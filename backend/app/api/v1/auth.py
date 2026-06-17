@@ -31,6 +31,7 @@ class LoginResponse(BaseModel):
     real_name: Optional[str] = None
     roles: list[str] = []
     is_admin: bool = False
+    must_change_password: bool = False
 
 
 @router.post("/login", response_model=ApiResponse[LoginResponse])
@@ -91,6 +92,7 @@ async def login(
             real_name=user.real_name,
             roles=roles,
             is_admin=user.is_admin,
+            must_change_password=user.must_change_password or False,
         ),
         message="登录成功",
     )
@@ -121,3 +123,21 @@ async def refresh_token(
 async def logout():
     # JWT无状态，客户端清除token即可；如需黑名单可扩展Redis
     return ApiResponse.ok(message="已退出登录")
+
+@router.post("/change-password", response_model=ApiResponse)
+async def change_password(
+    old_password: str,
+    new_password: str,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.core.security import verify_password, get_password_hash
+    if not verify_password(old_password, current_user.password_hash):
+        raise AppException(code=400, message="原密码错误")
+    if len(new_password) < 8:
+        raise AppException(code=400, message="新密码至少8位")
+    current_user.password_hash = get_password_hash(new_password)
+    current_user.must_change_password = False
+    db.add(current_user)
+    await db.commit()
+    return ApiResponse.ok(message="密码修改成功")

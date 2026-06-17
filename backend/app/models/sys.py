@@ -26,6 +26,7 @@ class SysUser(Base):
     dingtalk_user_id = Column(String(64), comment="钉钉用户ID")
     dingtalk_union_id = Column(String(128), comment="钉钉unionId")
     last_login_at = Column(DateTime(timezone=True), comment="最后登录时间")
+    must_change_password = Column(Boolean, default=False, comment="首次登录必须改密")
     last_login_ip = Column(String(64), comment="最后登录IP")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

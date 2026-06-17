@@ -29,3 +29,14 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# 上传文件和备份
+backend/uploads/
+backend/backups/
+/srv/backups/
+*.bak
+*.backup
+*.sql.gz
+
+# 前端构建产物（dist已在node_modules外但仍需排除）
+frontend/dist/
