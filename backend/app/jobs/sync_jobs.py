@@ -1,35 +1,18 @@
-"""sync_jobs - 定时任务（待实现详细逻辑）"""
 import logging
-from datetime import datetime
+from datetime import date, timedelta
 
 logger = logging.getLogger(__name__)
 
-
-async def run_daily_sync():
-    logger.info(f"[定时任务] 每日数据同步 started at {datetime.now()}")
-    # TODO: 调用 ETL pipeline
-
-
-async def run_morning_report():
-    logger.info(f"[定时任务] 早间日报 started at {datetime.now()}")
-    # TODO: 生成老板日报 + 钉钉推送
-
-
-async def run_member_visit_push():
-    logger.info(f"[定时任务] 会员回访名单 started at {datetime.now()}")
-    # TODO: 生成回访名单 + 推送导购
-
-
-async def run_replenishment_push():
-    logger.info(f"[定时任务] 补货提醒 started at {datetime.now()}")
-    # TODO: 补货/调拨建议 + 推送商品负责人
-
-
-async def run_overdue_reminder():
-    logger.info(f"[定时任务] 逾期提醒 started at {datetime.now()}")
-    # TODO: 扫描逾期任务 + 推送
-
-
-async def run_evening_diagnosis():
-    logger.info(f"[定时任务] 晚间诊断 started at {datetime.now()}")
-    # TODO: 门店诊断 + 规则引擎
+async def run_etl_pipeline(stat_date: str = None):
+    """定时触发ETL Pipeline"""
+    if not stat_date:
+        stat_date = (date.today() - timedelta(days=1)).isoformat()
+    try:
+        from app.services.etl.pipeline import ETLPipeline
+        from app.core.database import AsyncSessionLocal
+        pipeline = ETLPipeline()
+        async with AsyncSessionLocal() as db:
+            result = await pipeline.run_full(stat_date, db)
+            logger.info(f"定时ETL完成: {result}")
+    except Exception as e:
+        logger.error(f"定时ETL失败: {e}", exc_info=True)
