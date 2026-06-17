@@ -24,6 +24,17 @@ class ReportService:
             if row and row[0]:
                 return await self._get_existing_report(stat_date, db)
 
+        # 数据完整性前置检查（9项）
+        quality = await self._check_data_quality(stat_date, d, db)
+        if quality["block_generation"]:
+            return {
+                "report_date": stat_date,
+                "data_quality": quality,
+                "blocked": True,
+                "block_reason": quality["block_reason"],
+                "ai_summary": "⚠️ 当前数据不完整，报告生成被阻断。" + quality["block_reason"],
+            }
+
         # 收集25项数据
         report_data = await self._collect_report_data(stat_date, d, db)
 
@@ -322,4 +333,75 @@ class ReportService:
             "is_cost_complete": bool(row[29]),
             "is_finance_complete": bool(row[30]) if row[30] is not None else False,
             "generated_at": str(row[31]) if row[31] else None,
+            "data_completeness_label": "成本缺失，利润不可准确计算。" if not row[29] else "",
+        }
+
+    async def _check_data_quality(self, stat_date: str, d, db) -> dict:
+        """检查9项数据完整性，决定是否阻断日报生成"""
+        issues = []
+        warnings = []
+        has_sales = has_return = has_inventory = has_cost = False
+        has_finance = has_cash = False
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_sales_detail WHERE order_date = :d"), {"d": d})
+        if int(r.scalar() or 0) > 0:
+            has_sales = True
+        else:
+            issues.append("无销售明细数据")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_return_detail WHERE return_date = :d"), {"d": d})
+        has_return = int(r.scalar() or 0) > 0
+        if not has_return:
+            warnings.append("无退货数据（可能当日无退货）")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_inventory_snapshot WHERE snapshot_date = :d"), {"d": d})
+        if int(r.scalar() or 0) > 0:
+            has_inventory = True
+        else:
+            issues.append("无库存快照数据")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_sales_detail WHERE order_date = :d AND cost_price > 0"), {"d": d})
+        has_cost = int(r.scalar() or 0) > 0
+        if not has_cost:
+            warnings.append("成本缺失，利润不可准确计算")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dws.dws_store_daily WHERE stat_date = :d"), {"d": d})
+        if int(r.scalar() or 0) == 0:
+            issues.append("DWS汇总数据未生成，请先运行ETL")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_finance_expense WHERE expense_date = :d"), {"d": d})
+        has_finance = int(r.scalar() or 0) > 0
+        if not has_finance:
+            warnings.append("无财务费用数据")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_finance_cash WHERE record_date = :d"), {"d": d})
+        has_cash = int(r.scalar() or 0) > 0
+        if not has_cash:
+            warnings.append("无现金余额数据")
+
+        r = await db.execute(text("""
+            SELECT COUNT(*) FROM app.app_metrics_reconciliation
+            WHERE reconcile_date = :d AND is_blocking = TRUE AND is_passed = FALSE
+        """), {"d": d})
+        blocking_reconcile = int(r.scalar() or 0)
+        if blocking_reconcile > 0:
+            issues.append(f"存在{blocking_reconcile}个指标对账高风险项未处理")
+
+        r = await db.execute(text("SELECT COUNT(*) FROM dm.dm_boss_daily_report WHERE report_date = :d"), {"d": d})
+        if int(r.scalar() or 0) == 0:
+            issues.append("老板日报基础数据未生成，请先运行完整ETL")
+
+        block_generation = len(issues) > 0
+        return {
+            "has_sales": has_sales, "has_return": has_return,
+            "has_inventory": has_inventory, "has_cost": has_cost,
+            "has_finance": has_finance, "has_cash": has_cash,
+            "blocking_issues": issues, "warnings": warnings,
+            "block_generation": block_generation,
+            "block_reason": "；".join(issues) if issues else "",
+            "data_completeness_label": (
+                "当前数据不完整，以下结果仅供参考。"
+                if (not has_cost or not has_finance or not has_cash) else "数据完整"
+            ),
+            "cost_missing_label": "成本缺失，利润不可准确计算。" if not has_cost else "",
         }

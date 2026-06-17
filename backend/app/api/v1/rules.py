@@ -86,3 +86,28 @@ async def product_ranking(
     svc = MetricsService()
     result = await svc.get_product_ranking(stat_date, db, limit)
     return ApiResponse.ok(data=result)
+
+
+@router.post("/create-drafts", response_model=ApiResponse)
+async def create_task_drafts_from_rules(
+    stat_date: Optional[str] = None,
+    store_code: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """运行规则引擎并将命中项生成任务草稿（需人工确认后才可派发）"""
+    from datetime import date as ddate, timedelta
+    if not stat_date:
+        stat_date = (ddate.today() - timedelta(days=1)).isoformat()
+    from app.services.rule_engine import RuleEngine
+    engine = RuleEngine()
+    result = await engine.run_all(stat_date, db, store_code)
+    triggered = [r for r in result["results"] if r["triggered"]]
+    drafts = await engine.create_task_drafts(triggered, stat_date, db, creator_id=current_user.id)
+    return ApiResponse.ok(data={
+        "stat_date": stat_date,
+        "triggered_count": result["triggered_count"],
+        "drafts_created": len(drafts),
+        "drafts": drafts,
+        "tip": "草稿已生成，需在任务管理中人工确认责任人和截止日期后才可正式派发",
+    }, message=f"生成{len(drafts)}个任务草稿")

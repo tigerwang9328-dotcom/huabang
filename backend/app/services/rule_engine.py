@@ -281,3 +281,57 @@ class RuleEngine:
                      "suggestion": "请确认ERP系统成本数据是否已导入",
                      "severity": "info"}]
         return []
+
+    async def create_task_drafts(self, rule_results: list[dict], stat_date: str, db, creator_id: int = 1) -> list[dict]:
+        """将规则命中结果转为任务草稿（需人工确认后才可派发）"""
+        import uuid
+        from datetime import timedelta
+
+        SEVERITY_DAYS = {"critical": 1, "risk": 3, "warning": 7, "info": 14}
+        SEVERITY_ROLE = {"critical": "store_manager", "risk": "store_manager",
+                         "warning": "operation", "info": "operation"}
+        created = []
+        for result in rule_results:
+            if not result.get("triggered"):
+                continue
+            severity = result.get("severity", "warning")
+
+            existing = await db.execute(text("""
+                SELECT id FROM app.app_action_task
+                WHERE source_type = 'rule' AND source_id = :sid
+                  AND related_date = :rd AND status IN ('draft','pending','processing')
+                  AND is_deleted = FALSE
+            """), {"sid": result["rule_id"], "rd": date.fromisoformat(stat_date)})
+            if existing.fetchone():
+                continue
+
+            deadline = date.fromisoformat(stat_date) + timedelta(days=SEVERITY_DAYS.get(severity, 7))
+            task_no = f"DRAFT-{result['rule_id']}-{stat_date.replace('-','')}-{uuid.uuid4().hex[:4].upper()}"
+
+            await db.execute(text("""
+                INSERT INTO app.app_action_task
+                    (task_no, title, description, data_evidence_text, suggested_actions,
+                     review_metrics, feedback_requirement, source_type, source_id,
+                     related_store_code, related_date, assignee_role, creator_id, status, is_deleted)
+                VALUES
+                    (:no, :title, :desc, :evidence, :actions, :review, :feedback,
+                     'rule', :sid, :store, :rd, :role, :creator, 'draft', FALSE)
+            """), {
+                "no": task_no,
+                "title": f"【草稿】{result['title']}",
+                "desc": f"{result['rule_id']} 规则触发，需人工确认后派发",
+                "evidence": str(result.get("evidence", {})),
+                "actions": result.get("suggestion", ""),
+                "review": f"复查指标：{result['rule_id']} 相关数据",
+                "feedback": "需提交处理结果和改进措施",
+                "sid": result["rule_id"],
+                "store": result.get("store_code"),
+                "rd": date.fromisoformat(stat_date),
+                "role": SEVERITY_ROLE.get(severity, "operation"),
+                "creator": creator_id,
+            })
+            created.append({"task_no": task_no, "rule_id": result["rule_id"], "title": result["title"]})
+
+        if created:
+            await db.commit()
+        return created
