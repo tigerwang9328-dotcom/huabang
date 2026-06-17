@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     DINGTALK_ROBOT_WEBHOOK: str = ""
     DINGTALK_PUSH_ENABLED: bool = False
     DINGTALK_MAX_PUSH_PER_HOUR: int = 1
+    DINGTALK_TEST_WEBHOOK: str = ""
+    DINGTALK_TEST_MODE: bool = True
 
     # 百盛ERP
     BAISON_API_URL: str = ""

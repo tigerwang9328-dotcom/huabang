@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.core.security import verify_password, create_access_token, create_refresh_token, decode_token
 from app.core.config import settings
 from app.core.exceptions import AppException
+from app.api.v1.deps import get_current_user
 from app.models.sys import SysUser, SysUserRole, SysRole
 from app.schemas.common import ApiResponse
 from pydantic import BaseModel

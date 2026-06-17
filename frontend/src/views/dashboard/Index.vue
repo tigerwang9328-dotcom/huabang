@@ -11,8 +11,8 @@
       <el-col :span="6" v-for="card in kpiCards" :key="card.label">
         <div class="kpi-card">
           <div class="kpi-label">{{ card.label }}</div>
-          <div class="kpi-value" :class="{ no-data: card.value === null }">
-            {{ card.value !== null ? (card.prefix || "") + formatNumber(card.value, card.decimals) + (card.suffix || "") : "--" }}
+          <div class="kpi-value" :class="{ 'no-data': card.value === null }">
+            {{ card.value !== null ? (card.prefix || '') + formatNumber(card.value, card.decimals) + (card.suffix || '') : '--' }}
           </div>
           <div class="kpi-tip" v-if="card.tip">{{ card.tip }}</div>
         </div>
@@ -39,7 +39,7 @@
           <div class="card-title">任务状态汇总</div>
           <div v-for="(val, key) in taskSummary" :key="key" class="task-stat-row">
             <span class="task-stat-label">{{ taskStatusLabel[key] || key }}</span>
-            <el-badge :value="val" :type="taskStatusType[key] || info" />
+            <el-badge :value="val" :type="taskStatusType[key] || 'info'" />
           </div>
         </div>
       </el-col>
@@ -53,10 +53,10 @@
           <el-table :data="storeRank" stripe size="small">
             <el-table-column label="排名" type="index" width="60" />
             <el-table-column prop="store_code" label="门店编码" width="120" />
-            <el-table-column prop="net_sales" label="净销售额" :formatter="(r:any)=>formatMoney(r.net_sales)" />
+            <el-table-column prop="net_sales" label="净销售额" :formatter="fmtMoney" />
             <el-table-column prop="order_count" label="订单数" width="80" />
-            <el-table-column prop="avg_order_value" label="客单价" :formatter="(r:any)=>formatMoney(r.avg_order_value)" />
-            <el-table-column prop="items_per_order" label="连带率" :formatter="(r:any)=>r.items_per_order?.toFixed(1)||--" />
+            <el-table-column prop="avg_order_value" label="客单价" :formatter="fmtAvgOrder" />
+            <el-table-column prop="items_per_order" label="连带率" :formatter="fmtItemsPerOrder" />
           </el-table>
         </div>
       </el-col>
@@ -111,6 +111,11 @@ const formatNumber = (v: any, decimals = 2) => {
   return Number(v).toFixed(decimals);
 };
 const formatMoney = (v: any) => v ? `¥${formatNumber(v, 0)}` : "--";
+
+// 表格formatter函数（避免在模板属性中写箭头函数）
+const fmtMoney = (row: any) => formatMoney(row.net_sales);
+const fmtAvgOrder = (row: any) => formatMoney(row.avg_order_value);
+const fmtItemsPerOrder = (row: any) => row.items_per_order ? row.items_per_order.toFixed(1) : "--";
 
 onMounted(async () => {
   try {
