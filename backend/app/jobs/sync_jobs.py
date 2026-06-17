@@ -16,3 +16,8 @@ async def run_etl_pipeline(stat_date: str = None):
             logger.info(f"定时ETL完成: {result}")
     except Exception as e:
         logger.error(f"定时ETL失败: {e}", exc_info=True)
+
+
+async def run_daily_sync():
+    """scheduler入口：每日凌晨数据同步+ETL"""
+    await run_etl_pipeline()
