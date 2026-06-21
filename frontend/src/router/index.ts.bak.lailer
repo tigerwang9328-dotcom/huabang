@@ -2,15 +2,23 @@ import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 
 const routes = [
-  // ====== 公开品牌官网（单页，无需登录） ======
+  // ====== 公开品牌官网（无需登录） ======
   {
     path: "/",
-    name: "PublicHome",
-    component: () => import("@/views/public/Home.vue"),
-    meta: { public: true, title: "华邦公司 · 莱勒 LAILER" },
+    component: () => import("@/layouts/PublicLayout.vue"),
+    meta: { public: true },
+    children: [
+      { path: "", name: "PublicHome", component: () => import("@/views/public/Home.vue"), meta: { public: true, title: "华邦服饰" } },
+      { path: "about", name: "CompanyIntro", component: () => import("@/views/public/CompanyIntro.vue"), meta: { public: true, title: "公司简介" } },
+      { path: "brand", name: "BrandStory", component: () => import("@/views/public/BrandStory.vue"), meta: { public: true, title: "品牌故事" } },
+      { path: "products", name: "Products", component: () => import("@/views/public/Products.vue"), meta: { public: true, title: "产品展示" } },
+      { path: "stores", name: "PublicStores", component: () => import("@/views/public/Stores.vue"), meta: { public: true, title: "门店形象" } },
+      { path: "space", name: "Space", component: () => import("@/views/public/Space.vue"), meta: { public: true, title: "场地展示" } },
+      { path: "contact", name: "Contact", component: () => import("@/views/public/Contact.vue"), meta: { public: true, title: "联系我们" } },
+    ],
   },
 
-  // ====== 登录（无需登录，沿用现有全屏登录页） ======
+  // ====== 登录（无需登录，自带全屏视觉，沿用现有 Login.vue） ======
   {
     path: "/login",
     component: () => import("@/layouts/AuthLayout.vue"),
@@ -53,7 +61,7 @@ const routes = [
     ],
   },
 
-  // ====== 旧内部路径兼容重定向 ======
+  // ====== 旧内部路径兼容重定向（避免旧书签 404） ======
   { path: "/dashboard", redirect: "/app/dashboard" },
 
   // 未匹配 -> 公开官网首页
@@ -72,9 +80,11 @@ router.beforeEach((to, _, next) => {
   const authStore = useAuthStore();
   const needAuth = to.matched.some((r) => r.meta.requireAuth);
 
+  // 已登录用户访问登录页 -> 直接进中台
   if (to.path === "/login" && authStore.isLoggedIn) {
     return next("/app/dashboard");
   }
+  // 访问 /app/* 但未登录 -> 跳登录页
   if (needAuth && !authStore.isLoggedIn) {
     return next("/login");
   }

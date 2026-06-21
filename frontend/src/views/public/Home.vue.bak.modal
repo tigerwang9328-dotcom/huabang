@@ -24,7 +24,7 @@
 
         <div class="hdr-right">
           <!-- 隐蔽员工入口 -->
-          <button class="staff-entry" title="" aria-label="En" @click="goLogin">En</button>
+          <button class="staff-entry" title="" aria-label="En" @click="openModal">En</button>
           <button class="burger" :class="{ on: mobileMenu }" aria-label="菜单" @click="mobileMenu = !mobileMenu">
             <span></span><span></span><span></span>
           </button>
@@ -234,14 +234,47 @@
       </div>
       <div class="ft-copy">© {{ year }} 华邦公司 WINBANG · 莱勒 LAILER · 版权所有</div>
     </footer>
+
+    <!-- ===================== 员工登录 Modal ===================== -->
+    <transition name="modal">
+      <div v-if="modal" class="modal-mask" @click.self="closeModal">
+        <div class="modal-card">
+          <button class="modal-x" @click="closeModal" aria-label="关闭">✕</button>
+          <div class="modal-logo"><span class="brand-mark">WB</span></div>
+          <h3 class="modal-title">员工内部入口</h3>
+          <p class="modal-sub">华邦 AI 经营中台 · 仅限内部员工</p>
+
+          <form class="modal-form" @submit.prevent="doLogin">
+            <label class="field">
+              <span>工号 / 手机号</span>
+              <input v-model.trim="loginForm.username" type="text" autocomplete="username" placeholder="请输入工号或手机号" />
+            </label>
+            <label class="field">
+              <span>密码</span>
+              <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" @keyup.enter="doLogin" />
+            </label>
+            <button class="btn btn-gold modal-submit" type="submit" :disabled="submitting">
+              {{ submitting ? '登录中…' : '登 录' }}
+            </button>
+          </form>
+
+          <div class="modal-foot">
+            <router-link to="/login" class="modal-link">前往完整登录页 →</router-link>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, reactive, onMounted, onUnmounted, nextTick } from "vue";
 import { useRouter } from "vue-router";
+import { useAuthStore } from "@/stores/auth";
+import { ElMessage } from "element-plus";
 
 const router = useRouter();
+const authStore = useAuthStore();
 const year = new Date().getFullYear();
 
 /* ---------- 导航 ---------- */
@@ -332,8 +365,30 @@ onUnmounted(() => {
   spy?.disconnect();
 });
 
-const goLogin = () => {
-  router.push("/login");
+/* ---------- 员工登录 Modal ---------- */
+const modal = ref(false);
+const submitting = ref(false);
+const loginForm = reactive({ username: "", password: "" });
+
+const openModal = () => { modal.value = true; document.body.style.overflow = "hidden"; };
+const closeModal = () => { modal.value = false; document.body.style.overflow = ""; };
+
+const doLogin = async () => {
+  if (!loginForm.username || !loginForm.password) {
+    ElMessage({ message: "请输入工号和密码", type: "warning" });
+    return;
+  }
+  submitting.value = true;
+  try {
+    await authStore.login(loginForm.username, loginForm.password);
+    ElMessage({ message: "登录成功，欢迎回来", type: "success" });
+    closeModal();
+    router.push("/app/dashboard");
+  } catch (e: any) {
+    ElMessage({ message: e?.message || "工号或密码错误，请重试", type: "error" });
+  } finally {
+    submitting.value = false;
+  }
 };
 </script>
 
