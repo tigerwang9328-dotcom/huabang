@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>门店运营中心</h2>
+      <h2>门店分析</h2>
       <p class="page-desc">门店总览、排行、单店诊断、红黑榜</p>
     </div>
     <el-card>

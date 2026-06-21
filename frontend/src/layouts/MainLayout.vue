@@ -11,61 +11,61 @@
         </div>
       </div>
 
-      <!-- 菜单 -->
+      <!-- 菜单（路径全部位于 /app 之下） -->
       <nav class="sidebar-nav">
         <div class="nav-group-label">经营分析</div>
-        <router-link to="/dashboard" class="nav-item" :class="{ active: activeMenu === '/dashboard' }">
+        <router-link to="/app/dashboard" class="nav-item" :class="{ active: activeMenu === '/app/dashboard' }">
           <el-icon><DataLine /></el-icon><span>经营概览</span>
         </router-link>
-        <router-link to="/boss" class="nav-item" :class="{ active: activeMenu === '/boss' }">
+        <router-link to="/app/boss" class="nav-item" :class="{ active: activeMenu === '/app/boss' }">
           <el-icon><House /></el-icon><span>经营日报</span>
         </router-link>
-        <router-link to="/store" class="nav-item" :class="{ active: activeMenu === '/store' }">
+        <router-link to="/app/store" class="nav-item" :class="{ active: activeMenu === '/app/store' }">
           <el-icon><Shop /></el-icon><span>门店分析</span>
         </router-link>
-        <router-link to="/product" class="nav-item" :class="{ active: activeMenu === '/product' }">
+        <router-link to="/app/product" class="nav-item" :class="{ active: activeMenu === '/app/product' }">
           <el-icon><GoodsFilled /></el-icon><span>商品分析</span>
         </router-link>
 
         <div class="nav-group-label" style="margin-top:16px">风险管理</div>
-        <router-link to="/inventory" class="nav-item" :class="{ active: activeMenu === '/inventory' }">
+        <router-link to="/app/inventory" class="nav-item" :class="{ active: activeMenu === '/app/inventory' }">
           <el-icon><Box /></el-icon><span>库存预警</span>
         </router-link>
-        <router-link to="/warning" class="nav-item" :class="{ active: activeMenu === '/warning' }">
+        <router-link to="/app/warning" class="nav-item" :class="{ active: activeMenu === '/app/warning' }">
           <el-icon><Warning /></el-icon><span>异常稽核</span>
         </router-link>
         <router-link
           v-if="authStore.hasAnyRole('boss', 'shareholder', 'ceo', 'finance_manager', 'super_admin')"
-          to="/finance"
+          to="/app/finance"
           class="nav-item"
-          :class="{ active: activeMenu === '/finance' }"
+          :class="{ active: activeMenu === '/app/finance' }"
         >
           <el-icon><Money /></el-icon><span>利润分析</span>
         </router-link>
 
         <div class="nav-group-label" style="margin-top:16px">运营管理</div>
-        <router-link to="/member" class="nav-item" :class="{ active: activeMenu === '/member' }">
+        <router-link to="/app/member" class="nav-item" :class="{ active: activeMenu === '/app/member' }">
           <el-icon><User /></el-icon><span>会员运营</span>
         </router-link>
-        <router-link to="/task" class="nav-item" :class="{ active: activeMenu.startsWith('/task') }">
+        <router-link to="/app/task" class="nav-item" :class="{ active: activeMenu.startsWith('/app/task') }">
           <el-icon><List /></el-icon><span>任务管理</span>
         </router-link>
-        <router-link to="/ai" class="nav-item" :class="{ active: activeMenu === '/ai' }">
+        <router-link to="/app/ai" class="nav-item" :class="{ active: activeMenu === '/app/ai' }">
           <el-icon><ChatDotRound /></el-icon><span>AI助手</span>
         </router-link>
-        <router-link to="/dingtalk" class="nav-item" :class="{ active: activeMenu === '/dingtalk' }">
+        <router-link to="/app/dingtalk" class="nav-item" :class="{ active: activeMenu === '/app/dingtalk' }">
           <el-icon><Bell /></el-icon><span>钉钉通知</span>
         </router-link>
 
         <template v-if="authStore.isAdmin || authStore.hasRole('super_admin')">
           <div class="nav-group-label" style="margin-top:16px">系统管理</div>
-          <router-link to="/system/users" class="nav-item" :class="{ active: activeMenu === '/system/users' }">
+          <router-link to="/app/system/users" class="nav-item" :class="{ active: activeMenu === '/app/system/users' }">
             <el-icon><Avatar /></el-icon><span>用户管理</span>
           </router-link>
-          <router-link to="/system/roles" class="nav-item" :class="{ active: activeMenu === '/system/roles' }">
+          <router-link to="/app/system/roles" class="nav-item" :class="{ active: activeMenu === '/app/system/roles' }">
             <el-icon><Key /></el-icon><span>角色权限</span>
           </router-link>
-          <router-link to="/system/sync" class="nav-item" :class="{ active: activeMenu === '/system/sync' }">
+          <router-link to="/app/system/sync" class="nav-item" :class="{ active: activeMenu === '/app/system/sync' }">
             <el-icon><Refresh /></el-icon><span>数据同步</span>
           </router-link>
         </template>

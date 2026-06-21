@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>角色管理</h2>
+      <h2>角色权限</h2>
       <p class="page-desc">系统角色权限配置</p>
     </div>
     <el-card>

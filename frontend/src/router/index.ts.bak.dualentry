@@ -2,39 +2,18 @@ import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 
 const routes = [
-  // ====== 公开品牌官网（无需登录） ======
-  {
-    path: "/",
-    component: () => import("@/layouts/PublicLayout.vue"),
-    meta: { public: true },
-    children: [
-      { path: "", name: "PublicHome", component: () => import("@/views/public/Home.vue"), meta: { public: true, title: "华邦服饰" } },
-      { path: "about", name: "CompanyIntro", component: () => import("@/views/public/CompanyIntro.vue"), meta: { public: true, title: "公司简介" } },
-      { path: "brand", name: "BrandStory", component: () => import("@/views/public/BrandStory.vue"), meta: { public: true, title: "品牌故事" } },
-      { path: "products", name: "Products", component: () => import("@/views/public/Products.vue"), meta: { public: true, title: "产品展示" } },
-      { path: "stores", name: "PublicStores", component: () => import("@/views/public/Stores.vue"), meta: { public: true, title: "门店形象" } },
-      { path: "space", name: "Space", component: () => import("@/views/public/Space.vue"), meta: { public: true, title: "场地展示" } },
-      { path: "contact", name: "Contact", component: () => import("@/views/public/Contact.vue"), meta: { public: true, title: "联系我们" } },
-    ],
-  },
-
-  // ====== 登录（无需登录，自带全屏视觉，沿用现有 Login.vue） ======
   {
     path: "/login",
-    component: () => import("@/layouts/AuthLayout.vue"),
+    name: "Login",
+    component: () => import("@/views/Login.vue"),
     meta: { public: true },
-    children: [
-      { path: "", name: "Login", component: () => import("@/views/Login.vue"), meta: { public: true } },
-    ],
   },
-
-  // ====== 内部经营数据中台（必须登录，全部位于 /app 之下） ======
   {
-    path: "/app",
-    component: () => import("@/layouts/MainLayout.vue"),
+    path: "/",
+    component: () => import("@/layouts/BasicLayout.vue"),
     meta: { requireAuth: true },
     children: [
-      { path: "", redirect: "/app/dashboard" },
+      { path: "", redirect: "/dashboard" },
       { path: "dashboard", name: "Dashboard", component: () => import("@/views/dashboard/Index.vue"), meta: { title: "经营概览" } },
       { path: "boss", name: "Boss", component: () => import("@/views/boss/Index.vue"), meta: { title: "经营日报" } },
       { path: "store", name: "Store", component: () => import("@/views/store/Index.vue"), meta: { title: "门店分析" } },
@@ -50,7 +29,7 @@ const routes = [
       {
         path: "system",
         name: "System",
-        redirect: "/app/system/users",
+        redirect: "/system/users",
         meta: { title: "系统管理" },
         children: [
           { path: "users", component: () => import("@/views/system/Users.vue"), meta: { title: "用户管理" } },
@@ -60,34 +39,18 @@ const routes = [
       },
     ],
   },
-
-  // ====== 旧内部路径兼容重定向（避免旧书签 404） ======
-  { path: "/dashboard", redirect: "/app/dashboard" },
-
-  // 未匹配 -> 公开官网首页
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
-  scrollBehavior() {
-    return { top: 0 };
-  },
 });
 
 router.beforeEach((to, _, next) => {
   const authStore = useAuthStore();
-  const needAuth = to.matched.some((r) => r.meta.requireAuth);
-
-  // 已登录用户访问登录页 -> 直接进中台
-  if (to.path === "/login" && authStore.isLoggedIn) {
-    return next("/app/dashboard");
-  }
-  // 访问 /app/* 但未登录 -> 跳登录页
-  if (needAuth && !authStore.isLoggedIn) {
-    return next("/login");
-  }
+  if (to.meta.public) return next();
+  if (!authStore.isLoggedIn) return next("/login");
   next();
 });
 

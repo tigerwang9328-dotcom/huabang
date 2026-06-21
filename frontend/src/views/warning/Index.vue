@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>异常稽核中心</h2>
+      <h2>异常稽核</h2>
       <p class="page-desc">折扣异常、退货异常、库存异常、数据质量</p>
     </div>
     <el-card>

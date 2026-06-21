@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>老板经营中心</h2>
+      <h2>经营日报</h2>
       <p class="page-desc">老板日报、今日三件事、风险摘要、AI问答</p>
     </div>
     <el-card>

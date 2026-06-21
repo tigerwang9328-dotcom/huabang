@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     BAISON_API_KEY: str = ""
     BAISON_API_ENABLED: bool = False
 
+    # 百胜 E3ERP 开放平台（API 联调）
+    BAISON_API_BASE_URL: str = ""
+    BAISON_APP_KEY: str = ""
+    BAISON_APP_SECRET: str = ""
+    BAISON_SIGN_METHOD: str = "md5"
+    BAISON_PAGE_SIZE: int = 20
+    BAISON_HTTP_METHOD: str = "POST"  # GET / POST 可配置
+
     # 金蝶
     KINGDEE_API_URL: str = ""
     KINGDEE_API_KEY: str = ""

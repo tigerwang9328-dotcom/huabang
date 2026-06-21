@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>库存预警中心</h2>
+      <h2>库存预警</h2>
       <p class="page-desc">库存余额、库龄分析、负库存、断码风险</p>
     </div>
     <el-card>

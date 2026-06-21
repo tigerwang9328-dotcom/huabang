@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>商品经营中心</h2>
+      <h2>商品分析</h2>
       <p class="page-desc">动销分析、爆款识别、断码预警、补货建议</p>
     </div>
     <el-card>

@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <div class="page-header"><h2>财务利润中心</h2></div>
+    <div class="page-header"><h2>利润分析</h2></div>
     <el-tabs v-model="activeTab">
       <el-tab-pane label="费用补录" name="expense">
         <el-card>

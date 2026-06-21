@@ -3,7 +3,7 @@
     <!-- ====== 页面 Header ====== -->
     <div class="page-header">
       <div class="page-header-left">
-        <h2 class="page-title">经营驾驶舱</h2>
+        <h2 class="page-title">经营概览</h2>
         <span class="page-subtitle">企业经营核心指标总览</span>
       </div>
       <div class="page-header-right">

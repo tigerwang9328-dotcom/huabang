@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>AI任务中心</h2>
+      <h2>任务管理</h2>
       <el-button type="primary" @click="showCreate = true">创建任务</el-button>
     </div>
 

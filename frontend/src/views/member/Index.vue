@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>会员运营中心</h2>
+      <h2>会员运营</h2>
       <p class="page-desc">会员分层、今日回访名单、沉睡会员、生日会员</p>
     </div>
     <el-card>

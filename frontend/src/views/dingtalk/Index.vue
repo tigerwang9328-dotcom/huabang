@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>钉钉协同中心</h2>
+      <h2>钉钉通知</h2>
       <p class="page-desc">推送配置、用户绑定、推送模板、推送日志</p>
     </div>
     <el-card>
