@@ -154,7 +154,6 @@ SELECT
   count(*) FILTER (
     WHERE coalesce(event_type,'') ~* 'bpms|approval|process|instance'
        OR payload::text ~* 'bpms|approval|process|instance'
-       OR payload::text ILIKE '%审批%'
   ) AS approval_count,
   count(*) FILTER (
     WHERE payload::text ILIKE '%报销%' OR payload::text ~* 'expense|reimbursement'
@@ -186,21 +185,9 @@ def _dt_summary(event_type: str, ptext: str) -> str:
         return "钉钉付款事件"
     if "考勤" in t or "attendance" in tl:
         return "钉钉考勤事件"
-    if "审批" in t or any(k in tl for k in ("bpms", "approval", "process", "instance")):
+    if any(k in tl for k in ("bpms", "approval", "process", "instance")):
         return "钉钉审批事件"
     return "钉钉其他事件"
-
-
-_DT_ATT_SQL = """
-SELECT
-  count(DISTINCT dingtalk_user_id) AS att_users,
-  count(*) FILTER (WHERE time_result IN ('Late','SeriousLate','VeryLate')) AS late_count,
-  count(*) FILTER (WHERE time_result = 'Early') AS early_count,
-  count(*) FILTER (WHERE time_result IN ('NotSigned','Absenteeism') OR location_result = 'NotSigned') AS missing_count,
-  count(*) FILTER (WHERE time_result = 'Normal') AS normal_count
-FROM dingtalk_attendance_records
-WHERE {scope}
-"""
 
 
 @router.get("/overview", response_model=ApiResponse)
@@ -239,45 +226,6 @@ async def dingtalk_overview(
         "payment_count": _ci(month_row, "payment_count"),
         "attendance_count": _ci(month_row, "attendance_count"),
     }
-
-    # ---- 考勤统计（优先取 dingtalk_attendance_records；空表返回 0，不报错） ----
-    att_today = (await db.execute(
-        text(_DT_ATT_SQL.format(scope="work_date = current_date"))
-    )).mappings().first()
-    att_month = (await db.execute(
-        text(_DT_ATT_SQL.format(scope="work_date >= date_trunc('month', now())::date"))
-    )).mappings().first()
-    today.update({
-        "attendance_count": _ci(att_today, "att_users"),
-        "late_count": _ci(att_today, "late_count"),
-        "early_leave_count": _ci(att_today, "early_count"),
-        "missing_check_count": _ci(att_today, "missing_count"),
-        "normal_count": _ci(att_today, "normal_count"),
-    })
-    month.update({
-        "attendance_count": _ci(att_month, "att_users"),
-        "late_count": _ci(att_month, "late_count"),
-        "early_leave_count": _ci(att_month, "early_count"),
-        "missing_check_count": _ci(att_month, "missing_count"),
-    })
-
-    # ---- 财务汇总（来自 finance_expense_records / approval_instances；空表 0） ----
-    fin_today = (await db.execute(text("""
-        SELECT
-          coalesce(sum(amount) FILTER (WHERE category='reimbursement' AND expense_date=current_date),0) AS reimb,
-          coalesce(sum(amount) FILTER (WHERE category='payment' AND expense_date=current_date),0) AS pay
-        FROM finance_expense_records
-    """))).mappings().first()
-    pend = (await db.execute(text("""
-        SELECT count(*) FROM dingtalk_approval_instances
-        WHERE category IN ('reimbursement','payment') AND status IN ('NEW','RUNNING')
-    """))).scalar()
-    today.update({
-        "reimbursement_amount": float(fin_today["reimb"] or 0),
-        "payment_amount": float(fin_today["pay"] or 0),
-        "pending_approval_count": int(pend or 0),
-    })
-
     recent_events = [
         {
             "id": r["id"],

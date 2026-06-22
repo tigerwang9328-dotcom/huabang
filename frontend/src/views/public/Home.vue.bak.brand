@@ -4,8 +4,11 @@
     <header class="hdr" :class="{ solid: scrolled }">
       <div class="hdr-inner">
         <a href="#home" class="brand" @click.prevent="scrollTo('home')">
-          <span class="logo-word"><ReareLogo /></span>
-          <span class="logo-cn">莱勒</span>
+          <span class="brand-mark">WB</span>
+          <span class="brand-text">
+            <span class="brand-cn">华邦 <i>·</i> 莱勒</span>
+            <span class="brand-en">WINBANG · LAILER</span>
+          </span>
         </a>
 
         <nav class="nav" :class="{ open: mobileMenu }">
@@ -50,7 +53,7 @@
           <span class="reveal gold" style="--d:.18s">定义现代男装美学</span>
         </h1>
         <p class="hero-sub reveal" style="--d:.32s">
-          莱勒 REARE · 以精工裁艺与现代审美，诠释当代男士的格调与从容
+          莱勒 LAILER · 以精工裁艺与现代审美，诠释当代男士的格调与从容
         </p>
         <div class="hero-actions reveal" style="--d:.46s">
           <button class="btn btn-gold" @click="scrollTo('products')">探索系列</button>
@@ -94,7 +97,7 @@
           <div class="media-frame">
             <img :src="aboutImg" alt="华邦总部" @error="imgFail" />
           </div>
-          <div class="media-badge">REARE · since 2000</div>
+          <div class="media-badge">WINBANG · since 2000</div>
         </div>
       </div>
     </section>
@@ -104,13 +107,13 @@
       <div class="wrap">
         <div class="sec-head reveal">
           <span class="kicker light">品牌故事 · HERITAGE</span>
-          <h2 class="sec-title light">主营品牌 · 莱勒 REARE</h2>
+          <h2 class="sec-title light">主营品牌 · 莱勒 LAILER</h2>
         </div>
 
         <div class="brand-hero reveal" style="--d:.1s">
-          <div class="brand-hero-media"><img :src="brandImg" alt="REARE" @error="imgFail" /></div>
+          <div class="brand-hero-media"><img :src="brandImg" alt="LAILER" @error="imgFail" /></div>
           <div class="brand-hero-text">
-            <div class="brand-logo-lg"><span class="logo-word hero-logo"><ReareLogo /></span><span class="brand-logo-cn">莱勒</span></div>
+            <h3>LAILER<span>莱勒</span></h3>
             <p>
               莱勒以「精致而不张扬」为设计哲学，专注现代商务与轻奢休闲男装。
               每一件作品从面料甄选、版型剪裁到工艺细节，皆经反复打磨，
@@ -204,9 +207,9 @@
     <footer class="ft">
       <div class="wrap ft-inner">
         <div class="ft-brand">
-          <span class="logo-word ft-logo"><ReareLogo /></span>
+          <span class="brand-mark">WB</span>
           <div>
-            <div class="ft-name">华邦公司 · 莱勒</div>
+            <div class="ft-name">华邦公司 · 莱勒 LAILER</div>
             <div class="ft-slogan">始于 2000 · 高端男装 · 工贸一体</div>
           </div>
         </div>
@@ -229,7 +232,7 @@
           </div>
         </div>
       </div>
-      <div class="ft-copy">© {{ year }} 华邦公司 REARE · 莱勒 · 版权所有</div>
+      <div class="ft-copy">© {{ year }} 华邦公司 WINBANG · 莱勒 LAILER · 版权所有</div>
     </footer>
   </div>
 </template>
@@ -237,7 +240,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from "vue";
 import { useRouter } from "vue-router";
-import ReareLogo from "@/components/ReareLogo.vue";
 
 const router = useRouter();
 const year = new Date().getFullYear();
@@ -544,15 +546,4 @@ img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .ft-cols { gap:32px; }
   .brand-en { display:none; }
 }
-
-/* ===== REARE 字标（SVG，currentColor 自适配背景） ===== */
-.logo-word { display:inline-flex; align-items:center; height:24px; color:#eef0ec; transition: color .25s; }
-.brand:hover .logo-word { color:#fff; }
-.logo-cn { font-size:17px; font-weight:800; letter-spacing:.16em; color: var(--gold-2);
-  padding-left:13px; margin-left:2px; border-left:1px solid rgba(255,255,255,.2); line-height:1; }
-.ft-logo { height:30px; color:#f2efe8; }
-.brand-logo-lg { display:flex; align-items:flex-end; gap:18px; margin-bottom:6px; }
-.hero-logo { height: clamp(46px, 7vw, 72px); color:#fff; }
-.brand-logo-cn { font-size: clamp(22px,3vw,34px); font-weight:800; letter-spacing:.2em; color: var(--gold-2); line-height:1; }
-@media (max-width:560px){ .logo-word { height:20px; } .logo-cn{ font-size:15px; padding-left:10px; letter-spacing:.12em; } }
 </style>

@@ -32,9 +32,3 @@ from app.models.log import (
     LogUserLogin, LogUserOperation, LogExport, LogError
 )
 from app.models.ai import AiDiagnosisResult, AiRuleMatch
-from app.models.dingtalk_event import DingtalkEvent
-from app.models.dingtalk_attendance import DingtalkAttendanceRecord
-from app.models.dingtalk_hr_finance import (
-    DingtalkEmployee, DingtalkDepartment, DingtalkApprovalInstance,
-    FinanceExpenseRecord, HrAttendanceDaily,
-)

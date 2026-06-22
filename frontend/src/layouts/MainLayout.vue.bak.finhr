@@ -57,34 +57,6 @@
           <el-icon><Bell /></el-icon><span>钉钉通知</span>
         </router-link>
 
-        <div class="nav-group-label" style="margin-top:16px">财务管理</div>
-        <router-link to="/app/fin/overview" class="nav-item" :class="{ active: activeMenu === '/app/fin/overview' }">
-          <el-icon><Money /></el-icon><span>财务首页</span>
-        </router-link>
-        <router-link to="/app/fin/reimbursements" class="nav-item" :class="{ active: activeMenu === '/app/fin/reimbursements' }">
-          <el-icon><Wallet /></el-icon><span>报销管理</span>
-        </router-link>
-        <router-link to="/app/fin/payments" class="nav-item" :class="{ active: activeMenu === '/app/fin/payments' }">
-          <el-icon><Coin /></el-icon><span>付款申请</span>
-        </router-link>
-        <router-link to="/app/fin/expense-analysis" class="nav-item" :class="{ active: activeMenu === '/app/fin/expense-analysis' }">
-          <el-icon><TrendCharts /></el-icon><span>费用分析</span>
-        </router-link>
-
-        <div class="nav-group-label" style="margin-top:16px">人事管理</div>
-        <router-link to="/app/hr/overview" class="nav-item" :class="{ active: activeMenu === '/app/hr/overview' }">
-          <el-icon><User /></el-icon><span>人事首页</span>
-        </router-link>
-        <router-link to="/app/hr/employees" class="nav-item" :class="{ active: activeMenu === '/app/hr/employees' }">
-          <el-icon><UserFilled /></el-icon><span>员工档案</span>
-        </router-link>
-        <router-link to="/app/hr/attendance" class="nav-item" :class="{ active: activeMenu === '/app/hr/attendance' }">
-          <el-icon><Calendar /></el-icon><span>考勤管理</span>
-        </router-link>
-        <router-link to="/app/hr/leaves" class="nav-item" :class="{ active: activeMenu === '/app/hr/leaves' }">
-          <el-icon><Clock /></el-icon><span>请假外出</span>
-        </router-link>
-
         <template v-if="authStore.isAdmin || authStore.hasRole('super_admin')">
           <div class="nav-group-label" style="margin-top:16px">系统管理</div>
           <router-link to="/app/system/users" class="nav-item" :class="{ active: activeMenu === '/app/system/users' }">

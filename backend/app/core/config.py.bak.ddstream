@@ -52,11 +52,6 @@ class Settings(BaseSettings):
     DINGTALK_MAX_PUSH_PER_HOUR: int = 1
     DINGTALK_TEST_WEBHOOK: str = ""
     DINGTALK_TEST_MODE: bool = True
-    DINGTALK_STREAM_ENABLED: bool = False
-    DINGTALK_ENABLED: bool = False
-    DINGTALK_CALLBACK_TOKEN: str = ""
-    DINGTALK_CALLBACK_AES_KEY: str = ""
-    DINGTALK_CALLBACK_URL: str = ""
 
     # 百盛ERP
     BAISON_API_URL: str = ""

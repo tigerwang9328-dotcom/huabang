@@ -261,23 +261,6 @@ async def dingtalk_overview(
         "missing_check_count": _ci(att_month, "missing_count"),
     })
 
-    # ---- 财务汇总（来自 finance_expense_records / approval_instances；空表 0） ----
-    fin_today = (await db.execute(text("""
-        SELECT
-          coalesce(sum(amount) FILTER (WHERE category='reimbursement' AND expense_date=current_date),0) AS reimb,
-          coalesce(sum(amount) FILTER (WHERE category='payment' AND expense_date=current_date),0) AS pay
-        FROM finance_expense_records
-    """))).mappings().first()
-    pend = (await db.execute(text("""
-        SELECT count(*) FROM dingtalk_approval_instances
-        WHERE category IN ('reimbursement','payment') AND status IN ('NEW','RUNNING')
-    """))).scalar()
-    today.update({
-        "reimbursement_amount": float(fin_today["reimb"] or 0),
-        "payment_amount": float(fin_today["pay"] or 0),
-        "pending_approval_count": int(pend or 0),
-    })
-
     recent_events = [
         {
             "id": r["id"],

@@ -207,52 +207,6 @@
         <el-table-column label="连带率" width="90" align="right" :formatter="fmtItems" />
       </el-table>
     </div>
-
-    <!-- ====== 钉钉协同数据 ====== -->
-    <div class="kpi-group">
-      <div class="kpi-group-header">
-        <span class="kpi-group-title" style="color:#1E5EFF">钉钉协同数据</span>
-        <span class="dt-sub">考勤、审批、报销、付款申请等协同办公数据</span>
-      </div>
-      <div class="kpi-row">
-        <div
-          v-for="card in dingtalkCards"
-          :key="card.label"
-          class="kpi-card"
-          :class="{ 'is-warning': card.isWarning }"
-        >
-          <div class="kpi-top-bar" :style="{ background: card.color }"></div>
-          <div class="kpi-label">{{ card.label }}</div>
-          <div class="kpi-value" :class="{ 'warning-val': card.isWarning && (card.value || 0) > 0 }">
-            {{ card.value != null ? card.value : 0 }}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 最近钉钉事件 -->
-    <div class="section-card">
-      <div class="section-header">
-        <span class="section-title">最近钉钉事件</span>
-        <span class="section-sub">最新 10 条</span>
-      </div>
-      <div v-if="!dingtalkRecent.length" class="empty-state">
-        <el-icon size="28"><Bell /></el-icon>
-        <span>暂无钉钉事件，待审批/考勤/报销/付款数据接入后展示</span>
-      </div>
-      <el-table v-else :data="dingtalkRecent" stripe size="small" class="hb-table">
-        <el-table-column label="时间" min-width="160">
-          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column prop="event_type" label="类型" min-width="160" />
-        <el-table-column label="状态" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 'failed' ? 'danger' : 'info'">{{ row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="event_summary" label="摘要" min-width="140" />
-      </el-table>
-    </div>
   </div>
 </template>
 
@@ -264,7 +218,6 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import VChart from "vue-echarts";
 import { dashboardApi } from "@/api/dashboard";
-import { dingtalkApi } from "@/api/dingtalk";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent]);
 
@@ -273,8 +226,6 @@ const trend = ref<any[]>([]);
 const storeRank = ref<any[]>([]);
 const taskSummary = ref<any>({});
 const loading = ref(true);
-const dingtalk = ref<any>({});
-const dingtalkRecent = ref<any[]>([]);
 
 const taskStatusConfig: Record<string, { label: string; type: string; order: number }> = {
   overdue:            { label: "已逾期", type: "danger", order: 1 },
@@ -381,33 +332,6 @@ const trendOption = computed(() => ({
   }],
 }));
 
-const dingtalkCards = computed(() => {
-  const t = dingtalk.value || {};
-  return [
-    { label: "今日钉钉事件", value: t.event_count || 0, color: "#1E5EFF", isWarning: false },
-    { label: "今日审批事件", value: t.approval_count || 0, color: "#6366F1", isWarning: false },
-    { label: "今日报销事件", value: t.expense_count || 0, color: "#16A34A", isWarning: false },
-    { label: "今日付款申请", value: t.payment_count || 0, color: "#C8A45D", isWarning: false },
-    { label: "今日考勤事件", value: t.attendance_count || 0, color: "#0EA5E9", isWarning: false },
-    { label: "异常事件", value: t.error_count || 0, color: "#DC2626", isWarning: true },
-  ];
-});
-
-const formatTime = (v: any): string => (v ? String(v).replace("T", " ").slice(0, 19) : "—");
-
-const loadDingtalk = async () => {
-  try {
-    const res = await dingtalkApi.getDingtalkOverview();
-    const d = res.data.data || {};
-    dingtalk.value = d.today || {};
-    dingtalkRecent.value = d.recent_events || [];
-  } catch (e) {
-    console.error("钉钉协同数据加载失败", e);
-    dingtalk.value = {};
-    dingtalkRecent.value = [];
-  }
-};
-
 const loadData = async () => {
   loading.value = true;
   try {
@@ -428,7 +352,7 @@ const loadData = async () => {
   }
 };
 
-onMounted(() => { loadData(); loadDingtalk(); });
+onMounted(loadData);
 </script>
 
 <style scoped>
@@ -712,5 +636,4 @@ onMounted(() => { loadData(); loadDingtalk(); });
   .hero-aside { flex: 1 1 100%; }
   .kpi-row { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
-.dt-sub { font-size: 12px; color: #9CA3AF; }
 </style>

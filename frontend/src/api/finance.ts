@@ -1,8 +1,8 @@
 import request from "./request";
 
 export const financeApi = {
-  getProfitDaily: (params?: any) => request.get("/finance/profit-daily", { params }),
-  getCashSafety: () => request.get("/finance/cash-safety"),
-  createExpense: (data: any) => request.post("/finance/manual-expense", data),
-  createCash: (data: any) => request.post("/finance/manual-cash", data),
+  getOverview: () => request.get("/finance/overview"),
+  getExpenses: (params?: { page?: number; page_size?: number }) => request.get("/finance/expenses", { params }),
+  getReimbursements: (params?: { page?: number; page_size?: number }) => request.get("/finance/reimbursements", { params }),
+  getPayments: (params?: { page?: number; page_size?: number }) => request.get("/finance/payments", { params }),
 };

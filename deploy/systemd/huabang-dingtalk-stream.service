@@ -1,0 +1,23 @@
+; 草稿：华邦钉钉 Stream 入站事件消费服务（单进程单例）
+; 安装：sudo cp deploy/systemd/huabang-dingtalk-stream.service /etc/systemd/system/
+;       sudo systemctl daemon-reload
+;       # 先在 backend/.env 设置 DINGTALK_STREAM_ENABLED=true 再启用
+;       sudo systemctl enable --now huabang-dingtalk-stream.service
+; 注意：务必只运行一个实例，多实例会重复消费并争抢 Stream 连接。
+
+[Unit]
+Description=Huabang DingTalk Stream Consumer (inbound events)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xiaohu
+WorkingDirectory=/srv/huabang-ai-center/backend
+EnvironmentFile=/srv/huabang-ai-center/backend/.env
+ExecStart=/srv/huabang-ai-center/backend/.venv/bin/python -m app.modules.dingtalk.runner
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
