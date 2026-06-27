@@ -1,257 +1,83 @@
 <template>
-  <div class="dashboard">
-    <!-- ====== 页面 Header ====== -->
+  <div class="dashboard-v2">
+    <!-- 页面标题 -->
     <div class="page-header">
       <div class="page-header-left">
-        <h2 class="page-title">经营概览</h2>
-        <span class="page-subtitle">企业经营核心指标总览</span>
+        <h2 class="page-title">华邦AI中台 · 经营概览</h2>
+        <span class="page-subtitle">基于百胜ERP、库存、商品、门店数据的经营指挥看板</span>
       </div>
       <div class="page-header-right">
-        <div class="data-date" v-if="overview.stat_date">
-          <el-icon><Calendar /></el-icon>
-          数据日期：{{ overview.stat_date }}
-        </div>
-        <el-tag v-if="overview.no_data" type="warning" size="small">暂无数据</el-tag>
-        <el-button size="small" :loading="loading" @click="loadData" class="hb-action-btn">
-          <el-icon><Refresh /></el-icon> 刷新数据
+        <span class="data-date" v-if="dataDate">
+          <el-icon><Calendar /></el-icon> 数据日期：{{ dataDate }}
+        </span>
+        <el-button size="small" :loading="loading" @click="fetchData" class="refresh-btn">
+          <el-icon><Refresh /></el-icon> 刷新
         </el-button>
       </div>
     </div>
 
-    <!-- ====== Hero 总览卡 ====== -->
-    <div class="hero-card" v-loading="loading">
-      <div class="hero-main">
-        <div class="hero-label">昨日总销售额</div>
-        <div class="hero-value">
-          {{ overview.total_sales != null ? formatMoney(overview.total_sales) : "—" }}
-        </div>
-        <div class="hero-split">
-          <span class="hero-chip offline">
-            <span class="chip-dot"></span>
-            线下 {{ overview.offline_sales != null ? formatMoney(overview.offline_sales) : "—" }}
-          </span>
-          <span class="hero-chip online">
-            <span class="chip-dot"></span>
-            线上 {{ overview.online_sales != null ? formatMoney(overview.online_sales) : "—" }}
-          </span>
-          <span class="hero-chip ratio" v-if="overview.online_ratio != null">
-            线上占比 {{ (overview.online_ratio * 100).toFixed(1) }}%
-          </span>
-        </div>
-      </div>
-      <div class="hero-aside">
-        <div class="hero-kpi-row">
-          <div class="hero-kpi-item">
-            <span class="hk-label">订单数</span>
-            <span class="hk-val">{{ overview.order_count != null ? overview.order_count + "单" : "—" }}</span>
-          </div>
-          <div class="hero-kpi-item">
-            <span class="hk-label">销售件数</span>
-            <span class="hk-val">{{ overview.item_count != null ? overview.item_count + "件" : "—" }}</span>
-          </div>
-          <div class="hero-kpi-item">
-            <span class="hk-label">客单价</span>
-            <span class="hk-val">{{ overview.avg_order_value != null ? "¥" + Number(overview.avg_order_value).toFixed(0) : "—" }}</span>
-          </div>
-          <div class="hero-kpi-item">
-            <span class="hk-label">连带率</span>
-            <span class="hk-val">{{ overview.items_per_order != null ? Number(overview.items_per_order).toFixed(2) + "件/单" : "—" }}</span>
-          </div>
-        </div>
-        <div class="hero-risk-row" v-if="(overview.overdue_task_count || 0) > 0 || (overview.pending_task_count || 0) > 0">
-          <span class="risk-tag danger" v-if="(overview.overdue_task_count || 0) > 0">
-            <el-icon><Warning /></el-icon> {{ overview.overdue_task_count }}项逾期任务
-          </span>
-          <span class="risk-tag warning" v-if="(overview.pending_task_count || 0) > 0">
-            {{ overview.pending_task_count }}项待处理
-          </span>
-        </div>
-        <div class="hero-risk-row all-good" v-else-if="!loading">
-          <el-icon><CircleCheck /></el-icon> 暂无逾期任务
-        </div>
+    <!-- 第一行：数据资产 -->
+    <div class="section-label">📊 数据资产</div>
+    <div class="asset-row">
+      <div class="asset-card" v-for="a in assetCards" :key="a.label">
+        <div class="asset-num">{{ a.value }}</div>
+        <div class="asset-label">{{ a.label }}</div>
       </div>
     </div>
 
-    <!-- ====== KPI 分组 ====== -->
-    <!-- 利润质量 -->
-    <div class="kpi-group">
-      <div class="kpi-group-header">
-        <span class="kpi-group-title" style="color:#16A34A">利润质量</span>
-      </div>
-      <div class="kpi-row">
-        <div
-          v-for="card in profitCards"
-          :key="card.label"
-          class="kpi-card"
-          :class="{ 'has-tip': card.tip }"
-          style="--top-color: #16A34A"
-        >
-          <div class="kpi-top-bar" style="background:#16A34A"></div>
-          <div class="kpi-label">{{ card.label }}</div>
-          <div class="kpi-value" :class="{ empty: card.value == null }">
-            {{ card.value != null ? (card.prefix || "") + formatNum(card.value, card.decimals) + (card.suffix || "") : "暂无数据" }}
-          </div>
-          <div class="kpi-tip" v-if="card.tip">{{ card.tip }}</div>
-        </div>
+    <!-- 第二行：经营指标 -->
+    <div class="section-label">📈 经营关键指标</div>
+    <div class="metric-row">
+      <div class="metric-card" v-for="m in bizMetricCards" :key="m.label" :class="{ pending: m.isPending }">
+        <div class="metric-label">{{ m.label }}</div>
+        <div class="metric-value" v-if="!m.isPending">{{ m.value }}</div>
+        <el-tag v-else type="info" size="small" class="pending-tag">待接入</el-tag>
       </div>
     </div>
 
-    <!-- 风险与执行 -->
-    <div class="kpi-group">
-      <div class="kpi-group-header">
-        <span class="kpi-group-title" style="color:#F59E0B">风险与执行</span>
+    <!-- 第三行：库存风险 + 任务执行 -->
+    <div class="two-col">
+      <div class="panel">
+        <div class="section-label">⚠️ 库存风险</div>
+        <div class="metric-row small">
+          <div class="metric-card" v-for="r in riskCards" :key="r.label" :class="{ pending: r.isPending }">
+            <div class="metric-label">{{ r.label }}</div>
+            <div class="metric-value" v-if="!r.isPending">{{ r.value }}</div>
+            <el-tag v-else type="info" size="small" class="pending-tag">待接入</el-tag>
+          </div>
+        </div>
       </div>
-      <div class="kpi-row">
-        <div
-          v-for="card in riskCards"
-          :key="card.label"
-          class="kpi-card"
-          :class="{ 'is-danger': card.isDanger, 'is-warning': card.isWarning }"
-        >
-          <div class="kpi-top-bar" :style="{ background: card.isDanger ? '#DC2626' : card.isWarning ? '#F59E0B' : '#6366F1' }"></div>
-          <div class="kpi-label">{{ card.label }}</div>
-          <div class="kpi-value" :class="{ empty: card.value == null, 'danger-val': card.isDanger && card.value > 0, 'warning-val': card.isWarning && card.value > 0 }">
-            {{ card.value != null ? (card.prefix || "") + formatNum(card.value, card.decimals) + (card.suffix || "") : (card.placeholder || "暂无数据") }}
+      <div class="panel">
+        <div class="section-label">📋 任务执行</div>
+        <div class="metric-row small">
+          <div class="metric-card" v-for="t in taskCards" :key="t.label" :class="{ warning: t.isWarning, danger: t.isDanger }">
+            <div class="metric-label">{{ t.label }}</div>
+            <div class="metric-value" :class="{ 'danger-val': t.isDanger }">{{ t.value }}</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ====== 趋势图 + 任务汇总 ====== -->
-    <div class="bottom-row">
-      <!-- 近7天趋势 -->
-      <div class="section-card trend-card">
-        <div class="section-header">
-          <span class="section-title">近7天销售趋势</span>
-        </div>
-        <div v-if="!trend.length && !loading" class="empty-state">
-          <el-icon size="28"><TrendCharts /></el-icon>
-          <span>暂无趋势数据</span>
-        </div>
-        <div v-else class="trend-chart-wrap">
-          <v-chart :option="trendOption" autoresize class="echarts-trend" />
-        </div>
+    <!-- 趋势图（无数据时简化） -->
+    <div class="panel trend-panel">
+      <div class="section-label">📉 近7天销售趋势</div>
+      <div v-if="!trend.length || !trend.some(t => t.total_sales)" class="empty-hint">
+        <el-icon><TrendCharts /></el-icon>
+        <span>销售明细尚未接入，趋势图待数据接入后展示</span>
       </div>
-
-      <!-- 任务状态汇总 -->
-      <div class="section-card task-card">
-        <div class="section-header">
-          <span class="section-title">任务状态汇总</span>
-        </div>
-        <div v-if="taskRows.length === 0 && !loading" class="empty-state">
-          <el-icon size="28"><CircleCheck /></el-icon>
-          <span>暂无待处理任务</span>
-        </div>
-        <div class="task-list" v-else>
-          <div v-for="row in taskRows" :key="row.key" class="task-row">
-            <div class="task-row-left">
-              <span class="task-status-dot" :class="row.type"></span>
-              <span class="task-row-label">{{ row.label }}</span>
-            </div>
-            <span class="task-row-count" :class="row.type">{{ row.count }}</span>
-          </div>
-        </div>
+      <div v-else class="trend-chart-wrap">
+        <v-chart :option="trendOption" autoresize class="echarts-trend" />
       </div>
     </div>
 
-    <!-- ====== 异常预警 ====== -->
-    <div class="section-card anomaly-card">
-      <div class="section-header">
-        <span class="section-title">异常与风险预警</span>
-        <span class="section-sub">数据异常将在此自动展示</span>
+    <!-- 待接入字段清单 -->
+    <div class="panel pending-panel" v-if="pendingFields.length">
+      <div class="section-label">⏳ 待接入数据</div>
+      <div class="pending-list">
+        <el-tag v-for="pf in pendingFields" :key="pf.field" type="info" size="small" effect="plain">
+          {{ pf.group }} / {{ pf.field }}：{{ pf.reason }}
+        </el-tag>
       </div>
-      <div class="anomaly-grid">
-        <div class="anomaly-item ok">
-          <el-icon><CircleCheck /></el-icon>
-          <div class="anomaly-label">重大异常</div>
-          <div class="anomaly-val">暂无</div>
-        </div>
-        <div class="anomaly-item" :class="(overview.age_90_plus_amount || 0) > 0 ? 'warn' : 'ok'">
-          <el-icon><Box /></el-icon>
-          <div class="anomaly-label">库存风险</div>
-          <div class="anomaly-val">
-            {{ overview.age_90_plus_amount != null ? formatMoney(overview.age_90_plus_amount) + " 90天+" : "待接入" }}
-          </div>
-        </div>
-        <div class="anomaly-item ok">
-          <el-icon><DataLine /></el-icon>
-          <div class="anomaly-label">折扣异常</div>
-          <div class="anomaly-val">
-            {{ overview.avg_discount_rate != null ? (overview.avg_discount_rate * 100).toFixed(1) + "% 均折" : "待接入" }}
-          </div>
-        </div>
-        <div class="anomaly-item ok">
-          <el-icon><TrendCharts /></el-icon>
-          <div class="anomaly-label">数据质量</div>
-          <div class="anomaly-val">正常</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ====== 门店排行 ====== -->
-    <div class="section-card store-rank-card">
-      <div class="section-header">
-        <span class="section-title">门店销售排行</span>
-        <span class="section-sub">昨日 Top 10</span>
-      </div>
-      <div v-if="!storeRank.length && !loading" class="empty-state">
-        <el-icon size="28"><Shop /></el-icon>
-        <span>暂无门店数据</span>
-      </div>
-      <el-table v-else :data="storeRank" stripe size="small" class="hb-table">
-        <el-table-column label="排名" type="index" width="56" align="center" />
-        <el-table-column prop="store_code" label="门店编码" min-width="100" />
-        <el-table-column label="净销售额" min-width="110" :formatter="fmtMoney" />
-        <el-table-column prop="order_count" label="订单数" width="80" align="center" />
-        <el-table-column label="客单价" width="90" align="right" :formatter="fmtAvgOrder" />
-        <el-table-column label="连带率" width="90" align="right" :formatter="fmtItems" />
-      </el-table>
-    </div>
-
-    <!-- ====== 钉钉协同数据 ====== -->
-    <div class="kpi-group">
-      <div class="kpi-group-header">
-        <span class="kpi-group-title" style="color:#1E5EFF">钉钉协同数据</span>
-        <span class="dt-sub">考勤、审批、报销、付款申请等协同办公数据</span>
-      </div>
-      <div class="kpi-row">
-        <div
-          v-for="card in dingtalkCards"
-          :key="card.label"
-          class="kpi-card"
-          :class="{ 'is-warning': card.isWarning }"
-        >
-          <div class="kpi-top-bar" :style="{ background: card.color }"></div>
-          <div class="kpi-label">{{ card.label }}</div>
-          <div class="kpi-value" :class="{ 'warning-val': card.isWarning && (card.value || 0) > 0 }">
-            {{ card.value != null ? card.value : 0 }}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 最近钉钉事件 -->
-    <div class="section-card">
-      <div class="section-header">
-        <span class="section-title">最近钉钉事件</span>
-        <span class="section-sub">最新 10 条</span>
-      </div>
-      <div v-if="!dingtalkRecent.length" class="empty-state">
-        <el-icon size="28"><Bell /></el-icon>
-        <span>暂无钉钉事件，待审批/考勤/报销/付款数据接入后展示</span>
-      </div>
-      <el-table v-else :data="dingtalkRecent" stripe size="small" class="hb-table">
-        <el-table-column label="时间" min-width="160">
-          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column prop="event_type" label="类型" min-width="160" />
-        <el-table-column label="状态" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 'failed' ? 'danger' : 'info'">{{ row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="event_summary" label="摘要" min-width="140" />
-      </el-table>
     </div>
   </div>
 </template>
@@ -264,453 +90,181 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import VChart from "vue-echarts";
 import { dashboardApi } from "@/api/dashboard";
-import { dingtalkApi } from "@/api/dingtalk";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent]);
 
-const overview = ref<any>({});
-const trend = ref<any[]>([]);
-const storeRank = ref<any[]>([]);
-const taskSummary = ref<any>({});
 const loading = ref(true);
-const dingtalk = ref<any>({});
-const dingtalkRecent = ref<any[]>([]);
+const dataDate = ref("");
+const pendingFields = ref<any[]>([]);
+const trend = ref<any[]>([]);
 
-const taskStatusConfig: Record<string, { label: string; type: string; order: number }> = {
-  overdue:            { label: "已逾期", type: "danger", order: 1 },
-  pending:            { label: "待处理", type: "warning", order: 2 },
-  processing:         { label: "处理中", type: "primary", order: 3 },
-  feedback_submitted: { label: "待复查", type: "info", order: 4 },
-  review_passed:      { label: "复查通过", type: "success", order: 5 },
-  draft:              { label: "草稿", type: "muted", order: 6 },
-  closed:             { label: "已关闭", type: "muted", order: 7 },
-};
+// 从 overview 解析的原始数据
+const rawOverview = ref<any>({});
 
-const taskRows = computed(() =>
-  Object.entries(taskSummary.value)
-    .filter(([, v]) => (v as number) > 0)
-    .map(([key, v]) => ({
-      key,
-      label: taskStatusConfig[key]?.label || key,
-      type: taskStatusConfig[key]?.type || "info",
-      count: v as number,
-      order: taskStatusConfig[key]?.order || 99,
-    }))
-    .sort((a, b) => a.order - b.order)
-);
+function getMetricVal(metrics: any, key: string): { val: string; isPending: boolean } {
+  const m = metrics?.[key];
+  if (!m || m.status === "pending_data") return { val: "待接入", isPending: true };
+  return { val: m.display || String(m.value ?? "—"), isPending: false };
+}
 
-const profitCards = computed(() => [
-  { label: "毛利额", value: overview.value.gross_profit, prefix: "¥", decimals: 0, tip: overview.value.data_tip },
-  { label: "毛利率", value: overview.value.gross_margin != null ? overview.value.gross_margin * 100 : null, suffix: "%", decimals: 1, tip: overview.value.data_tip },
-  { label: "折扣率", value: overview.value.avg_discount_rate != null ? overview.value.avg_discount_rate * 100 : null, suffix: "%", decimals: 1 },
-]);
+const assetCards = computed(() => {
+  const a = rawOverview.value?.data_assets || {};
+  return [
+    { label: "门店数", value: a.store_count?.value ?? "—" },
+    { label: "商品款数", value: a.product_count?.value ?? "—" },
+    { label: "SKU数", value: a.sku_count?.value ?? "—" },
+    { label: "仓库数", value: a.warehouse_count?.value ?? "—" },
+    { label: "库存记录", value: formatBigNum(a.inventory_record_count?.value) },
+  ];
+});
 
-const riskCards = computed(() => [
-  { label: "库存金额", value: overview.value.total_inventory_amount, prefix: "¥", decimals: 0, isDanger: false, isWarning: false },
-  { label: "90天+库存", value: overview.value.age_90_plus_amount, prefix: "¥", decimals: 0, isDanger: false, isWarning: (overview.value.age_90_plus_amount || 0) > 0 },
-  { label: "重大异常", value: null, decimals: 0, isDanger: false, isWarning: false, placeholder: "待接入" },
-  { label: "待处理任务", value: overview.value.pending_task_count, suffix: "项", decimals: 0, isDanger: false, isWarning: (overview.value.pending_task_count || 0) > 0 },
-  { label: "逾期任务", value: overview.value.overdue_task_count, suffix: "项", decimals: 0, isDanger: (overview.value.overdue_task_count || 0) > 0, isWarning: false },
-]);
-
-const formatNum = (v: any, decimals = 0): string => {
+function formatBigNum(v: any): string {
   if (v === null || v === undefined) return "—";
   const n = Number(v);
-  if (isNaN(n)) return "—";
-  if (Math.abs(n) >= 10000) return (n / 10000).toFixed(decimals < 1 ? 1 : decimals) + "万";
-  return n.toFixed(decimals);
-};
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  return String(n);
+}
 
-const formatMoney = (v: any): string => {
-  if (v === null || v === undefined) return "—";
-  const n = Number(v);
-  if (isNaN(n)) return "—";
-  if (Math.abs(n) >= 10000) return "¥" + (n / 10000).toFixed(2) + "万";
-  return "¥" + n.toFixed(0);
-};
+const bizMetricCards = computed(() => {
+  const m = rawOverview.value?.business_metrics || {};
+  const cards = [
+    { key: "yesterday_sales", label: "昨日销售额" },
+    { key: "yesterday_orders", label: "昨日订单数" },
+    { key: "yesterday_items", label: "昨日销售件数" },
+    { key: "gross_profit", label: "毛利额" },
+    { key: "gross_margin", label: "毛利率" },
+    { key: "discount_rate", label: "折扣率" },
+    { key: "avg_order_value", label: "客单价" },
+    { key: "items_per_order", label: "连带率" },
+  ];
+  return cards.map(c => {
+    const r = getMetricVal(m, c.key);
+    return { label: c.label, value: r.val, isPending: r.isPending };
+  });
+});
 
-const fmtMoney = (row: any) => formatMoney(row.net_sales);
-const fmtAvgOrder = (row: any) => row.avg_order_value ? "¥" + Number(row.avg_order_value).toFixed(0) : "—";
-const fmtItems = (row: any) => row.items_per_order ? Number(row.items_per_order).toFixed(1) : "—";
+const riskCards = computed(() => {
+  const m = rawOverview.value?.inventory_risk || {};
+  return [
+    { label: "库存件数", ...getMetricVal(m, "total_inventory_qty") },
+    { label: "库存金额", ...getMetricVal(m, "inventory_amount") },
+    { label: "缺货SKU", ...getMetricVal(m, "low_stock_sku_count") },
+    { label: "高库存SKU", ...getMetricVal(m, "high_stock_sku_count") },
+    { label: "无条码SKU", ...getMetricVal(m, "no_barcode_sku_count") },
+    { label: "90天+库存金额", ...getMetricVal(m, "age_90_plus_amount") },
+  ];
+});
+
+const taskCards = computed(() => {
+  const m = rawOverview.value?.task_execution || {};
+  const pending = m.pending_task_count?.value ?? 0;
+  const overdue = m.overdue_task_count?.value ?? 0;
+  return [
+    { label: "待处理", value: pending, isWarning: pending > 0, isDanger: false },
+    { label: "已逾期", value: overdue, isWarning: false, isDanger: overdue > 0 },
+    { label: "已完成", value: m.completed_task_count?.value ?? 0, isWarning: false, isDanger: false },
+  ];
+});
 
 const trendOption = computed(() => ({
-  tooltip: {
-    trigger: "axis",
-    backgroundColor: "#1C2B3A",
-    borderWidth: 0,
-    textStyle: { color: "#E5E7EB", fontSize: 12 },
-    formatter: (params: any[]) => {
-      const p = params[0];
-      return `${p.name}<br/><b>${formatMoney(p.value)}</b>`;
-    },
-  },
+  tooltip: { trigger: "axis" },
   grid: { left: 4, right: 4, top: 12, bottom: 0, containLabel: true },
   xAxis: {
     type: "category",
-    data: trend.value.map((t: any) => t.date?.slice(5) || t.date),
-    axisLine: { show: false },
-    axisTick: { show: false },
+    data: trend.value.map((t: any) => (t.date || "").slice(5)),
     axisLabel: { color: "#9CA3AF", fontSize: 11 },
   },
   yAxis: {
     type: "value",
     axisLabel: {
-      color: "#9CA3AF",
-      fontSize: 11,
+      color: "#9CA3AF", fontSize: 11,
       formatter: (v: number) => v >= 10000 ? (v / 10000).toFixed(0) + "万" : String(v),
     },
     splitLine: { lineStyle: { color: "#F3F4F6" } },
   },
   series: [{
-    type: "line",
-    data: trend.value.map((t: any) => t.total_sales),
-    smooth: true,
-    symbol: "circle",
-    symbolSize: 6,
-    lineStyle: { color: "#1E5EFF", width: 2.5 },
-    itemStyle: { color: "#1E5EFF", borderWidth: 2, borderColor: "#fff" },
-    areaStyle: {
-      color: {
-        type: "linear", x: 0, y: 0, x2: 0, y2: 1,
-        colorStops: [
-          { offset: 0, color: "rgba(30, 94, 255, 0.15)" },
-          { offset: 1, color: "rgba(30, 94, 255, 0)" },
-        ],
-      },
-    },
+    type: "line", data: trend.value.map((t: any) => t.total_sales || 0),
+    smooth: true, symbol: "circle", symbolSize: 4,
+    lineStyle: { color: "#1E5EFF", width: 2 },
+    itemStyle: { color: "#1E5EFF" },
+    areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+      colorStops: [{ offset: 0, color: "rgba(30,94,255,0.1)" }, { offset: 1, color: "rgba(30,94,255,0)" }] } },
   }],
 }));
 
-const dingtalkCards = computed(() => {
-  const t = dingtalk.value || {};
-  return [
-    { label: "今日钉钉事件", value: t.event_count || 0, color: "#1E5EFF", isWarning: false },
-    { label: "今日审批事件", value: t.approval_count || 0, color: "#6366F1", isWarning: false },
-    { label: "今日报销事件", value: t.expense_count || 0, color: "#16A34A", isWarning: false },
-    { label: "今日付款申请", value: t.payment_count || 0, color: "#C8A45D", isWarning: false },
-    { label: "今日考勤事件", value: t.attendance_count || 0, color: "#0EA5E9", isWarning: false },
-    { label: "异常事件", value: t.error_count || 0, color: "#DC2626", isWarning: true },
-  ];
-});
-
-const formatTime = (v: any): string => (v ? String(v).replace("T", " ").slice(0, 19) : "—");
-
-const loadDingtalk = async () => {
-  try {
-    const res = await dingtalkApi.getDingtalkOverview();
-    const d = res.data.data || {};
-    dingtalk.value = d.today || {};
-    dingtalkRecent.value = d.recent_events || [];
-  } catch (e) {
-    console.error("钉钉协同数据加载失败", e);
-    dingtalk.value = {};
-    dingtalkRecent.value = [];
-  }
-};
-
-const loadData = async () => {
+async function fetchData() {
   loading.value = true;
   try {
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2] = await Promise.all([
       dashboardApi.getOverview(),
       dashboardApi.getSalesTrend({ days: 7 }),
-      dashboardApi.getStoreRank({ top_n: 10 }),
-      dashboardApi.getTaskSummary(),
     ]);
-    overview.value = r1.data.data || {};
+    rawOverview.value = r1.data.data || {};
+    dataDate.value = rawOverview.value.stat_date || "";
+    pendingFields.value = rawOverview.value.pending_fields || [];
     trend.value = r2.data.data?.trend || [];
-    storeRank.value = r3.data.data?.rank || [];
-    taskSummary.value = r4.data.data || {};
   } catch (e) {
-    console.error("驾驶舱数据加载失败", e);
+    console.error("加载概览失败", e);
   } finally {
     loading.value = false;
   }
-};
+}
 
-onMounted(() => { loadData(); loadDingtalk(); });
+onMounted(() => { fetchData(); });
 </script>
 
 <style scoped>
-.dashboard {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-width: 0;
-}
-
-/* ====== 页面 Header ====== */
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
+.dashboard-v2 { display: flex; flex-direction: column; gap: 16px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .page-header-left { display: flex; align-items: baseline; gap: 12px; }
-.page-title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.page-subtitle { font-size: 13px; color: #9CA3AF; }
-.page-header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.data-date {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 13px;
-  color: #6B7280;
-}
-.hb-action-btn {
-  border-color: #E5E7EB;
-  color: #374151;
-  background: #fff;
-}
-.hb-action-btn:hover { border-color: #1E5EFF; color: #1E5EFF; }
+.page-title { font-size: 20px; font-weight: 700; color: #111827; margin: 0; }
+.page-subtitle { font-size: 12px; color: #9CA3AF; }
+.page-header-right { display: flex; align-items: center; gap: 10px; }
+.data-date { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #6B7280; }
+.refresh-btn { border-color: #E5E7EB; color: #374151; background: #fff; }
 
-/* ====== Hero 卡 ====== */
-.hero-card {
-  background: linear-gradient(135deg, #071A2F 0%, #0B2340 100%);
-  border-radius: 14px;
-  padding: 28px 32px;
-  display: flex;
-  gap: 40px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-.hero-main { flex: 1; min-width: 260px; }
-.hero-label { font-size: 13px; color: rgba(255,255,255,0.5); margin-bottom: 8px; }
-.hero-value {
-  font-size: 40px;
-  font-weight: 800;
-  color: #FFFFFF;
-  line-height: 1.1;
-  margin-bottom: 16px;
-  font-variant-numeric: tabular-nums;
-}
-.hero-split { display: flex; gap: 10px; flex-wrap: wrap; }
-.hero-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-weight: 500;
-}
-.hero-chip .chip-dot {
-  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-}
-.hero-chip.offline { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75); }
-.hero-chip.offline .chip-dot { background: #C8A45D; }
-.hero-chip.online { background: rgba(30,94,255,0.2); color: #7EAAFF; }
-.hero-chip.online .chip-dot { background: #4D8EFF; }
-.hero-chip.ratio { background: rgba(22,163,74,0.18); color: #4ADE80; }
+.section-label { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 2px; }
 
-.hero-aside { flex: 0 0 320px; display: flex; flex-direction: column; gap: 16px; }
-.hero-kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.hero-kpi-item {
-  background: rgba(255,255,255,0.06);
-  border-radius: 10px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+/* 数据资产 */
+.asset-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.asset-card {
+  background: #FFFFFF; border-radius: 10px; padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;
+  border-top: 3px solid #1E5EFF;
 }
-.hk-label { font-size: 11px; color: rgba(255,255,255,0.4); }
-.hk-val { font-size: 16px; font-weight: 700; color: #FFFFFF; }
+.asset-num { font-size: 28px; font-weight: 700; color: #111827; line-height: 1.2; }
+.asset-label { font-size: 12px; color: #9CA3AF; margin-top: 4px; }
 
-.hero-risk-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.risk-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-weight: 500;
+/* 指标卡片 */
+.metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.metric-row.small { grid-template-columns: repeat(3, 1fr); }
+.metric-card {
+  background: #FFFFFF; border-radius: 10px; padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
-.risk-tag.danger { background: rgba(220,38,38,0.18); color: #FCA5A5; }
-.risk-tag.warning { background: rgba(245,158,11,0.18); color: #FCD34D; }
-.hero-risk-row.all-good {
-  font-size: 12px;
-  color: rgba(74,222,128,0.8);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
+.metric-card.pending { opacity: 0.7; }
+.metric-card.warning { border-left: 3px solid #F59E0B; }
+.metric-card.danger { border-left: 3px solid #DC2626; }
+.metric-label { font-size: 12px; color: #9CA3AF; margin-bottom: 6px; }
+.metric-value { font-size: 22px; font-weight: 700; color: #111827; }
+.metric-value.danger-val { color: #DC2626; }
+.pending-tag { margin-top: 2px; }
 
-/* ====== KPI 分组 ====== */
-.kpi-group { display: flex; flex-direction: column; gap: 10px; }
-.kpi-group-header { display: flex; align-items: center; gap: 8px; }
-.kpi-group-title { font-size: 13px; font-weight: 700; letter-spacing: 0.03em; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.panel { background: #FFFFFF; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 
-.kpi-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.kpi-card {
-  background: #FFFFFF;
-  border-radius: 12px;
-  padding: 16px 18px 14px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-  position: relative;
-  overflow: hidden;
-  transition: box-shadow 0.2s, transform 0.2s;
-  cursor: default;
-}
-.kpi-card:hover {
-  box-shadow: 0 4px 14px rgba(0,0,0,0.09);
-  transform: translateY(-1px);
-}
-.kpi-top-bar {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  border-radius: 12px 12px 0 0;
-}
-.kpi-label {
-  font-size: 12px;
-  color: #9CA3AF;
-  margin-bottom: 8px;
-  margin-top: 2px;
-}
-.kpi-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #111827;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-.kpi-value.empty { font-size: 14px; color: #D1D5DB; font-weight: 400; }
-.kpi-value.danger-val { color: #DC2626; }
-.kpi-value.warning-val { color: #D97706; }
-.kpi-tip { font-size: 11px; color: #F59E0B; margin-top: 5px; }
-
-/* ====== 底部两栏 ====== */
-.bottom-row {
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 16px;
-}
-@media (max-width: 1100px) { .bottom-row { grid-template-columns: 1fr; } }
-
-.section-card {
-  background: #FFFFFF;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-}
-.section-header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.section-title { font-size: 14px; font-weight: 700; color: #111827; }
-.section-sub { font-size: 12px; color: #9CA3AF; }
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px 0;
-  color: #D1D5DB;
-  font-size: 13px;
-}
-
-/* 趋势图 */
+.trend-panel { }
 .trend-chart-wrap { width: 100%; }
-.echarts-trend { width: 100%; height: 220px; }
+.echarts-trend { width: 100%; height: 200px; }
 
-/* 任务状态 */
-.task-list { display: flex; flex-direction: column; gap: 4px; }
-.task-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 6px;
-  border-radius: 7px;
-  transition: background 0.15s;
-}
-.task-row:hover { background: #F9FAFB; }
-.task-row-left { display: flex; align-items: center; gap: 9px; }
-.task-status-dot {
-  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-}
-.task-status-dot.danger  { background: #DC2626; }
-.task-status-dot.warning { background: #F59E0B; }
-.task-status-dot.primary { background: #1E5EFF; }
-.task-status-dot.success { background: #16A34A; }
-.task-status-dot.info    { background: #6366F1; }
-.task-status-dot.muted   { background: #D1D5DB; }
-.task-row-label { font-size: 13px; color: #374151; }
-.task-row-count {
-  font-size: 15px;
-  font-weight: 700;
-  min-width: 32px;
-  text-align: right;
-}
-.task-row-count.danger  { color: #DC2626; }
-.task-row-count.warning { color: #D97706; }
-.task-row-count.primary { color: #1E5EFF; }
-.task-row-count.success { color: #16A34A; }
-.task-row-count.info    { color: #6366F1; }
-.task-row-count.muted   { color: #9CA3AF; }
+.empty-hint { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px 0; color: #D1D5DB; font-size: 13px; }
 
-/* 异常预警 */
-.anomaly-card { }
-.anomaly-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-}
-.anomaly-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 14px 16px;
-  border-radius: 10px;
-  border: 1.5px solid #F3F4F6;
-}
-.anomaly-item .el-icon { font-size: 18px; }
-.anomaly-item.ok { border-color: #D1FAE5; background: #F0FDF4; color: #16A34A; }
-.anomaly-item.warn { border-color: #FED7AA; background: #FFF7ED; color: #D97706; }
-.anomaly-item.ok .el-icon { color: #16A34A; }
-.anomaly-item.warn .el-icon { color: #D97706; }
-.anomaly-label { font-size: 12px; color: #6B7280; }
-.anomaly-val { font-size: 14px; font-weight: 600; color: inherit; }
+.pending-panel { }
+.pending-list { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* 门店排行 */
-.store-rank-card { }
-.hb-table { margin-top: 4px; }
-.hb-table :deep(.el-table__header-wrapper th) {
-  background: #F9FAFB;
-  color: #6B7280;
-  font-size: 12px;
-  font-weight: 600;
+@media (max-width: 1100px) {
+  .asset-row { grid-template-columns: repeat(3, 1fr); }
+  .metric-row { grid-template-columns: repeat(2, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
 }
-.hb-table :deep(.el-table__row td) {
-  color: #374151;
-  font-size: 13px;
-}
-
-/* 响应式 */
-@media (max-width: 1366px) {
-  .hero-card { padding: 22px 24px; }
-  .hero-aside { flex: 0 0 280px; }
-  .hero-value { font-size: 34px; }
-}
-@media (max-width: 1024px) {
-  .hero-aside { flex: 1 1 100%; }
-  .kpi-row { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-}
-.dt-sub { font-size: 12px; color: #9CA3AF; }
 </style>
