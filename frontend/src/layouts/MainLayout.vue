@@ -23,13 +23,28 @@
         <router-link to="/app/store" class="nav-item" :class="{ active: activeMenu === '/app/store' }">
           <el-icon><Shop /></el-icon><span>门店分析</span>
         </router-link>
+        <router-link to="/app/store/overview" class="nav-item" :class="{ active: activeMenu === '/app/store/overview' }">
+          <el-icon><OfficeBuilding /></el-icon><span>门店总览</span>
+        </router-link>
         <router-link to="/app/product" class="nav-item" :class="{ active: activeMenu === '/app/product' }">
           <el-icon><GoodsFilled /></el-icon><span>商品分析</span>
+        </router-link>
+        <router-link to="/app/product/products" class="nav-item" :class="{ active: activeMenu === '/app/product/products' }">
+          <el-icon><Goods /></el-icon><span>商品主档</span>
+        </router-link>
+        <router-link to="/app/product/skus" class="nav-item" :class="{ active: activeMenu === '/app/product/skus' }">
+          <el-icon><Files /></el-icon><span>SKU档案</span>
         </router-link>
 
         <div class="nav-group-label" style="margin-top:16px">风险管理</div>
         <router-link to="/app/inventory" class="nav-item" :class="{ active: activeMenu === '/app/inventory' }">
           <el-icon><Box /></el-icon><span>库存预警</span>
+        </router-link>
+        <router-link to="/app/inventory/warehouses" class="nav-item" :class="{ active: activeMenu === '/app/inventory/warehouses' }">
+          <el-icon><House /></el-icon><span>仓库档案</span>
+        </router-link>
+        <router-link to="/app/inventory/balance" class="nav-item" :class="{ active: activeMenu === '/app/inventory/balance' }">
+          <el-icon><Box /></el-icon><span>库存余额</span>
         </router-link>
         <router-link to="/app/warning" class="nav-item" :class="{ active: activeMenu === '/app/warning' }">
           <el-icon><Warning /></el-icon><span>异常稽核</span>
@@ -83,6 +98,11 @@
         </router-link>
         <router-link to="/app/hr/leaves" class="nav-item" :class="{ active: activeMenu === '/app/hr/leaves' }">
           <el-icon><Clock /></el-icon><span>请假外出</span>
+        </router-link>
+
+        <div class="nav-group-label" style="margin-top:16px">数据中心</div>
+        <router-link to="/app/baison/shops" class="nav-item" :class="{ active: activeMenu === '/app/baison/shops' }">
+          <el-icon><Shop /></el-icon><span>百胜门店档案</span>
         </router-link>
 
         <template v-if="authStore.isAdmin || authStore.hasRole('super_admin')">

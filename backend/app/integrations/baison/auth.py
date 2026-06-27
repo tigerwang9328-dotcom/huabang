@@ -1,7 +1,8 @@
 """百胜 E3ERP 开放平台签名算法。
 
 签名规则（sign_method=md5）：
-1. 取所有请求参数（公共参数 + 业务参数）。
+1. 取所有请求参数：全部公共参数（method/format/key/timestamp/v/sign_method）
+   + data（业务参数序列化后的 JSON 字符串）。
 2. 排除 sign 参数。
 3. 排除值为 None 的参数（byte[] 二进制参数由调用方在传参前剔除）。
 4. 按参数名 ASCII 升序排序。
@@ -13,6 +14,9 @@
 文档示例：bar=2, foo=1, foo_bar=3, foobar=4
 排序拼接 -> bar2foo1foo_bar3foobar4
 签名原文 -> secret + bar2foo1foo_bar3foobar4 + secret
+
+说明：data 与其它公共参数同等对待，作为普通参数（参数名 data + 其 JSON 字符串值）
+参与排序与拼接；AppSecret 仅用于本地计算，绝不出现在请求参数或日志中。
 """
 import hashlib
 
@@ -20,7 +24,7 @@ import hashlib
 def generate_sign(params: dict, app_secret: str) -> str:
     """根据百胜签名规则生成 sign（MD5 大写）。
 
-    :param params: 全部请求参数（公共 + 业务），可包含 None 值与 sign。
+    :param params: 全部请求参数（公共参数 + data），可包含 None 值与 sign。
     :param app_secret: 应用密钥，仅用于本地计算签名，不会出现在请求参数中。
     :return: 32 位大写 MD5 签名。
     """

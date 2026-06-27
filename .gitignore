@@ -34,7 +34,7 @@ Thumbs.db
 backend/uploads/
 backend/backups/
 /srv/backups/
-*.bak
+*.bak*
 *.backup
 *.sql.gz
 

@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     BAISON_SIGN_METHOD: str = "md5"
     BAISON_PAGE_SIZE: int = 20
     BAISON_HTTP_METHOD: str = "POST"  # GET / POST 可配置
+    BAISON_API_VERSION: str = "2.0"
+    BAISON_FORMAT: str = "json"
 
     # 金蝶
     KINGDEE_API_URL: str = ""

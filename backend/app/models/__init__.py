@@ -9,7 +9,7 @@ from app.models.ods import (
     OdsBaisonReturnOrder, OdsBaisonReturnDetail,
     OdsBaisonInventory, OdsBaisonMember, OdsBaisonEmployee
 )
-from app.models.dim import DimStore, DimProduct, DimSku, DimMember, DimEmployee, DimDate
+from app.models.dim import DimStore, DimProduct, DimSku, DimMember, DimEmployee, DimDate, DimBaisonShop, DimWarehouse
 from app.models.dwd import (
     DwdSalesDetail, DwdReturnDetail, DwdInventorySnapshot,
     DwdFinanceExpense, DwdFinanceCash
@@ -38,3 +38,4 @@ from app.models.dingtalk_hr_finance import (
     DingtalkEmployee, DingtalkDepartment, DingtalkApprovalInstance,
     FinanceExpenseRecord, HrAttendanceDaily,
 )
+from app.models.baison_ods import (OdsBaisonProductApi, OdsBaisonSkuApi, OdsBaisonWarehouseApi, OdsBaisonInventoryApi, DwdInventoryBalance)
