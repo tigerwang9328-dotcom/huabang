@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import require_permission
 from app.core.database import get_db
 from app.integrations.baison.exceptions import BaisonError
 from app.integrations.baison.services.shop_service import (
@@ -20,6 +21,7 @@ from app.integrations.baison.services.shop_service import (
     import_shop_page,
 )
 from app.models.dim import DimBaisonShop
+from app.models.sys import SysUser
 
 logger = logging.getLogger("baison.api")
 
@@ -51,7 +53,10 @@ class ShopSyncRequest(BaseModel):
 
 # ------------------------- 联调测试 -------------------------
 @router.post("/test/shop-list")
-async def test_shop_list(req: ShopListRequest):
+async def test_shop_list(
+    req: ShopListRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+):
     """联调测试：调用 base.shop.get_list 拉取门店档案（不落库）。"""
     try:
         result = await run_in_threadpool(
@@ -73,7 +78,11 @@ async def test_shop_list(req: ShopListRequest):
 
 # ------------------------- 同步落库 -------------------------
 @router.post("/sync/shop-list")
-async def sync_shop_list_to_db(req: ShopListRequest, db: AsyncSession = Depends(get_db)):
+async def sync_shop_list_to_db(
+    req: ShopListRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
     """同步单页门店并落库 dim.dim_baison_shop。"""
     try:
         result = await import_shop_page(db, req.page, req.page_size, req.startModified, req.endModified)
@@ -84,7 +93,11 @@ async def sync_shop_list_to_db(req: ShopListRequest, db: AsyncSession = Depends(
 
 
 @router.post("/sync/shops")
-async def sync_shops(req: ShopSyncRequest, db: AsyncSession = Depends(get_db)):
+async def sync_shops(
+    req: ShopSyncRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
     """门店档案同步（前端“同步门店数据”按钮）。full_sync=True 走全量分页。"""
     try:
         if req.full_sync:
@@ -119,6 +132,7 @@ async def list_shops(
     shop_type: Optional[str] = None,
     online_type: Optional[str] = None,
     is_enabled: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """门店档案分页查询（不返回 raw_data）。"""
@@ -154,7 +168,11 @@ async def list_shops(
 
 
 @router.get("/shops/{shop_code}")
-async def get_shop_detail(shop_code: str, db: AsyncSession = Depends(get_db)):
+async def get_shop_detail(
+    shop_code: str,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
     """门店详情（含 raw_data）。"""
     try:
         obj = (await db.execute(

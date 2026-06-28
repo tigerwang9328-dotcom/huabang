@@ -140,3 +140,24 @@ class DwdInventoryBalance(Base):
     synced_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+# --- 百胜门店商品销售 ODS (pos.storefx.sale_goods_get) ---
+class OdsBaisonPosSaleGoodsApi(Base):
+    __tablename__ = 'ods_baison_pos_sale_goods_api'
+    __table_args__ = {'schema': 'ods'}
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    batch_no = Column(String(32), nullable=False)
+    source_system = Column(String(32), default='baison')
+    api_method = Column(String(64), default='pos.storefx.sale_goods_get')
+    store_code = Column(String(32), nullable=False)
+    product_code = Column(String(64))
+    sku_code = Column(String(64))
+    raw_data = Column(JSONB, nullable=False)
+    source_hash = Column(String(64))
+    biz_start_time = Column(DateTime)
+    biz_end_time = Column(DateTime)
+    page_no = Column(Integer, default=1)
+    synced_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

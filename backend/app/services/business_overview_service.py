@@ -92,36 +92,30 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
         },
     }
 
-    # 尝试从 DWS/DM 获取真实销售数据
+    # 从 DWD 门店商品销售表获取真实销售数据
     try:
+        query_date = date.fromisoformat(data["stat_date"])
         r = await db.execute(
-            select(text("total_sales_amount, total_order_count, total_item_count, "
-                       "gross_profit, gross_margin, avg_discount_rate, "
-                       "avg_order_value, items_per_order"))
-            .select_from(text("dws.dws_company_daily"))
-            .where(text("stat_date = :sd")).params(sd=date.fromisoformat(data["stat_date"]))
+            text("""SELECT COALESCE(SUM(sales_amount),0) as total_sales,
+                       COALESCE(SUM(sales_qty),0) as total_qty,
+                       COALESCE(SUM(standard_amount),0) as total_std,
+                       CASE WHEN SUM(standard_amount) > 0 
+                            THEN ROUND(SUM(sales_amount)::numeric / SUM(standard_amount)::numeric, 4)
+                            ELSE NULL END as discount_rate
+                FROM dwd.dwd_pos_sale_goods
+                WHERE biz_date = :sd""").params(sd=query_date)
         )
         row = r.mappings().first()
-        if row:
+        if row and row.get("total_sales") and float(row["total_sales"]) > 0:
             bm = data["business_metrics"]
-            if row.get("total_sales_amount") is not None:
-                bm["yesterday_sales"] = _value(float(row["total_sales_amount"]), 2)
-            if row.get("total_order_count") is not None:
-                bm["yesterday_orders"] = _value(int(row["total_order_count"]))
-            if row.get("total_item_count") is not None:
-                bm["yesterday_items"] = _value(int(row["total_item_count"]))
-            if row.get("gross_profit") is not None:
-                bm["gross_profit"] = _value(float(row["gross_profit"]), 2)
-            if row.get("gross_margin") is not None:
-                bm["gross_margin"] = _value(round(float(row["gross_margin"]) * 100, 1))
-            if row.get("avg_discount_rate") is not None:
-                bm["discount_rate"] = _value(round(float(row["avg_discount_rate"]) * 100, 1))
-            if row.get("avg_order_value") is not None:
-                bm["avg_order_value"] = _value(float(row["avg_order_value"]), 2)
-            if row.get("items_per_order") is not None:
-                bm["items_per_order"] = _value(float(row["items_per_order"]), 2)
+            bm["yesterday_sales"] = _value(round(float(row["total_sales"]), 2))
+            bm["yesterday_items"] = _value(int(float(row["total_qty"])))
+            if row.get("discount_rate"):
+                bm["discount_rate"] = _value(round(float(row["discount_rate"]) * 100, 1))
+            # 没有订单数，保持待接入
+            # 没有毛利，保持待接入
     except Exception:
-        logger.exception("获取 DWS 销售数据失败，使用待接入占位")
+        logger.exception("获取 DWD 销售数据失败，使用待接入占位")
 
     # 尝试获取任务汇总
     try:

@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import require_permission
 from app.core.database import get_db
 from app.models.dim import DimStore
+from app.models.sys import SysUser
 
 logger = logging.getLogger("store.api")
 
@@ -32,6 +34,7 @@ async def list_stores(
     store_type: Optional[str] = None,
     business_type: Optional[str] = None,
     status: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准门店维分页查询（门店总览）。"""

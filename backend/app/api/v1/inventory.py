@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import require_permission
 from app.core.database import get_db
 from app.integrations.baison.services.warehouse_service import WAREHOUSE_LIST_METHOD, import_all_warehouses, import_warehouse_page
 import asyncio as _asyncio
@@ -17,6 +18,7 @@ from app.core.database import AsyncSessionLocal
 from app.integrations.baison.services.inventory_service import STOCK_METHOD, import_all_inventory
 from app.models.baison_ods import DwdInventoryBalance
 from app.models.dim import DimWarehouse
+from app.models.sys import SysUser
 
 logger = logging.getLogger("inventory.api")
 
@@ -48,6 +50,7 @@ async def list_warehouses(
     region_name: Optional[str] = None,
     status: Optional[str] = None,
     source_system: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准仓库维分页查询（仓库档案）。不返回 raw_data。"""
@@ -81,7 +84,11 @@ async def list_warehouses(
 
 
 @router.post("/sync/baison/warehouses")
-async def sync_baison_warehouses(req: WarehouseSyncRequest, db: AsyncSession = Depends(get_db)):
+async def sync_baison_warehouses(
+    req: WarehouseSyncRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
     """同步百胜仓库档案（base.warehouse_list_get）。仅 59 条/3 页，全量同步直接返回。"""
     try:
         if req.full_sync:
@@ -127,6 +134,7 @@ async def list_inventory_balance(
     color_name: Optional[str] = None,
     size_name: Optional[str] = None,
     only_positive: Optional[int] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准库存余额分页查询。available_qty = num - lock_num。库存金额待接入（接口无金额）。"""
@@ -175,7 +183,11 @@ async def _bg_full_inventory_sync():
 
 
 @router.post("/sync/baison/inventory")
-async def sync_baison_inventory(req: InventorySyncRequest, db: AsyncSession = Depends(get_db)):
+async def sync_baison_inventory(
+    req: InventorySyncRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
     """同步百胜实物库存（stock.goods_sscx，逐店全量）。耗时长 -> 后台任务立即返回。"""
     try:
         if req.full_sync:

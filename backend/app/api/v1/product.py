@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import require_permission
 from app.core.database import get_db
 import asyncio as _asyncio
 
@@ -17,6 +18,7 @@ from app.core.database import AsyncSessionLocal
 from app.integrations.baison.services.product_service import GOODS_LIST_METHOD, import_all_goods, import_goods_page
 from app.integrations.baison.services.sku_service import SKU_LIST_METHOD, import_all_skus, import_sku_page
 from app.models.dim import DimProduct, DimSku
+from app.models.sys import SysUser
 
 logger = logging.getLogger("product.api")
 
@@ -54,6 +56,7 @@ async def list_products(
     year: Optional[int] = None,
     status: Optional[str] = None,
     source_system: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准商品维分页查询（商品主档）。"""
@@ -88,7 +91,11 @@ async def list_products(
 
 
 @router.post("/sync/baison/products")
-async def sync_baison_products(req: ProductSyncRequest, db: AsyncSession = Depends(get_db)):
+async def sync_baison_products(
+    req: ProductSyncRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
     """同步百胜商品主档（prm.goods.list_get）。full_sync=True 走全量分页。"""
     try:
         if req.full_sync:
@@ -143,6 +150,7 @@ async def list_skus(
     season_name: Optional[str] = None,
     status: Optional[str] = None,
     source_system: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准 SKU 维分页查询（SKU档案）。不返回 raw_data / 成本价。"""
@@ -189,7 +197,11 @@ async def _bg_full_sku_sync():
 
 
 @router.post("/sync/baison/skus")
-async def sync_baison_skus(req: SkuSyncRequest, db: AsyncSession = Depends(get_db)):
+async def sync_baison_skus(
+    req: SkuSyncRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
     """同步百胜 SKU 档案（prm.goods.sku_list_get）。
 
     full_sync=True：全量约 2048 页/40944 条、约 15 分钟，放后台任务执行并立即返回（避免网关超时）。
