@@ -43,6 +43,18 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
     """经营概览完整数据"""
     counts = await get_base_counts(db)
 
+    # 未指定日期时，使用已落库的最新有效 POS 业务日，
+    # 避免每日同步尚未完成时首页误显示为全部“待接入”。
+    effective_date = stat_date
+    if not effective_date:
+        latest_result = await db.execute(text("""
+            SELECT MAX(biz_date)
+            FROM dwd.dwd_pos_sale_goods
+            WHERE sales_amount IS NOT NULL
+        """))
+        latest_date = latest_result.scalar()
+        effective_date = str(latest_date or (date.today() - timedelta(days=1)))
+
     # 数据更新时间
     synced_result = await db.execute(
         select(func.max(text("synced_at"))).select_from(text("dim.dim_product"))
@@ -50,7 +62,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
     last_sync = synced_result.scalar()
 
     data = {
-        "stat_date": stat_date or str(date.today() - timedelta(days=1)),
+        "stat_date": effective_date,
         "updated_at": str(last_sync) if last_sync else None,
 
         # 数据资产（真实数据）
@@ -92,6 +104,22 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
         },
     }
 
+    # 库存余额表已落库的可直接计算指标。
+    try:
+        inv_result = await db.execute(text("""
+            SELECT COALESCE(SUM(qty), 0) AS total_qty,
+                   COUNT(DISTINCT sku_code) FILTER (
+                       WHERE barcode IS NULL OR BTRIM(barcode) = ''
+                   ) AS no_barcode_sku_count
+            FROM dwd.dwd_inventory_balance
+        """))
+        inv_row = inv_result.mappings().first()
+        if inv_row:
+            data["inventory_risk"]["total_inventory_qty"] = _value(float(inv_row["total_qty"] or 0))
+            data["inventory_risk"]["no_barcode_sku_count"] = _value(int(inv_row["no_barcode_sku_count"] or 0))
+    except Exception:
+        logger.exception("获取库存实时指标失败，使用待接入占位")
+
     # 从 DWD 门店商品销售表获取真实销售数据
     try:
         query_date = date.fromisoformat(data["stat_date"])
@@ -123,6 +151,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
             select(
                 func.count().filter(text("status IN ('pending', 'processing')")).label("pending"),
                 func.count().filter(text("status = 'overdue'")).label("overdue"),
+                func.count().filter(text("status IN ('closed', 'review_passed')")).label("completed"),
             ).select_from(text("app.app_action_task")).where(text("is_deleted = false"))
         )
         trow = r2.one()
@@ -130,6 +159,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
             data["task_execution"]["pending_task_count"] = _value(trow.pending)
         if trow.overdue is not None:
             data["task_execution"]["overdue_task_count"] = _value(trow.overdue)
+        if trow.completed is not None:
+            data["task_execution"]["completed_task_count"] = _value(trow.completed)
     except Exception:
         logger.exception("获取任务汇总失败")
 

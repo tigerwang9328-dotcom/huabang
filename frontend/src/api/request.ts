@@ -9,6 +9,19 @@ export interface ApiResponse<T = any> {
   success: boolean;
 }
 
+let isSessionRedirecting = false;
+
+const isLoginRequest = (url?: string) => url?.includes("/auth/login") === true;
+
+const redirectExpiredSession = () => {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("user_info");
+
+  if (isSessionRedirecting || window.location.pathname === "/login") return;
+  isSessionRedirecting = true;
+  window.location.replace("/login?reason=expired");
+};
+
 const request = axios.create({
   baseURL: "/api/v1",
   timeout: 30000,
@@ -29,8 +42,11 @@ request.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
     const data = response.data;
     if (data.code === 401) {
-      localStorage.removeItem("access_token");
-      window.location.href = "/login";
+      if (isLoginRequest(response.config.url)) {
+        ElMessage.error(data.message || "用户名或密码错误");
+        return Promise.reject(new Error(data.message || "用户名或密码错误"));
+      }
+      redirectExpiredSession();
       return Promise.reject(new Error("登录已过期，请重新登录"));
     }
     if (!data.success && data.code !== 200) {
@@ -40,6 +56,17 @@ request.interceptors.response.use(
     return response;
   },
   (error) => {
+    const status = error.response?.status;
+    const code = error.response?.data?.code;
+    if (status === 401 || code === 401) {
+      if (isLoginRequest(error.config?.url)) {
+        const loginMsg = error.response?.data?.message || "用户名或密码错误";
+        ElMessage.error(loginMsg);
+        return Promise.reject(new Error(loginMsg));
+      }
+      redirectExpiredSession();
+      return Promise.reject(new Error("登录已过期，请重新登录"));
+    }
     const msg = error.response?.data?.message || error.message || "网络错误";
     ElMessage.error(msg);
     return Promise.reject(error);
