@@ -103,11 +103,11 @@
           <div class="lux-chart-stage">
             <v-chart :option="trendOption" autoresize class="echarts-canvas" />
           </div>
-          <div class="lux-blur-overlay">
+          <div class="lux-blur-overlay" v-if="!trend.length">
             <div class="overlay-content">
               <div class="pulse-radar"></div>
-              <h3>销售明细尚未接入</h3>
-              <p>系统已就绪，正等待百胜 ERP 流水数据管线握手连通</p>
+              <h3>暂无销售趋势数据</h3>
+              <p>系统已就绪，等待百胜 ERP 流水数据同步完成后自动呈现</p>
             </div>
           </div>
         </div>

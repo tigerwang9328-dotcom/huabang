@@ -64,6 +64,7 @@ const routes = [
           { path: "users", component: () => import("@/views/system/Users.vue"), meta: { title: "用户管理" } },
           { path: "roles", component: () => import("@/views/system/Roles.vue"), meta: { title: "角色权限" } },
           { path: "sync", component: () => import("@/views/system/Sync.vue"), meta: { title: "数据同步" } },
+          { path: "baison-api", component: () => import("@/views/system/BaisonApi.vue"), meta: { title: "百胜API管理" } },
         ],
       },
     ],

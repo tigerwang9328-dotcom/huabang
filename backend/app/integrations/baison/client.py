@@ -24,7 +24,7 @@ from app.integrations.baison.exceptions import BaisonConfigError, BaisonRequestE
 logger = logging.getLogger("baison.client")
 
 # 日志脱敏：这些 key 一旦出现一律打码（兜底，正常请求参数里不应含 secret）
-_SENSITIVE_KEYS = {"app_secret", "appsecret", "secret"}
+_SENSITIVE_KEYS = {"app_key", "appkey", "key", "app_secret", "appsecret", "secret"}
 
 
 def mask_params(params: dict) -> dict:

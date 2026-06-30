@@ -101,6 +101,9 @@
           <router-link to="/app/system/sync" class="nav-item" :class="{ active: activeMenu === '/app/system/sync' }">
             <el-icon><Refresh /></el-icon><span>数据同步</span>
           </router-link>
+          <router-link to="/app/system/baison-api" class="nav-item" :class="{ active: activeMenu === '/app/system/baison-api' }">
+            <el-icon><Refresh /></el-icon><span>百胜API管理</span>
+          </router-link>
         </template>
       </nav>
 

@@ -117,6 +117,7 @@ def _ods_row(raw: dict, batch_no: str, now: datetime) -> dict:
 def _dim_row(raw: dict, now: datetime) -> dict:
     gb = _s(raw.get("gbBarcode")); s69 = _s(raw.get("sixNineCode"))
     ckj = raw.get("ckj")
+    cbj = raw.get("cbj")
     return {
         "sku_code": _trim(raw.get("sku")),
         "product_code": _trim(raw.get("goodsSn")),
@@ -129,8 +130,8 @@ def _dim_row(raw: dict, now: datetime) -> dict:
         "category_code": _s(raw.get("catCode")), "category_name": _s(raw.get("catName")),
         "season_code": _s(raw.get("seasonCode")), "season_name": _s(raw.get("seasonName")),
         "series_code": _s(raw.get("seriesCode")), "series_name": _s(raw.get("seriesName")),
-        "tag_price": _num(raw.get("shopPrice")), "market_price": _num(raw.get("marketPrice")),
-        "cost_price": _num(ckj), "has_cost": _num(ckj) is not None,   # ckj/cbj 含义待确认，前端不展示
+        "tag_price": _num(raw.get("shopPrice") or ckj), "market_price": _num(raw.get("marketPrice")),
+        "cost_price": _num(cbj), "has_cost": _num(cbj) is not None,   # cbj=成本价，ckj/shopPrice=吊牌/售价
         "weight": _num(raw.get("goodsWeight")), "remark": _s(raw.get("remark")),
         "status": "active",   # 接口未返回状态，默认 active，待百胜确认
         "source_system": SOURCE_SYSTEM,
@@ -173,7 +174,7 @@ async def _upsert_skus(db: AsyncSession, skus: list, batch_no: str, now: datetim
         sp = _num(raw.get("shopPrice"))
         if sp is None or sp == 0:
             q["shop_price_empty"] += 1
-        if _num(raw.get("ckj")) is None:
+        if _num(raw.get("cbj")) is None:
             q["cost_empty"] += 1
         if str(raw.get("lastchanged")) == _BYTE_SENTINEL:
             q["lastchanged_bytes"] += 1

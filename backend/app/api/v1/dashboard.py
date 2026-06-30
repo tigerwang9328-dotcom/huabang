@@ -77,28 +77,43 @@ async def get_store_rank(
     current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """门店销售排行"""
-    query_date = date.fromisoformat(stat_date) if stat_date else date.today() - timedelta(days=1)
+    """门店销售排行
 
-    result = await db.execute(
-        select(DwsStoreDailySales)
-        .where(
-            DwsStoreDailySales.stat_date == query_date,
-            DwsStoreDailySales.channel != "online",
-        )
-        .order_by(DwsStoreDailySales.net_sales_amount.desc())
-        .limit(top_n)
-    )
-    rows = result.scalars().all()
+    未指定日期时使用 DWD 销售明细中最新有效业务日，避免每日同步尚未完成
+    或 DWS 汇总滞后时首页排行区域显示空白。
+    """
+    if stat_date:
+        query_date = date.fromisoformat(stat_date)
+    else:
+        latest_result = await db.execute(text("""
+            SELECT MAX(biz_date)
+            FROM dwd.dwd_pos_sale_goods
+            WHERE sales_amount IS NOT NULL
+        """))
+        query_date = latest_result.scalar() or (date.today() - timedelta(days=1))
+
+    result = await db.execute(text("""
+        SELECT store_code,
+               COALESCE(SUM(sales_amount), 0) AS net_sales,
+               COALESCE(SUM(sales_qty), 0) AS item_count
+        FROM dwd.dwd_pos_sale_goods
+        WHERE biz_date = :query_date
+        GROUP BY store_code
+        HAVING COALESCE(SUM(sales_amount), 0) > 0
+        ORDER BY net_sales DESC
+        LIMIT :top_n
+    """), {"query_date": query_date, "top_n": top_n})
+    rows = result.mappings().all()
 
     rank = [
         {
             "rank": i + 1,
-            "store_code": r.store_code,
-            "net_sales": float(r.net_sales_amount) if r.net_sales_amount else 0,
-            "order_count": r.order_count,
-            "avg_order_value": float(r.avg_order_value) if r.avg_order_value else 0,
-            "items_per_order": float(r.items_per_order) if r.items_per_order else 0,
+            "store_code": r["store_code"],
+            "net_sales": float(r["net_sales"] or 0),
+            "order_count": 0,
+            "avg_order_value": 0,
+            "items_per_order": 0,
+            "item_count": int(float(r["item_count"] or 0)),
         }
         for i, r in enumerate(rows)
     ]

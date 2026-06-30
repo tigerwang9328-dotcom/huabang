@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 PENDING = {"value": None, "display": "待接入", "status": "pending_data"}
+LOW_STOCK_AVAILABLE_QTY = 0
+HIGH_STOCK_QTY = 100
 
 
 def _pending(reason: str = "") -> dict:
@@ -21,6 +23,12 @@ def _value(val, decimals: int = 0) -> dict:
     if isinstance(val, (int, float)):
         return {"value": round(float(val), decimals), "display": str(round(float(val), decimals)), "status": "ready"}
     return {"value": val, "display": str(val), "status": "ready"}
+
+
+def _estimated(val, decimals: int = 0, reason: str = "") -> dict:
+    if isinstance(val, (int, float)):
+        val = round(float(val), decimals)
+    return {"value": val, "display": str(val), "status": "estimated", "reason": reason}
 
 
 async def get_base_counts(db: AsyncSession) -> dict:
@@ -39,6 +47,26 @@ async def get_base_counts(db: AsyncSession) -> dict:
     return counts
 
 
+async def _table_columns(db: AsyncSession, schema: str, table: str) -> set[str]:
+    result = await db.execute(text("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = :schema AND table_name = :table
+    """), {"schema": schema, "table": table})
+    return {r[0] for r in result.fetchall()}
+
+
+def _inventory_key_expr(columns: set[str]) -> str:
+    """构建库存风险聚合主键，避免 sku_code 全空时风险统计永远为 0。"""
+    parts = []
+    for col in ("sku_code", "product_code", "goods_id", "barcode"):
+        if col in columns:
+            parts.append(f"NULLIF(BTRIM({col}::text), '')")
+    if "id" in columns:
+        parts.append("id::text")
+    return "COALESCE(" + ", ".join(parts) + ")" if parts else "NULL"
+
+
 async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dict:
     """经营概览完整数据"""
     counts = await get_base_counts(db)
@@ -48,9 +76,10 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
     effective_date = stat_date
     if not effective_date:
         latest_result = await db.execute(text("""
-            SELECT MAX(biz_date)
-            FROM dwd.dwd_pos_sale_goods
-            WHERE sales_amount IS NOT NULL
+            SELECT COALESCE(
+                (SELECT MAX(biz_date) FROM dwd.dwd_pos_ticket WHERE to_regclass('dwd.dwd_pos_ticket') IS NOT NULL AND sales_amount IS NOT NULL),
+                (SELECT MAX(biz_date) FROM dwd.dwd_pos_sale_goods WHERE sales_amount IS NOT NULL)
+            )
         """))
         latest_date = latest_result.scalar()
         effective_date = str(latest_date or (date.today() - timedelta(days=1)))
@@ -79,8 +108,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
             "yesterday_sales": _pending("销售明细尚未接入"),
             "yesterday_orders": _pending("销售明细尚未接入"),
             "yesterday_items": _pending("销售明细尚未接入"),
-            "gross_profit": _pending("成本和销售未完整接入"),
-            "gross_margin": _pending("成本和销售未完整接入"),
+            "gross_profit": _pending("成本价待接入"),
+            "gross_margin": _pending("成本价待接入"),
             "discount_rate": _pending("销售明细尚未接入"),
             "avg_order_value": _pending("销售明细尚未接入"),
             "items_per_order": _pending("销售明细尚未接入"),
@@ -106,44 +135,205 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
 
     # 库存余额表已落库的可直接计算指标。
     try:
+        inv_columns = await _table_columns(db, "dwd", "dwd_inventory_balance")
+        inv_key = _inventory_key_expr(inv_columns)
+        qty_col = "qty" if "qty" in inv_columns else "0"
+        available_col = "available_qty" if "available_qty" in inv_columns else qty_col
+        barcode_expr = (
+            "barcode IS NULL OR BTRIM(barcode::text) = ''"
+            if "barcode" in inv_columns
+            else "FALSE"
+        )
         inv_result = await db.execute(text("""
-            SELECT COALESCE(SUM(qty), 0) AS total_qty,
-                   COUNT(DISTINCT sku_code) FILTER (
-                       WHERE barcode IS NULL OR BTRIM(barcode) = ''
-                   ) AS no_barcode_sku_count
-            FROM dwd.dwd_inventory_balance
-        """))
+            WITH inv AS (
+                SELECT {inv_key} AS inv_key,
+                       COALESCE(SUM({qty_col}), 0) AS total_qty,
+                       COALESCE(SUM({available_col}), 0) AS available_qty,
+                       BOOL_OR({barcode_expr}) AS missing_barcode
+                FROM dwd.dwd_inventory_balance
+                GROUP BY {inv_key}
+            )
+            SELECT COALESCE(SUM(total_qty), 0) AS total_qty,
+                   COUNT(*) FILTER (WHERE missing_barcode) AS no_barcode_sku_count,
+                   COUNT(*) FILTER (WHERE available_qty <= :low_stock_qty) AS low_stock_sku_count,
+                   COUNT(*) FILTER (WHERE total_qty >= :high_stock_qty) AS high_stock_sku_count
+            FROM inv
+            WHERE inv_key IS NOT NULL
+        """.format(
+            inv_key=inv_key,
+            qty_col=qty_col,
+            available_col=available_col,
+            barcode_expr=barcode_expr,
+        )), {
+            "low_stock_qty": LOW_STOCK_AVAILABLE_QTY,
+            "high_stock_qty": HIGH_STOCK_QTY,
+        })
         inv_row = inv_result.mappings().first()
         if inv_row:
             data["inventory_risk"]["total_inventory_qty"] = _value(float(inv_row["total_qty"] or 0))
             data["inventory_risk"]["no_barcode_sku_count"] = _value(int(inv_row["no_barcode_sku_count"] or 0))
+            data["inventory_risk"]["low_stock_sku_count"] = _value(int(inv_row["low_stock_sku_count"] or 0))
+            data["inventory_risk"]["high_stock_sku_count"] = _value(int(inv_row["high_stock_sku_count"] or 0))
+
+        if "product_code" in inv_columns:
+            amount_result = await db.execute(text("""
+                SELECT COALESCE(SUM(i.qty * COALESCE(sku.cost_price, p.cost_price)), 0) AS inventory_amount,
+                       COALESCE(SUM(i.qty) FILTER (
+                           WHERE COALESCE(sku.cost_price, p.cost_price) IS NOT NULL
+                             AND COALESCE(sku.cost_price, p.cost_price) > 0
+                       ), 0) AS costed_qty,
+                       COALESCE(SUM(i.qty), 0) AS total_qty
+                FROM dwd.dwd_inventory_balance i
+                LEFT JOIN dim.dim_sku sku
+                  ON sku.product_code = i.product_code
+                 AND sku.color_code = i.color_code
+                 AND sku.size_code = i.size_code
+                 AND COALESCE(sku.source_system, 'baison') = 'baison'
+                LEFT JOIN dim.dim_product p
+                  ON p.product_code = i.product_code
+                 AND COALESCE(p.source_system, 'baison') = 'baison'
+            """))
+            amount_row = amount_result.mappings().first()
+            if amount_row and float(amount_row["inventory_amount"] or 0) > 0:
+                data["inventory_risk"]["inventory_amount"] = _value(
+                    round(float(amount_row["inventory_amount"]), 2), 2
+                )
     except Exception:
         logger.exception("获取库存实时指标失败，使用待接入占位")
 
-    # 从 DWD 门店商品销售表获取真实销售数据
+    # 销售核心指标：优先使用真实小票流水；小票未接入时才回退旧销售排行口径。
     try:
         query_date = date.fromisoformat(data["stat_date"])
-        r = await db.execute(
-            text("""SELECT COALESCE(SUM(sales_amount),0) as total_sales,
+        ticket_table_result = await db.execute(text("SELECT to_regclass('dwd.dwd_pos_ticket') IS NOT NULL"))
+        has_ticket_table = bool(ticket_table_result.scalar())
+        row = None
+        source = "ticket"
+
+        if has_ticket_table:
+            ticket_result = await db.execute(text("""
+                WITH category_cost AS (
+                    SELECT COALESCE(NULLIF(category_name, ''), NULLIF(top_category_name, ''), 'UNKNOWN') AS cat,
+                           AVG(cost_price) FILTER (WHERE cost_price IS NOT NULL AND cost_price > 0) AS avg_cost
+                    FROM dim.dim_product
+                    WHERE COALESCE(source_system, 'baison') = 'baison'
+                    GROUP BY 1
+                ), ticket AS (
+                    SELECT *
+                    FROM dwd.dwd_pos_ticket
+                    WHERE biz_date = :sd
+                      AND COALESCE(is_void, false) = false
+                      AND COALESCE(is_pending, false) = false
+                ), ticket_agg AS (
+                    SELECT COALESCE(SUM(sales_amount),0) AS total_sales,
+                           COALESCE(SUM(sales_qty),0) AS total_qty,
+                           COALESCE(SUM(standard_amount),0) AS total_std,
+                           COUNT(*) AS total_orders,
+                           CASE WHEN SUM(standard_amount) > 0
+                                THEN ROUND(SUM(sales_amount)::numeric / SUM(standard_amount)::numeric, 4)
+                                ELSE NULL END AS discount_rate
+                    FROM ticket
+                ), detail AS (
+                    SELECT NULLIF(d.item->>'spdm', '') AS product_code,
+                           COALESCE(NULLIF(d.item->>'sl', '')::numeric, 0) AS sales_qty
+                    FROM ticket t
+                    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(t.raw_data->'orderDetailGets', '[]'::jsonb)) AS d(item)
+                ), detail_cost AS (
+                    SELECT COALESCE(SUM(detail.sales_qty), 0) AS detail_qty,
+                           COALESCE(SUM(detail.sales_qty) FILTER (
+                               WHERE p.cost_price IS NOT NULL AND p.cost_price > 0
+                           ), 0) AS costed_qty,
+                           COALESCE(SUM(detail.sales_qty) FILTER (
+                               WHERE (p.cost_price IS NOT NULL AND p.cost_price > 0)
+                                  OR (cc.avg_cost IS NOT NULL AND cc.avg_cost > 0)
+                           ), 0) AS covered_qty,
+                           COALESCE(SUM(detail.sales_qty * COALESCE(NULLIF(p.cost_price, 0), cc.avg_cost)) FILTER (
+                               WHERE (p.cost_price IS NOT NULL AND p.cost_price > 0)
+                                  OR (cc.avg_cost IS NOT NULL AND cc.avg_cost > 0)
+                           ), 0) AS sales_cost
+                    FROM detail
+                    LEFT JOIN dim.dim_product p
+                      ON p.product_code = detail.product_code
+                     AND COALESCE(p.source_system, 'baison') = 'baison'
+                    LEFT JOIN category_cost cc
+                      ON cc.cat = COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), 'UNKNOWN')
+                )
+                SELECT ticket_agg.*, detail_cost.detail_qty, detail_cost.costed_qty,
+                       detail_cost.covered_qty, detail_cost.sales_cost
+                FROM ticket_agg CROSS JOIN detail_cost
+            """), {"sd": query_date})
+            row = ticket_result.mappings().first()
+
+        if not row or not row.get("total_sales") or float(row["total_sales"] or 0) <= 0:
+            source = "sale_goods_fallback"
+            fallback_result = await db.execute(text("""
+                WITH category_cost AS (
+                    SELECT COALESCE(NULLIF(category_name, ''), NULLIF(top_category_name, ''), 'UNKNOWN') AS cat,
+                           AVG(cost_price) FILTER (WHERE cost_price IS NOT NULL AND cost_price > 0) AS avg_cost
+                    FROM dim.dim_product
+                    WHERE COALESCE(source_system, 'baison') = 'baison'
+                    GROUP BY 1
+                ), sale AS (
+                    SELECT s.sales_amount, s.sales_qty, s.standard_amount,
+                           p.cost_price, cc.avg_cost AS estimated_cost_price
+                    FROM dwd.dwd_pos_sale_goods s
+                    LEFT JOIN dim.dim_product p
+                      ON p.product_code = s.product_code
+                     AND COALESCE(p.source_system, 'baison') = 'baison'
+                    LEFT JOIN category_cost cc
+                      ON cc.cat = COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), 'UNKNOWN')
+                    WHERE s.biz_date = :sd
+                )
+                SELECT COALESCE(SUM(sales_amount),0) as total_sales,
                        COALESCE(SUM(sales_qty),0) as total_qty,
                        COALESCE(SUM(standard_amount),0) as total_std,
-                       CASE WHEN SUM(standard_amount) > 0 
+                       NULL::int as total_orders,
+                       COALESCE(SUM(sales_qty) FILTER (WHERE cost_price IS NOT NULL AND cost_price > 0), 0) AS costed_qty,
+                       COALESCE(SUM(sales_qty) FILTER (
+                           WHERE (cost_price IS NOT NULL AND cost_price > 0)
+                              OR (estimated_cost_price IS NOT NULL AND estimated_cost_price > 0)
+                       ), 0) AS covered_qty,
+                       COALESCE(SUM(sales_qty * COALESCE(NULLIF(cost_price, 0), estimated_cost_price)) FILTER (
+                           WHERE (cost_price IS NOT NULL AND cost_price > 0)
+                              OR (estimated_cost_price IS NOT NULL AND estimated_cost_price > 0)
+                       ), 0) AS sales_cost,
+                       CASE WHEN SUM(standard_amount) > 0
                             THEN ROUND(SUM(sales_amount)::numeric / SUM(standard_amount)::numeric, 4)
                             ELSE NULL END as discount_rate
-                FROM dwd.dwd_pos_sale_goods
-                WHERE biz_date = :sd""").params(sd=query_date)
-        )
-        row = r.mappings().first()
-        if row and row.get("total_sales") and float(row["total_sales"]) > 0:
+                FROM sale
+            """), {"sd": query_date})
+            row = fallback_result.mappings().first()
+
+        if row and row.get("total_sales") and float(row["total_sales"] or 0) > 0:
             bm = data["business_metrics"]
-            bm["yesterday_sales"] = _value(round(float(row["total_sales"]), 2))
-            bm["yesterday_items"] = _value(int(float(row["total_qty"])))
+            total_sales = float(row["total_sales"] or 0)
+            total_qty = float(row["total_qty"] or 0)
+            total_orders = row.get("total_orders")
+            bm["yesterday_sales"] = _value(round(total_sales, 2), 2)
+            bm["yesterday_items"] = _value(int(total_qty))
+            if total_orders is not None and int(total_orders or 0) > 0:
+                order_count = int(total_orders)
+                bm["yesterday_orders"] = _value(order_count)
+                bm["avg_order_value"] = _value(round(total_sales / order_count, 2), 2)
+                bm["items_per_order"] = _value(round(total_qty / order_count, 2), 2)
+            elif source == "sale_goods_fallback":
+                bm["yesterday_orders"] = _pending("销售排行接口不包含订单数，需同步小票流水")
+                bm["avg_order_value"] = _pending("销售排行接口不包含订单数，需同步小票流水")
+                bm["items_per_order"] = _pending("销售排行接口不包含订单数，需同步小票流水")
             if row.get("discount_rate"):
-                bm["discount_rate"] = _value(round(float(row["discount_rate"]) * 100, 1))
-            # 没有订单数，保持待接入
-            # 没有毛利，保持待接入
+                bm["discount_rate"] = _value(round(float(row["discount_rate"]) * 100, 1), 1)
+
+            cost_base_qty = float(row.get("detail_qty") or row.get("total_qty") or 0)
+            costed_qty = float(row.get("costed_qty") or 0)
+            covered_qty = float(row.get("covered_qty") or 0)
+            if cost_base_qty > 0 and covered_qty / cost_base_qty >= 0.95:
+                gross_profit = total_sales - float(row.get("sales_cost") or 0)
+                status_reason = "成本覆盖完整" if costed_qty / cost_base_qty >= 0.95 else "部分商品成本按同品类平均成本估算"
+                setter = _value if costed_qty / cost_base_qty >= 0.95 else _estimated
+                bm["gross_profit"] = setter(round(gross_profit, 2), 2, status_reason) if setter is _estimated else setter(round(gross_profit, 2), 2)
+                gross_margin = round(gross_profit / total_sales * 100, 1) if total_sales else 0
+                bm["gross_margin"] = setter(gross_margin, 1, status_reason) if setter is _estimated else setter(gross_margin, 1)
     except Exception:
-        logger.exception("获取 DWD 销售数据失败，使用待接入占位")
+        logger.exception("获取 DWD 销售/小票数据失败，使用待接入占位")
 
     # 尝试获取任务汇总
     try:
