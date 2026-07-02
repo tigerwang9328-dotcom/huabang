@@ -13,98 +13,70 @@
 
       <!-- 菜单（路径全部位于 /app 之下） -->
       <nav class="sidebar-nav">
-        <div class="nav-group-label">经营分析</div>
-        <router-link to="/app/dashboard" class="nav-item" :class="{ active: activeMenu === '/app/dashboard' }">
-          <el-icon><DataLine /></el-icon><span>经营概览</span>
-        </router-link>
-        <router-link to="/app/boss" class="nav-item" :class="{ active: activeMenu === '/app/boss' }">
-          <el-icon><House /></el-icon><span>经营日报</span>
-        </router-link>
-        <router-link to="/app/store" class="nav-item" :class="{ active: activeMenu === '/app/store' }">
-          <el-icon><Shop /></el-icon><span>门店分析</span>
-        </router-link>
-        <router-link to="/app/product" class="nav-item" :class="{ active: activeMenu === '/app/product' }">
-          <el-icon><GoodsFilled /></el-icon><span>商品分析</span>
-        </router-link>
-
-        <div class="nav-group-label" style="margin-top:16px">风险管理</div>
-        <router-link to="/app/inventory" class="nav-item" :class="{ active: activeMenu === '/app/inventory' }">
-          <el-icon><Box /></el-icon><span>库存预警</span>
-        </router-link>
-        <router-link to="/app/warning" class="nav-item" :class="{ active: activeMenu === '/app/warning' }">
-          <el-icon><Warning /></el-icon><span>异常稽核</span>
-        </router-link>
-        <router-link
-          v-if="authStore.hasAnyRole('boss', 'shareholder', 'ceo', 'finance_manager', 'super_admin')"
-          to="/app/finance"
-          class="nav-item"
-          :class="{ active: activeMenu === '/app/finance' }"
-        >
-          <el-icon><Money /></el-icon><span>利润分析</span>
-        </router-link>
-
-        <div class="nav-group-label" style="margin-top:16px">运营管理</div>
-        <router-link to="/app/member" class="nav-item" :class="{ active: activeMenu === '/app/member' }">
-          <el-icon><User /></el-icon><span>会员运营</span>
-        </router-link>
-        <router-link to="/app/task" class="nav-item" :class="{ active: activeMenu.startsWith('/app/task') }">
-          <el-icon><List /></el-icon><span>任务管理</span>
-        </router-link>
-        <router-link to="/app/ai" class="nav-item" :class="{ active: activeMenu === '/app/ai' }">
-          <el-icon><ChatDotRound /></el-icon><span>AI助手</span>
-        </router-link>
-        <router-link to="/app/dingtalk" class="nav-item" :class="{ active: activeMenu === '/app/dingtalk' }">
-          <el-icon><Bell /></el-icon><span>钉钉通知</span>
-        </router-link>
-
-        <div class="nav-group-label" style="margin-top:16px">财务管理</div>
-        <router-link to="/app/fin/overview" class="nav-item" :class="{ active: activeMenu === '/app/fin/overview' }">
-          <el-icon><Money /></el-icon><span>财务首页</span>
-        </router-link>
-        <router-link to="/app/fin/reimbursements" class="nav-item" :class="{ active: activeMenu === '/app/fin/reimbursements' }">
-          <el-icon><Wallet /></el-icon><span>报销管理</span>
-        </router-link>
-        <router-link to="/app/fin/payments" class="nav-item" :class="{ active: activeMenu === '/app/fin/payments' }">
-          <el-icon><Coin /></el-icon><span>付款申请</span>
-        </router-link>
-        <router-link to="/app/fin/expense-analysis" class="nav-item" :class="{ active: activeMenu === '/app/fin/expense-analysis' }">
-          <el-icon><TrendCharts /></el-icon><span>费用分析</span>
-        </router-link>
-
-        <div class="nav-group-label" style="margin-top:16px">人事管理</div>
-        <router-link to="/app/hr/overview" class="nav-item" :class="{ active: activeMenu === '/app/hr/overview' }">
-          <el-icon><User /></el-icon><span>人事首页</span>
-        </router-link>
-        <router-link to="/app/hr/employees" class="nav-item" :class="{ active: activeMenu === '/app/hr/employees' }">
-          <el-icon><UserFilled /></el-icon><span>员工档案</span>
-        </router-link>
-        <router-link to="/app/hr/attendance" class="nav-item" :class="{ active: activeMenu === '/app/hr/attendance' }">
-          <el-icon><Calendar /></el-icon><span>考勤管理</span>
-        </router-link>
-        <router-link to="/app/hr/leaves" class="nav-item" :class="{ active: activeMenu === '/app/hr/leaves' }">
-          <el-icon><Clock /></el-icon><span>请假外出</span>
-        </router-link>
-
-        <div class="nav-group-label" style="margin-top:16px">数据中心</div>
-        <router-link to="/app/baison/shops" class="nav-item" :class="{ active: activeMenu === '/app/baison/shops' }">
-          <el-icon><Shop /></el-icon><span>百胜门店档案</span>
-        </router-link>
-
-        <template v-if="authStore.isAdmin || authStore.hasRole('super_admin')">
-          <div class="nav-group-label" style="margin-top:16px">系统管理</div>
-          <router-link to="/app/system/users" class="nav-item" :class="{ active: activeMenu === '/app/system/users' }">
-            <el-icon><Avatar /></el-icon><span>用户管理</span>
-          </router-link>
-          <router-link to="/app/system/roles" class="nav-item" :class="{ active: activeMenu === '/app/system/roles' }">
-            <el-icon><Key /></el-icon><span>角色权限</span>
-          </router-link>
-          <router-link to="/app/system/sync" class="nav-item" :class="{ active: activeMenu === '/app/system/sync' }">
-            <el-icon><Refresh /></el-icon><span>数据同步</span>
-          </router-link>
-          <router-link to="/app/system/baison-api" class="nav-item" :class="{ active: activeMenu === '/app/system/baison-api' }">
-            <el-icon><Refresh /></el-icon><span>百胜API管理</span>
-          </router-link>
-        </template>
+        <div class="nav-group" v-for="group in visibleMenuGroups" :key="group.label">
+          <div class="nav-group-label">{{ group.label }}</div>
+          <template v-for="item in group.items" :key="menuKey(item)">
+            <div v-if="item.children?.length" class="nav-submenu">
+              <button
+                type="button"
+                class="nav-item nav-parent"
+                :class="{ active: isAnyChildActive(item.children), expanded: expandedMenus.has(menuKey(item)) }"
+                @click="toggleMenu(menuKey(item))"
+              >
+                <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+                <span>{{ item.label }}</span>
+                <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+              </button>
+              <transition name="submenu">
+                <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list">
+                  <template v-for="sub in item.children" :key="menuKey(sub)">
+                    <div v-if="sub.children?.length" class="nav-submenu">
+                      <button
+                        type="button"
+                        class="nav-item nav-sub nav-parent-2"
+                        :class="{ active: isAnyChildActive(sub.children), expanded: expandedMenus.has(menuKey(sub)) }"
+                        @click.stop="toggleMenu(menuKey(sub))"
+                      >
+                        <span>{{ sub.label }}</span>
+                        <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+                      </button>
+                      <transition name="submenu">
+                        <div v-show="expandedMenus.has(menuKey(sub))" class="submenu-list submenu-list-2">
+                          <router-link
+                            v-for="leaf in sub.children"
+                            :key="leaf.path"
+                            :to="leaf.path || '/app/dashboard'"
+                            class="nav-item nav-sub nav-sub-2"
+                            :class="{ active: isActive(leaf.path || '') }"
+                          >
+                            <span>{{ leaf.label }}</span>
+                          </router-link>
+                        </div>
+                      </transition>
+                    </div>
+                    <router-link
+                      v-else
+                      :to="sub.path || '/app/dashboard'"
+                      class="nav-item nav-sub"
+                      :class="{ active: isActive(sub.path || '') }"
+                    >
+                      <span>{{ sub.label }}</span>
+                    </router-link>
+                  </template>
+                </div>
+              </transition>
+            </div>
+            <router-link
+              v-else
+              :to="item.path || '/app/dashboard'"
+              class="nav-item"
+              :class="{ active: isActive(item.path || '') }"
+            >
+              <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+              <span>{{ item.label }}</span>
+            </router-link>
+          </template>
+        </div>
       </nav>
 
       <div class="sidebar-footer">v1.0.0 · 华邦服装</div>
@@ -136,17 +108,219 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { ElMessageBox } from "element-plus";
+import {
+  ArrowRight,
+  Avatar,
+  Bell,
+  Box,
+  ChatDotRound,
+  DataLine,
+  GoodsFilled,
+  House,
+  Key,
+  List,
+  Money,
+  Refresh,
+  Shop,
+  TrendCharts,
+  User,
+  UserFilled,
+  Warning,
+} from "@element-plus/icons-vue";
 
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 
-const activeMenu = computed(() => route.path);
 const currentTitle = computed(() => (route.meta.title as string) || "华邦AI中台");
+const expandedMenus = ref(new Set<string>());
+
+type MenuRole = "admin" | "finance";
+interface MenuItem {
+  path?: string;
+  label: string;
+  icon?: unknown;
+  key?: string;
+  role?: MenuRole;
+  children?: MenuItem[];
+}
+interface MenuGroup {
+  label: string;
+  items: MenuItem[];
+}
+
+const financeRoles = ["boss", "shareholder", "ceo", "finance_manager", "super_admin"];
+
+const canShow = (item: MenuItem) => {
+  if (item.role === "admin") return authStore.isAdmin || authStore.hasRole("super_admin");
+  if (item.role === "finance") return authStore.hasAnyRole(...financeRoles);
+  return true;
+};
+
+const menuGroups = computed<MenuGroup[]>(() => [
+  {
+    label: "经营",
+    items: [
+      { path: "/app/dashboard", icon: DataLine, label: "经营概览" },
+      { path: "/app/boss", icon: House, label: "经营日报" },
+      {
+        icon: Shop,
+        label: "门店经营",
+        key: "store",
+        children: [
+          { path: "/app/store", label: "门店分析" },
+          { path: "/app/store/overview", label: "门店总览" },
+          { path: "/app/baison/shops", label: "百胜门店档案" },
+        ],
+      },
+      {
+        icon: GoodsFilled,
+        label: "商品中心",
+        key: "product",
+        children: [
+          { path: "/app/product", label: "商品分析" },
+          { path: "/app/product/products", label: "商品主档" },
+          { path: "/app/product/skus", label: "SKU档案" },
+        ],
+      },
+      { path: "/app/finance", icon: TrendCharts, label: "利润分析", role: "finance" },
+    ],
+  },
+  {
+    label: "风控",
+    items: [
+      {
+        icon: Box,
+        label: "库存管理",
+        key: "inventory",
+        children: [
+          { path: "/app/inventory", label: "库存预警" },
+          { path: "/app/inventory/balance", label: "库存余额" },
+          { path: "/app/inventory/warehouses", label: "仓库档案" },
+        ],
+      },
+      { path: "/app/warning", icon: Warning, label: "异常稽核" },
+    ],
+  },
+  {
+    label: "协同",
+    items: [
+      { path: "/app/member", icon: User, label: "会员运营" },
+      { path: "/app/task", icon: List, label: "任务管理" },
+      { path: "/app/ai", icon: ChatDotRound, label: "AI助手" },
+      { path: "/app/dingtalk", icon: Bell, label: "钉钉通知" },
+    ],
+  },
+  {
+    label: "财务",
+    items: [
+      {
+        icon: Money,
+        label: "财务中心",
+        key: "fin",
+        role: "finance",
+        children: [
+          { path: "/app/fin/overview", label: "财务首页" },
+          { path: "/app/fin/reimbursements", label: "报销管理" },
+          { path: "/app/fin/payments", label: "付款申请" },
+          { path: "/app/fin/expense-analysis", label: "费用分析" },
+        ],
+      },
+    ],
+  },
+  {
+    label: "人事",
+    items: [
+      {
+        icon: UserFilled,
+        label: "人事管理",
+        key: "hr",
+        children: [
+          { path: "/app/hr/overview", label: "人事首页" },
+          { path: "/app/hr/employees", label: "员工档案" },
+          { path: "/app/hr/attendance", label: "考勤管理" },
+          { path: "/app/hr/leaves", label: "请假外出" },
+        ],
+      },
+    ],
+  },
+  {
+    label: "管理",
+    items: [
+      {
+        icon: Avatar,
+        label: "系统管理",
+        key: "system",
+        role: "admin",
+        children: [
+          { path: "/app/system/users", icon: Avatar, label: "用户管理" },
+          { path: "/app/system/roles", icon: Key, label: "角色权限" },
+          {
+            label: "数据运维",
+            key: "system:data",
+            children: [
+              { path: "/app/system/sync", icon: Refresh, label: "数据同步" },
+              { path: "/app/system/baison-api", icon: Refresh, label: "百胜API管理" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]);
+
+const visibleMenuGroups = computed(() => {
+  const filterItems = (items: MenuItem[]): MenuItem[] =>
+    items
+      .filter(canShow)
+      .map((item) => ({
+        ...item,
+        children: item.children ? filterItems(item.children) : undefined,
+      }))
+      .filter((item) => !item.children || item.children.length > 0);
+
+  return menuGroups.value
+    .map((group) => ({ ...group, items: filterItems(group.items) }))
+    .filter((group) => group.items.length > 0);
+});
+
+const menuKey = (item: MenuItem) => item.key || item.path || item.label;
+
+const toggleMenu = (key: string) => {
+  const next = new Set(expandedMenus.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedMenus.value = next;
+};
+
+const isActive = (path: string) => {
+  if (!path) return false;
+  if (path === "/app/task") return route.path === path || route.path.startsWith(`${path}/`);
+  return route.path === path;
+};
+
+const isAnyChildActive = (children: MenuItem[]): boolean =>
+  children.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false));
+
+const autoExpandForRoute = (path: string) => {
+  const next = new Set(expandedMenus.value);
+  if (path.startsWith("/app/store") || path.startsWith("/app/baison")) next.add("store");
+  if (path.startsWith("/app/product")) next.add("product");
+  if (path.startsWith("/app/inventory")) next.add("inventory");
+  if (path.startsWith("/app/fin")) next.add("fin");
+  if (path.startsWith("/app/hr")) next.add("hr");
+  if (path.startsWith("/app/system")) {
+    next.add("system");
+    if (path.startsWith("/app/system/sync") || path.startsWith("/app/system/baison-api")) next.add("system:data");
+  }
+  expandedMenus.value = next;
+};
+
+watch(() => route.path, autoExpandForRoute, { immediate: true });
 
 const userInitial = computed(() => {
   const name = authStore.userInfo?.real_name || authStore.userInfo?.username || "用";
@@ -224,6 +398,7 @@ const handleLogout = async () => {
   padding: 14px 10px;
   overflow-y: auto;
 }
+.nav-group + .nav-group { margin-top: 16px; }
 .nav-group-label {
   font-size: 10px;
   font-weight: 600;
@@ -234,6 +409,7 @@ const handleLogout = async () => {
   margin-bottom: 4px;
 }
 .nav-item {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -245,6 +421,10 @@ const handleLogout = async () => {
   transition: background 0.15s, color 0.15s;
   margin-bottom: 2px;
   cursor: pointer;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
 }
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.07);
@@ -257,6 +437,51 @@ const handleLogout = async () => {
 }
 .nav-item.active .el-icon { color: #4D8EFF; }
 .nav-item .el-icon { font-size: 15px; flex-shrink: 0; }
+.nav-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-parent .nav-arrow {
+  margin-left: auto;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.32);
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+.nav-parent.expanded .nav-arrow,
+.nav-parent-2.expanded .nav-arrow {
+  transform: rotate(90deg);
+  color: rgba(255, 255, 255, 0.75);
+}
+.submenu-list {
+  padding: 2px 0 4px;
+}
+.submenu-list-2 {
+  padding-left: 8px;
+}
+.nav-sub {
+  padding-left: 38px;
+  font-size: 13px;
+}
+.nav-parent-2 {
+  padding-left: 38px;
+}
+.nav-sub-2 {
+  padding-left: 50px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.submenu-enter-active,
+.submenu-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.submenu-enter-from,
+.submenu-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
+}
 
 .sidebar-footer {
   padding: 12px 18px;

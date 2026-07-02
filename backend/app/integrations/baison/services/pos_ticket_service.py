@@ -13,6 +13,7 @@ from typing import Optional
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
+from app.core.store_whitelist import allowed_store_sql_in, ACTUAL_PAY_CODES
 from app.integrations.baison.client import BaisonClient
 
 logger = logging.getLogger("baison.pos_ticket")
@@ -108,6 +109,10 @@ class PosTicketService:
             """))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_biz_date ON dwd.dwd_pos_ticket(biz_date)"))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_store_date ON dwd.dwd_pos_ticket(store_code, biz_date)"))
+            # 兼容旧表:补充 actual_pay_amount 列(实际收款额,排除上月储值/会员积分)
+            await db.execute(text(
+                "ALTER TABLE dwd.dwd_pos_ticket ADD COLUMN IF NOT EXISTS actual_pay_amount NUMERIC(16,2) DEFAULT 0"
+            ))
             await db.commit()
 
     async def sync_range(self, start_time: str, end_time: str, max_pages: int = 0, page_size: int = 100) -> dict:
@@ -231,16 +236,30 @@ class PosTicketService:
                 is_void = str(rec.get("zf") or "0") == "1"
                 is_pending = str(rec.get("gd") or "0") == "1"
 
+                # 实际收款额:只统计白名单支付方式(现金+微信+POS+VIP卡),
+                # 排除五月前储值(003)和会员积分(005)
+                djs_mx = rec.get("qtlsdjs_mx") or []
+                if isinstance(djs_mx, str):
+                    try:
+                        djs_mx = json.loads(djs_mx)
+                    except (json.JSONDecodeError, TypeError):
+                        djs_mx = []
+                actual_pay_amount = sum(
+                    self._f(p.get("je"))
+                    for p in djs_mx
+                    if str(p.get("jsdm") or "") in ACTUAL_PAY_CODES
+                )
+
                 await db.execute(text("""
                     INSERT INTO dwd.dwd_pos_ticket
                     (source_system, biz_date, ticket_no, store_code, store_name, customer_code, vip_code,
                      sales_qty, sales_amount, standard_amount, gross_profit_source_amount, discount_rate,
-                     detail_count, is_void, is_pending, batch_no, raw_ref_id, raw_data,
+                     detail_count, is_void, is_pending, batch_no, raw_ref_id, raw_data, actual_pay_amount,
                      synced_at, created_at, updated_at)
                     VALUES ('baison', :biz_date, :ticket_no, :store_code, :store_name, :customer_code, :vip_code,
                             :sales_qty, :sales_amount, :standard_amount, :gross_profit_source_amount, :discount_rate,
                             :detail_count, :is_void, :is_pending, :batch_no, :raw_ref_id, CAST(:raw_data AS jsonb),
-                            now(), now(), now())
+                            :actual_pay_amount, now(), now(), now())
                     ON CONFLICT (ticket_no, source_system)
                     DO UPDATE SET biz_date = EXCLUDED.biz_date,
                                   store_code = EXCLUDED.store_code,
@@ -258,6 +277,7 @@ class PosTicketService:
                                   batch_no = EXCLUDED.batch_no,
                                   raw_ref_id = EXCLUDED.raw_ref_id,
                                   raw_data = EXCLUDED.raw_data,
+                                  actual_pay_amount = EXCLUDED.actual_pay_amount,
                                   synced_at = now(),
                                   updated_at = now()
                 """), {
@@ -278,6 +298,7 @@ class PosTicketService:
                     "batch_no": self.batch_no,
                     "raw_ref_id": raw_id,
                     "raw_data": raw_json,
+                    "actual_pay_amount": actual_pay_amount,
                 })
                 dwd_count += 1
 
@@ -288,26 +309,31 @@ class PosTicketService:
         start_date = dt.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S").date()
         end_date = dt.datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S").date()
         params = {"sd": start_date, "ed": end_date}
+        # 华邦业务口径:仅统计白名单门店/仓,见 app.core.store_whitelist
+        store_in = allowed_store_sql_in()
         async with AsyncSessionLocal() as db:
-            await db.execute(text("""
+            await db.execute(text(f"""
                 INSERT INTO dws.dws_company_daily AS t
                 (stat_date, total_sales_amount, offline_sales_amount, online_sales_amount,
                  total_order_count, total_item_count, net_sales_amount, avg_order_value,
                  items_per_order, avg_discount_rate, active_store_count, etl_at, created_at)
                 SELECT biz_date,
-                       COALESCE(SUM(sales_amount), 0),
-                       COALESCE(SUM(sales_amount), 0),
+                       COALESCE(SUM(actual_pay_amount), 0),
+                       COALESCE(SUM(actual_pay_amount), 0),
                        0,
                        COUNT(*)::int,
                        COALESCE(SUM(sales_qty), 0)::int,
-                       COALESCE(SUM(sales_amount), 0),
-                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
+                       COALESCE(SUM(actual_pay_amount), 0),
+                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(actual_pay_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
                        CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_qty) / COUNT(*))::numeric, 2) ELSE NULL END,
-                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(sales_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
+                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(actual_pay_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
                        COUNT(DISTINCT store_code)::int,
                        now(), now()
                 FROM dwd.dwd_pos_ticket
-                WHERE biz_date >= :sd AND biz_date <= :ed AND COALESCE(is_void, false) = false AND COALESCE(is_pending, false) = false
+                WHERE biz_date >= :sd AND biz_date <= :ed
+                  AND COALESCE(is_void, false) = false
+                  AND COALESCE(is_pending, false) = false
+                  AND store_code IN {store_in}
                 GROUP BY biz_date
                 ON CONFLICT (stat_date)
                 DO UPDATE SET total_sales_amount = EXCLUDED.total_sales_amount,
@@ -322,7 +348,7 @@ class PosTicketService:
                               active_store_count = EXCLUDED.active_store_count,
                               etl_at = now()
             """), params)
-            await db.execute(text("""
+            await db.execute(text(f"""
                 INSERT INTO dws.dws_store_daily AS t
                 (stat_date, store_code, channel, order_count, item_count, net_item_count,
                  tag_amount, sales_amount, net_sales_amount, avg_order_value, items_per_order,
@@ -332,14 +358,17 @@ class PosTicketService:
                        COALESCE(SUM(sales_qty), 0)::int,
                        COALESCE(SUM(sales_qty), 0)::int,
                        COALESCE(SUM(standard_amount), 0),
-                       COALESCE(SUM(sales_amount), 0),
-                       COALESCE(SUM(sales_amount), 0),
-                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
+                       COALESCE(SUM(actual_pay_amount), 0),
+                       COALESCE(SUM(actual_pay_amount), 0),
+                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(actual_pay_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
                        CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_qty) / COUNT(*))::numeric, 2) ELSE NULL END,
-                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(sales_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
+                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(actual_pay_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
                        now(), now()
                 FROM dwd.dwd_pos_ticket
-                WHERE biz_date >= :sd AND biz_date <= :ed AND COALESCE(is_void, false) = false AND COALESCE(is_pending, false) = false
+                WHERE biz_date >= :sd AND biz_date <= :ed
+                  AND COALESCE(is_void, false) = false
+                  AND COALESCE(is_pending, false) = false
+                  AND store_code IN {store_in}
                 GROUP BY biz_date, store_code
                 ON CONFLICT (stat_date, store_code, channel)
                 DO UPDATE SET order_count = EXCLUDED.order_count,
@@ -354,13 +383,16 @@ class PosTicketService:
                               etl_at = now()
             """), params)
             await db.commit()
-            result = await db.execute(text("""
-                SELECT COALESCE(SUM(sales_amount),0) AS total_sales,
+            result = await db.execute(text(f"""
+                SELECT COALESCE(SUM(actual_pay_amount),0) AS total_sales,
                        COALESCE(SUM(sales_qty),0) AS total_qty,
                        COUNT(*) AS total_orders,
                        COUNT(DISTINCT store_code) AS store_count
                 FROM dwd.dwd_pos_ticket
-                WHERE biz_date >= :sd AND biz_date <= :ed AND COALESCE(is_void, false) = false AND COALESCE(is_pending, false) = false
+                WHERE biz_date >= :sd AND biz_date <= :ed
+                  AND COALESCE(is_void, false) = false
+                  AND COALESCE(is_pending, false) = false
+                  AND store_code IN {store_in}
             """), params)
             row = result.mappings().one()
             return {

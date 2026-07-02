@@ -12,6 +12,15 @@
         <p class="lux-brand-subtitle">基于百胜 ERP、库存、商品、门店数据驱动的零售决策看板</p>
       </div>
       <div class="header-right-meta">
+        <el-date-picker
+          v-model="selectedDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          :clearable="false"
+          placeholder="选择日期"
+          style="width: 160px"
+          @change="onDateChange"
+        />
         <span class="date-tag">
           <span class="live-dot"></span> 数据日期：{{ dataDate || '加载中...' }}
         </span>
@@ -170,6 +179,15 @@ const storeRank = ref<any[]>([]);
 const taskSummary = ref<any>({});
 const rawOverview = ref<any>({});
 
+// 日期选择器：默认昨天
+const yesterday = new Date();
+yesterday.setDate(yesterday.getDate() - 1);
+const selectedDate = ref(yesterday.toISOString().slice(0, 10));
+
+function onDateChange() {
+  fetchData();
+}
+
 function getMetricVal(metrics: any, key: string): { val: string; isPending: boolean } {
   const m = metrics?.[key];
   if (!m || m.status === "pending_data") return { val: "--", isPending: true };
@@ -206,9 +224,9 @@ const assetCards = computed(() => {
 const bizMetricCards = computed(() => {
   const m = rawOverview.value?.business_metrics || {};
   const cards = [
-    { key: "yesterday_sales", label: "昨日销售额" },
-    { key: "yesterday_orders", label: "昨日订单数" },
-    { key: "yesterday_items", label: "昨日销售件数" },
+    { key: "yesterday_sales", label: "销售额" },
+    { key: "yesterday_orders", label: "订单数" },
+    { key: "yesterday_items", label: "销售件数" },
     { key: "gross_profit", label: "毛利额" },
     { key: "gross_margin", label: "毛利率" },
     { key: "discount_rate", label: "折扣率" },
@@ -284,9 +302,9 @@ async function fetchData() {
   loading.value = true;
   try {
     const [r1, r2, r3, r4] = await Promise.all([
-      dashboardApi.getOverview(),
-      dashboardApi.getSalesTrend({ days: 7 }),
-      dashboardApi.getStoreRank({ top_n: 10 }),
+      dashboardApi.getOverview({ stat_date: selectedDate.value }),
+      dashboardApi.getSalesTrend({ days: 7, end_date: selectedDate.value }),
+      dashboardApi.getStoreRank({ stat_date: selectedDate.value, top_n: 10 }),
       dashboardApi.getTaskSummary(),
     ]);
     rawOverview.value = r1.data.data || {};

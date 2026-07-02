@@ -32,17 +32,21 @@ async def get_overview(
 @router.get("/sales-trend", response_model=ApiResponse)
 async def get_sales_trend(
     days: int = Query(7, ge=3, le=30),
+    end_date: Optional[str] = Query(None, description="结束日期YYYY-MM-DD，默认最新数据日期"),
     current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """近N天销售趋势"""
-    latest_result = await db.execute(text("""
-        SELECT MAX(biz_date)
-        FROM dwd.dwd_pos_sale_goods
-        WHERE sales_amount IS NOT NULL
-    """))
-    end_date = latest_result.scalar() or (date.today() - timedelta(days=1))
-    start_date = end_date - timedelta(days=days - 1)
+    if end_date:
+        end_dt = date.fromisoformat(end_date)
+    else:
+        latest_result = await db.execute(text("""
+            SELECT MAX(biz_date)
+            FROM dwd.dwd_pos_sale_goods
+            WHERE sales_amount IS NOT NULL
+        """))
+        end_dt = latest_result.scalar() or (date.today() - timedelta(days=1))
+    start_dt = end_dt - timedelta(days=days - 1)
 
     result = await db.execute(text("""
         SELECT biz_date,
@@ -52,7 +56,7 @@ async def get_sales_trend(
         WHERE biz_date BETWEEN :start_date AND :end_date
         GROUP BY biz_date
         ORDER BY biz_date
-    """), {"start_date": start_date, "end_date": end_date})
+    """), {"start_date": start_dt, "end_date": end_dt})
     rows = result.mappings().all()
 
     trend = [

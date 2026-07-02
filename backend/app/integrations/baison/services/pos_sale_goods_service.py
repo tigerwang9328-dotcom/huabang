@@ -8,6 +8,7 @@ from typing import Optional
 
 from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
+from app.core.store_whitelist import allowed_store_sql_in
 from sqlalchemy import text
 
 logger = logging.getLogger("baison.pos_sale")
@@ -200,11 +201,13 @@ class PosSaleGoodsService:
     async def rebuild_dws_summary(self, start_date: str, end_date: str) -> dict:
             """重建 DWS/DM 层汇总（匹配当前 dws 表结构）。"""
             params = {"sd": dt.date.fromisoformat(start_date[:10]), "ed": dt.date.fromisoformat(end_date[:10])}
+            # 华邦业务口径:仅统计白名单门店/仓,见 app.core.store_whitelist
+            store_in = allowed_store_sql_in()
             async with AsyncSessionLocal() as db:
                 # 公司日汇总 -> dws_company_daily
                 await db.execute(
-                    text(
-                        """INSERT INTO dws.dws_company_daily AS t
+                    text(f"""
+                        INSERT INTO dws.dws_company_daily AS t
                         (stat_date, total_sales_amount, total_item_count, total_order_count,
                          net_sales_amount, offline_sales_amount, online_sales_amount,
                          avg_discount_rate, etl_at, created_at)
@@ -221,6 +224,7 @@ class PosSaleGoodsService:
                                now(), now()
                         FROM dwd.dwd_pos_sale_goods
                         WHERE biz_date >= :sd AND biz_date <= :ed
+                          AND store_code IN {store_in}
                         GROUP BY biz_date
                         ON CONFLICT (stat_date)
                         DO UPDATE SET total_sales_amount = EXCLUDED.total_sales_amount,
@@ -229,15 +233,14 @@ class PosSaleGoodsService:
                            offline_sales_amount = EXCLUDED.offline_sales_amount,
                            online_sales_amount = EXCLUDED.online_sales_amount,
                            avg_discount_rate = EXCLUDED.avg_discount_rate,
-                           etl_at = now()"""
-                    ),
+                           etl_at = now()"""),
                     params,
                 )
 
                 # 门店日汇总 -> dws_store_daily，百胜 POS 口径暂归 offline
                 await db.execute(
-                    text(
-                        """INSERT INTO dws.dws_store_daily AS t
+                    text(f"""
+                        INSERT INTO dws.dws_store_daily AS t
                         (stat_date, store_code, channel, item_count, net_item_count,
                          sales_amount, net_sales_amount, order_count,
                          avg_order_value, items_per_order, avg_discount_rate, etl_at, created_at)
@@ -254,6 +257,7 @@ class PosSaleGoodsService:
                                now(), now()
                         FROM dwd.dwd_pos_sale_goods
                         WHERE biz_date >= :sd AND biz_date <= :ed
+                          AND store_code IN {store_in}
                         GROUP BY biz_date, store_code
                         ON CONFLICT (stat_date, store_code, channel)
                         DO UPDATE SET item_count = EXCLUDED.item_count,
@@ -261,15 +265,14 @@ class PosSaleGoodsService:
                            sales_amount = EXCLUDED.sales_amount,
                            net_sales_amount = EXCLUDED.net_sales_amount,
                            avg_discount_rate = EXCLUDED.avg_discount_rate,
-                           etl_at = now()"""
-                    ),
+                           etl_at = now()"""),
                     params,
                 )
 
                 # 商品日汇总 -> dws_product_daily，按门店+商品汇总
                 await db.execute(
-                    text(
-                        """INSERT INTO dws.dws_product_daily AS t
+                    text(f"""
+                        INSERT INTO dws.dws_product_daily AS t
                         (stat_date, product_code, store_code, sales_quantity, net_quantity,
                          sales_amount, net_sales_amount, avg_discount_rate, etl_at, created_at)
                         SELECT biz_date, product_code, store_code,
@@ -283,6 +286,7 @@ class PosSaleGoodsService:
                                now(), now()
                         FROM dwd.dwd_pos_sale_goods
                         WHERE biz_date >= :sd AND biz_date <= :ed
+                          AND store_code IN {store_in}
                         GROUP BY biz_date, product_code, store_code
                         ON CONFLICT (stat_date, product_code, store_code)
                         DO UPDATE SET sales_quantity = EXCLUDED.sales_quantity,
@@ -290,22 +294,20 @@ class PosSaleGoodsService:
                            sales_amount = EXCLUDED.sales_amount,
                            net_sales_amount = EXCLUDED.net_sales_amount,
                            avg_discount_rate = EXCLUDED.avg_discount_rate,
-                           etl_at = now()"""
-                    ),
+                           etl_at = now()"""),
                     params,
                 )
 
                 await db.commit()
 
                 result = await db.execute(
-                    text(
-                        """SELECT
-                            (SELECT COALESCE(SUM(sales_amount),0) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed) as total_sales,
-                            (SELECT COALESCE(SUM(sales_qty),0) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed) as total_qty,
-                            (SELECT COUNT(DISTINCT store_code) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed) as store_cnt,
-                            (SELECT COUNT(DISTINCT product_code) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed) as product_cnt,
-                            (SELECT COUNT(*) FROM dws.dws_company_daily WHERE stat_date >= :sd AND stat_date <= :ed AND total_sales_amount IS NOT NULL) as company_rows"""
-                    ),
+                    text(f"""
+                        SELECT
+                            (SELECT COALESCE(SUM(sales_amount),0) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed AND store_code IN {store_in}) as total_sales,
+                            (SELECT COALESCE(SUM(sales_qty),0) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed AND store_code IN {store_in}) as total_qty,
+                            (SELECT COUNT(DISTINCT store_code) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed AND store_code IN {store_in}) as store_cnt,
+                            (SELECT COUNT(DISTINCT product_code) FROM dwd.dwd_pos_sale_goods WHERE biz_date >= :sd AND biz_date <= :ed AND store_code IN {store_in}) as product_cnt,
+                            (SELECT COUNT(*) FROM dws.dws_company_daily WHERE stat_date >= :sd AND stat_date <= :ed AND total_sales_amount IS NOT NULL) as company_rows"""),
                     params,
                 )
                 row = result.fetchone()
