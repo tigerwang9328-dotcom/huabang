@@ -2,7 +2,34 @@
   <div class="sku-archive">
     <div class="page-header">
       <h2>SKU档案</h2>
-      <p class="page-desc">华邦标准 SKU 维（dim_sku），当前数据来源：百胜 E3ERP。库存/销量等指标待数据接入后展示。</p>
+      <p class="page-desc">华邦标准 SKU 维（dim_sku），当前数据来源：百胜 E3ERP，已接入条码/成本质量、库存与近7天销售。</p>
+    </div>
+
+    <div class="quality-grid" v-loading="qualityLoading">
+      <div class="quality-card">
+        <span>SKU总数</span>
+        <strong>{{ formatNumber(quality.sku_count) }}</strong>
+      </div>
+      <div class="quality-card warning">
+        <span>SKU缺成本</span>
+        <strong>{{ formatNumber(quality.sku_missing_cost_count) }}</strong>
+      </div>
+      <div class="quality-card warning">
+        <span>SKU缺条码</span>
+        <strong>{{ formatNumber(quality.sku_missing_barcode_count) }}</strong>
+      </div>
+      <div class="quality-card">
+        <span>条码覆盖率</span>
+        <strong>{{ Number(quality.sku_barcode_rate || 0).toFixed(1) }}%</strong>
+      </div>
+      <div class="quality-card">
+        <span>有库存SKU</span>
+        <strong>{{ formatNumber(quality.inv_sku_count) }}</strong>
+      </div>
+      <div class="quality-card">
+        <span>近7天动销SKU</span>
+        <strong>{{ formatNumber(quality.sale_sku_count) }}</strong>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -47,10 +74,21 @@
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="当前库存" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
-      <el-table-column label="近7天销量" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
-      <el-table-column label="销售额" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
-      <el-table-column label="AI建议" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
+      <el-table-column label="成本" width="80">
+        <template #default="{ row }">
+          <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="inventory_qty" label="当前库存" width="90" align="right" />
+      <el-table-column prop="sales_qty" label="近7天销量" width="95" align="right" />
+      <el-table-column label="销售额" width="95" align="right">
+        <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
+      </el-table-column>
+      <el-table-column label="AI建议" width="95">
+        <template #default="{ row }">
+          <el-tag :type="suggestionType(row.ai_suggestion)" size="small">{{ row.ai_suggestion || "-" }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="source_system" label="来源系统" width="90" />
       <el-table-column label="同步时间" width="160"><template #default="{ row }">{{ formatTime(row.synced_at) }}</template></el-table-column>
     </el-table>
@@ -70,18 +108,46 @@ import { Refresh } from "@element-plus/icons-vue";
 import { productApi } from "@/api/product";
 
 const loading = ref(false);
+const qualityLoading = ref(false);
 const syncing = ref(false);
 const list = ref<any[]>([]);
 const total = ref(0);
 const page = ref(1);
 const page_size = ref(20);
 const lastSyncedAt = ref<string | null>(null);
+const quality = ref<any>({});
 const filters = reactive<any>({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "" });
 const options = reactive<{ brands: string[]; colors: string[]; sizes: string[]; seasons: string[] }>({ brands: [], colors: [], sizes: [], seasons: [] });
 
 function formatTime(t: string | null) {
   if (!t) return "-";
   return String(t).replace("T", " ").slice(0, 19);
+}
+
+function formatNumber(v: any) {
+  return Number(v || 0).toLocaleString("zh-CN");
+}
+
+function formatAmount(v: any) {
+  return Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function suggestionType(text: string) {
+  if (text === "正常") return "success";
+  if (text === "补条码" || text === "补成本" || text === "关注补货") return "warning";
+  return "info";
+}
+
+async function fetchQuality() {
+  qualityLoading.value = true;
+  try {
+    const { data } = await productApi.getQualitySummary();
+    if (data && data.success) quality.value = data.data || {};
+  } catch (_) {
+    /* 概览失败不阻塞列表 */
+  } finally {
+    qualityLoading.value = false;
+  }
 }
 
 async function fetchList() {
@@ -130,7 +196,7 @@ async function handleSync() {
     const { data } = await productApi.syncSkus({ full_sync: true, page_size: 20 });
     if (data && data.success) {
       ElMessage.success(data.message || "SKU 同步已在后台启动，稍后刷新查看");
-      setTimeout(() => fetchList(), 1500);
+      setTimeout(() => { fetchQuality(); fetchList(); }, 1500);
     } else {
       ElMessage.error((data && data.message) || "同步失败");
     }
@@ -141,7 +207,7 @@ async function handleSync() {
   }
 }
 
-onMounted(() => { loadOptions(); fetchList(); });
+onMounted(() => { fetchQuality(); loadOptions(); fetchList(); });
 </script>
 
 <style scoped>
@@ -149,10 +215,20 @@ onMounted(() => { loadOptions(); fetchList(); });
 .page-header { margin-bottom: 12px; }
 .page-header h2 { font-size: 18px; color: #333; margin-bottom: 4px; }
 .page-desc { color: #999; font-size: 13px; }
+.quality-grid { display:grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap:12px; margin-bottom:12px; }
+.quality-card { background:#fff; border:1px solid #ebeef5; border-radius:6px; padding:12px 14px; min-height:70px; display:flex; flex-direction:column; justify-content:center; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+.quality-card span { color:#909399; font-size:12px; margin-bottom:8px; }
+.quality-card strong { color:#172033; font-size:22px; line-height:1; }
+.quality-card.warning strong { color:#d97706; }
 .toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
 .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .actions { display:flex; align-items:center; gap:12px; }
 .last-sync { color:#909399; font-size:13px; }
-.pending { color:#c0c4cc; font-size:12px; }
 .pager { margin-top:12px; display:flex; justify-content:flex-end; }
+@media (max-width: 1200px) {
+  .quality-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .quality-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+}
 </style>

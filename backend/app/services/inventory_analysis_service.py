@@ -4,6 +4,8 @@ from typing import Optional
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.store_whitelist import allowed_inventory_sql_in
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,26 +23,53 @@ def _value(val, decimals: int = 0) -> dict:
 
 async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     """库存预警顶部指标"""
-    wh_total_r = await db.execute(text("SELECT COUNT(*) FROM dim.dim_warehouse"))
+    inventory_in = allowed_inventory_sql_in()
+    wh_total_r = await db.execute(text(f"""
+        SELECT COUNT(*)
+        FROM dim.dim_warehouse
+        WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+    """))
     wh_total = wh_total_r.scalar() or 0
 
-    wh_enabled_r = await db.execute(text("SELECT COUNT(*) FROM dim.dim_warehouse WHERE is_enabled = true"))
+    wh_enabled_r = await db.execute(text(f"""
+        SELECT COUNT(*)
+        FROM dim.dim_warehouse
+        WHERE is_enabled = true
+          AND UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+    """))
     wh_enabled = wh_enabled_r.scalar() or 0
     wh_disabled = wh_total - wh_enabled
 
-    inv_records_r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_inventory_balance"))
+    inv_records_r = await db.execute(text(f"""
+        SELECT COUNT(*)
+        FROM dwd.dwd_inventory_balance
+        WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+    """))
     inv_records = inv_records_r.scalar() or 0
 
-    inv_qty_r = await db.execute(text("SELECT COALESCE(SUM(qty), 0) FROM dwd.dwd_inventory_balance"))
+    inv_qty_r = await db.execute(text(f"""
+        SELECT COALESCE(SUM(qty), 0)
+        FROM dwd.dwd_inventory_balance
+        WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+    """))
     total_inv_qty = int(inv_qty_r.scalar() or 0)
 
     # 缺货(库存=0)和低库存
     zero_r = await db.execute(
-        text("SELECT COUNT(*) FROM dwd.dwd_inventory_balance WHERE qty = 0 OR available_qty = 0")
+        text(f"""
+            SELECT COUNT(*)
+            FROM dwd.dwd_inventory_balance
+            WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+              AND (qty = 0 OR available_qty = 0)
+        """)
     )
     out_of_stock = zero_r.scalar() or 0
 
-    synced_r = await db.execute(text("SELECT MAX(synced_at) FROM dwd.dwd_inventory_balance"))
+    synced_r = await db.execute(text(f"""
+        SELECT MAX(synced_at)
+        FROM dwd.dwd_inventory_balance
+        WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+    """))
     last_sync = synced_r.scalar()
 
     return {
@@ -64,12 +93,14 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
 
 async def get_inventory_overview(db: AsyncSession) -> dict:
     """库存总览 - 按仓库汇总"""
-    rows = await db.execute(text("""
+    inventory_in = allowed_inventory_sql_in()
+    rows = await db.execute(text(f"""
         SELECT w.warehouse_code, w.warehouse_name,
                COALESCE(SUM(i.qty), 0) as total_qty,
                COUNT(i.id) as sku_count
         FROM dim.dim_warehouse w
         LEFT JOIN dwd.dwd_inventory_balance i ON w.warehouse_code = i.warehouse_code
+        WHERE UPPER(COALESCE(w.warehouse_code, '')::text) IN {inventory_in}
         GROUP BY w.warehouse_code, w.warehouse_name
         ORDER BY total_qty DESC
     """))
@@ -91,7 +122,8 @@ async def get_warehouse_list(
     status: Optional[str] = None,
 ) -> dict:
     """仓库档案列表"""
-    conds = []
+    inventory_in = allowed_inventory_sql_in()
+    conds = [f"UPPER(COALESCE(w.warehouse_code, '')::text) IN {inventory_in}"]
     params = {}
     if keyword:
         kw = f"%{keyword.strip()}%"
@@ -143,7 +175,8 @@ async def get_inventory_balance_list(
     only_positive: Optional[bool] = None,
 ) -> dict:
     """库存余额列表"""
-    conds = []
+    inventory_in = allowed_inventory_sql_in()
+    conds = [f"UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}"]
     params = {}
     if keyword:
         kw = f"%{keyword.strip()}%"

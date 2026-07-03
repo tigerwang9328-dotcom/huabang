@@ -11,6 +11,7 @@ from app.models.dm import DmBossDailyReport
 from app.models.app import AppActionTask
 from app.schemas.common import ApiResponse, safe_div
 from app.services.business_overview_service import get_overview as get_business_overview
+from app.core.store_whitelist import allowed_store_sql_in
 from sqlalchemy import text
 import logging
 
@@ -41,21 +42,21 @@ async def get_sales_trend(
         end_dt = date.fromisoformat(end_date)
     else:
         latest_result = await db.execute(text("""
-            SELECT MAX(biz_date)
-            FROM dwd.dwd_pos_sale_goods
-            WHERE sales_amount IS NOT NULL
+            SELECT MAX(stat_date)
+            FROM dws.dws_company_daily
+            WHERE total_sales_amount IS NOT NULL
         """))
         end_dt = latest_result.scalar() or (date.today() - timedelta(days=1))
     start_dt = end_dt - timedelta(days=days - 1)
 
     result = await db.execute(text("""
-        SELECT biz_date,
-               COALESCE(SUM(sales_amount), 0) AS total_sales,
-               COALESCE(SUM(sales_qty), 0) AS item_count
-        FROM dwd.dwd_pos_sale_goods
-        WHERE biz_date BETWEEN :start_date AND :end_date
-        GROUP BY biz_date
-        ORDER BY biz_date
+        SELECT stat_date AS biz_date,
+               COALESCE(total_sales_amount, 0) AS total_sales,
+               COALESCE(total_order_count, 0) AS order_count,
+               COALESCE(total_item_count, 0) AS item_count
+        FROM dws.dws_company_daily
+        WHERE stat_date BETWEEN :start_date AND :end_date
+        ORDER BY stat_date
     """), {"start_date": start_dt, "end_date": end_dt})
     rows = result.mappings().all()
 
@@ -65,7 +66,7 @@ async def get_sales_trend(
             "total_sales": float(r["total_sales"] or 0),
             "offline_sales": float(r["total_sales"] or 0),
             "online_sales": 0,
-            "order_count": 0,
+            "order_count": int(r["order_count"] or 0),
             "item_count": int(float(r["item_count"] or 0)),
             "net_sales": float(r["total_sales"] or 0),
         }
@@ -96,12 +97,14 @@ async def get_store_rank(
         """))
         query_date = latest_result.scalar() or (date.today() - timedelta(days=1))
 
-    result = await db.execute(text("""
+    store_in = allowed_store_sql_in()
+    result = await db.execute(text(f"""
         SELECT store_code,
                COALESCE(SUM(sales_amount), 0) AS net_sales,
                COALESCE(SUM(sales_qty), 0) AS item_count
         FROM dwd.dwd_pos_sale_goods
         WHERE biz_date = :query_date
+          AND COALESCE(store_code, '') IN {store_in}
         GROUP BY store_code
         HAVING COALESCE(SUM(sales_amount), 0) > 0
         ORDER BY net_sales DESC

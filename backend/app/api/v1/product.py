@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission
@@ -15,6 +15,7 @@ from app.core.database import get_db
 import asyncio as _asyncio
 
 from app.core.database import AsyncSessionLocal
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
 from app.integrations.baison.services.product_service import GOODS_LIST_METHOD, import_all_goods, import_goods_page
 from app.integrations.baison.services.sku_service import SKU_LIST_METHOD, import_all_skus, import_sku_page
 from app.models.dim import DimProduct, DimSku
@@ -30,11 +31,156 @@ _COLS = (
     DimProduct.category_code, DimProduct.category_name, DimProduct.brand_name,
     DimProduct.top_category_name, DimProduct.year, DimProduct.season,
     DimProduct.tag_price, DimProduct.market_price, DimProduct.supplier_name,
-    DimProduct.status, DimProduct.source_system, DimProduct.synced_at,
+    DimProduct.has_cost, DimProduct.status, DimProduct.source_system, DimProduct.synced_at,
 )
-# 未接入指标占位
-_PENDING = {"sales_qty": "待接入", "sales_amount": "待接入", "inventory_qty": "待接入",
-            "lifecycle_stage": "待接入", "ai_suggestion": "待接入"}
+
+
+def _num(v) -> float:
+    return float(v or 0)
+
+
+def _fmt_qty(v) -> int | float:
+    n = _num(v)
+    return int(n) if n.is_integer() else round(n, 2)
+
+
+def _product_suggestion(row: dict) -> str:
+    sales_qty = _num(row.get("sales_qty"))
+    inventory_qty = _num(row.get("inventory_qty"))
+    has_cost = bool(row.get("has_cost"))
+    if not has_cost:
+        return "补成本"
+    if sales_qty > 0 and inventory_qty <= 0:
+        return "关注补货"
+    if sales_qty <= 0 and inventory_qty > 0:
+        return "关注动销"
+    if sales_qty >= 10:
+        return "持续跟进"
+    return "正常"
+
+
+def _lifecycle_stage(row: dict) -> str:
+    sales_qty = _num(row.get("sales_qty"))
+    inventory_qty = _num(row.get("inventory_qty"))
+    if sales_qty > 0:
+        return "动销"
+    if inventory_qty > 0:
+        return "待动销"
+    return "无库存"
+
+
+def _sku_suggestion(row: dict) -> str:
+    if not row.get("barcode"):
+        return "补条码"
+    if not row.get("has_cost"):
+        return "补成本"
+    if _num(row.get("sales_qty")) > 0 and _num(row.get("inventory_qty")) <= 0:
+        return "关注补货"
+    if _num(row.get("sales_qty")) <= 0 and _num(row.get("inventory_qty")) > 0:
+        return "关注动销"
+    return "正常"
+
+
+async def _latest_sales_window(db: AsyncSession):
+    row = (await db.execute(text("""
+        SELECT MAX(biz_date) AS end_date, MAX(biz_date) - INTERVAL '6 days' AS start_date
+        FROM dwd.dwd_pos_sale_goods
+    """))).mappings().first()
+    if not row or not row["end_date"]:
+        return None, None
+    return row["start_date"], row["end_date"]
+
+
+async def _product_metrics(db: AsyncSession, product_codes: list[str]) -> dict[str, dict]:
+    if not product_codes:
+        return {}
+    start_date, end_date = await _latest_sales_window(db)
+    metrics = {code: {"inventory_qty": 0.0, "sales_qty": 0.0, "sales_amount": 0.0} for code in product_codes}
+    inv_rows = (await db.execute(text("""
+        SELECT product_code, COALESCE(SUM(qty), 0) AS inventory_qty
+        FROM dwd.dwd_inventory_balance
+        WHERE product_code = ANY(:codes)
+          AND UPPER(warehouse_code::text) = ANY(:inventory_codes)
+        GROUP BY product_code
+    """), {"codes": product_codes, "inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).mappings().all()
+    for row in inv_rows:
+        metrics[row["product_code"]]["inventory_qty"] = _num(row["inventory_qty"])
+    if start_date and end_date:
+        sales_rows = (await db.execute(text("""
+            SELECT product_code,
+                   COALESCE(SUM(sales_qty), 0) AS sales_qty,
+                   COALESCE(SUM(sales_amount), 0) AS sales_amount
+            FROM dwd.dwd_pos_sale_goods
+            WHERE product_code = ANY(:codes)
+              AND store_code = ANY(:store_codes)
+              AND biz_date >= :start_date
+              AND biz_date <= :end_date
+            GROUP BY product_code
+        """), {
+            "codes": product_codes,
+            "store_codes": sorted(ALLOWED_STORE_CODES),
+            "start_date": start_date,
+            "end_date": end_date,
+        })).mappings().all()
+        for row in sales_rows:
+            metrics[row["product_code"]]["sales_qty"] = _num(row["sales_qty"])
+            metrics[row["product_code"]]["sales_amount"] = _num(row["sales_amount"])
+    return metrics
+
+
+async def _sku_metrics(db: AsyncSession, sku_rows: list[dict]) -> dict[str, dict]:
+    sku_codes = [r["sku_code"] for r in sku_rows if r.get("sku_code")]
+    if not sku_codes:
+        return {}
+    start_date, end_date = await _latest_sales_window(db)
+    metrics = {code: {"inventory_qty": 0.0, "sales_qty": 0.0, "sales_amount": 0.0} for code in sku_codes}
+    product_codes = sorted({r["product_code"] for r in sku_rows if r.get("product_code")})
+    inv_rows = (await db.execute(text("""
+        SELECT product_code,
+               COALESCE(BTRIM(color_code::text), '') AS color_code,
+               COALESCE(BTRIM(size_code::text), '') AS size_code,
+               COALESCE(SUM(qty), 0) AS inventory_qty
+        FROM dwd.dwd_inventory_balance
+        WHERE product_code = ANY(:product_codes)
+          AND UPPER(warehouse_code::text) = ANY(:inventory_codes)
+        GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
+    """), {"product_codes": product_codes, "inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).mappings().all()
+    inventory_by_spec = {
+        (row["product_code"], row["color_code"], row["size_code"]): _num(row["inventory_qty"])
+        for row in inv_rows
+    }
+    for row in sku_rows:
+        sku_code = row.get("sku_code")
+        if sku_code not in metrics:
+            continue
+        key = (
+            row.get("product_code"),
+            str(row.get("color_code") or "").strip(),
+            str(row.get("size_code") or "").strip(),
+        )
+        metrics[sku_code]["inventory_qty"] = inventory_by_spec.get(key, 0.0)
+    if start_date and end_date:
+        sales_rows = (await db.execute(text("""
+            SELECT sku_code,
+                   COALESCE(SUM(sales_qty), 0) AS sales_qty,
+                   COALESCE(SUM(sales_amount), 0) AS sales_amount
+            FROM dwd.dwd_pos_sale_goods
+            WHERE sku_code = ANY(:codes)
+              AND store_code = ANY(:store_codes)
+              AND biz_date >= :start_date
+              AND biz_date <= :end_date
+            GROUP BY sku_code
+        """), {
+            "codes": sku_codes,
+            "store_codes": sorted(ALLOWED_STORE_CODES),
+            "start_date": start_date,
+            "end_date": end_date,
+        })).mappings().all()
+        for row in sales_rows:
+            if row["sku_code"] in metrics:
+                metrics[row["sku_code"]]["sales_qty"] = _num(row["sales_qty"])
+                metrics[row["sku_code"]]["sales_amount"] = _num(row["sales_amount"])
+    return metrics
 
 
 class ProductSyncRequest(BaseModel):
@@ -83,7 +229,18 @@ async def list_products(
             select(*_COLS).where(*conds).order_by(DimProduct.product_code)
             .offset((page - 1) * page_size).limit(page_size)
         )).mappings().all()
-        items = [{**dict(r), **_PENDING} for r in rows]
+        product_codes = [r["product_code"] for r in rows if r["product_code"]]
+        metrics = await _product_metrics(db, product_codes)
+        items = []
+        for r in rows:
+            item = dict(r)
+            item.update(metrics.get(item.get("product_code"), {}))
+            item["sales_qty"] = _fmt_qty(item.get("sales_qty"))
+            item["sales_amount"] = round(_num(item.get("sales_amount")), 2)
+            item["inventory_qty"] = _fmt_qty(item.get("inventory_qty"))
+            item["lifecycle_stage"] = _lifecycle_stage(item)
+            item["ai_suggestion"] = _product_suggestion(item)
+            items.append(item)
         return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
     except Exception:
         logger.exception("product list error")
@@ -128,9 +285,8 @@ _SKU_COLS = (
     DimSku.id, DimSku.sku_code, DimSku.product_code, DimSku.product_name,
     DimSku.barcode, DimSku.color_code, DimSku.color_name, DimSku.size_code, DimSku.size_name,
     DimSku.brand_name, DimSku.season_name, DimSku.tag_price, DimSku.market_price,
-    DimSku.status, DimSku.source_system, DimSku.synced_at,
+    DimSku.has_cost, DimSku.status, DimSku.source_system, DimSku.synced_at,
 )
-_SKU_PENDING = {"inventory_qty": "待接入", "sales_qty": "待接入", "sales_amount": "待接入", "ai_suggestion": "待接入"}
 
 
 class SkuSyncRequest(BaseModel):
@@ -180,10 +336,87 @@ async def list_skus(
             select(*_SKU_COLS).where(*conds).order_by(DimSku.sku_code)
             .offset((page - 1) * page_size).limit(page_size)
         )).mappings().all()
-        items = [{**dict(r), **_SKU_PENDING} for r in rows]
+        row_dicts = [dict(r) for r in rows]
+        metrics = await _sku_metrics(db, row_dicts)
+        items = []
+        for r in rows:
+            item = dict(r)
+            item.update(metrics.get(item.get("sku_code"), {}))
+            item["sales_qty"] = _fmt_qty(item.get("sales_qty"))
+            item["sales_amount"] = round(_num(item.get("sales_amount")), 2)
+            item["inventory_qty"] = _fmt_qty(item.get("inventory_qty"))
+            item["ai_suggestion"] = _sku_suggestion(item)
+            items.append(item)
         return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
     except Exception:
         logger.exception("sku list error")
+        return {"success": False, "message": "查询失败，请查看服务日志"}
+
+
+@router.get("/product/quality-summary")
+async def product_quality_summary(
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """商品/SKU 数据质量与经营接入概览。"""
+    try:
+        row = (await db.execute(text("""
+            WITH inv_spec AS (
+                SELECT product_code,
+                       COALESCE(BTRIM(color_code::text), '') AS color_code,
+                       COALESCE(BTRIM(size_code::text), '') AS size_code,
+                       SUM(qty) AS qty
+                FROM dwd.dwd_inventory_balance
+                WHERE UPPER(warehouse_code::text) = ANY(:inventory_codes)
+                GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
+            ), inv AS (
+                SELECT COUNT(DISTINCT product_code) FILTER (WHERE qty <> 0) AS inv_product_count
+                FROM inv_spec
+            ), inv_sku AS (
+                SELECT COUNT(DISTINCT s.sku_code) AS inv_sku_count
+                FROM dim.dim_sku s
+                JOIN inv_spec i
+                  ON i.product_code = s.product_code
+                 AND i.color_code = COALESCE(BTRIM(s.color_code::text), '')
+                 AND i.size_code = COALESCE(BTRIM(s.size_code::text), '')
+                WHERE s.source_system = 'baison'
+                  AND i.qty <> 0
+            ), sale AS (
+                SELECT COUNT(DISTINCT product_code) AS sale_product_count,
+                       COUNT(DISTINCT sku_code) FILTER (WHERE sku_code IS NOT NULL AND BTRIM(sku_code::text) <> '') AS sale_sku_count
+                FROM dwd.dwd_pos_sale_goods
+                WHERE store_code = ANY(:store_codes)
+                  AND biz_date >= (SELECT MAX(biz_date) - INTERVAL '6 days' FROM dwd.dwd_pos_sale_goods)
+                  AND biz_date <= (SELECT MAX(biz_date) FROM dwd.dwd_pos_sale_goods)
+            )
+            SELECT
+                (SELECT COUNT(*) FROM dim.dim_product WHERE source_system='baison') AS product_count,
+                (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison') AS sku_count,
+                (SELECT COUNT(*) FROM dim.dim_product WHERE source_system='baison' AND (cost_price IS NULL OR cost_price <= 0)) AS product_missing_cost_count,
+                (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (cost_price IS NULL OR cost_price <= 0)) AS sku_missing_cost_count,
+                (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (barcode IS NULL OR BTRIM(barcode::text)='')) AS sku_missing_barcode_count,
+                (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (
+                    sku_code IS NULL OR BTRIM(sku_code::text) = ''
+                    OR product_code IS NULL OR BTRIM(product_code::text) = ''
+                    OR color_name IS NULL OR BTRIM(color_name::text) = ''
+                    OR size_name IS NULL OR BTRIM(size_name::text) = ''
+                )) AS abnormal_sku_count,
+                inv.inv_product_count, inv_sku.inv_sku_count, sale.sale_product_count, sale.sale_sku_count
+            FROM inv CROSS JOIN inv_sku CROSS JOIN sale
+        """), {
+            "inventory_codes": sorted(ALLOWED_INVENTORY_CODES),
+            "store_codes": sorted(ALLOWED_STORE_CODES),
+        })).mappings().first()
+        data = dict(row or {})
+        product_count = _num(data.get("product_count"))
+        sku_count = _num(data.get("sku_count"))
+        data["product_cost_ready_count"] = int(product_count - _num(data.get("product_missing_cost_count")))
+        data["sku_cost_ready_count"] = int(sku_count - _num(data.get("sku_missing_cost_count")))
+        data["sku_barcode_ready_count"] = int(sku_count - _num(data.get("sku_missing_barcode_count")))
+        data["sku_barcode_rate"] = round(data["sku_barcode_ready_count"] / sku_count * 100, 1) if sku_count else 0
+        return {"success": True, "data": data}
+    except Exception:
+        logger.exception("product quality summary error")
         return {"success": False, "message": "查询失败，请查看服务日志"}
 
 

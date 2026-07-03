@@ -13,7 +13,10 @@ from typing import Optional
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
-from app.core.store_whitelist import allowed_store_sql_in, ACTUAL_PAY_CODES
+from app.core.store_whitelist import (
+    ACTUAL_PAY_CODES,
+    allowed_store_sql_in,
+)
 from app.integrations.baison.client import BaisonClient
 
 logger = logging.getLogger("baison.pos_ticket")
@@ -109,7 +112,7 @@ class PosTicketService:
             """))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_biz_date ON dwd.dwd_pos_ticket(biz_date)"))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_store_date ON dwd.dwd_pos_ticket(store_code, biz_date)"))
-            # 兼容旧表:补充 actual_pay_amount 列(实际收款额,排除上月储值/会员积分)
+            # 兼容旧表:补充 actual_pay_amount 列(销售支付收款额,不含储值卡消费/充值)
             await db.execute(text(
                 "ALTER TABLE dwd.dwd_pos_ticket ADD COLUMN IF NOT EXISTS actual_pay_amount NUMERIC(16,2) DEFAULT 0"
             ))
@@ -236,8 +239,8 @@ class PosTicketService:
                 is_void = str(rec.get("zf") or "0") == "1"
                 is_pending = str(rec.get("gd") or "0") == "1"
 
-                # 实际收款额:只统计白名单支付方式(现金+微信+POS+VIP卡),
-                # 排除五月前储值(003)和会员积分(005)
+                # 品氪销售页口径:积分 + 现金 + 收钱吧 + 储值卡。
+                # 只从小票结算明细 qtlsdjs_mx 汇总,不额外叠加充值流水。
                 djs_mx = rec.get("qtlsdjs_mx") or []
                 if isinstance(djs_mx, str):
                     try:
@@ -309,7 +312,7 @@ class PosTicketService:
         start_date = dt.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S").date()
         end_date = dt.datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S").date()
         params = {"sd": start_date, "ed": end_date}
-        # 华邦业务口径:仅统计白名单门店/仓,见 app.core.store_whitelist
+        # 华邦业务口径:销售/收款仅统计白名单门店,仓库不进入销售口径。
         store_in = allowed_store_sql_in()
         async with AsyncSessionLocal() as db:
             await db.execute(text(f"""
@@ -397,6 +400,7 @@ class PosTicketService:
             row = result.mappings().one()
             return {
                 "total_sales": float(row["total_sales"] or 0),
+                "recharge_amount": 0,
                 "total_qty": float(row["total_qty"] or 0),
                 "total_orders": int(row["total_orders"] or 0),
                 "store_count": int(row["store_count"] or 0),

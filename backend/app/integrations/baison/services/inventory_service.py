@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.baison.client import BaisonClient
 from app.models.baison_ods import OdsBaisonInventoryApi, DwdInventoryBalance
 from app.models.log import LogDataSync, LogDataQuality
-from app.core.store_whitelist import ALLOWED_WAREHOUSE_CODES
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
 
 logger = logging.getLogger("baison.inventory_service")
 
@@ -124,8 +124,10 @@ async def _list_store_codes(db: AsyncSession) -> list:
     rows = (await db.execute(text(
         "select warehouse_code from dim.dim_warehouse where source_system='baison' and warehouse_code is not null order by warehouse_code"
     ))).scalars().all()
-    # 华邦业务口径:仅同步白名单门店/仓,见 app.core.store_whitelist
-    return [r for r in rows if r in ALLOWED_WAREHOUSE_CODES]
+    # 华邦 AI 中台库存口径:同步 7 个销售门店 + 3 个仓库,见 app.core.store_whitelist。
+    # 百胜里仓库编码可能大小写不一致(gz002/GZ002),统一按大写匹配。
+    allowed = {code.upper() for code in ALLOWED_INVENTORY_CODES}
+    return [r for r in rows if str(r).upper() in allowed]
 
 
 async def _upsert_lines(db, lines, batch_no, now) -> dict:

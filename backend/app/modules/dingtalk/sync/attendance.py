@@ -107,7 +107,7 @@ _DAILY_SQL = text("""
 INSERT INTO hr_attendance_daily
   (work_date, dingtalk_user_id, employee_name, department_name,
    normal_count, late_count, early_leave_count, missing_check_count, leave_count, attendance_status)
-SELECT a.work_date, a.dingtalk_user_id, max(e.name), NULL,
+SELECT a.work_date, a.dingtalk_user_id, max(e.name), max(dept.department_name),
   count(*) FILTER (WHERE a.time_result='Normal'),
   count(*) FILTER (WHERE a.time_result IN ('Late','SeriousLate','VeryLate')),
   count(*) FILTER (WHERE a.time_result='Early'),
@@ -117,10 +117,15 @@ SELECT a.work_date, a.dingtalk_user_id, max(e.name), NULL,
        THEN 'abnormal' ELSE 'normal' END
 FROM dingtalk_attendance_records a
 LEFT JOIN dingtalk_employees e ON e.dingtalk_user_id = a.dingtalk_user_id
+LEFT JOIN LATERAL (
+  SELECT string_agg(d.name, '/' ORDER BY d.name) AS department_name
+  FROM jsonb_array_elements_text(coalesce(e.department_ids, '[]'::jsonb)) AS did(dept_id)
+  JOIN dingtalk_departments d ON d.dingtalk_dept_id = did.dept_id
+) dept ON true
 WHERE a.work_date BETWEEN :dfrom AND :dto AND a.work_date IS NOT NULL
 GROUP BY a.work_date, a.dingtalk_user_id
 ON CONFLICT (work_date, dingtalk_user_id) DO UPDATE SET
-  employee_name=EXCLUDED.employee_name,
+  employee_name=EXCLUDED.employee_name, department_name=EXCLUDED.department_name,
   normal_count=EXCLUDED.normal_count, late_count=EXCLUDED.late_count,
   early_leave_count=EXCLUDED.early_leave_count, missing_check_count=EXCLUDED.missing_check_count,
   attendance_status=EXCLUDED.attendance_status, updated_at=now()

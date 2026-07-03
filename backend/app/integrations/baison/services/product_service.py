@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -242,8 +242,14 @@ async def _upsert_goods(db: AsyncSession, goods: list, batch_no: str, now: datet
             seen_dim.add(gsn)
         drs = _dim_row(raw, now)
         st2 = pg_insert(DimProduct).values(**drs)
+        dim_update = {k: st2.excluded[k] for k in drs if k not in ("product_code", "source_system", "created_at")}
+        dim_update["cost_price"] = func.coalesce(st2.excluded.cost_price, DimProduct.cost_price)
+        dim_update["has_cost"] = case(
+            (st2.excluded.cost_price.isnot(None), st2.excluded.has_cost),
+            else_=DimProduct.has_cost,
+        )
         st2 = st2.on_conflict_do_update(constraint="uq_dim_product_code_source",
-                                        set_={k: st2.excluded[k] for k in drs if k not in ("product_code", "source_system", "created_at")})
+                                        set_=dim_update)
         await db.execute(st2)
 
     return {"ods_inserted": ods_ins, "ods_updated": ods_upd,

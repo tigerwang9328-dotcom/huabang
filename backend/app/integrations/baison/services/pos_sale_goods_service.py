@@ -8,7 +8,7 @@ from typing import Optional
 
 from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
-from app.core.store_whitelist import allowed_store_sql_in
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, allowed_inventory_sql_in
 from sqlalchemy import text
 
 logger = logging.getLogger("baison.pos_sale")
@@ -29,6 +29,11 @@ class PosSaleGoodsService:
         self, zddm: str, start_date: str, end_date: str, max_pages: int = 0
     ) -> dict:
         """同步单个门店全部销售数据"""
+        zddm = str(zddm).strip()
+        if zddm not in ALLOWED_INVENTORY_CODES:
+            logger.warning("Skip non-whitelisted sale goods store=%s", zddm)
+            return {"store": zddm, "ods": 0, "dwd": 0, "pages": 0, "skipped": True}
+
         total_ods = 0
         total_dwd = 0
         page = 1
@@ -113,19 +118,32 @@ class PosSaleGoodsService:
         self, stores: list, start_date: str, end_date: str, max_pages: int = 0
     ) -> dict:
         results = []
-        for zddm in stores:
+        requested = [str(zddm).strip() for zddm in stores]
+        skipped = [zddm for zddm in requested if zddm not in ALLOWED_INVENTORY_CODES]
+        if skipped:
+            logger.warning("Skip non-whitelisted sale goods stores=%s", skipped)
+
+        for zddm in requested:
+            if zddm not in ALLOWED_INVENTORY_CODES:
+                results.append({"store": zddm, "ods": 0, "dwd": 0, "pages": 0, "skipped": True})
+                continue
             r = await self.sync_one_store(zddm, start_date, end_date, max_pages)
             results.append(r)
             logger.info(f"Store {zddm} done: {r}")
         total_ods = sum(r["ods"] for r in results)
         total_dwd = sum(r["dwd"] for r in results)
-        return {"stores": len(stores), "ods": total_ods, "dwd": total_dwd, "details": results}
+        return {"stores": len(requested), "skipped": len(skipped), "ods": total_ods, "dwd": total_dwd, "details": results}
 
 
     async def _save_batch(
         self, zddm: str, records: list, start_date: str, end_date: str, page_no: int
     ):
         """批量写入 ODS + DWD"""
+        zddm = str(zddm).strip()
+        if zddm not in ALLOWED_INVENTORY_CODES:
+            logger.warning("Reject non-whitelisted sale goods batch store=%s", zddm)
+            return 0, 0
+
         bs_dt = dt.datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S")
         be_dt = dt.datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S")
         biz_d = be_dt.date()
@@ -201,8 +219,8 @@ class PosSaleGoodsService:
     async def rebuild_dws_summary(self, start_date: str, end_date: str) -> dict:
             """重建 DWS/DM 层汇总（匹配当前 dws 表结构）。"""
             params = {"sd": dt.date.fromisoformat(start_date[:10]), "ed": dt.date.fromisoformat(end_date[:10])}
-            # 华邦业务口径:仅统计白名单门店/仓,见 app.core.store_whitelist
-            store_in = allowed_store_sql_in()
+            # 华邦业务口径:销售明细仅统计 10 个白名单门店/仓,见 app.core.store_whitelist
+            store_in = allowed_inventory_sql_in()
             async with AsyncSessionLocal() as db:
                 # 公司日汇总 -> dws_company_daily
                 await db.execute(

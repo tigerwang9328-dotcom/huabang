@@ -53,10 +53,22 @@ RC=$?
 set -e
 
 if [ $RC -eq 0 ]; then
-  PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
-    "UPDATE log.log_etl_run SET finished_at=now(), status='success' WHERE id=${ETL_ID};" \
-    >> "$LOG_FILE" 2>&1
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 同步成功 rc=$RC" | tee -a "$LOG_FILE"
+  set +e
+  /srv/huabang-ai-center/scripts/rebuild_pos_sale_goods_from_tickets.sh "$START_TS" "$END_TS" >> "$LOG_FILE" 2>&1
+  REBUILD_RC=$?
+  set -e
+  if [ $REBUILD_RC -eq 0 ]; then
+    PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
+      "UPDATE log.log_etl_run SET finished_at=now(), status='success' WHERE id=${ETL_ID};" \
+      >> "$LOG_FILE" 2>&1
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 同步成功 rc=$RC rebuild_rc=$REBUILD_RC" | tee -a "$LOG_FILE"
+  else
+    PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
+      "UPDATE log.log_etl_run SET finished_at=now(), status='failed', error_msg='商品明细重建失败' WHERE id=${ETL_ID};" \
+      >> "$LOG_FILE" 2>&1
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 商品明细重建失败 rc=$REBUILD_RC" | tee -a "$LOG_FILE"
+    exit $REBUILD_RC
+  fi
 else
   PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
     "UPDATE log.log_etl_run SET finished_at=now(), status='failed', error_msg='同步脚本返回非0' WHERE id=${ETL_ID};" \

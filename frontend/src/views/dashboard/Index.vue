@@ -33,6 +33,7 @@
     <!-- ====== 数据资产总览 ====== -->
     <div class="lux-section-title">
       <span class="title-decor"></span> 数据资产总览
+      <span class="scope-note">销售口径 7 店 / 库存口径 7 店 + 3 仓</span>
     </div>
     <div class="lux-grid-5">
       <div v-for="(a, idx) in assetCards" :key="a.label" class="lux-crypto-card" :style="{ animationDelay: (idx * 60) + 'ms' }">
@@ -62,7 +63,25 @@
           <div class="lux-metric-card" v-for="m in bizMetricCards" :key="m.label">
             <div class="metric-header">
               <span class="metric-label">{{ m.label }}</span>
-              <span class="metric-status-dot" :class="{ active: !m.isPending }"></span>
+              <div class="metric-header-right">
+                <div v-if="m.isSalesAmount" class="sales-source-toggle" aria-label="销售额口径切换">
+                  <button
+                    type="button"
+                    :class="{ active: salesAmountSource === 'e3' }"
+                    @click="salesAmountSource = 'e3'"
+                  >
+                    E3
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: salesAmountSource === 'pinke' }"
+                    @click="salesAmountSource = 'pinke'"
+                  >
+                    品氪
+                  </button>
+                </div>
+                <span class="metric-status-dot" :class="{ active: !m.isPending }"></span>
+              </div>
             </div>
             <div class="metric-body">
               <template v-if="!m.isPending">
@@ -178,6 +197,7 @@ const trend = ref<any[]>([]);
 const storeRank = ref<any[]>([]);
 const taskSummary = ref<any>({});
 const rawOverview = ref<any>({});
+const salesAmountSource = ref<"e3" | "pinke">("e3");
 
 // 日期选择器：默认昨天
 const yesterday = new Date();
@@ -213,18 +233,21 @@ const ico = (d: string) => '<svg viewBox="0 0 24 24" fill="none" stroke="current
 const assetCards = computed(() => {
   const a = rawOverview.value?.data_assets || {};
   return [
-    { label: "运营门店数", value: a.store_count?.value ?? "--", unit: "家", icon: ico("M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10") },
+    { label: "销售门店数", value: a.store_count?.value ?? "--", unit: "家", icon: ico("M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10") },
     { label: "商品总款数", value: a.product_count?.value ?? "--", unit: "款", icon: ico("M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z M3 6h18 M16 10a4 4 0 0 1-8 0") },
     { label: "活跃 SKU 数", value: a.sku_count?.value ?? "--", unit: "个", icon: ico("M4 7V4h16v3 M9 20h6 M12 4v16") },
-    { label: "覆盖仓库数", value: a.warehouse_count?.value ?? "--", unit: "个", icon: ico("M3 21h18 M3 10h18 M5 6l7-3 7 3 M4 10v11 M20 10v11 M8 14v3 M12 14v3 M16 14v3") },
-    { label: "在库物理记录", value: formatBigNum(a.inventory_record_count?.value), unit: "条", icon: ico("M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4") },
+    { label: "库存范围数", value: a.inventory_scope_count?.value ?? "--", unit: "个", icon: ico("M3 21h18 M3 10h18 M5 6l7-3 7 3 M4 10v11 M20 10v11 M8 14v3 M12 14v3 M16 14v3") },
+    { label: "白名单库存记录", value: formatBigNum(a.inventory_record_count?.value), unit: "条", icon: ico("M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4") },
   ];
 });
 
 const bizMetricCards = computed(() => {
   const m = rawOverview.value?.business_metrics || {};
   const cards = [
-    { key: "yesterday_sales", label: "销售额" },
+    {
+      key: salesAmountSource.value === "e3" ? "yesterday_sales_e3" : "yesterday_sales_pinke",
+      label: salesAmountSource.value === "e3" ? "销售额(E3)" : "销售额(品氪)",
+    },
     { key: "yesterday_orders", label: "订单数" },
     { key: "yesterday_items", label: "销售件数" },
     { key: "gross_profit", label: "毛利额" },
@@ -235,7 +258,7 @@ const bizMetricCards = computed(() => {
   ];
   return cards.map(c => {
     const r = getMetricVal(m, c.key);
-    return { label: c.label, value: r.val, isPending: r.isPending };
+    return { label: c.label, value: r.val, isPending: r.isPending, isSalesAmount: c.key === "yesterday_sales_e3" || c.key === "yesterday_sales_pinke" };
   });
 });
 
@@ -364,6 +387,47 @@ onMounted(() => { fetchData(); });
 .live-dot { width: 6px; height: 6px; background-color: #10B981; border-radius: 50%; margin-right: 8px; box-shadow: 0 0 6px #10B981; }
 
 .lux-section-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; margin: 28px 0 16px 0; color: #0F172A; letter-spacing: 0.5px; }
+.sales-source-toggle {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  background: #FFFFFF;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.sales-source-toggle button {
+  min-width: 42px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #64748B;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s;
+}
+.sales-source-toggle button.active {
+  background: #0F172A;
+  color: #FFFFFF;
+}
+.sales-source-toggle button:hover:not(.active) {
+  background: #F1F5F9;
+  color: #334155;
+}
+.scope-note {
+  margin-left: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #FFF7ED;
+  color: #C2410C;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
 .title-decor { width: 4px; height: 15px; background-color: #D4AF37; border-radius: 2px; margin-right: 8px; }
 .title-decor.alert { background-color: #EF4444; }
 .title-decor.dynamic { background-color: #FF6A00; }
@@ -408,6 +472,7 @@ onMounted(() => { fetchData(); });
 }
 .lux-metric-card:hover, .lux-risk-card:hover { border-color: #CBD5E1; background-color: #FAFBFD; }
 .metric-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.metric-header-right { display: flex; align-items: center; gap: 10px; }
 .metric-label, .risk-label { font-size: 13px; color: #475569; font-weight: 500; }
 .risk-meta { margin-bottom: 8px; }
 .metric-status-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #CBD5E1; }

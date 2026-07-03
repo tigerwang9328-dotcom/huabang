@@ -5,11 +5,9 @@
       <span class="page-desc">动销分析、商品主档、SKU档案、条码质量</span>
     </div>
 
-    <!-- 顶部指标 -->
     <div class="summary-row">
-      <div class="summary-card" v-for="s in summaryCards" :key="s.label" :class="{ pending: s.isPending }">
-        <div class="s-num" v-if="!s.isPending">{{ s.value }}</div>
-        <el-tag v-else type="info" size="small">待接入</el-tag>
+      <div class="summary-card" v-for="s in summaryCards" :key="s.label" :class="{ warning: s.warning }">
+        <div class="s-num">{{ s.value }}</div>
         <div class="s-label">{{ s.label }}</div>
       </div>
     </div>
@@ -19,7 +17,7 @@
       <el-tab-pane label="商品经营分析" name="biz">
         <div class="empty-block">
           <el-icon size="28"><TrendCharts /></el-icon>
-          <span>销售明细尚未接入，动销/滞销/爆款/清仓建议等经营分析待数据接入后展示。</span>
+          <span>商品主档与 SKU 档案已接入库存、近7天销售和质量建议，后续可继续扩展爆款/滞销专题分析。</span>
         </div>
       </el-tab-pane>
 
@@ -53,6 +51,21 @@
           <el-table-column label="状态" width="70">
             <template #default="{ row }">
               <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="成本" width="76">
+            <template #default="{ row }">
+              <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="inventory_qty" label="库存" width="76" align="right" />
+          <el-table-column prop="sales_qty" label="7天销量" width="82" align="right" />
+          <el-table-column label="7天销售额" width="96" align="right">
+            <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
+          </el-table-column>
+          <el-table-column label="AI建议" width="90">
+            <template #default="{ row }">
+              <el-tag :type="suggestionType(row.ai_suggestion)" size="small">{{ row.ai_suggestion || "-" }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="source_system" label="来源" width="70" />
@@ -97,6 +110,21 @@
               <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="成本" width="76">
+            <template #default="{ row }">
+              <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="inventory_qty" label="库存" width="76" align="right" />
+          <el-table-column prop="sales_qty" label="7天销量" width="82" align="right" />
+          <el-table-column label="销售额" width="90" align="right">
+            <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
+          </el-table-column>
+          <el-table-column label="AI建议" width="90">
+            <template #default="{ row }">
+              <el-tag :type="suggestionType(row.ai_suggestion)" size="small">{{ row.ai_suggestion || "-" }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="同步时间" width="150">
             <template #default="{ row }">{{ fmtTs(row.synced_at) }}</template>
           </el-table-column>
@@ -130,20 +158,20 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, reactive, computed } from "vue";
+import { onMounted, ref, reactive } from "vue";
 import { ElMessage } from "element-plus";
 import { productApi } from "@/api/product";
 
 const activeTab = ref("products");
 
 const summaryCards = ref([
-  { label: "商品款数", value: "—", isPending: false },
-  { label: "SKU数", value: "—", isPending: false },
-  { label: "有条码SKU", value: "—", isPending: false },
-  { label: "无条码SKU", value: "—", isPending: false },
-  { label: "当前库存件数", value: "—", isPending: false },
-  { label: "库存金额", value: "待接入", isPending: true },
-  { label: "近7天销量", value: "待接入", isPending: true },
+  { label: "商品款数", value: "—", warning: false },
+  { label: "SKU数", value: "—", warning: false },
+  { label: "商品缺成本", value: "—", warning: true },
+  { label: "SKU缺成本", value: "—", warning: true },
+  { label: "SKU缺条码", value: "—", warning: true },
+  { label: "有库存SKU", value: "—", warning: false },
+  { label: "7天动销SKU", value: "—", warning: false },
 ]);
 
 // 商品主档
@@ -163,6 +191,36 @@ const sOpts = reactive<{ brands: string[]; colors: string[]; sizes: string[]; se
 const barcodeStats = ref({ withBarcode: 0, noBarcode: 0, barcodeRate: 0 });
 
 function fmtTs(t: any) { if (!t) return "-"; return String(t).replace("T", " ").slice(0, 19); }
+function formatNum(v: any) { return Number(v || 0).toLocaleString("zh-CN"); }
+function formatAmount(v: any) {
+  return Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function suggestionType(text: string) {
+  if (text === "正常") return "success";
+  if (text === "持续跟进") return "primary";
+  if (text === "补条码" || text === "补成本" || text === "关注补货") return "warning";
+  return "info";
+}
+
+async function fetchQualitySummary() {
+  try {
+    const { data } = await productApi.getQualitySummary();
+    if (!data?.success) return;
+    const q = data.data || {};
+    summaryCards.value = [
+      { label: "商品款数", value: formatNum(q.product_count), warning: false },
+      { label: "SKU数", value: formatNum(q.sku_count), warning: false },
+      { label: "商品缺成本", value: formatNum(q.product_missing_cost_count), warning: true },
+      { label: "SKU缺成本", value: formatNum(q.sku_missing_cost_count), warning: true },
+      { label: "SKU缺条码", value: formatNum(q.sku_missing_barcode_count), warning: true },
+      { label: "有库存SKU", value: formatNum(q.inv_sku_count), warning: false },
+      { label: "7天动销SKU", value: formatNum(q.sale_sku_count), warning: false },
+    ];
+    barcodeStats.value.withBarcode = Number(q.sku_barcode_ready_count || 0);
+    barcodeStats.value.noBarcode = Number(q.sku_missing_barcode_count || 0);
+    barcodeStats.value.barcodeRate = Number(q.sku_barcode_rate || 0);
+  } catch (_) {}
+}
 
 // 商品主档
 async function fetchProducts() {
@@ -176,7 +234,6 @@ async function fetchProducts() {
       pTotal.value = data.data.total || 0;
       const times = productList.value.map((x: any) => x.synced_at).filter(Boolean).sort();
       if (times.length) pLastSync.value = fmtTs(times[times.length - 1]);
-      summaryCards.value[0].value = String(pTotal.value);
     }
   } catch (e: any) { ElMessage.error("查询失败"); }
   finally { pLoading.value = false; }
@@ -207,14 +264,6 @@ async function fetchSkus() {
       sTotal.value = data.data.total || 0;
       const times = skuList.value.map((x: any) => x.synced_at).filter(Boolean).sort();
       if (times.length) sLastSync.value = fmtTs(times[times.length - 1]);
-      summaryCards.value[1].value = String(sTotal.value);
-      // 条码统计
-      const withBc = skuList.value.filter((x: any) => x.barcode && x.barcode !== "").length;
-      barcodeStats.value.withBarcode = withBc;
-      barcodeStats.value.noBarcode = sTotal.value - withBc;
-      barcodeStats.value.barcodeRate = sTotal.value > 0 ? Math.round((withBc / sTotal.value) * 100) : 0;
-      summaryCards.value[2].value = String(withBc);
-      summaryCards.value[3].value = String(sTotal.value - withBc);
     }
   } catch (e: any) { ElMessage.error("查询失败"); }
   finally { sLoading.value = false; }
@@ -234,6 +283,7 @@ function onSPage(p: number) { sPage.value = p; fetchSkus(); }
 function onSSize(s: number) { sSize.value = s; sPage.value = 1; fetchSkus(); }
 
 onMounted(() => {
+  fetchQualitySummary();
   loadPOpts(); fetchProducts();
   loadSOpts(); fetchSkus();
 });
@@ -249,7 +299,7 @@ onMounted(() => {
   background: #FFFFFF; border-radius: 10px; padding: 14px; text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-top: 3px solid #16A34A;
 }
-.summary-card.pending { opacity: 0.6; border-top-color: #D1D5DB; }
+.summary-card.warning { border-top-color: #D97706; }
 .s-num { font-size: 22px; font-weight: 700; color: #111827; }
 .s-label { font-size: 11px; color: #9CA3AF; margin-top: 4px; }
 .analysis-tabs { background: #FFFFFF; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
