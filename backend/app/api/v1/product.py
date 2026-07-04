@@ -4,8 +4,11 @@
 """
 import logging
 from typing import Optional
+from urllib.parse import quote, unquote, urlparse
 
-from fastapi import APIRouter, Depends, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +19,7 @@ import asyncio as _asyncio
 
 from app.core.database import AsyncSessionLocal
 from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
+from app.integrations.baison.services.product_image_service import ensure_product_image_table, sku_color_image_urls
 from app.integrations.baison.services.product_service import GOODS_LIST_METHOD, import_all_goods, import_goods_page
 from app.integrations.baison.services.sku_service import SKU_LIST_METHOD, import_all_skus, import_sku_page
 from app.models.dim import DimProduct, DimSku
@@ -79,6 +83,12 @@ def _sku_suggestion(row: dict) -> str:
     if _num(row.get("sales_qty")) <= 0 and _num(row.get("inventory_qty")) > 0:
         return "关注动销"
     return "正常"
+
+
+def _image_proxy_path(source_url: Optional[str]) -> Optional[str]:
+    if not source_url:
+        return None
+    return f"/api/v1/product/image-proxy?url={quote(source_url, safe='')}"
 
 
 async def _latest_sales_window(db: AsyncSession):
@@ -311,6 +321,7 @@ async def list_skus(
 ):
     """标准 SKU 维分页查询（SKU档案）。不返回 raw_data / 成本价。"""
     try:
+        await ensure_product_image_table(db)
         conds = []
         if keyword:
             kw = f"%{keyword.strip()}%"
@@ -333,15 +344,30 @@ async def list_skus(
 
         total = (await db.execute(select(func.count()).select_from(DimSku).where(*conds))).scalar() or 0
         rows = (await db.execute(
-            select(*_SKU_COLS).where(*conds).order_by(DimSku.sku_code)
+            select(*_SKU_COLS).where(*conds).order_by(
+                text("""
+                    COALESCE((
+                        SELECT CASE WHEN pi.image_url IS NOT NULL THEN 0 ELSE 1 END
+                        FROM dim.dim_product_image pi
+                        WHERE pi.source_system = 'baison'
+                          AND pi.product_code = dim_sku.product_code
+                          AND pi.color_code = COALESCE(BTRIM(dim_sku.color_code::text), '')
+                        LIMIT 1
+                    ), 1)
+                """),
+                DimSku.sku_code,
+            )
             .offset((page - 1) * page_size).limit(page_size)
         )).mappings().all()
         row_dicts = [dict(r) for r in rows]
         metrics = await _sku_metrics(db, row_dicts)
+        image_urls = await sku_color_image_urls(db, row_dicts)
         items = []
         for r in rows:
             item = dict(r)
             item.update(metrics.get(item.get("sku_code"), {}))
+            source_image_url = image_urls.get((str(item.get("product_code") or "").strip(), str(item.get("color_code") or "").strip()))
+            item["image_url"] = _image_proxy_path(source_image_url)
             item["sales_qty"] = _fmt_qty(item.get("sales_qty"))
             item["sales_amount"] = round(_num(item.get("sales_amount")), 2)
             item["inventory_qty"] = _fmt_qty(item.get("inventory_qty"))
@@ -351,6 +377,29 @@ async def list_skus(
     except Exception:
         logger.exception("sku list error")
         return {"success": False, "message": "查询失败，请查看服务日志"}
+
+
+@router.get("/product/image-proxy")
+async def product_image_proxy(url: str = Query(..., min_length=8)):
+    """同域代理百胜商品图片，避免 HTTPS 页面加载 HTTP 图片被浏览器拦截。"""
+    source_url = unquote(url)
+    parsed = urlparse(source_url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not host.endswith("gybssoft.com"):
+        raise HTTPException(status_code=400, detail="不允许的图片地址")
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(source_url)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="图片读取失败")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail="图片不存在")
+    media_type = resp.headers.get("content-type") or "image/jpeg"
+    return Response(
+        content=resp.content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/product/quality-summary")

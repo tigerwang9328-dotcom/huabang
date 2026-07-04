@@ -37,12 +37,34 @@
     </div>
     <div class="lux-grid-5">
       <div v-for="(a, idx) in assetCards" :key="a.label" class="lux-crypto-card" :style="{ animationDelay: (idx * 60) + 'ms' }">
+        <el-popover
+          v-if="a.scopeItems"
+          placement="bottom"
+          trigger="click"
+          width="320"
+          popper-class="inventory-scope-popover"
+        >
+          <template #reference>
+            <button class="scope-card-trigger" type="button" aria-label="查看库存范围编码"></button>
+          </template>
+          <div class="scope-popover">
+            <div class="scope-popover-title">库存口径：7 店 + 3 仓</div>
+            <div class="scope-group" v-for="group in a.scopeItems" :key="group.title">
+              <div class="scope-group-title">{{ group.title }}</div>
+              <div class="scope-code-row" v-for="item in group.items" :key="item.code">
+                <code>{{ item.code }}</code>
+                <span>{{ item.name }}</span>
+              </div>
+            </div>
+          </div>
+        </el-popover>
         <div class="card-inner">
           <div class="card-icon" v-html="a.icon"></div>
           <div class="card-info">
             <span class="card-label">{{ a.label }}</span>
             <h2 class="card-value" :class="{ 'highlight-gold': idx === 0, 'highlight-orange': idx === 4 }">
               {{ a.value }}<span class="unit" v-if="a.unit">{{ a.unit }}</span>
+              <span v-if="a.scopeItems" class="scope-caret">⌄</span>
             </h2>
           </div>
         </div>
@@ -230,13 +252,36 @@ function fmtMoney(v: any): string {
 
 const ico = (d: string) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="' + d + '"/></svg>';
 
+const inventoryScopeItems = [
+  {
+    title: "销售门店",
+    items: [
+      { code: "134681", name: "花果园锐煌【REARE】写字楼店" },
+      { code: "285204", name: "遵义市雅斯名品店" },
+      { code: "285702", name: "贵州毕节市莱勒店" },
+      { code: "185805", name: "六盘水百盛店" },
+      { code: "185808", name: "六盘水万达莱勒店" },
+      { code: "285101", name: "莱勒里沃 WIL品牌集合店" },
+      { code: "285102", name: "贵阳新" },
+    ],
+  },
+  {
+    title: "仓库",
+    items: [
+      { code: "GZ001", name: "总仓" },
+      { code: "GZ002", name: "残次仓，兼容 gz002" },
+      { code: "GYNG", name: "内购仓" },
+    ],
+  },
+];
+
 const assetCards = computed(() => {
   const a = rawOverview.value?.data_assets || {};
   return [
     { label: "销售门店数", value: a.store_count?.value ?? "--", unit: "家", icon: ico("M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10") },
     { label: "商品总款数", value: a.product_count?.value ?? "--", unit: "款", icon: ico("M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z M3 6h18 M16 10a4 4 0 0 1-8 0") },
     { label: "活跃 SKU 数", value: a.sku_count?.value ?? "--", unit: "个", icon: ico("M4 7V4h16v3 M9 20h6 M12 4v16") },
-    { label: "库存范围数", value: a.inventory_scope_count?.value ?? "--", unit: "个", icon: ico("M3 21h18 M3 10h18 M5 6l7-3 7 3 M4 10v11 M20 10v11 M8 14v3 M12 14v3 M16 14v3") },
+    { label: "库存范围数", value: a.inventory_scope_count?.value ?? "--", unit: "个", icon: ico("M3 21h18 M3 10h18 M5 6l7-3 7 3 M4 10v11 M20 10v11 M8 14v3 M12 14v3 M16 14v3"), scopeItems: inventoryScopeItems },
     { label: "白名单库存记录", value: formatBigNum(a.inventory_record_count?.value), unit: "条", icon: ico("M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4") },
   ];
 });
@@ -448,6 +493,10 @@ onMounted(() => { fetchData(); });
 }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .lux-crypto-card:hover { transform: translateY(-2px); box-shadow: 0 10px 20px -5px rgba(15,23,42,0.06); border-color: #CBD5E1; }
+.scope-card-trigger {
+  position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%;
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+}
 .card-inner { display: flex; align-items: center; }
 .card-icon {
   width: 42px; height: 42px; border-radius: 8px; background-color: #F8FAFC;
@@ -459,11 +508,35 @@ onMounted(() => { fetchData(); });
 .card-label { font-size: 13px; color: #64748B; margin-bottom: 4px; }
 .card-value { font-size: 24px; font-weight: 700; margin: 0; color: #0F172A; }
 .card-value .unit { font-size: 12px; font-weight: 400; color: #94A3B8; margin-left: 2px; }
+.scope-caret { font-size: 16px; color: #94A3B8; margin-left: 4px; vertical-align: 3px; }
 .highlight-gold { color: #B45309; }
 .highlight-orange { color: #EA580C; }
 .card-progress-bar { position: absolute; bottom: 0; left: 0; width: 100%; height: 3px; background-color: #F1F5F9; }
 .card-progress-bar.bar-gold { background-color: #D4AF37; }
 .card-progress-bar.bar-orange { background-color: #FF6A00; }
+
+:global(.inventory-scope-popover) {
+  border-radius: 8px;
+  box-shadow: 0 14px 32px rgba(15,23,42,0.14);
+}
+.scope-popover { padding: 2px 0; }
+.scope-popover-title {
+  font-size: 13px; font-weight: 700; color: #0F172A;
+  padding-bottom: 8px; border-bottom: 1px solid #EEF2F7; margin-bottom: 8px;
+}
+.scope-group + .scope-group { margin-top: 10px; }
+.scope-group-title {
+  font-size: 12px; font-weight: 600; color: #B45309;
+  margin-bottom: 6px;
+}
+.scope-code-row {
+  display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: center;
+  min-height: 26px; font-size: 12px; color: #475569;
+}
+.scope-code-row code {
+  color: #0F172A; background: #F8FAFC; border: 1px solid #E2E8F0;
+  border-radius: 4px; padding: 2px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 
 .lux-metric-card, .lux-risk-card {
   background: #FFFFFF; border-radius: 8px; padding: 20px;

@@ -14,68 +14,56 @@
       <!-- 菜单（路径全部位于 /app 之下） -->
       <nav class="sidebar-nav">
         <div class="nav-group" v-for="group in visibleMenuGroups" :key="group.label">
-          <div class="nav-group-label">{{ group.label }}</div>
-          <template v-for="item in group.items" :key="menuKey(item)">
-            <div v-if="item.children?.length" class="nav-submenu">
-              <button
-                type="button"
-                class="nav-item nav-parent"
-                :class="{ active: isAnyChildActive(item.children), expanded: expandedMenus.has(menuKey(item)) }"
-                @click="toggleMenu(menuKey(item))"
-              >
-                <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-                <span>{{ item.label }}</span>
-                <el-icon class="nav-arrow"><ArrowRight /></el-icon>
-              </button>
-              <transition name="submenu">
-                <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list">
-                  <template v-for="sub in item.children" :key="menuKey(sub)">
-                    <div v-if="sub.children?.length" class="nav-submenu">
-                      <button
-                        type="button"
-                        class="nav-item nav-sub nav-parent-2"
-                        :class="{ active: isAnyChildActive(sub.children), expanded: expandedMenus.has(menuKey(sub)) }"
-                        @click.stop="toggleMenu(menuKey(sub))"
+          <button
+            type="button"
+            class="nav-item nav-parent nav-group-parent"
+            :class="{ active: isGroupActive(group), expanded: expandedMenus.has(groupKey(group)) }"
+            @click="toggleMenu(groupKey(group))"
+          >
+            <el-icon v-if="group.icon"><component :is="group.icon" /></el-icon>
+            <span>{{ group.label }}</span>
+            <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+          </button>
+          <transition name="submenu">
+            <div v-show="expandedMenus.has(groupKey(group))" class="submenu-list">
+              <template v-for="item in group.items" :key="menuKey(item)">
+                <div v-if="item.children?.length" class="nav-submenu">
+                  <button
+                    type="button"
+                    class="nav-item nav-sub nav-parent-2"
+                    :class="{ active: isAnyChildActive(item.children), expanded: expandedMenus.has(menuKey(item)) }"
+                    @click.stop="toggleMenu(menuKey(item))"
+                  >
+                    <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+                    <span>{{ item.label }}</span>
+                    <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+                  </button>
+                  <transition name="submenu">
+                    <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list submenu-list-2">
+                      <router-link
+                        v-for="leaf in item.children"
+                        :key="leaf.path"
+                        :to="leaf.path || '/app/dashboard'"
+                        class="nav-item nav-sub nav-sub-2"
+                        :class="{ active: isActive(leaf.path || '') }"
                       >
-                        <span>{{ sub.label }}</span>
-                        <el-icon class="nav-arrow"><ArrowRight /></el-icon>
-                      </button>
-                      <transition name="submenu">
-                        <div v-show="expandedMenus.has(menuKey(sub))" class="submenu-list submenu-list-2">
-                          <router-link
-                            v-for="leaf in sub.children"
-                            :key="leaf.path"
-                            :to="leaf.path || '/app/dashboard'"
-                            class="nav-item nav-sub nav-sub-2"
-                            :class="{ active: isActive(leaf.path || '') }"
-                          >
-                            <span>{{ leaf.label }}</span>
-                          </router-link>
-                        </div>
-                      </transition>
+                        <span>{{ leaf.label }}</span>
+                      </router-link>
                     </div>
-                    <router-link
-                      v-else
-                      :to="sub.path || '/app/dashboard'"
-                      class="nav-item nav-sub"
-                      :class="{ active: isActive(sub.path || '') }"
-                    >
-                      <span>{{ sub.label }}</span>
-                    </router-link>
-                  </template>
+                  </transition>
                 </div>
-              </transition>
+                <router-link
+                  v-else
+                  :to="item.path || '/app/dashboard'"
+                  class="nav-item nav-sub"
+                  :class="{ active: isActive(item.path || '') }"
+                >
+                  <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+                  <span>{{ item.label }}</span>
+                </router-link>
+              </template>
             </div>
-            <router-link
-              v-else
-              :to="item.path || '/app/dashboard'"
-              class="nav-item"
-              :class="{ active: isActive(item.path || '') }"
-            >
-              <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-              <span>{{ item.label }}</span>
-            </router-link>
-          </template>
+          </transition>
         </div>
       </nav>
 
@@ -108,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { ElMessageBox } from "element-plus";
@@ -137,7 +125,20 @@ const router = useRouter();
 const authStore = useAuthStore();
 
 const currentTitle = computed(() => (route.meta.title as string) || "华邦AI中台");
-const expandedMenus = ref(new Set<string>());
+const EXPANDED_MENUS_KEY = "hb_sidebar_expanded_menus";
+const loadExpandedMenus = () => {
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_MENUS_KEY);
+    const values = raw ? JSON.parse(raw) : [];
+    return new Set<string>(Array.isArray(values) ? values : []);
+  } catch (_) {
+    return new Set<string>();
+  }
+};
+const saveExpandedMenus = (menus: Set<string>) => {
+  window.localStorage.setItem(EXPANDED_MENUS_KEY, JSON.stringify([...menus]));
+};
+const expandedMenus = ref(loadExpandedMenus());
 
 type MenuRole = "admin" | "finance";
 interface MenuItem {
@@ -150,6 +151,7 @@ interface MenuItem {
 }
 interface MenuGroup {
   label: string;
+  icon?: unknown;
   items: MenuItem[];
 }
 
@@ -164,6 +166,7 @@ const canShow = (item: MenuItem) => {
 const menuGroups = computed<MenuGroup[]>(() => [
   {
     label: "经营",
+    icon: DataLine,
     items: [
       { path: "/app/dashboard", icon: DataLine, label: "经营概览" },
       { path: "/app/boss", icon: House, label: "经营日报" },
@@ -173,8 +176,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
         key: "store",
         children: [
           { path: "/app/store", label: "门店分析" },
-          { path: "/app/store/overview", label: "门店总览" },
-          { path: "/app/baison/shops", label: "百胜门店档案" },
         ],
       },
       {
@@ -192,6 +193,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
   },
   {
     label: "风控",
+    icon: Warning,
     items: [
       {
         icon: Box,
@@ -207,16 +209,30 @@ const menuGroups = computed<MenuGroup[]>(() => [
     ],
   },
   {
-    label: "协同",
+    label: "协调",
+    icon: List,
     items: [
       { path: "/app/member", icon: User, label: "会员运营" },
       { path: "/app/task", icon: List, label: "任务管理" },
       { path: "/app/ai", icon: ChatDotRound, label: "AI助手" },
       { path: "/app/dingtalk", icon: Bell, label: "钉钉通知" },
+      {
+        icon: Avatar,
+        label: "其他",
+        key: "other",
+        role: "admin",
+        children: [
+          { path: "/app/system/users", icon: Avatar, label: "用户管理" },
+          { path: "/app/system/roles", icon: Key, label: "角色权限" },
+          { path: "/app/system/sync", icon: Refresh, label: "数据同步" },
+          { path: "/app/system/baison-api", icon: Refresh, label: "百胜API管理" },
+        ],
+      },
     ],
   },
   {
     label: "财务",
+    icon: Money,
     items: [
       {
         icon: Money,
@@ -234,6 +250,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
   },
   {
     label: "人事",
+    icon: UserFilled,
     items: [
       {
         icon: UserFilled,
@@ -244,29 +261,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
           { path: "/app/hr/employees", label: "员工档案" },
           { path: "/app/hr/attendance", label: "考勤管理" },
           { path: "/app/hr/leaves", label: "请假外出" },
-        ],
-      },
-    ],
-  },
-  {
-    label: "管理",
-    items: [
-      {
-        icon: Avatar,
-        label: "系统管理",
-        key: "system",
-        role: "admin",
-        children: [
-          { path: "/app/system/users", icon: Avatar, label: "用户管理" },
-          { path: "/app/system/roles", icon: Key, label: "角色权限" },
-          {
-            label: "数据运维",
-            key: "system:data",
-            children: [
-              { path: "/app/system/sync", icon: Refresh, label: "数据同步" },
-              { path: "/app/system/baison-api", icon: Refresh, label: "百胜API管理" },
-            ],
-          },
         ],
       },
     ],
@@ -289,12 +283,14 @@ const visibleMenuGroups = computed(() => {
 });
 
 const menuKey = (item: MenuItem) => item.key || item.path || item.label;
+const groupKey = (group: MenuGroup) => `group:${group.label}`;
 
 const toggleMenu = (key: string) => {
   const next = new Set(expandedMenus.value);
   if (next.has(key)) next.delete(key);
   else next.add(key);
   expandedMenus.value = next;
+  saveExpandedMenus(next);
 };
 
 const isActive = (path: string) => {
@@ -306,21 +302,8 @@ const isActive = (path: string) => {
 const isAnyChildActive = (children: MenuItem[]): boolean =>
   children.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false));
 
-const autoExpandForRoute = (path: string) => {
-  const next = new Set(expandedMenus.value);
-  if (path.startsWith("/app/store") || path.startsWith("/app/baison")) next.add("store");
-  if (path.startsWith("/app/product")) next.add("product");
-  if (path.startsWith("/app/inventory")) next.add("inventory");
-  if (path.startsWith("/app/fin")) next.add("fin");
-  if (path.startsWith("/app/hr")) next.add("hr");
-  if (path.startsWith("/app/system")) {
-    next.add("system");
-    if (path.startsWith("/app/system/sync") || path.startsWith("/app/system/baison-api")) next.add("system:data");
-  }
-  expandedMenus.value = next;
-};
-
-watch(() => route.path, autoExpandForRoute, { immediate: true });
+const isGroupActive = (group: MenuGroup): boolean =>
+  group.items.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false));
 
 const userInitial = computed(() => {
   const name = authStore.userInfo?.real_name || authStore.userInfo?.username || "用";

@@ -60,6 +60,22 @@
     </div>
 
     <el-table :data="list" v-loading="loading" border stripe size="small" style="width:100%">
+      <el-table-column label="图片" width="62" fixed align="center">
+        <template #default="{ row }">
+          <div class="sku-thumb-cell">
+            <el-image
+              v-if="row.image_url"
+              class="sku-thumb"
+              :src="row.image_url"
+              :preview-src-list="[row.image_url]"
+              fit="cover"
+              preview-teleported
+              hide-on-click-modal
+              loading="lazy"
+            />
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="sku_code" label="SKU编码" width="150" fixed show-overflow-tooltip />
       <el-table-column prop="product_code" label="款号" width="110" />
       <el-table-column prop="product_name" label="商品名称" min-width="140" show-overflow-tooltip />
@@ -224,6 +240,8 @@ onMounted(() => { fetchQuality(); loadOptions(); fetchList(); });
 .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .actions { display:flex; align-items:center; gap:12px; }
 .last-sync { color:#909399; font-size:13px; }
+.sku-thumb-cell { width:40px; height:40px; display:flex; align-items:center; justify-content:center; }
+.sku-thumb { width:36px; height:36px; object-fit:cover; border-radius:4px; border:1px solid #ebeef5; background:#f8fafc; display:block; }
 .pager { margin-top:12px; display:flex; justify-content:flex-end; }
 @media (max-width: 1200px) {
   .quality-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
