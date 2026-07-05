@@ -12,8 +12,9 @@
 """
 import json
 import logging
-import time
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -25,6 +26,12 @@ logger = logging.getLogger("baison.client")
 
 # 日志脱敏：这些 key 一旦出现一律打码（兜底，正常请求参数里不应含 secret）
 _SENSITIVE_KEYS = {"app_key", "appkey", "key", "app_secret", "appsecret", "secret"}
+BAISON_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def baison_timestamp() -> str:
+    """百胜开放平台 timestamp 要求 GMT+8，北京时间。"""
+    return datetime.now(BAISON_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def mask_params(params: dict) -> dict:
@@ -80,7 +87,7 @@ class BaisonClient:
             "method": method,
             "format": self.config.format,
             "key": self.config.app_key,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": baison_timestamp(),
             "v": self.config.api_version,
             "sign_method": self.config.sign_method,
             "data": data_str,
