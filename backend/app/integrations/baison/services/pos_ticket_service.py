@@ -22,6 +22,9 @@ from app.integrations.baison.client import BaisonClient
 logger = logging.getLogger("baison.pos_ticket")
 
 TICKET_METHOD = "pos.qtlsd.list_get"
+SALES_PAY_CODES = ACTUAL_PAY_CODES
+BASE_RECEIPT_PAY_CODES = frozenset({"000", "011", "666", "971"})
+RECHARGE_PAY_CODES = frozenset({"003", "004"})
 
 
 class PosTicketService:
@@ -112,7 +115,7 @@ class PosTicketService:
             """))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_biz_date ON dwd.dwd_pos_ticket(biz_date)"))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_store_date ON dwd.dwd_pos_ticket(store_code, biz_date)"))
-            # 兼容旧表:补充 actual_pay_amount 列(销售支付收款额,不含储值卡消费/充值)
+            # 兼容旧表:补充 actual_pay_amount 列(门店销售实收口径)
             await db.execute(text(
                 "ALTER TABLE dwd.dwd_pos_ticket ADD COLUMN IF NOT EXISTS actual_pay_amount NUMERIC(16,2) DEFAULT 0"
             ))
@@ -230,8 +233,19 @@ class PosTicketService:
                 raw_id = inserted.scalar()
                 ods_count += 1
 
+                djs_mx = rec.get("qtlsdjs_mx") or []
+                if isinstance(djs_mx, str):
+                    try:
+                        djs_mx = json.loads(djs_mx)
+                    except (json.JSONDecodeError, TypeError):
+                        djs_mx = []
                 sales_qty = self._f(rec.get("sl"))
-                sales_amount = self._f(rec.get("sfje") if rec.get("sfje") not in (None, "") else rec.get("je"))
+                raw_sales_amount = self._f(rec.get("sfje") if rec.get("sfje") not in (None, "") else rec.get("je"))
+                sales_amount = sum(
+                    self._f(p.get("je"))
+                    for p in djs_mx
+                    if str(p.get("jsdm") or "") in SALES_PAY_CODES
+                ) if djs_mx else raw_sales_amount
                 standard_amount = self._f(rec.get("bzje"))
                 gross_profit_source_amount = self._f(rec.get("mlje"))
                 details = rec.get("orderDetailGets") or []
@@ -239,19 +253,17 @@ class PosTicketService:
                 is_void = str(rec.get("zf") or "0") == "1"
                 is_pending = str(rec.get("gd") or "0") == "1"
 
-                # 品氪销售页口径:积分 + 现金 + 收钱吧 + 储值卡。
-                # 只从小票结算明细 qtlsdjs_mx 汇总,不额外叠加充值流水。
-                djs_mx = rec.get("qtlsdjs_mx") or []
-                if isinstance(djs_mx, str):
-                    try:
-                        djs_mx = json.loads(djs_mx)
-                    except (json.JSONDecodeError, TypeError):
-                        djs_mx = []
-                actual_pay_amount = sum(
-                    self._f(p.get("je"))
-                    for p in djs_mx
-                    if str(p.get("jsdm") or "") in ACTUAL_PAY_CODES
-                )
+                # 实收金额口径:收钱吧POS/扫码/胜券扫 + 现金 + 线上支付 + 充值金额 - 退款金额。
+                actual_pay_amount = 0.0
+                for p in djs_mx:
+                    code = str(p.get("jsdm") or "")
+                    amount = self._f(p.get("je"))
+                    if code in BASE_RECEIPT_PAY_CODES:
+                        actual_pay_amount += amount
+                    elif code in RECHARGE_PAY_CODES and amount > 0:
+                        actual_pay_amount += amount
+                    elif code in ACTUAL_PAY_CODES and amount < 0:
+                        actual_pay_amount += amount
 
                 await db.execute(text("""
                     INSERT INTO dwd.dwd_pos_ticket
@@ -321,15 +333,15 @@ class PosTicketService:
                  total_order_count, total_item_count, net_sales_amount, avg_order_value,
                  items_per_order, avg_discount_rate, active_store_count, etl_at, created_at)
                 SELECT biz_date,
-                       COALESCE(SUM(actual_pay_amount), 0),
-                       COALESCE(SUM(actual_pay_amount), 0),
+                       COALESCE(SUM(sales_amount), 0),
+                       COALESCE(SUM(sales_amount), 0),
                        0,
                        COUNT(*)::int,
                        COALESCE(SUM(sales_qty), 0)::int,
-                       COALESCE(SUM(actual_pay_amount), 0),
-                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(actual_pay_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
+                       COALESCE(SUM(sales_amount), 0),
+                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
                        CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_qty) / COUNT(*))::numeric, 2) ELSE NULL END,
-                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(actual_pay_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
+                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(sales_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
                        COUNT(DISTINCT store_code)::int,
                        now(), now()
                 FROM dwd.dwd_pos_ticket
@@ -361,11 +373,11 @@ class PosTicketService:
                        COALESCE(SUM(sales_qty), 0)::int,
                        COALESCE(SUM(sales_qty), 0)::int,
                        COALESCE(SUM(standard_amount), 0),
-                       COALESCE(SUM(actual_pay_amount), 0),
-                       COALESCE(SUM(actual_pay_amount), 0),
-                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(actual_pay_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
+                       COALESCE(SUM(sales_amount), 0),
+                       COALESCE(SUM(sales_amount), 0),
+                       CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_amount) / COUNT(*))::numeric, 2) ELSE NULL END,
                        CASE WHEN COUNT(*) > 0 THEN ROUND((SUM(sales_qty) / COUNT(*))::numeric, 2) ELSE NULL END,
-                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(actual_pay_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
+                       CASE WHEN SUM(standard_amount) > 0 THEN ROUND((SUM(sales_amount) / SUM(standard_amount))::numeric, 4) ELSE NULL END,
                        now(), now()
                 FROM dwd.dwd_pos_ticket
                 WHERE biz_date >= :sd AND biz_date <= :ed
@@ -387,7 +399,7 @@ class PosTicketService:
             """), params)
             await db.commit()
             result = await db.execute(text(f"""
-                SELECT COALESCE(SUM(actual_pay_amount),0) AS total_sales,
+                SELECT COALESCE(SUM(sales_amount),0) AS total_sales,
                        COALESCE(SUM(sales_qty),0) AS total_qty,
                        COUNT(*) AS total_orders,
                        COUNT(DISTINCT store_code) AS store_count

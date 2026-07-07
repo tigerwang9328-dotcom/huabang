@@ -33,6 +33,57 @@ def _parse_date(value: Optional[str], fallback: date) -> date:
     return date.fromisoformat(value[:10])
 
 
+PAY_DETAIL_SQL = """
+    SELECT t.ticket_no,
+           SUM(CASE
+                 WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                 ELSE 0
+               END) AS sales_amount,
+           SUM(CASE
+                 WHEN p->>'jsdm' IN ('000', '011', '666', '971')
+                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                 ELSE 0
+               END)
+           + SUM(CASE
+                   WHEN p->>'jsdm' IN ('003', '004')
+                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
+                   THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                   ELSE 0
+                 END)
+           + SUM(CASE
+                   WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
+                   THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                   ELSE 0
+                 END) AS actual_pay_amount,
+           SUM(CASE
+                 WHEN p->>'jsdm' IN ('003', '004')
+                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
+                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                 ELSE 0
+               END) AS recharge_amount,
+           -SUM(CASE
+                  WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
+                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                  ELSE 0
+                END) AS refund_amount
+    FROM dwd.dwd_pos_ticket t
+    CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+            WHEN jsonb_typeof(t.raw_data->'qtlsdjs_mx') = 'array' THEN t.raw_data->'qtlsdjs_mx'
+            ELSE '[]'::jsonb
+        END
+    ) p
+    WHERE t.biz_date >= CAST(:sd AS date) AND t.biz_date <= CAST(:ed AS date)
+      AND t.store_code = ANY(:store_codes)
+      AND COALESCE(t.is_void, false) = false
+      AND COALESCE(t.is_pending, false) = false
+    GROUP BY t.ticket_no
+"""
+
+
 @router.get("/list")
 async def list_stores(
     page: int = Query(1, ge=1),
@@ -118,19 +169,22 @@ async def store_sales_analysis(
                 FROM dim.dim_store s
                 WHERE {store_filter}
             ), ticket AS (
-                SELECT store_code,
+                SELECT t.store_code,
                        COUNT(*)::int AS orders,
-                       COALESCE(SUM(sales_qty), 0) AS sales_qty,
-                       COALESCE(SUM(sales_amount), 0) AS sales_amount,
-                       COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount,
-                       COALESCE(SUM(standard_amount), 0) AS standard_amount,
-                       MAX(synced_at) AS last_synced_at
-                FROM dwd.dwd_pos_ticket
-                WHERE biz_date >= CAST(:sd AS date) AND biz_date <= CAST(:ed AS date)
-                  AND store_code = ANY(:store_codes)
-                  AND COALESCE(is_void, false) = false
-                  AND COALESCE(is_pending, false) = false
-                GROUP BY store_code
+                       COALESCE(SUM(t.sales_qty), 0) AS sales_qty,
+                       COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount,
+                       COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount,
+                       COALESCE(SUM(COALESCE(pay.recharge_amount, 0)), 0) AS recharge_amount,
+                       COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS refund_amount,
+                       COALESCE(SUM(t.standard_amount), 0) AS standard_amount,
+                       MAX(t.synced_at) AS last_synced_at
+                FROM dwd.dwd_pos_ticket t
+                LEFT JOIN ({PAY_DETAIL_SQL}) pay ON pay.ticket_no = t.ticket_no
+                WHERE t.biz_date >= CAST(:sd AS date) AND t.biz_date <= CAST(:ed AS date)
+                  AND t.store_code = ANY(:store_codes)
+                  AND COALESCE(t.is_void, false) = false
+                  AND COALESCE(t.is_pending, false) = false
+                GROUP BY t.store_code
             ), goods AS (
                 SELECT store_code,
                        COUNT(DISTINCT product_code)::int AS product_count,
@@ -149,6 +203,8 @@ async def store_sales_analysis(
                    COALESCE(ticket.sales_qty, 0) AS sales_qty,
                    COALESCE(ticket.sales_amount, 0) AS sales_amount,
                    COALESCE(ticket.actual_pay_amount, 0) AS actual_pay_amount,
+                   COALESCE(ticket.recharge_amount, 0) AS recharge_amount,
+                   COALESCE(ticket.refund_amount, 0) AS refund_amount,
                    COALESCE(ticket.standard_amount, 0) AS standard_amount,
                    CASE WHEN COALESCE(ticket.standard_amount, 0) > 0
                         THEN ROUND((ticket.sales_amount / ticket.standard_amount)::numeric, 4)
@@ -173,7 +229,8 @@ async def store_sales_analysis(
             item = dict(row)
             item["rank"] = idx
             for key in (
-                "orders", "sales_qty", "sales_amount", "actual_pay_amount", "standard_amount",
+                "orders", "sales_qty", "sales_amount", "actual_pay_amount",
+                "recharge_amount", "refund_amount", "standard_amount",
                 "discount_rate", "customer_average_price", "attach_rate", "product_count", "sku_count",
             ):
                 item[key] = float(item[key] or 0)
@@ -182,30 +239,37 @@ async def store_sales_analysis(
             item["sku_count"] = int(item["sku_count"])
             stores.append(item)
 
-        trend_rows = (await db.execute(text("""
+        trend_rows = (await db.execute(text(f"""
             SELECT biz_date,
-                   COALESCE(SUM(sales_amount), 0) AS sales_amount,
-                   COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount,
+                   COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount,
+                   COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount,
+                   COALESCE(SUM(COALESCE(pay.recharge_amount, 0)), 0) AS recharge_amount,
+                   COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS refund_amount,
                    COUNT(*)::int AS orders,
-                   COALESCE(SUM(sales_qty), 0) AS sales_qty
-            FROM dwd.dwd_pos_ticket
-            WHERE biz_date >= CAST(:sd AS date) AND biz_date <= CAST(:ed AS date)
-              AND store_code = ANY(:store_codes)
-              AND COALESCE(is_void, false) = false
-              AND COALESCE(is_pending, false) = false
-            GROUP BY biz_date
-            ORDER BY biz_date
+                   COALESCE(SUM(t.sales_qty), 0) AS sales_qty
+            FROM dwd.dwd_pos_ticket t
+            LEFT JOIN ({PAY_DETAIL_SQL}) pay ON pay.ticket_no = t.ticket_no
+            WHERE t.biz_date >= CAST(:sd AS date) AND t.biz_date <= CAST(:ed AS date)
+              AND t.store_code = ANY(:store_codes)
+              AND COALESCE(t.is_void, false) = false
+              AND COALESCE(t.is_pending, false) = false
+            GROUP BY t.biz_date
+            ORDER BY t.biz_date
         """), params)).mappings().all()
         trend = [dict(r) for r in trend_rows]
         for r in trend:
             r["biz_date"] = str(r["biz_date"])
             r["sales_amount"] = float(r["sales_amount"] or 0)
             r["actual_pay_amount"] = float(r["actual_pay_amount"] or 0)
+            r["recharge_amount"] = float(r["recharge_amount"] or 0)
+            r["refund_amount"] = float(r["refund_amount"] or 0)
             r["orders"] = int(r["orders"] or 0)
             r["sales_qty"] = float(r["sales_qty"] or 0)
 
         total_sales = sum(float(x["sales_amount"] or 0) for x in stores)
         total_actual = sum(float(x["actual_pay_amount"] or 0) for x in stores)
+        total_recharge = sum(float(x["recharge_amount"] or 0) for x in stores)
+        total_refund = sum(float(x["refund_amount"] or 0) for x in stores)
         total_standard = sum(float(x["standard_amount"] or 0) for x in stores)
         total_orders = sum(int(x["orders"] or 0) for x in stores)
         total_qty = sum(float(x["sales_qty"] or 0) for x in stores)
@@ -214,6 +278,8 @@ async def store_sales_analysis(
         summary = {
             "total_sales_amount": round(total_sales, 2),
             "total_actual_pay_amount": round(total_actual, 2),
+            "total_recharge_amount": round(total_recharge, 2),
+            "total_refund_amount": round(total_refund, 2),
             "total_standard_amount": round(total_standard, 2),
             "total_orders": total_orders,
             "total_sales_qty": round(total_qty, 2),

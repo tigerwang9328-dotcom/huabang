@@ -137,6 +137,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
             "yesterday_sales": _pending("销售明细尚未接入"),
             "yesterday_sales_e3": _pending("E3销售额尚未接入"),
             "yesterday_sales_pinke": _pending("品氪销售额尚未接入"),
+            "yesterday_actual_pay_amount": _pending("实收金额尚未接入"),
             "yesterday_orders": _pending("销售明细尚未接入"),
             "yesterday_items": _pending("销售明细尚未接入"),
             "gross_profit": _pending("成本价待接入"),
@@ -278,18 +279,23 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
     try:
         query_date = date.fromisoformat(data["stat_date"])
         e3_result = await db.execute(text(f"""
-            SELECT COALESCE(SUM(sales_amount), 0) AS e3_sales
+            SELECT COALESCE(SUM(sales_amount), 0) AS e3_sales,
+                   COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount
             FROM dwd.dwd_pos_ticket
             WHERE biz_date = :sd
               AND COALESCE(is_void, false) = false
               AND COALESCE(is_pending, false) = false
               AND COALESCE(store_code, '') IN {store_in}
         """), {"sd": query_date})
-        e3_sales = float(e3_result.scalar() or 0)
+        e3_row = e3_result.mappings().first()
+        e3_sales = float(e3_row["e3_sales"] or 0) if e3_row else 0
+        actual_pay_amount = float(e3_row["actual_pay_amount"] or 0) if e3_row else 0
         if e3_sales > 0:
             bm = data["business_metrics"]
             bm["yesterday_sales_e3"] = _value(round(e3_sales, 2), 2)
             bm["yesterday_sales"] = bm["yesterday_sales_e3"]
+        if actual_pay_amount > 0:
+            data["business_metrics"]["yesterday_actual_pay_amount"] = _value(round(actual_pay_amount, 2), 2)
     except Exception:
         logger.exception("获取 E3 销售额失败")
 
@@ -321,6 +327,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
                       AND COALESCE(is_pending, false) = false
                 ), ticket_agg AS (
                     SELECT COALESCE(SUM(sales_amount),0) AS total_sales,
+                           COALESCE(SUM(actual_pay_amount),0) AS actual_pay_amount,
                            COALESCE(SUM(sales_qty),0) AS total_qty,
                            COALESCE(SUM(standard_amount),0) AS total_std,
                            COUNT(*) AS total_orders,
@@ -403,12 +410,15 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
             if row and row.get("total_sales") and float(row["total_sales"] or 0) > 0:
                 bm = data["business_metrics"]
                 total_sales = float(row["total_sales"] or 0)
+                actual_pay_amount = float(row.get("actual_pay_amount") or 0)
                 total_qty = float(row["total_qty"] or 0)
                 item_qty = total_qty
                 total_orders = row.get("total_orders")
                 if not used_dws_metrics:
                     bm["yesterday_sales"] = _value(round(total_sales, 2), 2)
                     bm["yesterday_sales_e3"] = bm["yesterday_sales"]
+                    if actual_pay_amount > 0:
+                        bm["yesterday_actual_pay_amount"] = _value(round(actual_pay_amount, 2), 2)
                     if total_orders is not None and int(total_orders or 0) > 0:
                         order_count = int(total_orders)
                         bm["yesterday_orders"] = _value(order_count)

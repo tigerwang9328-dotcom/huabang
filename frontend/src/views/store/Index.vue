@@ -93,6 +93,12 @@
           <el-table-column prop="actual_pay_amount" label="实收金额" width="118" sortable align="right">
             <template #default="{ row }">{{ formatMoney(row.actual_pay_amount) }}</template>
           </el-table-column>
+          <el-table-column prop="recharge_amount" label="充值金额" width="118" sortable align="right">
+            <template #default="{ row }">{{ formatMoney(row.recharge_amount) }}</template>
+          </el-table-column>
+          <el-table-column prop="refund_amount" label="退款金额" width="118" sortable align="right">
+            <template #default="{ row }">{{ formatMoney(row.refund_amount) }}</template>
+          </el-table-column>
           <el-table-column prop="orders" label="订单数" width="88" sortable align="right" />
           <el-table-column prop="sales_qty" label="件数" width="82" sortable align="right">
             <template #default="{ row }">{{ formatQty(row.sales_qty) }}</template>
@@ -249,8 +255,8 @@ async function refresh() {
 const filteredStores = computed(() => stores.value || []);
 
 const metricCards = computed(() => [
-  { label: "销售额", value: formatMoney(summary.value.total_sales_amount), sub: "E3 小票销售额" },
-  { label: "实收金额", value: formatMoney(summary.value.total_actual_pay_amount), sub: "支付明细实收口径" },
+  { label: "销售额", value: formatMoney(summary.value.total_sales_amount), sub: "VIP/收钱吧/五月前储值/现金/线上" },
+  { label: "实收金额", value: formatMoney(summary.value.total_actual_pay_amount), sub: "收钱吧/现金/线上+充值-退款" },
   { label: "订单数", value: Number(summary.value.total_orders || 0).toLocaleString("zh-CN"), sub: `${summary.value.active_stores_count || 0} 家有销售` },
   { label: "销售件数", value: formatQty(summary.value.total_sales_qty), sub: `连带率 ${formatDecimal(summary.value.attach_rate)}` },
   { label: "客单价", value: formatMoney(summary.value.customer_average_price), sub: `平均折扣 ${formatPercent(summary.value.discount_rate)}` },

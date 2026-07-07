@@ -86,27 +86,24 @@
             <div class="metric-header">
               <span class="metric-label">{{ m.label }}</span>
               <div class="metric-header-right">
-                <div v-if="m.isSalesAmount" class="sales-source-toggle" aria-label="销售额口径切换">
-                  <button
-                    type="button"
-                    :class="{ active: salesAmountSource === 'e3' }"
-                    @click="salesAmountSource = 'e3'"
-                  >
-                    E3
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: salesAmountSource === 'pinke' }"
-                    @click="salesAmountSource = 'pinke'"
-                  >
-                    品氪
-                  </button>
-                </div>
                 <span class="metric-status-dot" :class="{ active: !m.isPending }"></span>
               </div>
             </div>
             <div class="metric-body">
-              <template v-if="!m.isPending">
+              <template v-if="m.isSalesSplit">
+                <div class="metric-split">
+                  <div class="metric-split-item">
+                    <span class="split-label">销售额</span>
+                    <span class="metric-num">{{ m.salesValue }}</span>
+                  </div>
+                  <div class="metric-divider"></div>
+                  <div class="metric-split-item">
+                    <span class="split-label">实收金额</span>
+                    <span class="metric-num">{{ m.actualValue }}</span>
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="!m.isPending">
                 <span class="metric-num">{{ m.value }}</span>
               </template>
               <template v-else>
@@ -219,7 +216,6 @@ const trend = ref<any[]>([]);
 const storeRank = ref<any[]>([]);
 const taskSummary = ref<any>({});
 const rawOverview = ref<any>({});
-const salesAmountSource = ref<"e3" | "pinke">("e3");
 
 // 日期选择器：默认昨天
 const yesterday = new Date();
@@ -288,10 +284,16 @@ const assetCards = computed(() => {
 
 const bizMetricCards = computed(() => {
   const m = rawOverview.value?.business_metrics || {};
+  const sales = getMetricVal(m, "yesterday_sales_e3");
+  const actual = getMetricVal(m, "yesterday_actual_pay_amount");
   const cards = [
     {
-      key: salesAmountSource.value === "e3" ? "yesterday_sales_e3" : "yesterday_sales_pinke",
-      label: salesAmountSource.value === "e3" ? "销售额(E3)" : "销售额(品氪)",
+      key: "sales_split",
+      label: "销售额 / 实收金额",
+      isSalesSplit: true,
+      salesValue: sales.val,
+      actualValue: actual.val,
+      isPending: sales.isPending && actual.isPending,
     },
     { key: "yesterday_orders", label: "订单数" },
     { key: "yesterday_items", label: "销售件数" },
@@ -302,8 +304,9 @@ const bizMetricCards = computed(() => {
     { key: "items_per_order", label: "连带率" },
   ];
   return cards.map(c => {
+    if ((c as any).isSalesSplit) return c;
     const r = getMetricVal(m, c.key);
-    return { label: c.label, value: r.val, isPending: r.isPending, isSalesAmount: c.key === "yesterday_sales_e3" || c.key === "yesterday_sales_pinke" };
+    return { label: c.label, value: r.val, isPending: r.isPending };
   });
 });
 
@@ -432,37 +435,6 @@ onMounted(() => { fetchData(); });
 .live-dot { width: 6px; height: 6px; background-color: #10B981; border-radius: 50%; margin-right: 8px; box-shadow: 0 0 6px #10B981; }
 
 .lux-section-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; margin: 28px 0 16px 0; color: #0F172A; letter-spacing: 0.5px; }
-.sales-source-toggle {
-  margin-left: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid #E2E8F0;
-  border-radius: 6px;
-  background: #FFFFFF;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-.sales-source-toggle button {
-  min-width: 42px;
-  height: 24px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #64748B;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.16s, color 0.16s;
-}
-.sales-source-toggle button.active {
-  background: #0F172A;
-  color: #FFFFFF;
-}
-.sales-source-toggle button:hover:not(.active) {
-  background: #F1F5F9;
-  color: #334155;
-}
 .scope-note {
   margin-left: 10px;
   padding: 3px 8px;
@@ -551,6 +523,32 @@ onMounted(() => { fetchData(); });
 .metric-status-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #CBD5E1; }
 .metric-status-dot.active { background-color: #10B981; box-shadow: 0 0 8px #10B981; }
 .metric-num, .risk-num { font-size: 24px; font-weight: 700; color: #0F172A; letter-spacing: -0.5px; }
+.metric-split {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  align-items: center;
+  gap: 16px;
+  min-height: 38px;
+}
+.metric-split-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.metric-split-item:last-child {
+  align-items: flex-start;
+}
+.split-label {
+  color: #64748B;
+  font-size: 12px;
+  line-height: 1;
+}
+.metric-divider {
+  width: 1px;
+  height: 46px;
+  background: linear-gradient(180deg, transparent, #CBD5E1 18%, #CBD5E1 82%, transparent);
+}
 .text-alert { color: #EF4444; }
 
 .lux-shimmer-loader { display: flex; flex-direction: column; }
