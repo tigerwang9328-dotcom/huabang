@@ -252,6 +252,8 @@ onMounted(() => { fetchQuality(); loadOptions(); fetchList(); });
 .quality-card.warning strong { color:#d97706; }
 .toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
 .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.product-master :deep(.el-table th .cell) { display:inline-flex; align-items:center; justify-content:center; gap:3px; white-space:nowrap; }
+.product-master :deep(.el-table th .caret-wrapper) { flex:0 0 auto; height:20px; margin-left:0; }
 .actions { display:flex; align-items:center; gap:12px; }
 .last-sync { color:#909399; font-size:13px; }
 .pager { margin-top:12px; display:flex; justify-content:flex-end; }

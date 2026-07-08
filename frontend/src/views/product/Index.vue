@@ -345,6 +345,8 @@ onMounted(() => {
 .analysis-tabs { background: #FFFFFF; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.analysis-page :deep(.el-table th .cell) { display: inline-flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; }
+.analysis-page :deep(.el-table th .caret-wrapper) { flex: 0 0 auto; height: 20px; margin-left: 0; }
 .sync-info { color: #909399; font-size: 12px; }
 .pager { margin-top: 12px; display: flex; justify-content: flex-end; }
 .empty-block { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 48px 0; color: #D1D5DB; font-size: 13px; }
