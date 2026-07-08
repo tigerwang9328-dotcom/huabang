@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import defaultdict
 from typing import Optional
 
 from sqlalchemy import text
@@ -22,9 +23,10 @@ from app.integrations.baison.client import BaisonClient
 logger = logging.getLogger("baison.pos_ticket")
 
 TICKET_METHOD = "pos.qtlsd.list_get"
+DEPOSIT_METHOD = "crm.vip.get_deposit_list"
 SALES_PAY_CODES = ACTUAL_PAY_CODES
 BASE_RECEIPT_PAY_CODES = frozenset({"000", "011", "666", "971"})
-RECHARGE_PAY_CODES = frozenset({"003", "004"})
+RECHARGE_PAY_CODES = frozenset()
 
 
 class PosTicketService:
@@ -119,6 +121,18 @@ class PosTicketService:
             await db.execute(text(
                 "ALTER TABLE dwd.dwd_pos_ticket ADD COLUMN IF NOT EXISTS actual_pay_amount NUMERIC(16,2) DEFAULT 0"
             ))
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS dwd.dwd_store_recharge_daily (
+                    biz_date DATE NOT NULL,
+                    store_code VARCHAR(64) NOT NULL,
+                    recharge_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+                    source VARCHAR(64) NOT NULL DEFAULT 'baison_deposit',
+                    note TEXT,
+                    created_at TIMESTAMP DEFAULT now(),
+                    updated_at TIMESTAMP DEFAULT now(),
+                    PRIMARY KEY (biz_date, store_code, source)
+                )
+            """))
             await db.commit()
 
     async def sync_range(self, start_time: str, end_time: str, max_pages: int = 0, page_size: int = 100) -> dict:
@@ -242,9 +256,11 @@ class PosTicketService:
                 sales_qty = self._f(rec.get("sl"))
                 raw_sales_amount = self._f(rec.get("sfje") if rec.get("sfje") not in (None, "") else rec.get("je"))
                 sales_amount = sum(
-                    self._f(p.get("je"))
+                    amount
                     for p in djs_mx
                     if str(p.get("jsdm") or "") in SALES_PAY_CODES
+                    for amount in [self._f(p.get("je"))]
+                    if amount > 0
                 ) if djs_mx else raw_sales_amount
                 standard_amount = self._f(rec.get("bzje"))
                 gross_profit_source_amount = self._f(rec.get("mlje"))
@@ -258,7 +274,7 @@ class PosTicketService:
                 for p in djs_mx:
                     code = str(p.get("jsdm") or "")
                     amount = self._f(p.get("je"))
-                    if code in BASE_RECEIPT_PAY_CODES:
+                    if code in BASE_RECEIPT_PAY_CODES and amount > 0:
                         actual_pay_amount += amount
                     elif code in RECHARGE_PAY_CODES and amount > 0:
                         actual_pay_amount += amount
@@ -326,6 +342,7 @@ class PosTicketService:
         params = {"sd": start_date, "ed": end_date}
         # 华邦业务口径:销售/收款仅统计白名单门店,仓库不进入销售口径。
         store_in = allowed_store_sql_in()
+        recharge_by_date, recharge_by_store_date = self._fetch_recharge_amounts(start_time, end_time)
         async with AsyncSessionLocal() as db:
             await db.execute(text(f"""
                 INSERT INTO dws.dws_company_daily AS t
@@ -397,6 +414,56 @@ class PosTicketService:
                               avg_discount_rate = EXCLUDED.avg_discount_rate,
                               etl_at = now()
             """), params)
+            await db.execute(text("""
+                DELETE FROM dwd.dwd_store_recharge_daily
+                WHERE biz_date >= :sd AND biz_date <= :ed
+                  AND source = 'baison_deposit'
+            """), params)
+            for (biz_date, store_code), amount in recharge_by_store_date.items():
+                await db.execute(text("""
+                    INSERT INTO dwd.dwd_store_recharge_daily AS t
+                    (biz_date, store_code, recharge_amount, source, note, created_at, updated_at)
+                    VALUES (:biz_date, :store_code, :amount, 'baison_deposit', 'crm.vip.get_deposit_list change_type=0', now(), now())
+                    ON CONFLICT (biz_date, store_code, source)
+                    DO UPDATE SET recharge_amount = EXCLUDED.recharge_amount,
+                                  note = EXCLUDED.note,
+                                  updated_at = now()
+                """), {
+                    "biz_date": biz_date,
+                    "store_code": store_code,
+                    "amount": amount,
+                })
+            for biz_date, amount in recharge_by_date.items():
+                await db.execute(text("""
+                    UPDATE dws.dws_company_daily
+                    SET total_sales_amount = COALESCE(total_sales_amount, 0) + :amount,
+                        offline_sales_amount = COALESCE(offline_sales_amount, 0) + :amount,
+                        net_sales_amount = COALESCE(net_sales_amount, 0) + :amount,
+                        avg_order_value = CASE
+                            WHEN COALESCE(total_order_count, 0) > 0
+                            THEN ROUND(((COALESCE(total_sales_amount, 0) + :amount) / total_order_count)::numeric, 2)
+                            ELSE NULL END,
+                        etl_at = now()
+                    WHERE stat_date = :biz_date
+                """), {"biz_date": biz_date, "amount": amount})
+            for (biz_date, store_code), amount in recharge_by_store_date.items():
+                await db.execute(text("""
+                    UPDATE dws.dws_store_daily
+                    SET sales_amount = COALESCE(sales_amount, 0) + :amount,
+                        net_sales_amount = COALESCE(net_sales_amount, 0) + :amount,
+                        avg_order_value = CASE
+                            WHEN COALESCE(order_count, 0) > 0
+                            THEN ROUND(((COALESCE(sales_amount, 0) + :amount) / order_count)::numeric, 2)
+                            ELSE NULL END,
+                        etl_at = now()
+                    WHERE stat_date = :biz_date
+                      AND store_code = :store_code
+                      AND channel = 'offline'
+                """), {
+                    "biz_date": biz_date,
+                    "store_code": store_code,
+                    "amount": amount,
+                })
             await db.commit()
             result = await db.execute(text(f"""
                 SELECT COALESCE(SUM(sales_amount),0) AS total_sales,
@@ -410,10 +477,90 @@ class PosTicketService:
                   AND store_code IN {store_in}
             """), params)
             row = result.mappings().one()
+            recharge_total = sum(recharge_by_date.values())
             return {
-                "total_sales": float(row["total_sales"] or 0),
-                "recharge_amount": 0,
+                "total_sales": float(row["total_sales"] or 0) + recharge_total,
+                "recharge_amount": recharge_total,
                 "total_qty": float(row["total_qty"] or 0),
                 "total_orders": int(row["total_orders"] or 0),
                 "store_count": int(row["store_count"] or 0),
             }
+
+    def _fetch_recharge_amounts(
+        self,
+        start_time: str,
+        end_time: str,
+    ) -> tuple[dict[dt.date, float], dict[tuple[dt.date, str], float]]:
+        """拉取当日充值(change_type=0),供实收/经营口径额外计入。"""
+        allowed_stores = {
+            item.strip("'")
+            for item in allowed_store_sql_in().strip("()").split(",")
+            if item.strip("'")
+        }
+        by_date: defaultdict[dt.date, float] = defaultdict(float)
+        by_store_date: defaultdict[tuple[dt.date, str], float] = defaultdict(float)
+        page = 1
+        page_size = 100
+        fetched = 0
+        total: int | None = None
+
+        while True:
+            params = {
+                "pageNum": str(page),
+                "num": str(page_size),
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+            try:
+                resp = self.client.request(DEPOSIT_METHOD, params, timeout=30)
+            except Exception as exc:
+                logger.error("deposit api error page=%s err=%s", page, exc)
+                break
+            if not resp.data or str(resp.data.get("code")) != "1":
+                logger.error("deposit api failed page=%s raw=%s", page, resp.raw_response[:500])
+                break
+            inner = resp.data.get("data") or "{}"
+            if isinstance(inner, str):
+                try:
+                    inner = json.loads(inner)
+                except (json.JSONDecodeError, TypeError):
+                    logger.error("deposit api bad json page=%s raw=%s", page, resp.raw_response[:500])
+                    break
+            rows = inner.get("data") if isinstance(inner, dict) else []
+            rows = rows or []
+            if not rows:
+                break
+            if total is None:
+                total = int(self._f(rows[0].get("tCount")))
+            for rec in rows:
+                store_code = str(rec.get("shop_code") or "").strip()
+                if store_code not in allowed_stores:
+                    continue
+                if str(rec.get("change_type") or "") != "0":
+                    continue
+                amount = self._f(rec.get("ZJE") or rec.get("money_change"))
+                if amount <= 0:
+                    continue
+                biz_date = self._parse_deposit_date(rec)
+                by_date[biz_date] += amount
+                by_store_date[(biz_date, store_code)] += amount
+
+            fetched += len(rows)
+            if total is not None and fetched >= total:
+                break
+            page += 1
+            if page > 1000:
+                logger.error("deposit api stopped: too many pages fetched=%s", fetched)
+                break
+            time.sleep(0.15)
+        return dict(by_date), dict(by_store_date)
+
+    def _parse_deposit_date(self, rec: dict) -> dt.date:
+        raw = rec.get("init_time") or rec.get("is_add_time")
+        if raw:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return dt.datetime.strptime(str(raw), fmt).date()
+                except ValueError:
+                    pass
+        return dt.date.today()

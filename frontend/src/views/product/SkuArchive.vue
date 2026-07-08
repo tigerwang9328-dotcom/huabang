@@ -48,6 +48,7 @@
         <el-select v-model="filters.season_name" placeholder="季节" clearable style="width:100px">
           <el-option v-for="s in options.seasons" :key="s" :label="s" :value="s" />
         </el-select>
+        <el-checkbox v-model="filters.onlyPositive" @change="handleFilterChange">隐藏0库存</el-checkbox>
         <el-button type="primary" @click="handleSearch">搜索</el-button>
         <el-button @click="handleReset">重置</el-button>
       </div>
@@ -59,7 +60,7 @@
       </div>
     </div>
 
-    <el-table :data="list" v-loading="loading" border stripe size="small" style="width:100%">
+    <el-table :data="list" v-loading="loading" border stripe size="small" style="width:100%" @sort-change="handleSortChange">
       <el-table-column label="图片" width="62" fixed align="center">
         <template #default="{ row }">
           <div class="sku-thumb-cell">
@@ -95,9 +96,9 @@
           <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="inventory_qty" label="当前库存" width="90" align="right" />
-      <el-table-column prop="sales_qty" label="近7天销量" width="95" align="right" />
-      <el-table-column label="销售额" width="95" align="right">
+      <el-table-column prop="inventory_qty" label="当前库存" width="90" align="right" sortable="custom" />
+      <el-table-column prop="sales_qty" label="近7天销量" width="95" align="right" sortable="custom" />
+      <el-table-column prop="sales_amount" label="销售额" width="95" align="right" sortable="custom">
         <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
       </el-table-column>
       <el-table-column label="AI建议" width="95">
@@ -132,7 +133,8 @@ const page = ref(1);
 const page_size = ref(20);
 const lastSyncedAt = ref<string | null>(null);
 const quality = ref<any>({});
-const filters = reactive<any>({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "" });
+const filters = reactive<any>({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "", onlyPositive: true });
+const sortState = reactive({ prop: "", order: "" });
 const options = reactive<{ brands: string[]; colors: string[]; sizes: string[]; seasons: string[] }>({ brands: [], colors: [], sizes: [], seasons: [] });
 
 function formatTime(t: string | null) {
@@ -170,7 +172,17 @@ async function fetchList() {
   loading.value = true;
   try {
     const params: any = { page: page.value, page_size: page_size.value };
-    Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v; });
+    Object.entries(filters).forEach(([k, v]) => {
+      if (k === "onlyPositive") {
+        if (v) params.only_positive = 1;
+      } else if (v) {
+        params[k] = v;
+      }
+    });
+    if (sortState.prop) {
+      params.sort_by = sortState.prop;
+      params.sort_order = sortState.order === "ascending" ? "asc" : "desc";
+    }
     const { data } = await productApi.listSkus(params);
     if (data && data.success) {
       list.value = data.data.items || [];
@@ -199,9 +211,17 @@ async function loadOptions() {
 }
 
 function handleSearch() { page.value = 1; fetchList(); }
+function handleFilterChange() { page.value = 1; fetchList(); }
 function handleReset() {
   Object.keys(filters).forEach((k) => (filters[k] = ""));
+  filters.onlyPositive = true;
   page.value = 1; fetchList();
+}
+function handleSortChange({ prop, order }: any) {
+  sortState.prop = order ? prop : "";
+  sortState.order = order || "";
+  page.value = 1;
+  fetchList();
 }
 function handlePageChange(p: number) { page.value = p; fetchList(); }
 function handleSizeChange(s: number) { page_size.value = s; page.value = 1; fetchList(); }

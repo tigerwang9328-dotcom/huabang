@@ -37,32 +37,23 @@ PAY_DETAIL_SQL = """
     SELECT t.ticket_no,
            SUM(CASE
                  WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                  ELSE 0
                END) AS sales_amount,
            SUM(CASE
                  WHEN p->>'jsdm' IN ('000', '011', '666', '971')
+                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                  ELSE 0
                END)
-           + SUM(CASE
-                   WHEN p->>'jsdm' IN ('003', '004')
-                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                   THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
-                   ELSE 0
-                 END)
            + SUM(CASE
                    WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
                     AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
                    THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                    ELSE 0
                  END) AS actual_pay_amount,
-           SUM(CASE
-                 WHEN p->>'jsdm' IN ('003', '004')
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
-                 ELSE 0
-               END) AS recharge_amount,
+           0::numeric AS recharge_amount,
            -SUM(CASE
                   WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
@@ -157,6 +148,18 @@ async def store_sales_analysis(
         ed = _parse_date(end_date, latest_date)
         kw = f"%{keyword.strip()}%" if keyword and keyword.strip() else ""
         params = {"sd": sd, "ed": ed, "store_codes": sorted(ALLOWED_STORE_CODES), "kw": kw}
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS dwd.dwd_store_recharge_daily (
+                biz_date DATE NOT NULL,
+                store_code VARCHAR(64) NOT NULL,
+                recharge_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+                source VARCHAR(64) NOT NULL DEFAULT 'manual',
+                note TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now(),
+                PRIMARY KEY (biz_date, store_code, source)
+            )
+        """))
 
         store_filter = """
             s.store_code = ANY(:store_codes)
@@ -185,6 +188,13 @@ async def store_sales_analysis(
                   AND COALESCE(t.is_void, false) = false
                   AND COALESCE(t.is_pending, false) = false
                 GROUP BY t.store_code
+            ), recharge AS (
+                SELECT store_code,
+                       COALESCE(SUM(recharge_amount), 0) AS recharge_amount
+                FROM dwd.dwd_store_recharge_daily
+                WHERE biz_date >= CAST(:sd AS date) AND biz_date <= CAST(:ed AS date)
+                  AND store_code = ANY(:store_codes)
+                GROUP BY store_code
             ), goods AS (
                 SELECT store_code,
                        COUNT(DISTINCT product_code)::int AS product_count,
@@ -202,8 +212,8 @@ async def store_sales_analysis(
                    COALESCE(ticket.orders, 0) AS orders,
                    COALESCE(ticket.sales_qty, 0) AS sales_qty,
                    COALESCE(ticket.sales_amount, 0) AS sales_amount,
-                   COALESCE(ticket.actual_pay_amount, 0) AS actual_pay_amount,
-                   COALESCE(ticket.recharge_amount, 0) AS recharge_amount,
+                   COALESCE(ticket.actual_pay_amount, 0) + COALESCE(recharge.recharge_amount, 0) AS actual_pay_amount,
+                   COALESCE(recharge.recharge_amount, 0) AS recharge_amount,
                    COALESCE(ticket.refund_amount, 0) AS refund_amount,
                    COALESCE(ticket.standard_amount, 0) AS standard_amount,
                    CASE WHEN COALESCE(ticket.standard_amount, 0) > 0
@@ -220,6 +230,7 @@ async def store_sales_analysis(
                    ticket.last_synced_at
             FROM stores
             LEFT JOIN ticket ON ticket.store_code = stores.store_code
+            LEFT JOIN recharge ON recharge.store_code = stores.store_code
             LEFT JOIN goods ON goods.store_code = stores.store_code
             ORDER BY sales_amount DESC, stores.store_code
         """), params)).mappings().all()
@@ -240,21 +251,37 @@ async def store_sales_analysis(
             stores.append(item)
 
         trend_rows = (await db.execute(text(f"""
-            SELECT biz_date,
-                   COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount,
-                   COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount,
-                   COALESCE(SUM(COALESCE(pay.recharge_amount, 0)), 0) AS recharge_amount,
-                   COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS refund_amount,
-                   COUNT(*)::int AS orders,
-                   COALESCE(SUM(t.sales_qty), 0) AS sales_qty
-            FROM dwd.dwd_pos_ticket t
-            LEFT JOIN ({PAY_DETAIL_SQL}) pay ON pay.ticket_no = t.ticket_no
-            WHERE t.biz_date >= CAST(:sd AS date) AND t.biz_date <= CAST(:ed AS date)
-              AND t.store_code = ANY(:store_codes)
-              AND COALESCE(t.is_void, false) = false
-              AND COALESCE(t.is_pending, false) = false
-            GROUP BY t.biz_date
-            ORDER BY t.biz_date
+            WITH ticket AS (
+                SELECT biz_date,
+                       COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount,
+                       COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount,
+                       COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS refund_amount,
+                       COUNT(*)::int AS orders,
+                       COALESCE(SUM(t.sales_qty), 0) AS sales_qty
+                FROM dwd.dwd_pos_ticket t
+                LEFT JOIN ({PAY_DETAIL_SQL}) pay ON pay.ticket_no = t.ticket_no
+                WHERE t.biz_date >= CAST(:sd AS date) AND t.biz_date <= CAST(:ed AS date)
+                  AND t.store_code = ANY(:store_codes)
+                  AND COALESCE(t.is_void, false) = false
+                  AND COALESCE(t.is_pending, false) = false
+                GROUP BY t.biz_date
+            ), recharge AS (
+                SELECT biz_date, COALESCE(SUM(recharge_amount), 0) AS recharge_amount
+                FROM dwd.dwd_store_recharge_daily
+                WHERE biz_date >= CAST(:sd AS date) AND biz_date <= CAST(:ed AS date)
+                  AND store_code = ANY(:store_codes)
+                GROUP BY biz_date
+            )
+            SELECT ticket.biz_date,
+                   ticket.sales_amount,
+                   ticket.actual_pay_amount + COALESCE(recharge.recharge_amount, 0) AS actual_pay_amount,
+                   COALESCE(recharge.recharge_amount, 0) AS recharge_amount,
+                   ticket.refund_amount,
+                   ticket.orders,
+                   ticket.sales_qty
+            FROM ticket
+            LEFT JOIN recharge ON recharge.biz_date = ticket.biz_date
+            ORDER BY ticket.biz_date
         """), params)).mappings().all()
         trend = [dict(r) for r in trend_rows]
         for r in trend:

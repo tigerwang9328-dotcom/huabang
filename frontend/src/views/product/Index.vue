@@ -35,12 +35,13 @@
             <el-select v-model="pf.status" placeholder="状态" clearable style="width:90px">
               <el-option label="启用" value="active" /><el-option label="停用" value="disabled" />
             </el-select>
+            <el-checkbox v-model="pf.onlyPositive" @change="handleProductFilterChange">隐藏0库存</el-checkbox>
             <el-button type="primary" @click="fetchProducts">搜索</el-button>
             <el-button @click="resetProducts">重置</el-button>
           </div>
           <span class="sync-info" v-if="pLastSync">最后同步：{{ pLastSync }}</span>
         </div>
-        <el-table :data="productList" v-loading="pLoading" border stripe size="small">
+        <el-table :data="productList" v-loading="pLoading" border stripe size="small" @sort-change="handleProductSortChange">
           <el-table-column prop="product_code" label="款号" width="110" fixed />
           <el-table-column prop="product_name" label="商品名称" min-width="150" show-overflow-tooltip />
           <el-table-column prop="category_name" label="品类" width="90" />
@@ -58,9 +59,9 @@
               <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="inventory_qty" label="库存" width="76" align="right" />
-          <el-table-column prop="sales_qty" label="7天销量" width="82" align="right" />
-          <el-table-column label="7天销售额" width="96" align="right">
+          <el-table-column prop="inventory_qty" label="库存" width="76" align="right" sortable="custom" />
+          <el-table-column prop="sales_qty" label="7天销量" width="82" align="right" sortable="custom" />
+          <el-table-column prop="sales_amount" label="7天销售额" width="96" align="right" sortable="custom">
             <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
           </el-table-column>
           <el-table-column label="AI建议" width="90">
@@ -91,12 +92,13 @@
             <el-select v-model="sf.status" placeholder="状态" clearable style="width:90px">
               <el-option label="启用" value="active" /><el-option label="停用" value="disabled" />
             </el-select>
+            <el-checkbox v-model="sf.onlyPositive" @change="handleSkuFilterChange">隐藏0库存</el-checkbox>
             <el-button type="primary" @click="fetchSkus">搜索</el-button>
             <el-button @click="resetSkus">重置</el-button>
           </div>
           <span class="sync-info" v-if="sLastSync">最后同步：{{ sLastSync }}</span>
         </div>
-        <el-table :data="skuList" v-loading="sLoading" border stripe size="small">
+        <el-table :data="skuList" v-loading="sLoading" border stripe size="small" @sort-change="handleSkuSortChange">
           <el-table-column prop="sku_code" label="SKU编码" width="140" fixed show-overflow-tooltip />
           <el-table-column prop="product_code" label="款号" width="100" />
           <el-table-column prop="product_name" label="商品名称" min-width="130" show-overflow-tooltip />
@@ -115,9 +117,9 @@
               <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="inventory_qty" label="库存" width="76" align="right" />
-          <el-table-column prop="sales_qty" label="7天销量" width="82" align="right" />
-          <el-table-column label="销售额" width="90" align="right">
+          <el-table-column prop="inventory_qty" label="库存" width="76" align="right" sortable="custom" />
+          <el-table-column prop="sales_qty" label="7天销量" width="82" align="right" sortable="custom" />
+          <el-table-column prop="sales_amount" label="销售额" width="90" align="right" sortable="custom">
             <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
           </el-table-column>
           <el-table-column label="AI建议" width="90">
@@ -172,20 +174,23 @@ const summaryCards = ref([
   { label: "SKU缺条码", value: "—", warning: true },
   { label: "有库存SKU", value: "—", warning: false },
   { label: "7天动销SKU", value: "—", warning: false },
+  { label: "库存金额", value: "—", warning: false },
 ]);
 
 // 商品主档
 const pLoading = ref(false); const productList = ref<any[]>([]);
 const pTotal = ref(0); const pPage = ref(1); const pSize = ref(20);
 const pLastSync = ref("");
-const pf = reactive({ keyword: "", brand_name: "", category_name: "", year: "", season: "", status: "" });
+const pSort = reactive({ prop: "", order: "" });
+const pf = reactive({ keyword: "", brand_name: "", category_name: "", year: "", season: "", status: "", onlyPositive: true });
 const pOpts = reactive<{ brands: string[]; categories: string[]; years: any[]; seasons: string[] }>({ brands: [], categories: [], years: [], seasons: [] });
 
 // SKU
 const sLoading = ref(false); const skuList = ref<any[]>([]);
 const sTotal = ref(0); const sPage = ref(1); const sSize = ref(20);
 const sLastSync = ref("");
-const sf = reactive({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "" });
+const sSort = reactive({ prop: "", order: "" });
+const sf = reactive({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "", onlyPositive: true });
 const sOpts = reactive<{ brands: string[]; colors: string[]; sizes: string[]; seasons: string[] }>({ brands: [], colors: [], sizes: [], seasons: [] });
 
 const barcodeStats = ref({ withBarcode: 0, noBarcode: 0, barcodeRate: 0 });
@@ -215,6 +220,7 @@ async function fetchQualitySummary() {
       { label: "SKU缺条码", value: formatNum(q.sku_missing_barcode_count), warning: true },
       { label: "有库存SKU", value: formatNum(q.inv_sku_count), warning: false },
       { label: "7天动销SKU", value: formatNum(q.sale_sku_count), warning: false },
+      { label: "库存金额", value: "¥" + formatAmount(q.inventory_amount), warning: false },
     ];
     barcodeStats.value.withBarcode = Number(q.sku_barcode_ready_count || 0);
     barcodeStats.value.noBarcode = Number(q.sku_missing_barcode_count || 0);
@@ -227,7 +233,17 @@ async function fetchProducts() {
   pLoading.value = true;
   try {
     const params: any = { page: pPage.value, page_size: pSize.value };
-    Object.entries(pf).forEach(([k, v]) => { if (v !== "" && v != null) params[k] = v; });
+    Object.entries(pf).forEach(([k, v]) => {
+      if (k === "onlyPositive") {
+        if (v) params.only_positive = 1;
+      } else if (v !== "" && v != null) {
+        params[k] = v;
+      }
+    });
+    if (pSort.prop) {
+      params.sort_by = pSort.prop;
+      params.sort_order = pSort.order === "ascending" ? "asc" : "desc";
+    }
     const { data } = await productApi.listProducts(params);
     if (data?.success) {
       productList.value = data.data.items || [];
@@ -248,7 +264,14 @@ async function loadPOpts() {
     pOpts.seasons = [...new Set(items.map((x: any) => x.season).filter(Boolean))] as string[];
   } catch (_) {}
 }
-function resetProducts() { pf.keyword = ""; pf.brand_name = ""; pf.category_name = ""; pf.year = ""; pf.season = ""; pf.status = ""; pPage.value = 1; fetchProducts(); }
+function resetProducts() { pf.keyword = ""; pf.brand_name = ""; pf.category_name = ""; pf.year = ""; pf.season = ""; pf.status = ""; pf.onlyPositive = true; pPage.value = 1; fetchProducts(); }
+function handleProductFilterChange() { pPage.value = 1; fetchProducts(); }
+function handleProductSortChange({ prop, order }: any) {
+  pSort.prop = order ? prop : "";
+  pSort.order = order || "";
+  pPage.value = 1;
+  fetchProducts();
+}
 function onPPage(p: number) { pPage.value = p; fetchProducts(); }
 function onPSize(s: number) { pSize.value = s; pPage.value = 1; fetchProducts(); }
 
@@ -257,7 +280,17 @@ async function fetchSkus() {
   sLoading.value = true;
   try {
     const params: any = { page: sPage.value, page_size: sSize.value };
-    Object.entries(sf).forEach(([k, v]) => { if (v) params[k] = v; });
+    Object.entries(sf).forEach(([k, v]) => {
+      if (k === "onlyPositive") {
+        if (v) params.only_positive = 1;
+      } else if (v) {
+        params[k] = v;
+      }
+    });
+    if (sSort.prop) {
+      params.sort_by = sSort.prop;
+      params.sort_order = sSort.order === "ascending" ? "asc" : "desc";
+    }
     const { data } = await productApi.listSkus(params);
     if (data?.success) {
       skuList.value = data.data.items || [];
@@ -278,7 +311,14 @@ async function loadSOpts() {
     sOpts.seasons = [...new Set(items.map((x: any) => x.season_name).filter(Boolean))] as string[];
   } catch (_) {}
 }
-function resetSkus() { Object.keys(sf).forEach(k => (sf as any)[k] = ""); sPage.value = 1; fetchSkus(); }
+function resetSkus() { Object.keys(sf).forEach(k => (sf as any)[k] = ""); sf.onlyPositive = true; sPage.value = 1; fetchSkus(); }
+function handleSkuFilterChange() { sPage.value = 1; fetchSkus(); }
+function handleSkuSortChange({ prop, order }: any) {
+  sSort.prop = order ? prop : "";
+  sSort.order = order || "";
+  sPage.value = 1;
+  fetchSkus();
+}
 function onSPage(p: number) { sPage.value = p; fetchSkus(); }
 function onSSize(s: number) { sSize.value = s; sPage.value = 1; fetchSkus(); }
 
@@ -294,7 +334,7 @@ onMounted(() => {
 .page-header { display: flex; align-items: baseline; gap: 10px; }
 .page-title { font-size: 20px; font-weight: 700; color: #111827; margin: 0; }
 .page-desc { font-size: 12px; color: #9CA3AF; }
-.summary-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+.summary-row { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
 .summary-card {
   background: #FFFFFF; border-radius: 10px; padding: 14px; text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-top: 3px solid #16A34A;

@@ -19,6 +19,12 @@ from app.integrations.baison.services.inventory_service import STOCK_METHOD, imp
 from app.models.baison_ods import DwdInventoryBalance
 from app.models.dim import DimWarehouse
 from app.models.sys import SysUser
+from app.services.inventory_analysis_service import (
+    get_inventory_analysis_summary,
+    get_inventory_balance_list,
+    get_inventory_overview,
+    get_warehouse_list,
+)
 
 logger = logging.getLogger("inventory.api")
 
@@ -30,8 +36,7 @@ _WH_COLS = (
     DimWarehouse.region_name, DimWarehouse.default_location_code, DimWarehouse.default_location_name,
     DimWarehouse.status, DimWarehouse.is_enabled, DimWarehouse.source_system, DimWarehouse.synced_at,
 )
-_WH_PENDING = {"inventory_qty": "待接入", "inventory_amount": "待接入",
-               "stock_warning_count": "待接入", "ai_suggestion": "待接入"}
+_WH_PENDING = {"stock_warning_count": "待配置", "ai_suggestion": "待配置"}
 
 
 class WarehouseSyncRequest(BaseModel):
@@ -53,31 +58,14 @@ async def list_warehouses(
     current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """标准仓库维分页查询（仓库档案）。不返回 raw_data。"""
+    """标准仓库维分页查询（仓库档案 + 百胜库存汇总）。不返回 raw_data。"""
     try:
-        conds = []
-        if keyword:
-            kw = f"%{keyword.strip()}%"
-            conds.append(or_(DimWarehouse.warehouse_code.ilike(kw), DimWarehouse.warehouse_name.ilike(kw),
-                             DimWarehouse.region_name.ilike(kw)))
-        if warehouse_nature:
-            conds.append(DimWarehouse.warehouse_nature == warehouse_nature)
-        if warehouse_category_name:
-            conds.append(DimWarehouse.warehouse_category_name == warehouse_category_name)
-        if region_name:
-            conds.append(DimWarehouse.region_name == region_name)
-        if status:
-            conds.append(DimWarehouse.status == status)
-        if source_system:
-            conds.append(DimWarehouse.source_system == source_system)
-
-        total = (await db.execute(select(func.count()).select_from(DimWarehouse).where(*conds))).scalar() or 0
-        rows = (await db.execute(
-            select(*_WH_COLS).where(*conds).order_by(DimWarehouse.warehouse_code)
-            .offset((page - 1) * page_size).limit(page_size)
-        )).mappings().all()
-        items = [{**dict(r), **_WH_PENDING} for r in rows]
-        return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
+        data = await get_warehouse_list(
+            db, page, page_size, keyword, warehouse_nature, warehouse_category_name, region_name, status
+        )
+        for item in data.get("items", []):
+            item.update(_WH_PENDING)
+        return {"success": True, "data": data}
     except Exception:
         logger.exception("warehouse list error")
         return {"success": False, "message": "查询失败，请查看服务日志"}
@@ -107,7 +95,7 @@ async def sync_baison_warehouses(
         return {"success": False, "message": "内部错误，请查看服务日志"}
 
 
-# 库存余额返回字段（不含 raw_data；库存金额本接口无 -> 待接入）
+# 库存余额返回字段（不含 raw_data）
 _INV_COLS = (
     DwdInventoryBalance.id, DwdInventoryBalance.warehouse_code, DwdInventoryBalance.warehouse_name,
     DwdInventoryBalance.product_code, DwdInventoryBalance.sku_code, DwdInventoryBalance.barcode,
@@ -116,7 +104,7 @@ _INV_COLS = (
     DwdInventoryBalance.road_qty, DwdInventoryBalance.available_qty,
     DwdInventoryBalance.source_system, DwdInventoryBalance.synced_at,
 )
-_INV_PENDING = {"inventory_amount": "待接入", "ai_suggestion": "待接入"}
+_INV_PENDING = {"ai_suggestion": "待配置"}
 
 
 class InventorySyncRequest(BaseModel):
@@ -137,40 +125,44 @@ async def list_inventory_balance(
     current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """标准库存余额分页查询。available_qty = num - lock_num。库存金额待接入（接口无金额）。"""
+    """标准库存余额分页查询。available_qty = num - lock_num，库存金额按 SKU 成本计算。"""
     try:
-        conds = []
-        if keyword:
-            kw = f"%{keyword.strip()}%"
-            conds.append(or_(DwdInventoryBalance.product_code.ilike(kw), DwdInventoryBalance.sku_code.ilike(kw),
-                             DwdInventoryBalance.barcode.ilike(kw), DwdInventoryBalance.goods_name.ilike(kw)))
-        if warehouse_code:
-            conds.append(DwdInventoryBalance.warehouse_code == warehouse_code.strip())
-        if product_code:
-            conds.append(DwdInventoryBalance.product_code == product_code.strip())
-        if color_name:
-            conds.append(DwdInventoryBalance.color_name == color_name)
-        if size_name:
-            conds.append(DwdInventoryBalance.size_name == size_name)
-        if only_positive:
-            conds.append(DwdInventoryBalance.qty > 0)
-
-        total = (await db.execute(select(func.count()).select_from(DwdInventoryBalance).where(*conds))).scalar() or 0
-        rows = (await db.execute(
-            select(*_INV_COLS).where(*conds)
-            .order_by(DwdInventoryBalance.warehouse_code, DwdInventoryBalance.product_code)
-            .offset((page - 1) * page_size).limit(page_size)
-        )).mappings().all()
-        items = []
-        for r in rows:
-            d = dict(r)
-            for k in ("qty", "lock_qty", "road_qty", "available_qty"):
-                if d.get(k) is not None:
-                    d[k] = float(d[k])
-            items.append({**d, **_INV_PENDING})
-        return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
+        data = await get_inventory_balance_list(
+            db, page, page_size, keyword, warehouse_code, product_code, color_name, size_name, bool(only_positive)
+        )
+        for item in data.get("items", []):
+            item.update(_INV_PENDING)
+        return {"success": True, "data": data}
     except Exception:
         logger.exception("inventory balance list error")
+        return {"success": False, "message": "查询失败，请查看服务日志"}
+
+
+@router.get("/inventory/summary")
+async def inventory_summary(
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """库存管理顶部汇总，基于百胜库存余额和 SKU 成本。"""
+    try:
+        data = await get_inventory_analysis_summary(db)
+        return {"success": True, "updated_at": data.get("updated_at"), "data": data}
+    except Exception:
+        logger.exception("inventory summary error")
+        return {"success": False, "message": "查询失败，请查看服务日志"}
+
+
+@router.get("/inventory/overview")
+async def inventory_overview(
+    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """库存管理仓库总览，按 7 店 + 3 仓白名单汇总。"""
+    try:
+        data = await get_inventory_overview(db)
+        return {"success": True, "data": data}
+    except Exception:
+        logger.exception("inventory overview error")
         return {"success": False, "message": "查询失败，请查看服务日志"}
 
 

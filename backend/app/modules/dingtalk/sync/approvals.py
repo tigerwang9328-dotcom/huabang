@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import AsyncSessionLocal
 from app.models.dingtalk_hr_finance import DingtalkApprovalInstance, FinanceExpenseRecord
 from app.modules.dingtalk.sync._common import (
-    DingtalkApiError, get_access_token, get_all_dept_ids,
+    DingtalkApiBudget, DingtalkApiBudgetExceeded, DingtalkApiError, get_access_token, get_all_dept_ids,
     get_user_ids_of_dept, post_oapi, print_permission_help,
 )
 from app.modules.dingtalk.sync.finance_parser import categorize, parse_finance_record
@@ -20,13 +20,13 @@ CST = timezone(timedelta(hours=8))
 MAX_INSTANCES_PER_PROCESS = 200
 
 
-async def list_process_codes(client, token, sample_user_ids) -> dict:
+async def list_process_codes(client, token, sample_user_ids, budget: DingtalkApiBudget | None = None) -> dict:
     """通过若干用户可见的审批模板，收集 {process_code: name}。"""
     codes = {}
     for uid in sample_user_ids[:10]:
         try:
             data = await post_oapi(client, "/topapi/process/listbyuserid", token,
-                                   {"userid": uid, "offset": 0, "size": 100})
+                                   {"userid": uid, "offset": 0, "size": 100}, budget)
         except DingtalkApiError:
             continue
         for p in (data.get("result") or {}).get("process_list", []) or []:
@@ -36,12 +36,13 @@ async def list_process_codes(client, token, sample_user_ids) -> dict:
     return codes
 
 
-async def list_instance_ids(client, token, process_code, start_ms, end_ms) -> list:
+async def list_instance_ids(client, token, process_code, start_ms, end_ms,
+                            budget: DingtalkApiBudget | None = None) -> list:
     ids, cursor = [], 0
     while True:
         data = await post_oapi(client, "/topapi/processinstance/listids", token, {
             "process_code": process_code, "start_time": start_ms,
-            "end_time": end_ms, "size": 20, "cursor": cursor})
+            "end_time": end_ms, "size": 20, "cursor": cursor}, budget)
         result = data.get("result") or {}
         ids.extend(result.get("list") or [])
         cursor = result.get("next_cursor")
@@ -59,8 +60,8 @@ def _parse_dt(v):
         return None
 
 
-async def get_instance(client, token, pid, process_name) -> dict:
-    data = await post_oapi(client, "/topapi/processinstance/get", token, {"process_instance_id": pid})
+async def get_instance(client, token, pid, process_name, budget: DingtalkApiBudget | None = None) -> dict:
+    data = await post_oapi(client, "/topapi/processinstance/get", token, {"process_instance_id": pid}, budget)
     pi = data.get("process_instance") or {}
     pi["_process_instance_id"] = pid
     pi["_process_name"] = process_name
@@ -123,39 +124,47 @@ async def save_finance(rows: list) -> int:
     return len(rows)
 
 
-async def run(days: int = 30, dry_run: bool = False) -> dict:
+async def run(days: int = 30, dry_run: bool = False, max_api_calls: int | None = None) -> dict:
     today = datetime.now(CST)
     start = today - timedelta(days=days)
     start_ms = int(start.timestamp() * 1000)
     end_ms = int(today.timestamp() * 1000)
+    budget = DingtalkApiBudget(max_api_calls, "approval_sync") if max_api_calls else None
     token = await get_access_token()
     if not token:
         logger.error("无法获取 access_token，终止审批同步。")
         return {"instances": 0}
 
+    codes = {}
+    approval_rows, finance_rows = [], []
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             sample_users = []
-            for d in await get_all_dept_ids(client, token):
-                sample_users.extend(await get_user_ids_of_dept(client, token, d))
+            for d in await get_all_dept_ids(client, token, budget):
+                sample_users.extend(await get_user_ids_of_dept(client, token, d, budget))
                 if len(sample_users) >= 10:
                     break
-            codes = await list_process_codes(client, token, sample_users)
+            codes = await list_process_codes(client, token, sample_users, budget)
             logger.info("可见审批模板数: %d", len(codes))
             if not codes:
                 logger.warning("未获取到审批模板（可能缺少『审批模板读取』权限），跳过审批同步。")
-                return {"instances": 0, "finance": 0, "templates": 0}
+                return {"instances": 0, "finance": 0, "templates": 0, "api_calls": budget.used if budget else None}
 
-            approval_rows, finance_rows = [], []
             for code, name in codes.items():
+                if budget and budget.remaining <= 1:
+                    logger.warning("审批同步接口预算不足，停止拉取更多模板: used=%s limit=%s", budget.used, budget.limit)
+                    break
                 try:
-                    ids = await list_instance_ids(client, token, code, start_ms, end_ms)
+                    ids = await list_instance_ids(client, token, code, start_ms, end_ms, budget)
                 except DingtalkApiError as e:
                     logger.warning("审批实例列表失败 process=%s: %s", name, e)
                     continue
                 for pid in ids:
+                    if budget and budget.remaining <= 0:
+                        logger.warning("审批同步接口预算已用完，停止拉取审批详情: used=%s limit=%s", budget.used, budget.limit)
+                        break
                     try:
-                        pi = await get_instance(client, token, pid, name)
+                        pi = await get_instance(client, token, pid, name, budget)
                     except DingtalkApiError as e:
                         logger.warning("审批详情失败: %s", e)
                         continue
@@ -163,15 +172,23 @@ async def run(days: int = 30, dry_run: bool = False) -> dict:
                     fin = parse_finance_record(pi)
                     if fin:
                         finance_rows.append(fin)
+                if budget and budget.remaining <= 0:
+                    break
         except DingtalkApiError as e:
             print_permission_help("审批", e)
-            return {"instances": 0, "finance": 0, "error": "permission"}
+            return {"instances": 0, "finance": 0, "error": "permission", "api_calls": budget.used if budget else None}
+        except DingtalkApiBudgetExceeded as e:
+            logger.warning("审批同步接口预算停止: %s", e)
 
     cat_stat = {}
     for r in approval_rows:
         cat_stat[r["category"]] = cat_stat.get(r["category"], 0) + 1
     stats = {"templates": len(codes), "instances": len(approval_rows),
              "finance": len(finance_rows), "by_category": cat_stat}
+    if budget:
+        stats["api_calls"] = budget.used
+        stats["api_call_limit"] = budget.limit
+        stats["api_calls_remaining"] = budget.remaining
     logger.info("审批同步统计: %s", stats)
     if dry_run:
         logger.info("[dry-run] 审批不入库。")

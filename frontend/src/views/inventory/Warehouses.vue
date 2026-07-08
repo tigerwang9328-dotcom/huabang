@@ -2,7 +2,7 @@
   <div class="warehouse-archive">
     <div class="page-header">
       <h2>仓库档案</h2>
-      <p class="page-desc">华邦标准仓库维（dim_warehouse），当前数据来源：百胜 E3ERP。库存数量/金额/预警待库存数据接入后展示（仓库档案≠库存余额）。</p>
+      <p class="page-desc">华邦标准仓库维，当前数据来源：百胜 E3ERP。库存数量和金额来自百胜库存余额，金额按 SKU 成本计算。</p>
     </div>
 
     <div class="toolbar">
@@ -48,10 +48,13 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="当前库存" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
-      <el-table-column label="库存金额" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
-      <el-table-column label="预警数量" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
-      <el-table-column label="AI建议" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
+      <el-table-column prop="inventory_qty" label="当前库存" width="90" align="right" />
+      <el-table-column prop="sku_count" label="SKU数" width="80" align="right" />
+      <el-table-column label="库存金额" width="110" align="right">
+        <template #default="{ row }">{{ formatMoney(row.inventory_amount) }}</template>
+      </el-table-column>
+      <el-table-column label="预警数量" width="90"><template #default><span class="pending">待配置</span></template></el-table-column>
+      <el-table-column label="AI建议" width="90"><template #default><span class="pending">待配置</span></template></el-table-column>
       <el-table-column prop="source_system" label="来源系统" width="90" />
       <el-table-column label="同步时间" width="160"><template #default="{ row }">{{ formatTime(row.synced_at) }}</template></el-table-column>
     </el-table>
@@ -83,6 +86,10 @@ const options = reactive<{ regions: string[]; natures: string[]; categories: str
 function formatTime(t: string | null) {
   if (!t) return "-";
   return String(t).replace("T", " ").slice(0, 19);
+}
+function formatMoney(v: any) {
+  const n = Number(v || 0);
+  return `¥${n.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
 }
 
 async function fetchList() {

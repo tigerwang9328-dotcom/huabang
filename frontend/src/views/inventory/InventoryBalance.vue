@@ -2,7 +2,7 @@
   <div class="inv-balance">
     <div class="page-header">
       <h2>库存余额</h2>
-      <p class="page-desc">华邦标准库存余额（dwd_inventory_balance），来源：百胜 E3ERP 实物库存。可用=库存−占用；库存金额待 join 成本后展示。</p>
+      <p class="page-desc">华邦标准库存余额，来源：百胜 E3ERP 实物库存。可用=库存−占用；库存金额按 SKU 成本计算，无成本不计。</p>
     </div>
     <div class="toolbar">
       <div class="filters">
@@ -35,7 +35,12 @@
       <el-table-column prop="available_qty" label="可用" width="90" align="right">
         <template #default="{ row }"><span :class="{ neg: row.available_qty < 0 }">{{ row.available_qty }}</span></template>
       </el-table-column>
-      <el-table-column label="库存金额" width="90"><template #default><span class="pending">待接入</span></template></el-table-column>
+      <el-table-column label="SKU成本" width="90" align="right">
+        <template #default="{ row }">{{ row.sku_cost_price == null ? "-" : formatMoney(row.sku_cost_price) }}</template>
+      </el-table-column>
+      <el-table-column label="库存金额" width="110" align="right">
+        <template #default="{ row }">{{ row.inventory_amount == null ? "-" : formatMoney(row.inventory_amount) }}</template>
+      </el-table-column>
       <el-table-column prop="location_name" label="库位" width="100" />
       <el-table-column prop="source_system" label="来源" width="80" />
       <el-table-column label="同步时间" width="160"><template #default="{ row }">{{ formatTime(row.synced_at) }}</template></el-table-column>
@@ -67,6 +72,10 @@ const filters = reactive<any>({ keyword: "", warehouse_code: "", product_code: "
 function formatTime(t: string | null) {
   if (!t) return "-";
   return String(t).replace("T", " ").slice(0, 19);
+}
+function formatMoney(v: any) {
+  const n = Number(v || 0);
+  return `¥${n.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
 }
 
 async function fetchList() {

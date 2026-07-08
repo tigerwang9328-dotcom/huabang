@@ -231,6 +231,7 @@ const showPwd    = ref(false);
 const rememberMe = ref(false);
 const af         = ref("");   // active field
 const ready      = ref(false);
+const REMEMBER_KEY = "hb_login_remember";
 
 const sources = [
   { name: "百世ERP",   color: "#3B82F6" },
@@ -241,16 +242,48 @@ const sources = [
   { name: "人力资源",  color: "#06B6D4" },
 ];
 
-onMounted(() => { setTimeout(() => { ready.value = true; }, 60); });
+function loadRememberedLogin() {
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved?.username && saved?.password) {
+      form.username = saved.username;
+      form.password = saved.password;
+      rememberMe.value = true;
+    }
+  } catch {
+    localStorage.removeItem(REMEMBER_KEY);
+  }
+}
+
+function saveRememberedLogin() {
+  if (!rememberMe.value) {
+    localStorage.removeItem(REMEMBER_KEY);
+    return;
+  }
+  localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+    username: form.username.trim(),
+    password: form.password,
+  }));
+}
+
+onMounted(() => {
+  loadRememberedLogin();
+  setTimeout(() => { ready.value = true; }, 60);
+});
 
 const handleLogin = async () => {
-  if (!form.username || !form.password) {
+  const username = form.username.trim();
+  if (!username || !form.password) {
     ElMessage({ message: "请填写用户名和密码", type: "warning", duration: 2500 });
     return;
   }
   loading.value = true;
   try {
-    await authStore.login(form.username, form.password);
+    form.username = username;
+    await authStore.login(username, form.password);
+    saveRememberedLogin();
     ElMessage({ message: "登录成功，欢迎回来", type: "success", duration: 2000 });
     router.push("/app/dashboard");
   } catch (e: any) {

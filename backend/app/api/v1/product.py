@@ -18,7 +18,7 @@ from app.core.database import get_db
 import asyncio as _asyncio
 
 from app.core.database import AsyncSessionLocal
-from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES, allowed_inventory_sql_in
 from app.integrations.baison.services.product_image_service import ensure_product_image_table, sku_color_image_urls
 from app.integrations.baison.services.product_service import GOODS_LIST_METHOD, import_all_goods, import_goods_page
 from app.integrations.baison.services.sku_service import SKU_LIST_METHOD, import_all_skus, import_sku_page
@@ -83,6 +83,13 @@ def _sku_suggestion(row: dict) -> str:
     if _num(row.get("sales_qty")) <= 0 and _num(row.get("inventory_qty")) > 0:
         return "关注动销"
     return "正常"
+
+
+def _sort_items(items: list[dict], sort_by: Optional[str], sort_order: Optional[str]) -> list[dict]:
+    if sort_by not in {"inventory_qty", "sales_qty", "sales_amount"}:
+        return items
+    reverse = (sort_order or "desc").lower() != "asc"
+    return sorted(items, key=lambda x: _num(x.get(sort_by)), reverse=reverse)
 
 
 def _image_proxy_path(source_url: Optional[str]) -> Optional[str]:
@@ -171,25 +178,42 @@ async def _sku_metrics(db: AsyncSession, sku_rows: list[dict]) -> dict[str, dict
         metrics[sku_code]["inventory_qty"] = inventory_by_spec.get(key, 0.0)
     if start_date and end_date:
         sales_rows = (await db.execute(text("""
-            SELECT sku_code,
+            SELECT product_code,
+                   COALESCE(BTRIM(split_part(sku_code::text, '|', 2)), '') AS color_code,
+                   COALESCE(BTRIM(split_part(sku_code::text, '|', 3)), '') AS size_code,
                    COALESCE(SUM(sales_qty), 0) AS sales_qty,
                    COALESCE(SUM(sales_amount), 0) AS sales_amount
             FROM dwd.dwd_pos_sale_goods
-            WHERE sku_code = ANY(:codes)
+            WHERE product_code = ANY(:product_codes)
               AND store_code = ANY(:store_codes)
               AND biz_date >= :start_date
               AND biz_date <= :end_date
-            GROUP BY sku_code
+            GROUP BY product_code,
+                     COALESCE(BTRIM(split_part(sku_code::text, '|', 2)), ''),
+                     COALESCE(BTRIM(split_part(sku_code::text, '|', 3)), '')
         """), {
-            "codes": sku_codes,
+            "product_codes": product_codes,
             "store_codes": sorted(ALLOWED_STORE_CODES),
             "start_date": start_date,
             "end_date": end_date,
         })).mappings().all()
-        for row in sales_rows:
-            if row["sku_code"] in metrics:
-                metrics[row["sku_code"]]["sales_qty"] = _num(row["sales_qty"])
-                metrics[row["sku_code"]]["sales_amount"] = _num(row["sales_amount"])
+        sales_by_spec = {
+            (row["product_code"], row["color_code"], row["size_code"]): row
+            for row in sales_rows
+        }
+        for row in sku_rows:
+            sku_code = row.get("sku_code")
+            if sku_code not in metrics:
+                continue
+            key = (
+                row.get("product_code"),
+                str(row.get("color_code") or "").strip(),
+                str(row.get("size_code") or "").strip(),
+            )
+            sale = sales_by_spec.get(key)
+            if sale:
+                metrics[sku_code]["sales_qty"] = _num(sale["sales_qty"])
+                metrics[sku_code]["sales_amount"] = _num(sale["sales_amount"])
     return metrics
 
 
@@ -212,6 +236,9 @@ async def list_products(
     year: Optional[int] = None,
     status: Optional[str] = None,
     source_system: Optional[str] = None,
+    only_positive: Optional[int] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
     current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -233,12 +260,23 @@ async def list_products(
             conds.append(DimProduct.status == status)
         if source_system:
             conds.append(DimProduct.source_system == source_system)
+        if only_positive:
+            inventory_in = allowed_inventory_sql_in()
+            conds.append(text(f"""
+                dim_product.product_code IN (
+                    SELECT i.product_code
+                    FROM dwd.dwd_inventory_balance i
+                    WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
+                    GROUP BY i.product_code
+                    HAVING COALESCE(SUM(i.qty), 0) > 0
+                )
+            """))
 
         total = (await db.execute(select(func.count()).select_from(DimProduct).where(*conds))).scalar() or 0
-        rows = (await db.execute(
-            select(*_COLS).where(*conds).order_by(DimProduct.product_code)
-            .offset((page - 1) * page_size).limit(page_size)
-        )).mappings().all()
+        query = select(*_COLS).where(*conds).order_by(DimProduct.product_code)
+        if sort_by not in {"inventory_qty", "sales_qty", "sales_amount"}:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        rows = (await db.execute(query)).mappings().all()
         product_codes = [r["product_code"] for r in rows if r["product_code"]]
         metrics = await _product_metrics(db, product_codes)
         items = []
@@ -251,6 +289,9 @@ async def list_products(
             item["lifecycle_stage"] = _lifecycle_stage(item)
             item["ai_suggestion"] = _product_suggestion(item)
             items.append(item)
+        if sort_by in {"inventory_qty", "sales_qty", "sales_amount"}:
+            items = _sort_items(items, sort_by, sort_order)
+            items = items[(page - 1) * page_size: page * page_size]
         return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
     except Exception:
         logger.exception("product list error")
@@ -316,6 +357,9 @@ async def list_skus(
     season_name: Optional[str] = None,
     status: Optional[str] = None,
     source_system: Optional[str] = None,
+    only_positive: Optional[int] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
     current_user: SysUser = Depends(require_permission("dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -341,10 +385,21 @@ async def list_skus(
             conds.append(DimSku.status == status)
         if source_system:
             conds.append(DimSku.source_system == source_system)
+        if only_positive:
+            inventory_in = allowed_inventory_sql_in()
+            conds.append(text(f"""
+                COALESCE((
+                    SELECT SUM(i.qty)
+                    FROM dwd.dwd_inventory_balance i
+                    WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
+                      AND i.product_code = dim_sku.product_code
+                      AND COALESCE(BTRIM(i.color_code::text), '') = COALESCE(BTRIM(dim_sku.color_code::text), '')
+                      AND COALESCE(BTRIM(i.size_code::text), '') = COALESCE(BTRIM(dim_sku.size_code::text), '')
+                ), 0) > 0
+            """))
 
         total = (await db.execute(select(func.count()).select_from(DimSku).where(*conds))).scalar() or 0
-        rows = (await db.execute(
-            select(*_SKU_COLS).where(*conds).order_by(
+        query = select(*_SKU_COLS).where(*conds).order_by(
                 text("""
                     COALESCE((
                         SELECT CASE WHEN pi.image_url IS NOT NULL THEN 0 ELSE 1 END
@@ -357,22 +412,27 @@ async def list_skus(
                 """),
                 DimSku.sku_code,
             )
-            .offset((page - 1) * page_size).limit(page_size)
-        )).mappings().all()
+        if sort_by not in {"inventory_qty", "sales_qty", "sales_amount"}:
+            query = query.offset((page - 1) * page_size).limit(page_size)
+        rows = (await db.execute(query)).mappings().all()
         row_dicts = [dict(r) for r in rows]
         metrics = await _sku_metrics(db, row_dicts)
-        image_urls = await sku_color_image_urls(db, row_dicts)
         items = []
         for r in rows:
             item = dict(r)
             item.update(metrics.get(item.get("sku_code"), {}))
-            source_image_url = image_urls.get((str(item.get("product_code") or "").strip(), str(item.get("color_code") or "").strip()))
-            item["image_url"] = _image_proxy_path(source_image_url)
             item["sales_qty"] = _fmt_qty(item.get("sales_qty"))
             item["sales_amount"] = round(_num(item.get("sales_amount")), 2)
             item["inventory_qty"] = _fmt_qty(item.get("inventory_qty"))
             item["ai_suggestion"] = _sku_suggestion(item)
             items.append(item)
+        if sort_by in {"inventory_qty", "sales_qty", "sales_amount"}:
+            items = _sort_items(items, sort_by, sort_order)
+            items = items[(page - 1) * page_size: page * page_size]
+        image_urls = await sku_color_image_urls(db, items)
+        for item in items:
+            source_image_url = image_urls.get((str(item.get("product_code") or "").strip(), str(item.get("color_code") or "").strip()))
+            item["image_url"] = _image_proxy_path(source_image_url)
         return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
     except Exception:
         logger.exception("sku list error")
@@ -430,6 +490,17 @@ async def product_quality_summary(
                  AND i.size_code = COALESCE(BTRIM(s.size_code::text), '')
                 WHERE s.source_system = 'baison'
                   AND i.qty <> 0
+            ), inv_amount AS (
+                SELECT COALESCE(SUM(i.qty * s.cost_price), 0) AS inventory_amount
+                FROM inv_spec i
+                JOIN dim.dim_sku s
+                  ON s.source_system = 'baison'
+                 AND s.product_code = i.product_code
+                 AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
+                 AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+                WHERE i.qty <> 0
+                  AND s.cost_price IS NOT NULL
+                  AND s.cost_price > 0
             ), sale AS (
                 SELECT COUNT(DISTINCT product_code) AS sale_product_count,
                        COUNT(DISTINCT sku_code) FILTER (WHERE sku_code IS NOT NULL AND BTRIM(sku_code::text) <> '') AS sale_sku_count
@@ -450,8 +521,9 @@ async def product_quality_summary(
                     OR color_name IS NULL OR BTRIM(color_name::text) = ''
                     OR size_name IS NULL OR BTRIM(size_name::text) = ''
                 )) AS abnormal_sku_count,
-                inv.inv_product_count, inv_sku.inv_sku_count, sale.sale_product_count, sale.sale_sku_count
-            FROM inv CROSS JOIN inv_sku CROSS JOIN sale
+                inv.inv_product_count, inv_sku.inv_sku_count, inv_amount.inventory_amount,
+                sale.sale_product_count, sale.sale_sku_count
+            FROM inv CROSS JOIN inv_sku CROSS JOIN inv_amount CROSS JOIN sale
         """), {
             "inventory_codes": sorted(ALLOWED_INVENTORY_CODES),
             "store_codes": sorted(ALLOWED_STORE_CODES),

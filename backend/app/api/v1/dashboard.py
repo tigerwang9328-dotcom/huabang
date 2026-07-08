@@ -84,29 +84,68 @@ async def get_store_rank(
 ):
     """门店销售排行
 
-    未指定日期时使用 DWD 销售明细中最新有效业务日，避免每日同步尚未完成
-    或 DWS 汇总滞后时首页排行区域显示空白。
+    未指定日期时使用 DWD 小票中最新有效业务日，排行口径与门店分析/经营概览一致：
+    销售额、实收金额均来自小票支付口径，避免商品明细金额绕开支付方式口径。
     """
     if stat_date:
         query_date = date.fromisoformat(stat_date)
     else:
         latest_result = await db.execute(text("""
             SELECT MAX(biz_date)
-            FROM dwd.dwd_pos_sale_goods
+            FROM dwd.dwd_pos_ticket
             WHERE sales_amount IS NOT NULL
+              AND COALESCE(is_void, false) = false
+              AND COALESCE(is_pending, false) = false
         """))
         query_date = latest_result.scalar() or (date.today() - timedelta(days=1))
 
+    await db.execute(text("""
+        CREATE TABLE IF NOT EXISTS dwd.dwd_store_recharge_daily (
+            biz_date DATE NOT NULL,
+            store_code VARCHAR(64) NOT NULL,
+            recharge_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+            source VARCHAR(64) NOT NULL DEFAULT 'manual',
+            note TEXT,
+            created_at TIMESTAMP DEFAULT now(),
+            updated_at TIMESTAMP DEFAULT now(),
+            PRIMARY KEY (biz_date, store_code, source)
+        )
+    """))
     store_in = allowed_store_sql_in()
     result = await db.execute(text(f"""
-        SELECT store_code,
-               COALESCE(SUM(sales_amount), 0) AS net_sales,
-               COALESCE(SUM(sales_qty), 0) AS item_count
-        FROM dwd.dwd_pos_sale_goods
-        WHERE biz_date = :query_date
-          AND COALESCE(store_code, '') IN {store_in}
-        GROUP BY store_code
-        HAVING COALESCE(SUM(sales_amount), 0) > 0
+        WITH ticket AS (
+            SELECT store_code,
+                   COALESCE(SUM(sales_amount), 0) AS net_sales,
+                   COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount,
+                   COUNT(*)::int AS order_count,
+                   COALESCE(SUM(sales_qty), 0) AS item_count
+            FROM dwd.dwd_pos_ticket
+            WHERE biz_date = :query_date
+              AND COALESCE(store_code, '') IN {store_in}
+              AND COALESCE(is_void, false) = false
+              AND COALESCE(is_pending, false) = false
+            GROUP BY store_code
+        ), recharge AS (
+            SELECT store_code, COALESCE(SUM(recharge_amount), 0) AS recharge_amount
+            FROM dwd.dwd_store_recharge_daily
+            WHERE biz_date = :query_date
+              AND COALESCE(store_code, '') IN {store_in}
+            GROUP BY store_code
+        )
+        SELECT ticket.store_code,
+               ticket.net_sales,
+               ticket.actual_pay_amount + COALESCE(recharge.recharge_amount, 0) AS actual_pay_amount,
+               ticket.order_count,
+               ticket.item_count,
+               CASE WHEN ticket.order_count = 0 THEN 0
+                    ELSE ticket.net_sales / ticket.order_count
+               END AS avg_order_value,
+               CASE WHEN ticket.order_count = 0 THEN 0
+                    ELSE ticket.item_count::numeric / ticket.order_count
+               END AS items_per_order
+        FROM ticket
+        LEFT JOIN recharge ON recharge.store_code = ticket.store_code
+        WHERE ticket.net_sales > 0
         ORDER BY net_sales DESC
         LIMIT :top_n
     """), {"query_date": query_date, "top_n": top_n})
@@ -117,9 +156,10 @@ async def get_store_rank(
             "rank": i + 1,
             "store_code": r["store_code"],
             "net_sales": float(r["net_sales"] or 0),
-            "order_count": 0,
-            "avg_order_value": 0,
-            "items_per_order": 0,
+            "actual_pay_amount": float(r["actual_pay_amount"] or 0),
+            "order_count": int(r["order_count"] or 0),
+            "avg_order_value": float(r["avg_order_value"] or 0),
+            "items_per_order": float(r["items_per_order"] or 0),
             "item_count": int(float(r["item_count"] or 0)),
         }
         for i, r in enumerate(rows)

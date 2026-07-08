@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import AsyncSessionLocal
 from app.models.dingtalk_attendance import DingtalkAttendanceRecord
 from app.modules.dingtalk.sync._common import (
-    DingtalkApiError, get_access_token, get_all_dept_ids,
+    DingtalkApiBudget, DingtalkApiBudgetExceeded, DingtalkApiError, get_access_token, get_all_dept_ids,
     get_user_ids_of_dept, post_oapi, print_permission_help,
 )
 
@@ -19,17 +19,35 @@ LATE = ("Late", "SeriousLate", "VeryLate")
 MISSING = ("NotSigned", "Absenteeism")
 
 
-async def _all_user_ids(client, token) -> list:
+async def _local_user_ids() -> list:
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(text("""
+            SELECT dingtalk_user_id
+            FROM dingtalk_employees
+            WHERE active = true AND dingtalk_user_id IS NOT NULL AND dingtalk_user_id <> ''
+            ORDER BY id
+        """))).scalars().all()
+    return list(dict.fromkeys(rows))
+
+
+async def _all_user_ids(client, token, budget: DingtalkApiBudget | None = None, prefer_local: bool = True) -> list:
+    if prefer_local:
+        local_users = await _local_user_ids()
+        if local_users:
+            logger.info("考勤同步使用本地员工表 user_id: %d", len(local_users))
+            return local_users
+
     seen, out = set(), []
-    for d in await get_all_dept_ids(client, token):
-        for uid in await get_user_ids_of_dept(client, token, d):
+    for d in await get_all_dept_ids(client, token, budget):
+        for uid in await get_user_ids_of_dept(client, token, d, budget):
             if uid not in seen:
                 seen.add(uid)
                 out.append(uid)
     return out
 
 
-async def fetch_attendance(client, token, user_ids, date_from, date_to) -> list:
+async def fetch_attendance(client, token, user_ids, date_from, date_to,
+                           budget: DingtalkApiBudget | None = None) -> list:
     out = []
     for i in range(0, len(user_ids), 50):
         chunk = user_ids[i:i + 50]
@@ -37,7 +55,7 @@ async def fetch_attendance(client, token, user_ids, date_from, date_to) -> list:
         while True:
             body = {"workDateFrom": date_from, "workDateTo": date_to,
                     "userIdList": chunk, "offset": offset, "limit": 50, "isI18n": False}
-            data = await post_oapi(client, "/attendance/list", token, body)
+            data = await post_oapi(client, "/attendance/list", token, body, budget)
             recs = data.get("recordresult") or []
             out.extend(recs)
             if data.get("hasMore") and recs:
@@ -142,8 +160,10 @@ async def build_daily(dfrom, dto) -> int:
     return n or 0
 
 
-async def run(days: int = 7, dry_run: bool = False) -> dict:
+async def run(days: int = 7, dry_run: bool = False, max_api_calls: int | None = None,
+              prefer_local_users: bool = True) -> dict:
     days = max(1, min(days, 7))
+    budget = DingtalkApiBudget(max_api_calls, "attendance_sync") if max_api_calls else None
     today = datetime.now(CST).date()
     dfrom_d = today - timedelta(days=days - 1)
     date_from = dfrom_d.strftime("%Y-%m-%d") + " 00:00:00"
@@ -154,13 +174,20 @@ async def run(days: int = 7, dry_run: bool = False) -> dict:
         return {"records": 0}
     async with httpx.AsyncClient(timeout=30) as client:
         try:
-            user_ids = await _all_user_ids(client, token)
-            raw = await fetch_attendance(client, token, user_ids, date_from, date_to)
+            user_ids = await _all_user_ids(client, token, budget, prefer_local_users)
+            raw = await fetch_attendance(client, token, user_ids, date_from, date_to, budget)
         except DingtalkApiError as e:
             print_permission_help("考勤", e)
-            return {"records": 0, "error": "permission"}
+            return {"records": 0, "error": "permission", "api_calls": budget.used if budget else None}
+        except DingtalkApiBudgetExceeded as e:
+            logger.warning("考勤同步接口预算停止: %s", e)
+            return {"records": 0, "error": "budget_exceeded", "api_calls": budget.used if budget else None}
     parsed = [parse_record(r) for r in raw]
     stats = _stats(parsed)
+    if budget:
+        stats["api_calls"] = budget.used
+        stats["api_call_limit"] = budget.limit
+        stats["api_calls_remaining"] = budget.remaining
     logger.info("考勤同步统计: %s", stats)
     if dry_run:
         logger.info("[dry-run] 考勤不入库。")

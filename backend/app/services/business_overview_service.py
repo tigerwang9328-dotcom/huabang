@@ -278,14 +278,36 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
 
     try:
         query_date = date.fromisoformat(data["stat_date"])
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS dwd.dwd_store_recharge_daily (
+                biz_date DATE NOT NULL,
+                store_code VARCHAR(64) NOT NULL,
+                recharge_amount NUMERIC(16, 2) NOT NULL DEFAULT 0,
+                source VARCHAR(64) NOT NULL DEFAULT 'manual',
+                note TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now(),
+                PRIMARY KEY (biz_date, store_code, source)
+            )
+        """))
         e3_result = await db.execute(text(f"""
-            SELECT COALESCE(SUM(sales_amount), 0) AS e3_sales,
-                   COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount
-            FROM dwd.dwd_pos_ticket
-            WHERE biz_date = :sd
-              AND COALESCE(is_void, false) = false
-              AND COALESCE(is_pending, false) = false
-              AND COALESCE(store_code, '') IN {store_in}
+            WITH ticket AS (
+                SELECT COALESCE(SUM(sales_amount), 0) AS e3_sales,
+                       COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount
+                FROM dwd.dwd_pos_ticket
+                WHERE biz_date = :sd
+                  AND COALESCE(is_void, false) = false
+                  AND COALESCE(is_pending, false) = false
+                  AND COALESCE(store_code, '') IN {store_in}
+            ), recharge AS (
+                SELECT COALESCE(SUM(recharge_amount), 0) AS recharge_amount
+                FROM dwd.dwd_store_recharge_daily
+                WHERE biz_date = :sd
+                  AND COALESCE(store_code, '') IN {store_in}
+            )
+            SELECT ticket.e3_sales,
+                   ticket.actual_pay_amount + recharge.recharge_amount AS actual_pay_amount
+            FROM ticket CROSS JOIN recharge
         """), {"sd": query_date})
         e3_row = e3_result.mappings().first()
         e3_sales = float(e3_row["e3_sales"] or 0) if e3_row else 0
@@ -327,7 +349,13 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
                       AND COALESCE(is_pending, false) = false
                 ), ticket_agg AS (
                     SELECT COALESCE(SUM(sales_amount),0) AS total_sales,
-                           COALESCE(SUM(actual_pay_amount),0) AS actual_pay_amount,
+                           COALESCE(SUM(actual_pay_amount),0)
+                           + COALESCE((
+                               SELECT SUM(recharge_amount)
+                               FROM dwd.dwd_store_recharge_daily
+                               WHERE biz_date = :sd
+                                 AND COALESCE(store_code, '') IN {store_in}
+                           ), 0) AS actual_pay_amount,
                            COALESCE(SUM(sales_qty),0) AS total_qty,
                            COALESCE(SUM(standard_amount),0) AS total_std,
                            COUNT(*) AS total_orders,

@@ -22,6 +22,9 @@
           <el-table-column prop="warehouse_name" label="仓库名称" min-width="160" show-overflow-tooltip />
           <el-table-column prop="total_qty" label="库存总件数" width="120" align="right" />
           <el-table-column prop="sku_count" label="SKU数" width="100" align="right" />
+          <el-table-column label="库存金额" width="120" align="right">
+            <template #default="{ row }">{{ formatMoney(row.inventory_amount) }}</template>
+          </el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -51,6 +54,9 @@
           <el-table-column prop="road_qty" label="在途" width="70" align="right" />
           <el-table-column prop="available_qty" label="可用" width="80" align="right">
             <template #default="{ row }"><span :class="{ neg: row.available_qty < 0 }">{{ row.available_qty }}</span></template>
+          </el-table-column>
+          <el-table-column label="库存金额" width="100" align="right">
+            <template #default="{ row }">{{ row.inventory_amount == null ? "-" : formatMoney(row.inventory_amount) }}</template>
           </el-table-column>
           <el-table-column label="同步时间" width="150">
             <template #default="{ row }">{{ fmtTs(row.synced_at) }}</template>
@@ -127,9 +133,9 @@ const summaryCards = ref([
   { label: "启用仓库", value: "—", isPending: false },
   { label: "库存记录数", value: "—", isPending: false },
   { label: "库存总件数", value: "—", isPending: false },
-  { label: "库存金额", value: "待接入", isPending: true },
+  { label: "库存金额", value: "—", isPending: false },
   { label: "缺货SKU", value: "—", isPending: false },
-  { label: "高库存SKU", value: "待接入", isPending: true },
+  { label: "高库存SKU", value: "待配置", isPending: true },
 ]);
 
 // Tab 1: 库存总览
@@ -137,33 +143,19 @@ const ovLoading = ref(false); const whSummary = ref<any[]>([]);
 async function fetchOverview() {
   ovLoading.value = true;
   try {
-    // 通过 warehouse list 获取仓库，再汇总库存
-    const { data: wd } = await inventoryApi.listWarehouses({ page: 1, page_size: 200 });
-    const whs = wd?.data?.items || [];
-    // 每个仓库查库存汇总
-    const summaryMap: Record<string, any> = {};
-    for (const w of whs) {
-      summaryMap[w.warehouse_code] = { warehouse_code: w.warehouse_code, warehouse_name: w.warehouse_name, total_qty: 0, sku_count: 0 };
-    }
-    // 查所有余额
-    const { data: id } = await inventoryApi.listInventory({ page: 1, page_size: 200, only_positive: 1 } as any);
-    const items = id?.data?.items || [];
-    const total = id?.data?.total || 0;
-    summaryCards.value[2].value = String(total);
-    let totalQty = 0;
-    for (const item of items) {
-      if (summaryMap[item.warehouse_code]) {
-        summaryMap[item.warehouse_code].total_qty += (item.qty || 0);
-        summaryMap[item.warehouse_code].sku_count += 1;
-      }
-      totalQty += (item.qty || 0);
-    }
-    whSummary.value = Object.values(summaryMap).filter((x: any) => x.sku_count > 0).sort((a: any, b: any) => b.total_qty - a.total_qty);
-    summaryCards.value[3].value = String(totalQty);
-    // 缺货
-    const zeroItems = items.filter((x: any) => x.qty === 0 || x.available_qty === 0).length;
-    summaryCards.value[5].value = String(zeroItems);
-  } catch (_) {}
+    const [{ data: summaryRes }, { data: overviewRes }] = await Promise.all([
+      inventoryApi.getSummary(),
+      inventoryApi.getOverview(),
+    ]);
+    const summary = summaryRes?.data?.summary || {};
+    summaryCards.value[0].value = summary.warehouse_count?.display || "0";
+    summaryCards.value[1].value = summary.enabled_warehouses?.display || "0";
+    summaryCards.value[2].value = summary.inventory_records?.display || "0";
+    summaryCards.value[3].value = summary.total_inventory_qty?.display || "0";
+    summaryCards.value[4].value = formatMoney(summary.inventory_amount?.value || 0);
+    summaryCards.value[5].value = summary.out_of_stock_sku_count?.display || "0";
+    whSummary.value = overviewRes?.data?.by_warehouse || [];
+  } catch (_) { ElMessage.error("库存总览查询失败"); }
   finally { ovLoading.value = false; }
 }
 
@@ -230,6 +222,10 @@ function onWPage(p: number) { wPage.value = p; fetchWarehouses(); }
 function onWSize(s: number) { wSize.value = s; wPage.value = 1; fetchWarehouses(); }
 
 function fmtTs(t: any) { if (!t) return "-"; return String(t).replace("T", " ").slice(0, 19); }
+function formatMoney(v: any) {
+  const n = Number(v || 0);
+  return `¥${n.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
+}
 
 onMounted(() => {
   fetchOverview();

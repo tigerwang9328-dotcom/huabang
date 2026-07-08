@@ -14,7 +14,7 @@ scheduler = AsyncIOScheduler(
 
 def setup_jobs():
     """注册所有定时任务"""
-    from app.jobs.sync_jobs import run_daily_sync
+    from app.jobs.sync_jobs import run_daily_sync, run_dingtalk_approval_sync, run_dingtalk_attendance_sync
     from app.jobs.report_jobs import run_morning_report
     from app.jobs.push_jobs import run_member_visit_push, run_replenishment_push, run_overdue_reminder
     from app.jobs.review_jobs import run_evening_diagnosis
@@ -47,6 +47,31 @@ def setup_jobs():
         name="会员回访名单推送",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # 每天12:00 - 钉钉审批数据同步（考勤模块审批中心）
+    scheduler.add_job(
+        run_dingtalk_approval_sync,
+        CronTrigger(hour=12, minute=0),
+        id="dingtalk_approval_sync",
+        name="钉钉审批同步",
+        replace_existing=True,
+        misfire_grace_time=3600,
+        coalesce=True,
+        max_instances=1,
+    )
+
+    # 每天9/13/18/23点 - 钉钉考勤数据同步
+    # API预算：考勤 4 * 12 = 48 次/天；审批 100 次/天；全局限额仍为160次/天。
+    scheduler.add_job(
+        run_dingtalk_attendance_sync,
+        CronTrigger(hour="9,13,18,23", minute=5),
+        id="dingtalk_attendance_sync",
+        name="钉钉考勤同步",
+        replace_existing=True,
+        misfire_grace_time=1800,
+        coalesce=True,
+        max_instances=1,
     )
 
     # 每天14:00 - 商品补货/调拨提醒

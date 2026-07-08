@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.store_whitelist import allowed_inventory_sql_in
+from app.core.store_whitelist import allowed_inventory_sql_in, allowed_store_sql_in
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ def _value(val, decimals: int = 0) -> dict:
 async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     """库存预警顶部指标"""
     inventory_in = allowed_inventory_sql_in()
+    store_in = allowed_store_sql_in()
     wh_total_r = await db.execute(text(f"""
         SELECT COUNT(*)
         FROM dim.dim_warehouse
@@ -54,6 +55,60 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     """))
     total_inv_qty = int(inv_qty_r.scalar() or 0)
 
+    amount_r = await db.execute(text(f"""
+        WITH inv_spec AS (
+            SELECT product_code,
+                   COALESCE(BTRIM(color_code::text), '') AS color_code,
+                   COALESCE(BTRIM(size_code::text), '') AS size_code,
+                   SUM(qty) AS qty
+            FROM dwd.dwd_inventory_balance
+            WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
+            GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
+        ), priced AS (
+            SELECT i.product_code,
+                   i.qty,
+                   s.cost_price AS unit_price
+            FROM inv_spec i
+            JOIN dim.dim_sku s
+              ON s.source_system = 'baison'
+             AND s.product_code = i.product_code
+             AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
+             AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+            WHERE s.cost_price IS NOT NULL
+              AND s.cost_price > 0
+        ), sales_window AS (
+            SELECT MAX(biz_date) AS end_date, MAX(biz_date) - INTERVAL '6 days' AS start_date
+            FROM dwd.dwd_pos_sale_goods
+            WHERE store_code IN {store_in}
+        ), recent_sales AS (
+            SELECT g.product_code, COALESCE(SUM(g.sales_qty), 0) AS sales_qty
+            FROM dwd.dwd_pos_sale_goods g
+            CROSS JOIN sales_window sw
+            WHERE g.store_code IN {store_in}
+              AND sw.end_date IS NOT NULL
+              AND g.biz_date >= sw.start_date
+              AND g.biz_date <= sw.end_date
+            GROUP BY g.product_code
+        ), age_snapshot AS (
+            SELECT COUNT(*) AS snapshot_rows,
+                   COALESCE(SUM(CASE WHEN age_days > 15 THEN cost_amount ELSE 0 END), 0) AS age_90_plus_amount
+            FROM dwd.dwd_inventory_snapshot
+            WHERE UPPER(COALESCE(store_code, '')::text) IN {inventory_in}
+        )
+        SELECT COALESCE(SUM(priced.qty * priced.unit_price), 0) AS inventory_amount,
+               CASE WHEN MAX(age_snapshot.snapshot_rows) > 0
+                    THEN MAX(age_snapshot.age_90_plus_amount)
+                    ELSE COALESCE(SUM(CASE WHEN priced.qty > 0 AND COALESCE(recent_sales.sales_qty, 0) <= 0
+                                           THEN priced.qty * priced.unit_price ELSE 0 END), 0)
+                END AS age_90_plus_amount
+        FROM priced
+        LEFT JOIN recent_sales ON recent_sales.product_code = priced.product_code
+        CROSS JOIN age_snapshot
+    """))
+    amount_row = amount_r.mappings().first()
+    inventory_amount = float(amount_row["inventory_amount"] or 0) if amount_row else 0
+    age_90_plus_amount = float(amount_row["age_90_plus_amount"] or 0) if amount_row else 0
+
     # 缺货(库存=0)和低库存
     zero_r = await db.execute(
         text(f"""
@@ -80,12 +135,12 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
             "disabled_warehouses": _value(wh_disabled),
             "inventory_records": _value(inv_records),
             "total_inventory_qty": _value(total_inv_qty),
-            "inventory_amount": _pending("库存金额字段待确认"),
+            "inventory_amount": _value(round(inventory_amount, 2), 2),
+            "age_90_plus_amount": _value(round(age_90_plus_amount, 2), 2),
             "out_of_stock_sku_count": _value(out_of_stock),
             "high_stock_sku_count": _pending("库存预警规则待配置"),
         },
         "pending_fields": [
-            {"field": "inventory_amount", "reason": "库存金额字段待确认"},
             {"field": "high_stock_sku_count", "reason": "库存预警规则待配置"},
         ],
     }
@@ -95,19 +150,49 @@ async def get_inventory_overview(db: AsyncSession) -> dict:
     """库存总览 - 按仓库汇总"""
     inventory_in = allowed_inventory_sql_in()
     rows = await db.execute(text(f"""
-        SELECT w.warehouse_code, w.warehouse_name,
-               COALESCE(SUM(i.qty), 0) as total_qty,
-               COUNT(i.id) as sku_count
+        WITH inv_spec AS (
+            SELECT UPPER(COALESCE(i.warehouse_code, '')::text) AS warehouse_code,
+                   MAX(i.warehouse_name) AS warehouse_name,
+                   i.product_code,
+                   COALESCE(BTRIM(i.color_code::text), '') AS color_code,
+                   COALESCE(BTRIM(i.size_code::text), '') AS size_code,
+                   SUM(i.qty) AS qty,
+                   COUNT(*) AS row_count
+            FROM dwd.dwd_inventory_balance i
+            WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
+            GROUP BY UPPER(COALESCE(i.warehouse_code, '')::text), i.product_code,
+                     COALESCE(BTRIM(i.color_code::text), ''), COALESCE(BTRIM(i.size_code::text), '')
+        ), amount_by_wh AS (
+            SELECT i.warehouse_code,
+                   COALESCE(SUM(i.qty * s.cost_price), 0) AS inventory_amount
+            FROM inv_spec i
+            JOIN dim.dim_sku s
+              ON s.source_system = 'baison'
+             AND s.product_code = i.product_code
+             AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
+             AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+            WHERE i.qty <> 0
+              AND s.cost_price IS NOT NULL
+              AND s.cost_price > 0
+            GROUP BY i.warehouse_code
+        )
+        SELECT UPPER(COALESCE(w.warehouse_code, '')::text) AS warehouse_code,
+               COALESCE(MAX(w.warehouse_name), MAX(i.warehouse_name)) AS warehouse_name,
+               COALESCE(SUM(i.qty), 0) AS total_qty,
+               COUNT(i.product_code) AS sku_count,
+               COALESCE(MAX(a.inventory_amount), 0) AS inventory_amount
         FROM dim.dim_warehouse w
-        LEFT JOIN dwd.dwd_inventory_balance i ON w.warehouse_code = i.warehouse_code
+        LEFT JOIN inv_spec i ON UPPER(COALESCE(w.warehouse_code, '')::text) = i.warehouse_code
+        LEFT JOIN amount_by_wh a ON a.warehouse_code = UPPER(COALESCE(w.warehouse_code, '')::text)
         WHERE UPPER(COALESCE(w.warehouse_code, '')::text) IN {inventory_in}
-        GROUP BY w.warehouse_code, w.warehouse_name
-        ORDER BY total_qty DESC
+        GROUP BY UPPER(COALESCE(w.warehouse_code, '')::text)
+        ORDER BY total_qty DESC, warehouse_code
     """))
     by_warehouse = [dict(r._mapping) for r in rows]
     for item in by_warehouse:
         item["total_qty"] = int(item["total_qty"]) if item["total_qty"] else 0
         item["sku_count"] = int(item["sku_count"]) if item["sku_count"] else 0
+        item["inventory_amount"] = round(float(item["inventory_amount"] or 0), 2)
     return {"by_warehouse": by_warehouse}
 
 
@@ -145,12 +230,49 @@ async def get_warehouse_list(
     total_r = await db.execute(text(f"SELECT COUNT(*) FROM dim.dim_warehouse w WHERE {where}").params(**params))
     total = total_r.scalar() or 0
     rows_r = await db.execute(
-        text(f"""SELECT w.id, w.warehouse_code, w.warehouse_name, w.warehouse_nature,
-                        w.warehouse_category_name, w.channel_code, w.region_name,
-                        w.default_location_code, w.default_location_name,
-                        w.status, w.is_enabled, w.source_system, w.synced_at
-                 FROM dim.dim_warehouse w WHERE {where}
-                 ORDER BY w.warehouse_code LIMIT :lim OFFSET :off""")
+        text(f"""
+            WITH inv_spec AS (
+                SELECT UPPER(COALESCE(i.warehouse_code, '')::text) AS warehouse_code,
+                       i.product_code,
+                       COALESCE(BTRIM(i.color_code::text), '') AS color_code,
+                       COALESCE(BTRIM(i.size_code::text), '') AS size_code,
+                       SUM(i.qty) AS qty
+                FROM dwd.dwd_inventory_balance i
+                WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
+                GROUP BY UPPER(COALESCE(i.warehouse_code, '')::text), i.product_code,
+                         COALESCE(BTRIM(i.color_code::text), ''), COALESCE(BTRIM(i.size_code::text), '')
+            ), inv_wh AS (
+                SELECT warehouse_code,
+                       COALESCE(SUM(qty), 0) AS inventory_qty,
+                       COUNT(*) AS sku_count
+                FROM inv_spec
+                GROUP BY warehouse_code
+            ), amount_wh AS (
+                SELECT i.warehouse_code,
+                       COALESCE(SUM(i.qty * s.cost_price), 0) AS inventory_amount
+                FROM inv_spec i
+                JOIN dim.dim_sku s
+                  ON s.source_system = 'baison'
+                 AND s.product_code = i.product_code
+                 AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
+                 AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+                WHERE i.qty <> 0
+                  AND s.cost_price IS NOT NULL
+                  AND s.cost_price > 0
+                GROUP BY i.warehouse_code
+            )
+            SELECT w.id, w.warehouse_code, w.warehouse_name, w.warehouse_nature,
+                   w.warehouse_category_name, w.channel_code, w.region_name,
+                   w.default_location_code, w.default_location_name,
+                   w.status, w.is_enabled, w.source_system, w.synced_at,
+                   COALESCE(i.inventory_qty, 0) AS inventory_qty,
+                   COALESCE(i.sku_count, 0) AS sku_count,
+                   COALESCE(a.inventory_amount, 0) AS inventory_amount
+            FROM dim.dim_warehouse w
+            LEFT JOIN inv_wh i ON i.warehouse_code = UPPER(COALESCE(w.warehouse_code, '')::text)
+            LEFT JOIN amount_wh a ON a.warehouse_code = UPPER(COALESCE(w.warehouse_code, '')::text)
+            WHERE {where}
+            ORDER BY w.warehouse_code LIMIT :lim OFFSET :off""")
         .params(**params, lim=page_size, off=(page - 1) * page_size)
     )
     items = []
@@ -159,6 +281,9 @@ async def get_warehouse_list(
         for dt_col in ("synced_at",):
             if d.get(dt_col):
                 d[dt_col] = str(d[dt_col])
+        d["inventory_qty"] = float(d.get("inventory_qty") or 0)
+        d["sku_count"] = int(d.get("sku_count") or 0)
+        d["inventory_amount"] = round(float(d.get("inventory_amount") or 0), 2)
         items.append(d)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -203,8 +328,19 @@ async def get_inventory_balance_list(
         text(f"""SELECT i.id, i.warehouse_code, i.warehouse_name, i.product_code, i.sku_code,
                         i.barcode, i.goods_name, i.color_name, i.size_name,
                         i.location_name, i.qty, i.lock_qty, i.road_qty, i.available_qty,
+                        s.cost_price AS sku_cost_price,
+                        CASE WHEN s.cost_price IS NOT NULL AND s.cost_price > 0
+                             THEN i.qty * s.cost_price
+                             ELSE NULL
+                        END AS inventory_amount,
                         i.source_system, i.synced_at
-                 FROM dwd.dwd_inventory_balance i WHERE {where}
+                 FROM dwd.dwd_inventory_balance i
+                 LEFT JOIN dim.dim_sku s
+                   ON s.source_system = 'baison'
+                  AND s.product_code = i.product_code
+                  AND COALESCE(BTRIM(s.color_code::text), '') = COALESCE(BTRIM(i.color_code::text), '')
+                  AND COALESCE(BTRIM(s.size_code::text), '') = COALESCE(BTRIM(i.size_code::text), '')
+                 WHERE {where}
                  ORDER BY i.warehouse_code, i.product_code
                  LIMIT :lim OFFSET :off""")
         .params(**params, lim=page_size, off=(page - 1) * page_size)
@@ -212,7 +348,7 @@ async def get_inventory_balance_list(
     items = []
     for r in rows_r:
         d = dict(r._mapping)
-        for k in ("qty", "lock_qty", "road_qty", "available_qty"):
+        for k in ("qty", "lock_qty", "road_qty", "available_qty", "sku_cost_price", "inventory_amount"):
             if d.get(k) is not None:
                 d[k] = float(d[k])
         for dt_col in ("synced_at",):
