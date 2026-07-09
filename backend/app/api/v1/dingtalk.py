@@ -205,7 +205,7 @@ WHERE {scope}
 
 @router.get("/overview", response_model=ApiResponse)
 async def dingtalk_overview(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:dingtalk:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """经营概览-钉钉协同数据统计（MVP：dingtalk_events JSONB::text 模糊匹配）。"""

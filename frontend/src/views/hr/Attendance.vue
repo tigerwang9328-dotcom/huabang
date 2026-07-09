@@ -21,7 +21,7 @@
           value-format="YYYY-MM-DD"
           format="YYYY-MM-DD"
           :clearable="false"
-          @change="reloadAll"
+          @change="onWorkDateChange"
         />
         <el-button :icon="TrendCharts" size="large" @click="deptDialogVisible = true">部门统计</el-button>
         <el-button :icon="Download" size="large" @click="exportCsv">导出 CSV</el-button>
@@ -277,13 +277,21 @@ import {
 } from "@element-plus/icons-vue";
 import { hrApi } from "@/api/hr";
 
-const today = new Date().toISOString().slice(0, 10);
+const localDateText = (date = new Date()) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const today = localDateText();
 const workDate = ref(today);
 const nowText = ref("");
 const loading = ref(false);
 const summaryLoading = ref(false);
 const approvalsLoading = ref(false);
 const syncing = ref(false);
+const autoSyncing = ref(false);
 const page = ref(1);
 const pageSize = 20;
 const total = ref(0);
@@ -298,6 +306,7 @@ const deptDialogVisible = ref(false);
 const syncDialogVisible = ref(false);
 const whitelistDialogVisible = ref(false);
 const timer = ref<number | undefined>();
+const autoSyncTimer = ref<number | undefined>();
 
 const filters = reactive({
   keyword: "",
@@ -387,6 +396,11 @@ const reloadAll = async () => {
   await Promise.all([loadSummary(), loadAttendance(), loadDeptStats(), loadApprovals()]);
 };
 
+const onWorkDateChange = async () => {
+  await reloadAll();
+  await autoSyncAttendance("date-change");
+};
+
 const resetAndLoad = () => {
   page.value = 1;
   loadAttendance();
@@ -411,6 +425,28 @@ const runSync = async () => {
     await reloadAll();
   } finally {
     syncing.value = false;
+  }
+};
+
+const autoSyncAttendance = async (reason: "enter" | "timer" | "date-change") => {
+  if (workDate.value !== localDateText()) return;
+  if (syncing.value || autoSyncing.value) return;
+
+  const key = `hr_attendance_auto_sync_${workDate.value}`;
+  const now = Date.now();
+  const last = Number(localStorage.getItem(key) || 0);
+  const minInterval = reason === "enter" ? 10 * 60 * 1000 : 30 * 60 * 1000;
+  if (last && now - last < minInterval) return;
+
+  autoSyncing.value = true;
+  try {
+    await hrApi.syncDingtalk({ scope: "attendance", days: 1 });
+    localStorage.setItem(key, String(Date.now()));
+    await reloadAll();
+  } catch (err) {
+    console.warn("自动同步钉钉考勤失败", err);
+  } finally {
+    autoSyncing.value = false;
   }
 };
 
@@ -495,10 +531,15 @@ onMounted(async () => {
   updateTime();
   timer.value = window.setInterval(updateTime, 1000);
   await Promise.all([loadDepartments(), reloadAll()]);
+  await autoSyncAttendance("enter");
+  autoSyncTimer.value = window.setInterval(() => {
+    void autoSyncAttendance("timer");
+  }, 30 * 60 * 1000);
 });
 
 onBeforeUnmount(() => {
   if (timer.value) window.clearInterval(timer.value);
+  if (autoSyncTimer.value) window.clearInterval(autoSyncTimer.value);
 });
 </script>
 

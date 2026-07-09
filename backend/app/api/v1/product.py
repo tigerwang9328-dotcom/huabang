@@ -239,7 +239,7 @@ async def list_products(
     only_positive: Optional[int] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("product:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准商品维分页查询（商品主档）。"""
@@ -360,7 +360,7 @@ async def list_skus(
     only_positive: Optional[int] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("product:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准 SKU 维分页查询（SKU档案）。不返回 raw_data / 成本价。"""
@@ -464,7 +464,7 @@ async def product_image_proxy(url: str = Query(..., min_length=8)):
 
 @router.get("/product/quality-summary")
 async def product_quality_summary(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("product:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """商品/SKU 数据质量与经营接入概览。"""

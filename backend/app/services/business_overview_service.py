@@ -5,6 +5,7 @@ from datetime import date, timedelta, datetime
 from typing import Optional
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.data_scope import get_data_scope, sql_in
 from app.core.store_whitelist import (
     ALLOWED_INVENTORY_CODES,
     ALLOWED_STORE_CODES,
@@ -93,11 +94,18 @@ def _inventory_key_expr(columns: set[str]) -> str:
     return "COALESCE(" + ", ".join(parts) + ")" if parts else "NULL"
 
 
-async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dict:
+async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, current_user=None) -> dict:
     """经营概览完整数据"""
     counts = await get_base_counts(db)
-    store_in = allowed_store_sql_in()
-    inventory_in = allowed_inventory_sql_in()
+    data_scope = await get_data_scope(db, current_user) if current_user is not None else None
+    scoped_store_codes = data_scope.store_codes if data_scope else None
+    scoped_inventory_codes = data_scope.inventory_codes if data_scope else None
+    store_in = sql_in(scoped_store_codes) if scoped_store_codes is not None else allowed_store_sql_in()
+    inventory_in = sql_in(scoped_inventory_codes) if scoped_inventory_codes is not None else allowed_inventory_sql_in()
+    scoped_to_store = bool(data_scope and data_scope.is_limited_store)
+    if scoped_to_store:
+        counts["store_count"] = len(scoped_store_codes or [])
+        counts["inventory_scope_count"] = len(scoped_inventory_codes or [])
 
     # 未指定日期时，使用已落库的最新有效 POS 业务日，
     # 避免每日同步尚未完成时首页误显示为全部“待接入”。
@@ -121,6 +129,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
     data = {
         "stat_date": effective_date,
         "updated_at": str(last_sync) if last_sync else None,
+        "data_scope": data_scope.scope if data_scope else "all",
+        "scope_store_codes": scoped_store_codes if scoped_store_codes is not None else None,
 
         # 数据资产（真实数据）
         "data_assets": {
@@ -163,6 +173,9 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
             "overdue_task_count": _value(0),
             "completed_task_count": _value(0),
         },
+
+        # 库存品类结构：用于经营概览库存模块，按商品品类汇总库存数量。
+        "inventory_by_category": [],
     }
 
     # 库存余额表已落库的可直接计算指标。
@@ -233,6 +246,34 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
                 data["inventory_risk"]["inventory_amount"] = _value(
                     round(float(amount_row["inventory_amount"]), 2), 2
                 )
+
+            category_result = await db.execute(text("""
+                SELECT COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), '未分类') AS category_name,
+                       COALESCE(SUM(i.qty), 0) AS qty,
+                       COALESCE(SUM(i.qty * COALESCE(sku.cost_price, p.cost_price)), 0) AS amount
+                FROM dwd.dwd_inventory_balance i
+                LEFT JOIN dim.dim_product p
+                  ON p.product_code = i.product_code
+                 AND COALESCE(p.source_system, 'baison') = 'baison'
+                LEFT JOIN dim.dim_sku sku
+                  ON sku.product_code = i.product_code
+                 AND sku.color_code = i.color_code
+                 AND sku.size_code = i.size_code
+                 AND COALESCE(sku.source_system, 'baison') = 'baison'
+                WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
+                GROUP BY 1
+                HAVING COALESCE(SUM(i.qty), 0) <> 0
+                ORDER BY COALESCE(SUM(i.qty), 0) DESC
+                LIMIT 8
+            """.format(inventory_in=inventory_in)))
+            data["inventory_by_category"] = [
+                {
+                    "category_name": row["category_name"],
+                    "qty": float(row["qty"] or 0),
+                    "amount": round(float(row["amount"] or 0), 2),
+                }
+                for row in category_result.mappings().all()
+            ]
     except Exception:
         logger.exception("获取库存实时指标失败，使用待接入占位")
 
@@ -241,6 +282,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None) -> dic
     gross_metrics_ready = False
     try:
         query_date = date.fromisoformat(data["stat_date"])
+        if scoped_to_store:
+            raise RuntimeError("store scoped user skips company DWS metrics")
         dws_result = await db.execute(text("""
             SELECT total_sales_amount, total_order_count, total_item_count,
                    gross_profit, gross_margin, avg_order_value,

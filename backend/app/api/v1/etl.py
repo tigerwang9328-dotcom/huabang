@@ -39,7 +39,7 @@ async def run_etl(
 
 @router.get("/status", response_model=ApiResponse)
 async def get_etl_status(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:sync:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取最近ETL状态"""
@@ -61,7 +61,7 @@ async def get_etl_logs(
     page: int = 1,
     page_size: int = 20,
     stat_date: str = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:sync:view")),
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text

@@ -43,7 +43,7 @@ class DingtalkSyncRequest(BaseModel):
 
 @router.get("/overview", response_model=ApiResponse)
 async def hr_overview(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("hr:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """人事汇总：在职人数、今日出勤/迟到/早退/缺卡/请假、部门出勤、最近考勤异常。"""
@@ -107,7 +107,7 @@ async def hr_overview(
 
 @router.get("/employees", response_model=ApiResponse)
 async def hr_employees(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
-                       current_user: SysUser = Depends(require_permission("dashboard:view")),
+                       current_user: SysUser = Depends(require_permission("hr:overview:view")),
                        db: AsyncSession = Depends(get_db)):
     total = (await db.execute(text("SELECT count(*) FROM dingtalk_employees"))).scalar()
     rows = (await db.execute(text("""
@@ -129,7 +129,7 @@ async def hr_attendance(
     department: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("hr:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     filters = []
@@ -193,7 +193,7 @@ async def hr_attendance(
 @router.get("/attendance/summary", response_model=ApiResponse)
 async def hr_attendance_summary(
     work_date: Optional[date] = Query(None),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("hr:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     stat_date_sql = "CAST(:work_date AS date)" if work_date else "current_date"
@@ -240,7 +240,7 @@ async def hr_attendance_summary(
 @router.get("/attendance/departments", response_model=ApiResponse)
 async def hr_attendance_departments(
     work_date: Optional[date] = Query(None),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("hr:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     stat_date_sql = "CAST(:work_date AS date)" if work_date else "current_date"
@@ -278,7 +278,7 @@ async def hr_approvals(
     category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("hr:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     filters = []
@@ -314,7 +314,7 @@ async def hr_approvals(
 
 @router.get("/departments", response_model=ApiResponse)
 async def hr_departments(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("hr:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (await db.execute(text("""
@@ -345,7 +345,7 @@ async def sync_dingtalk_hr(
 
 @router.get("/leaves", response_model=ApiResponse)
 async def hr_leaves(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
-                    current_user: SysUser = Depends(require_permission("dashboard:view")),
+                    current_user: SysUser = Depends(require_permission("hr:overview:view")),
                     db: AsyncSession = Depends(get_db)):
     total = (await db.execute(text(
         "SELECT count(*) FROM dingtalk_approval_instances WHERE category IN ('leave','business_trip')"))).scalar()

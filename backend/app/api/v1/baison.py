@@ -275,7 +275,7 @@ async def _background_sync_module(module_key: str, req: BaisonModuleSyncRequest,
 # ------------------------- 接口目录 / 通用联调 -------------------------
 @router.get("/catalog")
 async def get_baison_api_catalog(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:baison-api:view")),
 ):
     """百胜接口目录：用于前端接口管理页展示已接入/待编排状态。"""
     modules = sorted({item["module"] for item in BAISON_API_CATALOG})
@@ -438,7 +438,7 @@ async def list_shops(
     shop_type: Optional[str] = None,
     online_type: Optional[str] = None,
     is_enabled: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:baison-api:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """门店档案分页查询（不返回 raw_data）。"""
@@ -476,7 +476,7 @@ async def list_shops(
 @router.get("/shops/{shop_code}")
 async def get_shop_detail(
     shop_code: str,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:baison-api:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """门店详情（含 raw_data）。"""

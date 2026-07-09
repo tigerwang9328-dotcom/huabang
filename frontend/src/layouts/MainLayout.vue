@@ -14,56 +14,89 @@
       <!-- 菜单（路径全部位于 /app 之下） -->
       <nav class="sidebar-nav">
         <div class="nav-group" v-for="group in visibleMenuGroups" :key="group.label">
-          <button
-            type="button"
-            class="nav-item nav-parent nav-group-parent"
-            :class="{ active: isGroupActive(group), expanded: expandedMenus.has(groupKey(group)) }"
-            @click="toggleMenu(groupKey(group))"
+          <router-link
+            v-if="group.path"
+            :to="group.path"
+            class="nav-item nav-parent nav-group-parent nav-group-link"
+            :class="{ active: isActive(group.path) }"
           >
             <el-icon v-if="group.icon"><component :is="group.icon" /></el-icon>
             <span>{{ group.label }}</span>
-            <el-icon class="nav-arrow"><ArrowRight /></el-icon>
-          </button>
-          <transition name="submenu">
-            <div v-show="expandedMenus.has(groupKey(group))" class="submenu-list">
-              <template v-for="item in group.items" :key="menuKey(item)">
-                <div v-if="item.children?.length" class="nav-submenu">
+          </router-link>
+          <template v-else>
+            <button
+              type="button"
+              class="nav-item nav-parent nav-group-parent"
+              :class="{ active: isGroupActive(group), expanded: expandedMenus.has(groupKey(group)) }"
+              @click="toggleMenu(groupKey(group))"
+            >
+              <el-icon v-if="group.icon"><component :is="group.icon" /></el-icon>
+              <span>{{ group.label }}</span>
+              <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+            </button>
+            <transition name="submenu">
+              <div v-show="expandedMenus.has(groupKey(group))" class="submenu-list">
+                <template v-for="item in group.items" :key="menuKey(item)">
+                  <div v-if="item.children?.length" class="nav-submenu">
+                    <button
+                      type="button"
+                      class="nav-item nav-sub nav-parent-2"
+                      :class="{ active: isAnyChildActive(item.children), expanded: expandedMenus.has(menuKey(item)) }"
+                      @click.stop="toggleMenu(menuKey(item))"
+                    >
+                      <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+                      <span>{{ item.label }}</span>
+                      <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+                    </button>
+                    <transition name="submenu">
+                      <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list submenu-list-2">
+                        <template v-for="leaf in item.children" :key="menuKey(leaf)">
+                          <button
+                            v-if="leaf.disabled"
+                            type="button"
+                            class="nav-item nav-sub nav-sub-2 nav-disabled"
+                            disabled
+                          >
+                            <span>{{ leaf.label }}</span>
+                            <em v-if="leaf.badge" class="nav-badge">{{ leaf.badge }}</em>
+                          </button>
+                          <router-link
+                            v-else
+                            :to="leaf.path || '/app/dashboard'"
+                            class="nav-item nav-sub nav-sub-2"
+                            :class="{ active: isActive(leaf.path || '') }"
+                          >
+                            <span>{{ leaf.label }}</span>
+                            <em v-if="leaf.badge" class="nav-badge">{{ leaf.badge }}</em>
+                          </router-link>
+                        </template>
+                      </div>
+                    </transition>
+                  </div>
                   <button
+                    v-else-if="item.disabled"
                     type="button"
-                    class="nav-item nav-sub nav-parent-2"
-                    :class="{ active: isAnyChildActive(item.children), expanded: expandedMenus.has(menuKey(item)) }"
-                    @click.stop="toggleMenu(menuKey(item))"
+                    class="nav-item nav-sub nav-disabled"
+                    disabled
                   >
                     <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
                     <span>{{ item.label }}</span>
-                    <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+                    <em v-if="item.badge" class="nav-badge">{{ item.badge }}</em>
                   </button>
-                  <transition name="submenu">
-                    <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list submenu-list-2">
-                      <router-link
-                        v-for="leaf in item.children"
-                        :key="leaf.path"
-                        :to="leaf.path || '/app/dashboard'"
-                        class="nav-item nav-sub nav-sub-2"
-                        :class="{ active: isActive(leaf.path || '') }"
-                      >
-                        <span>{{ leaf.label }}</span>
-                      </router-link>
-                    </div>
-                  </transition>
-                </div>
-                <router-link
-                  v-else
-                  :to="item.path || '/app/dashboard'"
-                  class="nav-item nav-sub"
-                  :class="{ active: isActive(item.path || '') }"
-                >
-                  <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-                  <span>{{ item.label }}</span>
-                </router-link>
-              </template>
-            </div>
-          </transition>
+                  <router-link
+                    v-else
+                    :to="item.path || '/app/dashboard'"
+                    class="nav-item nav-sub"
+                    :class="{ active: isActive(item.path || '') }"
+                  >
+                    <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+                    <span>{{ item.label }}</span>
+                    <em v-if="item.badge" class="nav-badge">{{ item.badge }}</em>
+                  </router-link>
+                </template>
+              </div>
+            </transition>
+          </template>
         </div>
       </nav>
 
@@ -140,129 +173,171 @@ const saveExpandedMenus = (menus: Set<string>) => {
 };
 const expandedMenus = ref(loadExpandedMenus());
 
-type MenuRole = "admin" | "finance";
 interface MenuItem {
   path?: string;
   label: string;
   icon?: unknown;
   key?: string;
-  role?: MenuRole;
+  permission?: string;
+  disabled?: boolean;
+  badge?: string;
   children?: MenuItem[];
 }
 interface MenuGroup {
+  path?: string;
   label: string;
   icon?: unknown;
-  items: MenuItem[];
+  items?: MenuItem[];
+  permission?: string;
 }
 
-const financeRoles = ["boss", "shareholder", "ceo", "finance_manager", "super_admin"];
-
 const canShow = (item: MenuItem) => {
-  if (item.role === "admin") return authStore.isAdmin || authStore.hasRole("super_admin");
-  if (item.role === "finance") return authStore.hasAnyRole(...financeRoles);
+  if (item.permission) return authStore.hasPermission(item.permission);
+  return true;
+};
+const canShowGroup = (group: MenuGroup) => {
+  if (group.permission) return authStore.hasPermission(group.permission);
   return true;
 };
 
 const menuGroups = computed<MenuGroup[]>(() => [
   {
-    label: "经营",
+    path: "/app/dashboard",
+    label: "经营总览",
     icon: DataLine,
+    permission: "dashboard:overview:view",
+  },
+  {
+    label: "AI经营诊断",
+    icon: ChatDotRound,
+    permission: "diagnosis:overall:view",
     items: [
-      { path: "/app/dashboard", icon: DataLine, label: "经营概览" },
-      { path: "/app/boss", icon: House, label: "经营日报" },
+      { path: "/app/ai-diagnosis", icon: ChatDotRound, label: "总体经营诊断", permission: "diagnosis:overall:view" },
+      { label: "销售诊断", icon: TrendCharts, disabled: true, badge: "规划中", permission: "diagnosis:sales:view" },
+      { label: "商品诊断", icon: GoodsFilled, disabled: true, badge: "规划中", permission: "diagnosis:product:view" },
+      { label: "库存诊断", icon: Box, disabled: true, badge: "规划中", permission: "diagnosis:inventory:view" },
+      { label: "人力诊断", icon: UserFilled, disabled: true, badge: "规划中", permission: "diagnosis:hr:view" },
+      { label: "财务诊断", icon: Money, disabled: true, badge: "规划中", permission: "diagnosis:finance:view" },
+    ],
+  },
+  {
+    label: "销售中心",
+    icon: TrendCharts,
+    permission: "sales:overview:view",
+    items: [
       {
         icon: Shop,
-        label: "门店经营",
-        key: "store",
+        label: "线下销售",
+        key: "sales-offline",
         children: [
-          { path: "/app/store", label: "门店分析" },
+          { path: "/app/store/overview", label: "门店总览" },
+          { path: "/app/store", label: "单店分析" },
+          { path: "/app/member", label: "会员运营" },
+          { label: "导购销售", disabled: true, badge: "规划中" },
         ],
       },
       {
-        icon: GoodsFilled,
-        label: "商品中心",
-        key: "product",
+        icon: DataLine,
+        label: "线上销售",
+        key: "sales-online",
         children: [
-          { path: "/app/product", label: "商品分析" },
-          { path: "/app/product/products", label: "商品主档" },
-          { path: "/app/product/skus", label: "SKU档案" },
+          { label: "线上总览", disabled: true, badge: "规划中" },
+          { label: "平台销售", disabled: true, badge: "规划中" },
+          { label: "退款售后", disabled: true, badge: "规划中" },
         ],
       },
-      { path: "/app/finance", icon: TrendCharts, label: "利润分析", role: "finance" },
+      { path: "/app/warning", icon: Warning, label: "销售异常" },
     ],
   },
   {
-    label: "风控",
-    icon: Warning,
+    label: "商品经营",
+    icon: GoodsFilled,
+    permission: "product:overview:view",
     items: [
-      {
-        icon: Box,
-        label: "库存管理",
-        key: "inventory",
-        children: [
-          { path: "/app/inventory", label: "库存预警" },
-          { path: "/app/inventory/balance", label: "库存余额" },
-          { path: "/app/inventory/warehouses", label: "仓库档案" },
-        ],
-      },
-      { path: "/app/warning", icon: Warning, label: "异常稽核" },
+      { path: "/app/product", icon: GoodsFilled, label: "商品总览" },
+      { path: "/app/product/products", icon: GoodsFilled, label: "商品主档" },
+      { path: "/app/product/skus", icon: Box, label: "SKU档案" },
+      { label: "动销分析", icon: TrendCharts, disabled: true, badge: "规划中" },
+      { label: "爆款补货", icon: DataLine, disabled: true, badge: "规划中" },
+      { label: "滞销清仓", icon: Warning, disabled: true, badge: "规划中" },
     ],
   },
   {
-    label: "协调",
+    label: "采购协同",
     icon: List,
+    permission: "purchase:overview:view",
     items: [
-      { path: "/app/member", icon: User, label: "会员运营" },
-      { path: "/app/task", icon: List, label: "任务管理" },
-      { path: "/app/ai", icon: ChatDotRound, label: "AI助手" },
-      { path: "/app/dingtalk", icon: Bell, label: "钉钉通知" },
-      {
-        icon: Avatar,
-        label: "其他",
-        key: "other",
-        role: "admin",
-        children: [
-          { path: "/app/system/users", icon: Avatar, label: "用户管理" },
-          { path: "/app/system/roles", icon: Key, label: "角色权限" },
-          { path: "/app/system/sync", icon: Refresh, label: "数据同步" },
-          { path: "/app/system/baison-api", icon: Refresh, label: "百胜API管理" },
-        ],
-      },
+      { label: "采购总览", icon: List, disabled: true, badge: "规划中" },
+      { label: "采购订单", icon: List, disabled: true, badge: "规划中" },
+      { label: "供应商管理", icon: User, disabled: true, badge: "规划中" },
+      { label: "到货跟踪", icon: Refresh, disabled: true, badge: "规划中" },
     ],
   },
   {
-    label: "财务",
+    label: "库存风控",
+    icon: Box,
+    permission: "inventory:overview:view",
+    items: [
+      { path: "/app/inventory", icon: Warning, label: "库存总览" },
+      { path: "/app/inventory/balance", icon: Box, label: "库存余额" },
+      { path: "/app/inventory/warehouses", icon: House, label: "仓库档案" },
+      { label: "库龄分析", icon: DataLine, disabled: true, badge: "规划中" },
+      { label: "调拨建议", icon: Refresh, disabled: true, badge: "规划中" },
+      { path: "/app/warning", icon: Warning, label: "异常库存" },
+    ],
+  },
+  {
+    label: "财务利润",
     icon: Money,
+    permission: "finance:overview:view",
     items: [
-      {
-        icon: Money,
-        label: "财务中心",
-        key: "fin",
-        role: "finance",
-        children: [
-          { path: "/app/fin/overview", label: "财务首页" },
-          { path: "/app/fin/reimbursements", label: "报销管理" },
-          { path: "/app/fin/payments", label: "付款申请" },
-          { path: "/app/fin/expense-analysis", label: "费用分析" },
-        ],
-      },
+      { path: "/app/fin/overview", icon: Money, label: "财务首页", permission: "finance:overview:view" },
+      { path: "/app/finance", icon: TrendCharts, label: "利润分析", permission: "finance:profit:view" },
+      { path: "/app/fin/reimbursements", icon: List, label: "报销管理", permission: "finance:reimbursement:view" },
+      { path: "/app/fin/payments", icon: Money, label: "付款申请", permission: "finance:payment:view" },
+      { path: "/app/fin/expense-analysis", icon: DataLine, label: "费用分析", permission: "finance:expense:view" },
+      { label: "现金安全", icon: Warning, disabled: true, badge: "规划中", permission: "finance:cash:view" },
     ],
   },
   {
-    label: "人事",
+    label: "人力资源",
     icon: UserFilled,
+    permission: "hr:overview:view",
     items: [
-      {
-        icon: UserFilled,
-        label: "人事管理",
-        key: "hr",
-        children: [
-          { path: "/app/hr/overview", label: "人事首页" },
-          { path: "/app/hr/employees", label: "员工档案" },
-          { path: "/app/hr/attendance", label: "考勤管理" },
-          { path: "/app/hr/leaves", label: "请假外出" },
-        ],
-      },
+      { path: "/app/hr/overview", icon: UserFilled, label: "人事首页" },
+      { path: "/app/hr/employees", icon: Avatar, label: "员工档案" },
+      { path: "/app/hr/attendance", icon: List, label: "考勤管理" },
+      { path: "/app/hr/leaves", icon: Bell, label: "请假外出" },
+      { label: "人效分析", icon: DataLine, disabled: true, badge: "规划中" },
+    ],
+  },
+  {
+    label: "知识中枢",
+    icon: ChatDotRound,
+    permission: "knowledge:ai:view",
+    items: [
+      { path: "/app/ai", icon: ChatDotRound, label: "AI助手" },
+      { label: "经营知识库", icon: List, disabled: true, badge: "规划中" },
+      { label: "制度文档", icon: Key, disabled: true, badge: "规划中" },
+      { label: "AI问答记录", icon: Refresh, disabled: true, badge: "规划中" },
+    ],
+  },
+  {
+    label: "系统设置",
+    icon: Key,
+    permission: "system:dashboard:view",
+    items: [
+      { path: "/app/system/admin", icon: DataLine, label: "管理后台", permission: "system:dashboard:view" },
+      { path: "/app/system/register-audit", icon: List, label: "注册审核", permission: "system:register:review" },
+      { path: "/app/system/module-permissions", icon: Key, label: "岗位权限矩阵", permission: "system:permission:view" },
+      { path: "/app/system/data-permissions", icon: Box, label: "数据权限", permission: "system:data-scope:update" },
+      { path: "/app/system/field-permissions", icon: List, label: "字段权限", permission: "system:field-permission:update" },
+      { path: "/app/system/security", icon: Warning, label: "安全设置", permission: "system:security:update" },
+      { path: "/app/system/users", icon: Avatar, label: "用户管理", permission: "system:user:view" },
+      { path: "/app/system/roles", icon: Key, label: "角色权限", permission: "system:role:view" },
+      { path: "/app/system/sync", icon: Refresh, label: "数据同步", permission: "system:sync:view" },
+      { path: "/app/system/baison-api", icon: Refresh, label: "百胜API管理", permission: "system:baison-api:view" },
+      { path: "/app/dingtalk", icon: Bell, label: "钉钉配置", permission: "system:dingtalk:view" },
     ],
   },
 ]);
@@ -278,8 +353,9 @@ const visibleMenuGroups = computed(() => {
       .filter((item) => !item.children || item.children.length > 0);
 
   return menuGroups.value
-    .map((group) => ({ ...group, items: filterItems(group.items) }))
-    .filter((group) => group.items.length > 0);
+    .filter(canShowGroup)
+    .map((group) => ({ ...group, items: group.items ? filterItems(group.items) : undefined }))
+    .filter((group) => Boolean(group.path) || Boolean(group.items?.length));
 });
 
 const menuKey = (item: MenuItem) => item.key || item.path || item.label;
@@ -303,7 +379,8 @@ const isAnyChildActive = (children: MenuItem[]): boolean =>
   children.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false));
 
 const isGroupActive = (group: MenuGroup): boolean =>
-  group.items.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false));
+  Boolean(group.path && isActive(group.path)) ||
+  Boolean(group.items?.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false)));
 
 const userInitial = computed(() => {
   const name = authStore.userInfo?.real_name || authStore.userInfo?.username || "用";
@@ -426,6 +503,26 @@ const handleLogout = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.nav-group-link {
+  padding-left: 12px;
+}
+.nav-disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+.nav-disabled:hover {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+}
+.nav-badge {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.46);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 .nav-parent .nav-arrow {
   margin-left: auto;

@@ -21,7 +21,7 @@ def _i(v):
 
 @router.get("/overview", response_model=ApiResponse)
 async def finance_overview(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("finance:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """财务汇总：今日/本月 报销与付款金额、待审批、已审批未付款、最近记录、部门排行。"""
@@ -93,20 +93,20 @@ async def _expense_list(db, category, page, page_size):
 
 @router.get("/expenses", response_model=ApiResponse)
 async def finance_expenses(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
-                           current_user: SysUser = Depends(require_permission("dashboard:view")),
+                           current_user: SysUser = Depends(require_permission("finance:overview:view")),
                            db: AsyncSession = Depends(get_db)):
     return ApiResponse.ok(data=await _expense_list(db, None, page, page_size))
 
 
 @router.get("/reimbursements", response_model=ApiResponse)
 async def finance_reimbursements(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
-                                 current_user: SysUser = Depends(require_permission("dashboard:view")),
+                                 current_user: SysUser = Depends(require_permission("finance:overview:view")),
                                  db: AsyncSession = Depends(get_db)):
     return ApiResponse.ok(data=await _expense_list(db, "reimbursement", page, page_size))
 
 
 @router.get("/payments", response_model=ApiResponse)
 async def finance_payments(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
-                           current_user: SysUser = Depends(require_permission("dashboard:view")),
+                           current_user: SysUser = Depends(require_permission("finance:overview:view")),
                            db: AsyncSession = Depends(get_db)):
     return ApiResponse.ok(data=await _expense_list(db, "payment", page, page_size))

@@ -332,7 +332,7 @@ async def submit_reference(
 async def run_reconciliation(
     reconcile_date: str,
     store_code: str = "ALL",
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """对比系统计算值与百盛原报参考值，生成对账结果"""
@@ -484,7 +484,7 @@ async def run_reconciliation(
 @router.get("/reconcile/result/{reconcile_date}", response_model=ApiResponse)
 async def get_reconcile_result(
     reconcile_date: str,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """查看指定日期的对账结果"""
@@ -588,7 +588,7 @@ async def update_checklist(
 
 @router.get("/dashboard", response_model=ApiResponse)
 async def get_acceptance_dashboard(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("system:dashboard:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """三天试运营验收看板"""

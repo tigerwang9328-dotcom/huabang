@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import require_permission
 from app.core.store_whitelist import ALLOWED_STORE_CODES
 from app.core.database import get_db
+from app.core.data_scope import get_data_scope
 from app.models.dim import DimStore
 from app.models.sys import SysUser
 
@@ -84,7 +85,7 @@ async def list_stores(
     store_type: Optional[str] = None,
     business_type: Optional[str] = None,
     status: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("sales:store:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准门店维分页查询（门店总览）。"""
@@ -101,6 +102,9 @@ async def list_stores(
             conds.append(DimStore.business_type == business_type)
         if status:
             conds.append(DimStore.status == status)
+        data_scope = await get_data_scope(db, current_user)
+        if data_scope.is_limited_store:
+            conds.append(DimStore.store_code.in_(data_scope.store_codes or ["__NO_ACCESS__"]))
 
         total = (await db.execute(select(func.count()).select_from(DimStore).where(*conds))).scalar() or 0
         rows = (await db.execute(
@@ -118,18 +122,20 @@ async def store_sales_analysis(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     keyword: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("sales:store:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """独立门店销售数据：按日期范围汇总门店小票、商品动销和趋势。"""
     try:
+        data_scope = await get_data_scope(db, current_user)
+        allowed_store_codes = data_scope.store_codes if data_scope.is_limited_store else sorted(ALLOWED_STORE_CODES)
         latest_row = (await db.execute(text("""
             SELECT MAX(biz_date) AS latest_date
             FROM dwd.dwd_pos_ticket
             WHERE store_code = ANY(:store_codes)
               AND COALESCE(is_void, false) = false
               AND COALESCE(is_pending, false) = false
-        """), {"store_codes": sorted(ALLOWED_STORE_CODES)})).mappings().first()
+        """), {"store_codes": allowed_store_codes})).mappings().first()
         latest_date = latest_row["latest_date"] if latest_row else None
         if not latest_date:
             return {
@@ -147,7 +153,7 @@ async def store_sales_analysis(
         sd = _parse_date(start_date, latest_date)
         ed = _parse_date(end_date, latest_date)
         kw = f"%{keyword.strip()}%" if keyword and keyword.strip() else ""
-        params = {"sd": sd, "ed": ed, "store_codes": sorted(ALLOWED_STORE_CODES), "kw": kw}
+        params = {"sd": sd, "ed": ed, "store_codes": allowed_store_codes, "kw": kw}
         await db.execute(text("""
             CREATE TABLE IF NOT EXISTS dwd.dwd_store_recharge_daily (
                 biz_date DATE NOT NULL,

@@ -204,7 +204,71 @@
               </span>
             </button>
 
+            <div class="register-entry">
+              <span>还没有中台账号？</span>
+              <button type="button" @click="openRegisterDialog">注册申请</button>
+            </div>
+
           </form>
+
+          <el-dialog
+            v-model="registerVisible"
+            title="华邦AI中台 · 注册申请"
+            width="620px"
+            class="register-dialog"
+            append-to-body
+          >
+            <div class="register-intro">
+              <strong>企业账号申请</strong>
+              <p>请填写真实信息。提交后账号不会立即启用，需系统管理员审核岗位、门店与权限范围后开通。</p>
+            </div>
+            <el-form :model="registerForm" label-width="96px" class="register-form">
+              <div class="form-section-title">账号信息</div>
+              <el-form-item label="用户名" required>
+                <el-input v-model="registerForm.username" placeholder="建议使用姓名拼音 / 工号 / 手机号" autocomplete="off" />
+              </el-form-item>
+              <div class="register-two-col">
+                <el-form-item label="登录密码" required>
+                  <el-input v-model="registerForm.password" type="password" show-password placeholder="至少8位" autocomplete="new-password" />
+                </el-form-item>
+                <el-form-item label="确认密码" required>
+                  <el-input v-model="registerForm.confirm_password" type="password" show-password placeholder="再次输入密码" autocomplete="new-password" />
+                </el-form-item>
+              </div>
+
+              <div class="form-section-title">身份信息</div>
+              <div class="register-two-col">
+                <el-form-item label="真实姓名" required>
+                  <el-input v-model="registerForm.real_name" placeholder="请输入真实姓名" />
+                </el-form-item>
+                <el-form-item label="手机号" required>
+                  <el-input v-model="registerForm.phone" placeholder="用于管理员核验身份" />
+                </el-form-item>
+              </div>
+              <el-form-item label="部门/门店">
+                <el-input v-model="registerForm.department" placeholder="如：运营部 / 商品部 / 成都某门店" />
+              </el-form-item>
+
+              <div class="form-section-title">权限申请</div>
+              <div class="register-two-col">
+                <el-form-item label="申请岗位" required>
+                  <el-select v-model="registerForm.apply_role" placeholder="请选择岗位" style="width: 100%">
+                    <el-option v-for="role in registerRoles" :key="role.value" :label="role.label" :value="role.value" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="门店编码">
+                  <el-input v-model="registerForm.store_code" placeholder="店长/导购必填" />
+                </el-form-item>
+              </div>
+              <el-form-item label="申请说明">
+                <el-input v-model="registerForm.remark" type="textarea" :rows="3" placeholder="请说明申请原因、所属业务范围或需要查看的数据模块" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="registerVisible = false">取消</el-button>
+              <el-button type="primary" :loading="registerSubmitting" @click="submitRegisterApply">提交申请</el-button>
+            </template>
+          </el-dialog>
 
           <!-- 版权 -->
           <div class="card-ft">
@@ -220,6 +284,7 @@
 import { ref, reactive, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { authApi } from "@/api/auth";
 import { ElMessage } from "element-plus";
 
 const router    = useRouter();
@@ -231,6 +296,32 @@ const showPwd    = ref(false);
 const rememberMe = ref(false);
 const af         = ref("");   // active field
 const ready      = ref(false);
+const registerVisible = ref(false);
+const registerSubmitting = ref(false);
+const registerForm = reactive({
+  username: "",
+  password: "",
+  confirm_password: "",
+  real_name: "",
+  phone: "",
+  apply_role: "",
+  department: "",
+  store_code: "",
+  remark: "",
+});
+const registerRoles = [
+  { label: "BOSS", value: "boss" },
+  { label: "总经理", value: "ceo" },
+  { label: "商品经理", value: "product_manager" },
+  { label: "商品专员", value: "product_specialist" },
+  { label: "财务经理", value: "finance_manager" },
+  { label: "会计", value: "accountant" },
+  { label: "出纳", value: "cashier" },
+  { label: "仓库主管", value: "warehouse_manager" },
+  { label: "运营经理", value: "operation_manager" },
+  { label: "店长", value: "store_manager" },
+  { label: "导购", value: "guide" },
+];
 const REMEMBER_KEY = "hb_login_remember";
 
 const sources = [
@@ -273,6 +364,83 @@ onMounted(() => {
   setTimeout(() => { ready.value = true; }, 60);
 });
 
+
+
+const openRegisterDialog = () => {
+  registerVisible.value = true;
+};
+
+const resetRegisterForm = () => {
+  registerForm.username = "";
+  registerForm.password = "";
+  registerForm.confirm_password = "";
+  registerForm.real_name = "";
+  registerForm.phone = "";
+  registerForm.apply_role = "";
+  registerForm.department = "";
+  registerForm.store_code = "";
+  registerForm.remark = "";
+};
+
+const submitRegisterApply = async () => {
+  if (!registerForm.username.trim() || !registerForm.password || !registerForm.confirm_password) {
+    ElMessage({ message: "请填写用户名、密码和确认密码", type: "warning", duration: 2600 });
+    return;
+  }
+  if (registerForm.password.length < 8) {
+    ElMessage({ message: "密码至少8位", type: "warning", duration: 2600 });
+    return;
+  }
+  if (registerForm.password !== registerForm.confirm_password) {
+    ElMessage({ message: "两次输入的密码不一致", type: "warning", duration: 2600 });
+    return;
+  }
+  if (!registerForm.real_name.trim() || !registerForm.phone.trim() || !registerForm.apply_role) {
+    ElMessage({ message: "请填写姓名、手机号并选择申请岗位", type: "warning", duration: 2600 });
+    return;
+  }
+  if (["store_manager", "guide"].includes(registerForm.apply_role) && !registerForm.store_code.trim()) {
+    ElMessage({ message: "店长/导购申请必须填写门店编码", type: "warning", duration: 2600 });
+    return;
+  }
+  registerSubmitting.value = true;
+  try {
+    await authApi.registerApply({
+      username: registerForm.username.trim(),
+      password: registerForm.password,
+      confirm_password: registerForm.confirm_password,
+      real_name: registerForm.real_name.trim(),
+      phone: registerForm.phone.trim(),
+      apply_role: registerForm.apply_role,
+      department: registerForm.department.trim(),
+      store_code: registerForm.store_code.trim(),
+      remark: registerForm.remark.trim(),
+    });
+    ElMessage({ message: "注册申请已提交，请等待管理员审核", type: "success", duration: 3200 });
+    registerVisible.value = false;
+    resetRegisterForm();
+  } catch (e: any) {
+    ElMessage({ message: e.message || "提交失败，请稍后重试", type: "error", duration: 3000 });
+  } finally {
+    registerSubmitting.value = false;
+  }
+};
+
+const getPermissionHomePath = () => {
+  const candidates: Array<[string, string]> = [
+    ["/app/dashboard", "dashboard:overview:view"],
+    ["/app/ai-diagnosis", "diagnosis:overall:view"],
+    ["/app/store", "sales:store:view"],
+    ["/app/product", "product:overview:view"],
+    ["/app/inventory", "inventory:overview:view"],
+    ["/app/fin/overview", "finance:overview:view"],
+    ["/app/hr/overview", "hr:overview:view"],
+    ["/app/ai", "knowledge:ai:view"],
+    ["/app/system/admin", "system:dashboard:view"],
+  ];
+  return candidates.find(([, permission]) => authStore.hasPermission(permission))?.[0] || "/app/ai";
+};
+
 const handleLogin = async () => {
   const username = form.username.trim();
   if (!username || !form.password) {
@@ -285,7 +453,7 @@ const handleLogin = async () => {
     await authStore.login(username, form.password);
     saveRememberedLogin();
     ElMessage({ message: "登录成功，欢迎回来", type: "success", duration: 2000 });
-    router.push("/app/dashboard");
+    router.push(getPermissionHomePath());
   } catch (e: any) {
     ElMessage({
       message: e.message || "用户名或密码错误，请重试",
@@ -811,6 +979,64 @@ const handleLogin = async () => {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+
+.register-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.34);
+}
+.register-entry button {
+  border: 0;
+  background: transparent;
+  color: rgba(212,168,83,0.88);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 999px;
+  transition: color .2s, background .2s;
+}
+.register-entry button:hover {
+  color: #F2D072;
+  background: rgba(212,168,83,0.08);
+}
+.register-intro {
+  border: 1px solid #E8D9B5;
+  background: #FFFBEB;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  color: #7C4A03;
+}
+.register-intro strong { display: block; margin-bottom: 4px; }
+.register-intro p { margin: 0; line-height: 1.55; font-size: 13px; }
+
+.form-section-title {
+  margin: 16px 0 10px;
+  padding-left: 10px;
+  border-left: 3px solid #D4A853;
+  color: #0F172A;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.form-section-title:first-child { margin-top: 2px; }
+.register-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.register-two-col :deep(.el-form-item) { margin-bottom: 16px; }
+@media (max-width: 640px) { .register-two-col { grid-template-columns: 1fr; gap: 0; } }
+
+.register-form :deep(.el-input__wrapper),
+.register-form :deep(.el-textarea__inner) {
+  border-radius: 10px;
 }
 
 /* Card footer */

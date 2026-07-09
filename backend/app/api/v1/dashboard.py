@@ -12,6 +12,7 @@ from app.models.app import AppActionTask
 from app.schemas.common import ApiResponse, safe_div
 from app.services.business_overview_service import get_overview as get_business_overview
 from app.core.store_whitelist import allowed_store_sql_in
+from app.core.data_scope import get_data_scope, sql_in
 from sqlalchemy import text
 import logging
 
@@ -22,11 +23,11 @@ router = APIRouter(prefix="/dashboard", tags=["驾驶舱"])
 @router.get("/overview", response_model=ApiResponse)
 async def get_overview(
     stat_date: Optional[str] = Query(None, description="统计日期YYYY-MM-DD，默认昨日"),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """首页核心指标概览"""
-    data = await get_business_overview(db, stat_date)
+    data = await get_business_overview(db, stat_date, current_user)
     return ApiResponse.ok(data=data)
 
 
@@ -34,7 +35,7 @@ async def get_overview(
 async def get_sales_trend(
     days: int = Query(7, ge=3, le=30),
     end_date: Optional[str] = Query(None, description="结束日期YYYY-MM-DD，默认最新数据日期"),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """近N天销售趋势"""
@@ -48,16 +49,33 @@ async def get_sales_trend(
         """))
         end_dt = latest_result.scalar() or (date.today() - timedelta(days=1))
     start_dt = end_dt - timedelta(days=days - 1)
+    data_scope = await get_data_scope(db, current_user)
 
-    result = await db.execute(text("""
-        SELECT stat_date AS biz_date,
-               COALESCE(total_sales_amount, 0) AS total_sales,
-               COALESCE(total_order_count, 0) AS order_count,
-               COALESCE(total_item_count, 0) AS item_count
-        FROM dws.dws_company_daily
-        WHERE stat_date BETWEEN :start_date AND :end_date
-        ORDER BY stat_date
-    """), {"start_date": start_dt, "end_date": end_dt})
+    if data_scope.is_limited_store:
+        store_in = sql_in(data_scope.store_codes)
+        result = await db.execute(text(f"""
+            SELECT biz_date,
+                   COALESCE(SUM(sales_amount), 0) AS total_sales,
+                   COUNT(*)::int AS order_count,
+                   COALESCE(SUM(sales_qty), 0) AS item_count
+            FROM dwd.dwd_pos_ticket
+            WHERE biz_date BETWEEN :start_date AND :end_date
+              AND COALESCE(store_code, '') IN {store_in}
+              AND COALESCE(is_void, false) = false
+              AND COALESCE(is_pending, false) = false
+            GROUP BY biz_date
+            ORDER BY biz_date
+        """), {"start_date": start_dt, "end_date": end_dt})
+    else:
+        result = await db.execute(text("""
+            SELECT stat_date AS biz_date,
+                   COALESCE(total_sales_amount, 0) AS total_sales,
+                   COALESCE(total_order_count, 0) AS order_count,
+                   COALESCE(total_item_count, 0) AS item_count
+            FROM dws.dws_company_daily
+            WHERE stat_date BETWEEN :start_date AND :end_date
+            ORDER BY stat_date
+        """), {"start_date": start_dt, "end_date": end_dt})
     rows = result.mappings().all()
 
     trend = [
@@ -79,7 +97,7 @@ async def get_sales_trend(
 async def get_store_rank(
     stat_date: Optional[str] = None,
     top_n: int = Query(10, ge=3, le=50),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """门店销售排行
@@ -111,7 +129,8 @@ async def get_store_rank(
             PRIMARY KEY (biz_date, store_code, source)
         )
     """))
-    store_in = allowed_store_sql_in()
+    data_scope = await get_data_scope(db, current_user)
+    store_in = sql_in(data_scope.store_codes) if data_scope.is_limited_store else allowed_store_sql_in()
     result = await db.execute(text(f"""
         WITH ticket AS (
             SELECT store_code,
@@ -133,6 +152,7 @@ async def get_store_rank(
             GROUP BY store_code
         )
         SELECT ticket.store_code,
+               COALESCE(NULLIF(bs.shop_name, ''), NULLIF(ds.store_name, '')) AS store_name,
                ticket.net_sales,
                ticket.actual_pay_amount + COALESCE(recharge.recharge_amount, 0) AS actual_pay_amount,
                ticket.order_count,
@@ -145,6 +165,10 @@ async def get_store_rank(
                END AS items_per_order
         FROM ticket
         LEFT JOIN recharge ON recharge.store_code = ticket.store_code
+        LEFT JOIN dim.dim_baison_shop bs ON bs.shop_code = ticket.store_code
+        LEFT JOIN dim.dim_store ds
+          ON ds.store_code = ticket.store_code
+         AND COALESCE(ds.source_system, 'baison') = 'baison'
         WHERE ticket.net_sales > 0
         ORDER BY net_sales DESC
         LIMIT :top_n
@@ -155,6 +179,7 @@ async def get_store_rank(
         {
             "rank": i + 1,
             "store_code": r["store_code"],
+            "store_name": r["store_name"],
             "net_sales": float(r["net_sales"] or 0),
             "actual_pay_amount": float(r["actual_pay_amount"] or 0),
             "order_count": int(r["order_count"] or 0),
@@ -169,7 +194,7 @@ async def get_store_rank(
 
 @router.get("/task-summary", response_model=ApiResponse)
 async def get_task_summary(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """任务汇总（今日待处理/逾期/完成趋势）"""

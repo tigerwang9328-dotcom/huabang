@@ -105,7 +105,7 @@
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper"
-            :total="wTotal" :current-page="wPage" :page-size="wSize"
+            :total="wTotal" v-model:current-page="wPage" v-model:page-size="wSize"
             :page-sizes="[20, 50, 100]" @current-change="onWPage" @size-change="onWSize" />
         </div>
       </el-tab-pane>

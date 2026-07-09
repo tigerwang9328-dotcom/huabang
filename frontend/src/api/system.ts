@@ -7,4 +7,8 @@ export const systemApi = {
   deleteUser: (id: number) => request.delete(`/system/users/${id}`),
   getRoles: () => request.get("/system/roles"),
   getParams: () => request.get("/system/params"),
+  getModulePermissionMatrix: () => request.get("/system/permissions/module-matrix"),
+  getRegisterApplications: (params?: any) => request.get("/system/register-applications", { params }),
+  approveRegisterApplication: (id: string) => request.post(`/system/register-applications/${id}/approve`),
+  rejectRegisterApplication: (id: string, data: any) => request.post(`/system/register-applications/${id}/reject`, data),
 };

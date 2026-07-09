@@ -41,9 +41,13 @@ export const useAuthStore = defineStore("auth", () => {
   const isLoggedIn = computed(() => isJwtUsable(token.value));
   const roles = computed<string[]>(() => userInfo.value?.roles || []);
   const isAdmin = computed(() => userInfo.value?.is_admin || false);
+  const permissions = computed<string[]>(() => userInfo.value?.permissions || []);
+  const dataScope = computed<string>(() => userInfo.value?.data_scope || "self");
 
   const hasRole = (role: string) => roles.value.includes(role) || isAdmin.value;
   const hasAnyRole = (...roleList: string[]) => roleList.some(r => hasRole(r));
+  const hasPermission = (permission: string) => isAdmin.value || permissions.value.includes("*") || permissions.value.includes(permission);
+  const hasAnyPermission = (...permissionList: string[]) => permissionList.some(p => hasPermission(p));
 
   const login = async (username: string, password: string) => {
     const res = await authApi.login({ username, password });
@@ -63,5 +67,5 @@ export const useAuthStore = defineStore("auth", () => {
     localStorage.removeItem("user_info");
   };
 
-  return { token, userInfo, isLoggedIn, roles, isAdmin, hasRole, hasAnyRole, login, logout };
+  return { token, userInfo, isLoggedIn, roles, permissions, dataScope, isAdmin, hasRole, hasAnyRole, hasPermission, hasAnyPermission, login, logout };
 });

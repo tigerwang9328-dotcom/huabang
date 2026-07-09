@@ -55,7 +55,7 @@ async def list_warehouses(
     region_name: Optional[str] = None,
     status: Optional[str] = None,
     source_system: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("inventory:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准仓库维分页查询（仓库档案 + 百胜库存汇总）。不返回 raw_data。"""
@@ -122,7 +122,7 @@ async def list_inventory_balance(
     color_name: Optional[str] = None,
     size_name: Optional[str] = None,
     only_positive: Optional[int] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("inventory:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """标准库存余额分页查询。available_qty = num - lock_num，库存金额按 SKU 成本计算。"""
@@ -140,7 +140,7 @@ async def list_inventory_balance(
 
 @router.get("/inventory/summary")
 async def inventory_summary(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("inventory:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """库存管理顶部汇总，基于百胜库存余额和 SKU 成本。"""
@@ -154,7 +154,7 @@ async def inventory_summary(
 
 @router.get("/inventory/overview")
 async def inventory_overview(
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("inventory:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """库存管理仓库总览，按 7 店 + 3 仓白名单汇总。"""

@@ -27,8 +27,9 @@ const routes = [
     meta: { requireAuth: true },
     children: [
       { path: "", redirect: "/app/dashboard" },
-      { path: "dashboard", name: "Dashboard", component: () => import("@/views/dashboard/Index.vue"), meta: { title: "经营概览" } },
+      { path: "dashboard", name: "Dashboard", component: () => import("@/views/dashboard/Index.vue"), meta: { title: "经营总览" } },
       { path: "boss", name: "Boss", component: () => import("@/views/boss/Index.vue"), meta: { title: "经营日报" } },
+      { path: "ai-diagnosis", name: "AiDiagnosis", component: () => import("@/views/diagnosis/Index.vue"), meta: { title: "AI经营诊断" } },
       { path: "store", name: "Store", component: () => import("@/views/store/Index.vue"), meta: { title: "门店分析" } },
       { path: "store/overview", name: "StoreOverview", component: () => import("@/views/store/StoreOverview.vue"), meta: { title: "门店总览" } },
       { path: "product", name: "Product", component: () => import("@/views/product/Index.vue"), meta: { title: "商品分析" } },
@@ -61,10 +62,16 @@ const routes = [
         redirect: "/app/system/users",
         meta: { title: "系统管理" },
         children: [
-          { path: "users", component: () => import("@/views/system/Users.vue"), meta: { title: "用户管理" } },
-          { path: "roles", component: () => import("@/views/system/Roles.vue"), meta: { title: "角色权限" } },
-          { path: "sync", component: () => import("@/views/system/Sync.vue"), meta: { title: "数据同步" } },
-          { path: "baison-api", component: () => import("@/views/system/BaisonApi.vue"), meta: { title: "百胜API管理" } },
+          { path: "admin", component: () => import("@/views/system/AdminDashboard.vue"), meta: { title: "管理后台", permission: "system:dashboard:view" } },
+          { path: "register-audit", component: () => import("@/views/system/RegisterAudit.vue"), meta: { title: "注册审核", permission: "system:register:review" } },
+          { path: "module-permissions", component: () => import("@/views/system/ModulePermissions.vue"), meta: { title: "岗位权限矩阵", permission: "system:permission:view" } },
+          { path: "data-permissions", component: () => import("@/views/system/DataPermissions.vue"), meta: { title: "数据权限", permission: "system:data-scope:update" } },
+          { path: "field-permissions", component: () => import("@/views/system/FieldPermissions.vue"), meta: { title: "字段权限", permission: "system:field-permission:update" } },
+          { path: "security", component: () => import("@/views/system/Security.vue"), meta: { title: "安全设置", permission: "system:security:update" } },
+          { path: "users", component: () => import("@/views/system/Users.vue"), meta: { title: "用户管理", permission: "system:user:view" } },
+          { path: "roles", component: () => import("@/views/system/Roles.vue"), meta: { title: "角色权限", permission: "system:role:view" } },
+          { path: "sync", component: () => import("@/views/system/Sync.vue"), meta: { title: "数据同步", permission: "system:sync:view" } },
+          { path: "baison-api", component: () => import("@/views/system/BaisonApi.vue"), meta: { title: "百胜API管理", permission: "system:baison-api:view" } },
         ],
       },
     ],
@@ -85,15 +92,79 @@ const router = createRouter({
   },
 });
 
+
+const routePermissionRules: Array<[string, string]> = [
+  ["/app/dashboard", "dashboard:overview:view"],
+  ["/app/ai-diagnosis", "diagnosis:overall:view"],
+  ["/app/store/overview", "sales:store:view"],
+  ["/app/store", "sales:store:view"],
+  ["/app/member", "sales:store:view"],
+  ["/app/warning", "sales:warning:view"],
+  ["/app/product/products", "product:master:view"],
+  ["/app/product/skus", "product:sku:view"],
+  ["/app/product", "product:overview:view"],
+  ["/app/inventory/warehouses", "inventory:warehouse:view"],
+  ["/app/inventory/balance", "inventory:balance:view"],
+  ["/app/inventory", "inventory:overview:view"],
+  ["/app/finance", "finance:profit:view"],
+  ["/app/fin/overview", "finance:overview:view"],
+  ["/app/fin/reimbursements", "finance:reimbursement:view"],
+  ["/app/fin/payments", "finance:payment:view"],
+  ["/app/fin/expense-analysis", "finance:expense:view"],
+  ["/app/hr/overview", "hr:overview:view"],
+  ["/app/hr/employees", "hr:employee:view"],
+  ["/app/hr/attendance", "hr:attendance:view"],
+  ["/app/hr/leaves", "hr:leave:view"],
+  ["/app/ai", "knowledge:ai:view"],
+  ["/app/system/admin", "system:dashboard:view"],
+  ["/app/system/register-audit", "system:register:review"],
+  ["/app/system/module-permissions", "system:permission:view"],
+  ["/app/system/data-permissions", "system:data-scope:update"],
+  ["/app/system/field-permissions", "system:field-permission:update"],
+  ["/app/system/security", "system:security:update"],
+  ["/app/system/users", "system:user:view"],
+  ["/app/system/roles", "system:role:view"],
+  ["/app/system/sync", "system:sync:view"],
+  ["/app/system/baison-api", "system:baison-api:view"],
+  ["/app/dingtalk", "system:dingtalk:view"],
+];
+
+const getRoutePermission = (path: string) => {
+  const matched = routePermissionRules
+    .filter(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  return matched?.[1] || "";
+};
+
+
+const getPermissionHomePath = (authStore: ReturnType<typeof useAuthStore>) => {
+  const candidates: Array<[string, string]> = [
+    ["/app/dashboard", "dashboard:overview:view"],
+    ["/app/ai-diagnosis", "diagnosis:overall:view"],
+    ["/app/store", "sales:store:view"],
+    ["/app/product", "product:overview:view"],
+    ["/app/inventory", "inventory:overview:view"],
+    ["/app/fin/overview", "finance:overview:view"],
+    ["/app/hr/overview", "hr:overview:view"],
+    ["/app/ai", "knowledge:ai:view"],
+    ["/app/system/admin", "system:dashboard:view"],
+  ];
+  return candidates.find(([, permission]) => authStore.hasPermission(permission))?.[0] || "/login";
+};
+
 router.beforeEach((to, _, next) => {
   const authStore = useAuthStore();
   const needAuth = to.matched.some((r) => r.meta.requireAuth);
 
   if (to.path === "/login" && authStore.isLoggedIn) {
-    return next("/app/dashboard");
+    return next(getPermissionHomePath(authStore));
   }
   if (needAuth && !authStore.isLoggedIn) {
     return next("/login");
+  }
+  const requiredPermission = (to.meta.permission as string) || getRoutePermission(to.path);
+  if (needAuth && requiredPermission && !authStore.hasPermission(requiredPermission)) {
+    return next(getPermissionHomePath(authStore));
   }
   next();
 });

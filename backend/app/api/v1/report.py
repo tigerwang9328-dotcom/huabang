@@ -13,7 +13,7 @@ router = APIRouter(prefix="/report", tags=["老板日报"])
 async def generate_boss_daily(
     stat_date: Optional[str] = None,
     force: bool = False,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """生成老板日报（含AI摘要）。force=true 强制重新生成AI摘要"""
@@ -27,7 +27,7 @@ async def generate_boss_daily(
 @router.get("/boss-daily/{report_date}", response_model=ApiResponse)
 async def get_boss_daily(
     report_date: str,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取指定日期老板日报"""
@@ -39,7 +39,7 @@ async def get_boss_daily(
 @router.get("/boss-daily", response_model=ApiResponse)
 async def list_boss_daily(
     days: int = 7,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取最近N天日报列表"""

@@ -1,0 +1,1137 @@
+华邦AI中台当前代码项目骨架
+========================================================================
+生成时间：2026-07-08 06:22:48
+代码位置：/srv/huabang-ai-center
+说明：本文档根据服务器当前代码扫描生成，不包含 .env 密码、Token、AppSecret 等敏感内容。
+
+一、项目总体架构
+- 前端：Vue 3 + Vite + TypeScript + Element Plus + ECharts/vue-echarts
+- 后端：FastAPI + SQLAlchemy Async + PostgreSQL + Redis + APScheduler
+- 数据源：百胜 E3 API、钉钉审批/考勤/组织数据、手工/财务扩展数据
+- 数据分层：ODS / DWD / DIM / DWS / DM / APP / AI / SYS / LOG
+- 当前部署：本地服务器 /srv/huabang-ai-center，后端监听 127.0.0.1:8000，前端由 Nginx/静态构建产物对外服务
+
+二、当前目录骨架
+./
+- backend/
+  - alembic/
+    - versions/
+      - 1b10a07bbe68_add_dingtalk_finance_hr_tables.py
+      - 8fb17272a066_add_dingtalk_attendance_records.py
+      - a5b6c7d8e9f0_warehouse_baison_api.py
+      - ac7a05414061_add_dingtalk_events_table.py
+      - b6c7d8e9f0a1_inventory_baison_api.py
+      - c1d2e3f4a5b6_add_dim_baison_shop.py
+      - c7d8e9f0a1b2_pos_ticket_baison_api.py
+      - d2e3f4a5b6c7_extend_dim_store_multisource.py
+      - e3f4a5b6c7d8_product_baison_api.py
+      - f4a5b6c7d8e9_sku_baison_api.py
+    - README
+    - env.py
+    - script.py.mako
+  - app/
+    - api/
+      - v1/
+      - __init__.py
+    - core/
+      - __init__.py
+      - config.py
+      - config.py.bak.20260626_030607
+      - config.py.bak.ddstream
+      - database.py
+      - exceptions.py
+      - logger.py
+      - redis.py
+      - security.py
+      - store_whitelist.py
+      - store_whitelist.py.bak_20260702_113847
+      - store_whitelist.py.bak_20260702_114456
+      - store_whitelist.py.bak_pinkr_
+    - integrations/
+      - baison/
+      - __init__.py
+    - jobs/
+      - __init__.py
+      - push_jobs.py
+      - report_jobs.py
+      - review_jobs.py
+      - scheduler.py
+      - sync_jobs.py
+    - models/
+      - __init__.py
+      - __init__.py.bak.20260626_030607
+      - __init__.py.bak.20260626_071415
+      - __init__.py.bak.20260626_083109
+      - __init__.py.bak.20260626_103023
+      - __init__.py.bak.20260626_154631
+      - __init__.py.bak.att
+      - __init__.py.bak.ddstream
+      - __init__.py.bak.finhr
+      - ai.py
+      - app.py
+      - baison_dwd.py
+      - baison_ods.py
+      - baison_ods.py.bak.20260626_083109
+      - baison_ods.py.bak.20260626_103023
+      - baison_ods.py.bak.20260626_154631
+      - baison_ods.py.bak.20260627_183010
+      - dim.py
+      - dim.py.bak.20260626_030607
+      - dim.py.bak.20260626_061931
+      - dim.py.bak.20260626_071415
+      - dim.py.bak.20260626_083109
+      - dim.py.bak.20260626_103023
+      - dingtalk_attendance.py
+      - dingtalk_event.py
+      - dingtalk_hr_finance.py
+      - dm.py
+      - dwd.py
+      - dws.py
+      - log.py
+      - ods.py
+      - sys.py
+    - modules/
+      - ai_engine/
+      - auth/
+      - baison/
+      - boss/
+      - dashboard/
+      - data_quality/
+      - dingtalk/
+      - finance/
+      - inventory/
+      - kingdee/
+      - member/
+      - product/
+      - report/
+      - store/
+      - task_center/
+      - warning_center/
+    - prompts/
+    - repositories/
+    - schemas/
+      - __init__.py
+      - common.py
+    - services/
+      - etl/
+      - __init__.py
+      - ai_engine.py
+      - baison_import.py
+      - business_overview_service.py
+      - business_overview_service.py.bak.front_scope_20260702_035540
+      - business_overview_service.py.bak.pos_tickets_20260629_172541
+      - business_overview_service.py.bak.sales_toggle_20260702_064525
+      - business_overview_service.py.bak_20260629164002
+      - business_overview_service.py.bak_dashboard_modules_20260708_035629
+      - dingtalk.py
+      - inventory_analysis_service.py
+      - metrics.py
+      - product_analysis_service.py
+      - report_service.py
+      - rule_engine.py
+      - store_analysis_service.py
+      - validation_service.py
+    - utils/
+      - __init__.py
+    - __init__.py
+    - main.py
+  - backups/
+    - env/
+    - .gitkeep
+  - migrations/
+    - versions/
+  - scripts/
+    - init_db.py
+  - tests/
+    - test_baison_auth.py
+    - test_business_routes_auth.py
+  - uploads/
+    - .gitkeep
+  - .env
+  - .env.bak.dingtalk_20260703_011338
+  - .env.example
+  - alembic.ini
+  - requirements.txt
+- deploy/
+  - postgres/
+  - redis/
+  - scripts/
+  - systemd/
+    - huabang-dingtalk-stream.service
+- docs/
+  - 04-百盛字段对照表.md
+  - 04-百盛字段对照表.md.bak.1782458484
+  - 04-百盛字段对照表.md.bak.1782459820
+  - 04-百盛字段对照表.md.bak.1782463028
+  - 04-百盛字段对照表.md.bak.1782465030
+  - 04-百盛字段对照表.md.bak.1782470076
+  - 04-百盛字段对照表.md.bak.1782488525
+  - 04-百盛字段对照表.md.bak.1782492301
+  - 04-百盛字段对照表.md.bak.20260626_064250
+  - 华邦AI中台项目骨架_企业级菜单架构版_20260708.txt
+- frontend/
+  - dist.bak.083621/
+    - assets/
+      - Attendance-BIZsUYKE.css
+      - Attendance-CMNUEyVV.js
+      - AuthLayout-CIlhyk1O.js
+      - AuthLayout-pX_AQq4v.css
+      - Detail-D7jCTesQ.js
+      - Detail-KFArdbBV.css
+      - Employees-BgEKRqJg.css
+      - Employees-DYXlL8jO.js
+      - ExpenseAnalysis-CctjFMkK.css
+      - ExpenseAnalysis-D0havBwx.js
+      - FinanceOverview-BRDVLJLz.js
+      - FinanceOverview-CopIGlDs.css
+      - Home-Dv5VFy-3.js
+      - Home-QvkavUao.css
+      - HrOverview-CYHFUd0N.js
+      - HrOverview-vLxIHX-2.css
+      - Index-B5k1SAIy.css
+      - Index-BCFMj39n.js
+      - Index-BSEWrn1B.css
+      - Index-BU3ZZ1qj.js
+      - Index-BwlCXxqF.js
+      - Index-C2rwFuIY.css
+      - Index-CY8pwQ-2.js
+      - Index-CdgmtbCe.js
+      - Index-ChdxHPbn.css
+      - Index-Clrz4E8y.css
+      - Index-CpsyqjZ-.js
+      - Index-CtlWLq1-.js
+      - Index-DEXymkZZ.css
+      - Index-DbKQmTy0.css
+      - Index-DikLfaYn.css
+      - Index-Dn-_Rugq.css
+      - Index-Duu05M9n.css
+      - Index-EBFFyeMS.js
+      - Index-RYcPsfjG.js
+      - Index-xVL5D3C-.js
+      - Index-zDx3g9Vr.js
+      - Index-ztvp0GsB.css
+      - Leaves-BIvX6ysM.js
+      - Leaves-Brfd4WEl.css
+      - Login-CsukOZO4.js
+      - Login-DfkiSuEp.css
+      - MainLayout-BTcwY_or.css
+      - MainLayout-zmaglgR4.js
+      - Payments-BAytyVY9.css
+      - Payments-Cf-sGaat.js
+      - ProductMaster-CJaAEegb.js
+      - ProductMaster-a6zQ1msz.css
+      - Reimbursements-D9aUBEVZ.css
+      - Reimbursements-DZLzYFSa.js
+      - Roles--tjcEtY1.js
+      - Roles-hI2G5xXw.css
+      - Shops-CFfVKK8j.js
+      - Shops-CYeNLVer.css
+      - StoreOverview-DVEpUMun.css
+      - StoreOverview-DyTtq97A.js
+      - Sync-Br9vXrEt.css
+      - Sync-D4D3d3-H.js
+      - Users-DLjW0wz5.js
+      - Users-nULH7y8M.css
+      - finance-B4a3WF6D.js
+      - hr-BxGpJXqV.js
+      - index-B_PfSJIS.css
+      - index-elpY0Qd-.js
+      - task-DWHVZDZe.js
+    - images/
+      - public/
+    - index.html
+  - dist.bak.103347/
+    - assets/
+      - Attendance-BIZsUYKE.css
+      - Attendance-BdC7u6E8.js
+      - AuthLayout-C9GkFfMT.js
+      - AuthLayout-pX_AQq4v.css
+      - Detail-KFArdbBV.css
+      - Detail-nhd7cZrp.js
+      - Employees-BM5VeMkF.js
+      - Employees-BgEKRqJg.css
+      - ExpenseAnalysis-CctjFMkK.css
+      - ExpenseAnalysis-Cnea6jkM.js
+      - FinanceOverview-CopIGlDs.css
+      - FinanceOverview-I9BpBsAJ.js
+      - Home-BZI1l9Zs.js
+      - Home-QvkavUao.css
+      - HrOverview-DwvqH5hE.js
+      - HrOverview-vLxIHX-2.css
+      - Index-B5k1SAIy.css
+      - Index-B7eq9p8U.js
+      - Index-BK_npGrO.js
+      - Index-BQT4BhxJ.js
+      - Index-BSEWrn1B.css
+      - Index-BXy7nPim.js
+      - Index-C2rwFuIY.css
+      - Index-CRhQQgHJ.js
+      - Index-ChdxHPbn.css
+      - Index-Clrz4E8y.css
+      - Index-D4lRQWdJ.js
+      - Index-DEXymkZZ.css
+      - Index-DbKQmTy0.css
+      - Index-DikLfaYn.css
+      - Index-Dn-_Rugq.css
+      - Index-DpwLhaWv.js
+      - Index-Duu05M9n.css
+      - Index-R1Z9Qqxj.js
+      - Index-TymqfHTy.js
+      - Index-eplpSeht.js
+      - Index-z_4YLESV.js
+      - Index-ztvp0GsB.css
+      - Leaves-Brfd4WEl.css
+      - Leaves-C6NFQX90.js
+      - Login-DfkiSuEp.css
+      - Login-F3W_HKGf.js
+      - MainLayout-CfbCO-Q0.css
+      - MainLayout-DsDhCtP1.js
+      - Payments-BAytyVY9.css
+      - Payments-BsFpnbJA.js
+      - ProductMaster-DAbDnylD.js
+      - ProductMaster-a6zQ1msz.css
+      - Reimbursements-D9aUBEVZ.css
+      - Reimbursements-dhBOJZMe.js
+      - Roles-DFfR-ijb.js
+      - Roles-hI2G5xXw.css
+      - Shops-CYeNLVer.css
+      - Shops-GOQN6Rej.js
+      - SkuArchive-B_mLz72q.js
+      - SkuArchive-CNsEJT4c.css
+      - StoreOverview-CamaHhx9.js
+      - StoreOverview-DVEpUMun.css
+      - Sync-BqxSBbKh.js
+      - Sync-Br9vXrEt.css
+      - Users-Br_22z4l.js
+      - Users-nULH7y8M.css
+      - finance-B9mvh6QX.js
+      - hr-D6agZOIZ.js
+      - index-B_PfSJIS.css
+      - index-C7G6vc29.js
+      - product-Dg82eezx.js
+      - task-B04B8TO0.js
+    - images/
+      - public/
+    - index.html
+  - dist.bak.160339/
+    - assets/
+      - Attendance-BIZsUYKE.css
+      - Attendance-CjFigem5.js
+      - AuthLayout-BjYGC6d4.js
+      - AuthLayout-pX_AQq4v.css
+      - Detail-DQ9O7POZ.js
+      - Detail-KFArdbBV.css
+      - Employees-BgEKRqJg.css
+      - Employees-qPds2Cmm.js
+      - ExpenseAnalysis-CSPVYB34.js
+      - ExpenseAnalysis-CctjFMkK.css
+      - FinanceOverview--DOsdf2D.js
+      - FinanceOverview-CopIGlDs.css
+      - Home-DjtnzrPE.js
+      - Home-QvkavUao.css
+      - HrOverview-B1JvT1fi.js
+      - HrOverview-vLxIHX-2.css
+      - Index-B14fvdxv.js
+      - Index-B4BreRWj.js
+      - Index-B5k1SAIy.css
+      - Index-B9gRml28.js
+      - Index-BSEWrn1B.css
+      - Index-BsCZak1b.js
+      - Index-BspCziiy.js
+      - Index-C2rwFuIY.css
+      - Index-CGPY13tq.js
+      - Index-CdrZBPIK.js
+      - Index-ChdxHPbn.css
+      - Index-Clrz4E8y.css
+      - Index-DEXymkZZ.css
+      - Index-DbKQmTy0.css
+      - Index-DikLfaYn.css
+      - Index-DkouITrL.js
+      - Index-Dn-_Rugq.css
+      - Index-Duu05M9n.css
+      - Index-JFWBK_Fr.js
+      - Index-axSCD1Ho.js
+      - Index-qSaWWf7-.js
+      - Index-ztvp0GsB.css
+      - Leaves-Brfd4WEl.css
+      - Leaves-DE0jIm2Z.js
+      - Login-DfkiSuEp.css
+      - Login-RhDo7yL5.js
+      - MainLayout-BfjlETLa.css
+      - MainLayout-tXrPd49k.js
+      - Payments-BAytyVY9.css
+      - Payments-Bp7PXBub.js
+      - ProductMaster-KOyabT0I.js
+      - ProductMaster-a6zQ1msz.css
+      - Reimbursements-D9aUBEVZ.css
+      - Reimbursements-DnICFsQR.js
+      - Roles-hI2G5xXw.css
+      - Roles-uHSS-9la.js
+      - Shops-CWPv_fZq.js
+      - Shops-CYeNLVer.css
+      - SkuArchive-B5Kx8zVj.js
+      - SkuArchive-CNsEJT4c.css
+      - StoreOverview-DVEpUMun.css
+      - StoreOverview-DgcudcLm.js
+      - Sync-4iRG7fHv.js
+      - Sync-Br9vXrEt.css
+      - Users-C82JyGJU.js
+      - Users-nULH7y8M.css
+      - Warehouses-B7ojuain.css
+      - Warehouses-DQeIjOW0.js
+      - finance-v0KTJwkW.js
+      - hr-BrWzq_AO.js
+      - index-Aw2vequL.js
+      - index-B_PfSJIS.css
+      - product-CIbOZLzX.js
+      - task-BX1KGKbw.js
+    - images/
+      - public/
+    - index.html
+  - dist.bak.20260626_041519/
+    - assets/
+      - Attendance-BIZsUYKE.css
+      - Attendance-W_hV1f7a.js
+      - AuthLayout-CRrtjLsF.js
+      - AuthLayout-pX_AQq4v.css
+      - Detail-C7pBYJml.js
+      - Detail-KFArdbBV.css
+      - Employees-BgEKRqJg.css
+      - Employees-De2FJXG6.js
+      - ExpenseAnalysis-CctjFMkK.css
+      - ExpenseAnalysis-DZYimBAB.js
+      - FinanceOverview-CopIGlDs.css
+      - FinanceOverview-W8VUHDdW.js
+      - Home-KM6YL843.js
+      - Home-QvkavUao.css
+      - HrOverview-DYMk2Ni7.js
+      - HrOverview-vLxIHX-2.css
+      - Index-B3Z4-0Qj.js
+      - Index-B5k1SAIy.css
+      - Index-BSEWrn1B.css
+      - Index-BeBgiNLG.js
+      - Index-C2rwFuIY.css
+      - Index-CLQpvf7S.js
+      - Index-CZOuXo4z.js
+      - Index-ChdxHPbn.css
+      - Index-Clrz4E8y.css
+      - Index-CwBNeOa7.js
+      - Index-DESkCo6e.js
+      - Index-DEXymkZZ.css
+      - Index-DTwrCQ47.js
+      - Index-Da7SmQJ5.js
+      - Index-DbKQmTy0.css
+      - Index-DikLfaYn.css
+      - Index-Dn-_Rugq.css
+      - Index-Duu05M9n.css
+      - Index-Dv4mQBwG.js
+      - Index-DvU-tGk8.js
+      - Index-St7v_X07.js
+      - Index-ztvp0GsB.css
+      - Leaves-Brfd4WEl.css
+      - Leaves-DMof-hJ3.js
+      - Login-CAflFHDX.js
+      - Login-DfkiSuEp.css
+      - MainLayout-DuqZw_42.js
+      - MainLayout-azQZloqN.css
+      - Payments-BAytyVY9.css
+      - Payments-EATc45d6.js
+      - Reimbursements-Bu8yqtZL.js
+      - Reimbursements-D9aUBEVZ.css
+      - Roles-BLTh9WGU.js
+      - Roles-hI2G5xXw.css
+      - Sync-Br9vXrEt.css
+      - Sync-CMiFwzlI.js
+      - Users-Bk0W82Zl.js
+      - Users-nULH7y8M.css
+      - finance-D3qRRXj6.js
+      - hr--iXMc6Ps.js
+      - index-B6eROa5c.js
+      - index-B_PfSJIS.css
+      - task-B19Mxdf3.js
+    - images/
+      - public/
+    - index.html
+  - dist.bak.20260626_062232/
+    - assets/
+      - Attendance-BIZsUYKE.css
+      - Attendance-BPKVaSld.js
+      - AuthLayout-DKA5dQj3.js
+      - AuthLayout-pX_AQq4v.css
+      - Detail-DCHTM_IT.js
+      - Detail-KFArdbBV.css
+      - Employees-BgEKRqJg.css
+      - Employees-By7_wMQA.js
+      - ExpenseAnalysis-CctjFMkK.css
+      - ExpenseAnalysis-D3_tOSrC.js
+      - FinanceOverview-CopIGlDs.css
+      - FinanceOverview-fraUnFzy.js
+      - Home-C-aeUCV7.js
+      - Home-QvkavUao.css
+      - HrOverview-rd7RX-YK.js
+      - HrOverview-vLxIHX-2.css
+      - Index-7G__Q0QD.js
+      - Index-7WbzUCKQ.js
+      - Index-B5k1SAIy.css
+      - Index-BL02vrxS.js
+      - Index-BSEWrn1B.css
+      - Index-BVsPpJvn.js
+      - Index-BZ1tMcPE.js
+      - Index-C2rwFuIY.css
+      - Index-CTZNzo_Y.js
+      - Index-CbNMBOZt.js
+      - Index-ChdxHPbn.css
+      - Index-Clrz4E8y.css
+      - Index-D3srRd-L.js
+      - Index-D8n6ZZci.js
+      - Index-DEXymkZZ.css
+      - Index-DKwy2e7c.js
+      - Index-DbKQmTy0.css
+      - Index-DikLfaYn.css
+      - Index-Dn-_Rugq.css
+      - Index-Duu05M9n.css
+      - Index-Iy3eRGuP.js
+      - Index-ztvp0GsB.css
+      - Leaves-Brfd4WEl.css
+      - Leaves-CWQV0sWv.js
+      - Login-DfkiSuEp.css
+      - Login-GVQoJQ7Y.js
+      - MainLayout-B8FsgTdJ.css
+      - MainLayout-Bg-nkowb.js
+      - Payments-BAytyVY9.css
+      - Payments-gSOB_O_g.js
+      - Reimbursements-B-_6XvGX.js
+      - Reimbursements-D9aUBEVZ.css
+      - Roles-hI2G5xXw.css
+      - Roles-t19UwFw3.js
+      - Shops-CYeNLVer.css
+      - Shops-CmLr0Or8.js
+      - Sync-Br9vXrEt.css
+      - Sync-uTmKXYgn.js
+      - Users-CBZiU5ts.js
+      - Users-nULH7y8M.css
+      - finance-ABPozq0Q.js
+      - hr-BanbEgg4.js
+      - index-B_PfSJIS.css
+      - index-BaHAc53w.js
+      - task-Df_oE16d.js
+    - images/
+      - public/
+    - index.html
+  - dist.bak.20260626_072024/
+    - assets/
+      - Attendance-BIZsUYKE.css
+      - Attendance-C8m5k4RV.js
+      - AuthLayout-DQLnryFI.js
+      - AuthLayout-pX_AQq4v.css
+      - Detail-C2MhQSsS.js
+      - Detail-KFArdbBV.css
+      - Employees-BgEKRqJg.css
+      - Employees-C9q4M2I4.js
+      - ExpenseAnalysis-CctjFMkK.css
+      - ExpenseAnalysis-DC5lPMNh.js
+      - FinanceOverview-BPFW0n5Z.js
+      - FinanceOverview-CopIGlDs.css
+      - Home-QvkavUao.css
+      - Home-YZB8XxXe.js
+      - HrOverview-vLxIHX-2.css
+      - HrOverview-vbL4WiMp.js
+      - Index-3_LvJjl_.js
+      - Index-B-aaM5SS.js
+      - Index-B2HzfytH.js
+      - Index-B5k1SAIy.css
+      - Index-BCnrXZbz.js
+      - Index-BSEWrn1B.css
+      - Index-Be0Cr93A.js
+      - Index-C2rwFuIY.css
+      - Index-ChdxHPbn.css
+      - Index-Clrz4E8y.css
+      - Index-Co6aJNkA.js
+      - Index-DEXymkZZ.css
+      - Index-DbKQmTy0.css
+      - Index-DikLfaYn.css
+      - Index-Dn-_Rugq.css
+      - Index-Duu05M9n.css
+      - Index-Dv2jkxbe.js
+      - Index-TzyDXpLa.js
+      - Index-VgW9_e3C.js
+      - Index-bdjOKzhz.js
+      - Index-nm6lGE5A.js
+      - Index-ztvp0GsB.css
+      - Leaves-Brfd4WEl.css
+      - Leaves-CDGtOrPz.js
+      - Login-CiOCR5FZ.js
+      - Login-DfkiSuEp.css
+      - MainLayout-DVVtqP2I.js
+      - MainLayout-DrfO35WS.css
+      - Payments-BAytyVY9.css
+      - Payments-uf3w33OE.js
+      - Reimbursements-D9aUBEVZ.css
+      - Reimbursements-imYc3J6e.js
+      - Roles-hI2G5xXw.css
+      - Roles-kLpXWxtZ.js
+      - Shops-CXo4Oarp.js
+      - Shops-CYeNLVer.css
+      - StoreOverview-DDuS29fr.js
+      - StoreOverview-DVEpUMun.css
+      - Sync-BB7r6q2v.js
+      - Sync-Br9vXrEt.css
+      - Users-YQWSe4FR.js
+      - Users-nULH7y8M.css
+      - finance-D6bp2zAF.js
+      - hr-BbIy-fE1.js
+      - index-B_PfSJIS.css
+      - index-Gwot3F21.js
+      - task-ByRZJ8RJ.js
+    - images/
+      - public/
+    - index.html
+  - public/
+    - images/
+      - public/
+  - src/
+    - api/
+      - ai.ts
+      - auth.ts
+      - baison.ts
+      - dashboard.ts
+      - dingtalk.ts
+      - finance.ts
+      - hr.ts
+      - hr.ts.bak.codex_att_20260702_082414
+      - inventory.ts
+      - inventory.ts.bak.20260626_160339
+      - product.ts
+      - product.ts.bak.20260626_083620
+      - request.ts
+      - store.ts
+      - store.ts.bak_20260703_161805
+      - sync.ts
+      - system.ts
+      - task.ts
+    - components/
+      - ReareLogo.vue
+    - config/
+      - publicSite.ts
+    - layouts/
+      - AuthLayout.vue
+      - BasicLayout.vue
+      - MainLayout.vue
+      - MainLayout.vue.bak.20260626_041441
+      - MainLayout.vue.bak.20260626_062154
+      - MainLayout.vue.bak.20260626_072005
+      - MainLayout.vue.bak.20260626_083620
+      - MainLayout.vue.bak.20260626_103347
+      - MainLayout.vue.bak.20260626_160339
+      - MainLayout.vue.bak.20260627_031353
+      - MainLayout.vue.bak.finhr
+      - MainLayout.vue.bak.mumaren-menu-20260702_024644
+      - MainLayout.vue.bak_20260703164922
+      - MainLayout.vue.bak_20260703173828
+      - MainLayout.vue.bak_20260703175053
+      - MainLayout.vue.bak_20260704094556
+      - MainLayout.vue.bak_20260704095322
+      - MainLayout.vue.bak_20260704101027
+      - MainLayout.vue.bak_20260704102004
+      - MainLayout.vue.bak_20260704102351
+      - MainLayout.vue.bak_menu_arch_20260708_033456
+      - MainLayout.vue.bak_menu_names_20260708_034339
+      - PublicLayout.vue
+    - router/
+      - index.ts
+      - index.ts.bak.20260626_041441
+      - index.ts.bak.20260626_062154
+      - index.ts.bak.20260626_072005
+      - index.ts.bak.20260626_083620
+      - index.ts.bak.20260626_103347
+      - index.ts.bak.20260626_160339
+      - index.ts.bak.brand
+      - index.ts.bak.dualentry
+      - index.ts.bak.finhr
+      - index.ts.bak.lailer
+    - stores/
+      - auth.ts
+    - styles/
+      - theme.css
+    - utils/
+    - views/
+      - ai/
+      - baison/
+      - boss/
+      - dashboard/
+      - diagnosis/
+      - dingtalk/
+      - finance/
+      - hr/
+      - inventory/
+      - member/
+      - product/
+      - public/
+      - store/
+      - system/
+      - task/
+      - warning/
+      - Login.vue
+    - App.vue
+    - main.ts
+  - index.html
+  - package-lock.json
+  - package.json
+  - tsconfig.json
+  - tsconfig.node.json
+  - vite.config.ts
+- scripts/
+  - crontab.bak_20260704065344
+  - git_daily_backup.log
+  - git_daily_backup.sh
+  - git_daily_backup_cron.log
+  - health_check.sh
+  - pg_backup.sh
+  - rebuild_pos_sale_goods_from_tickets.sh
+  - sync_baison_inventory_daily.sh
+  - sync_baison_master_daily.sh
+  - sync_pos_tickets_daily.sh
+  - sync_pos_tickets_daily.sh.bak_20260702_175314
+  - sync_pos_tickets_daily.sh.bak_20260702_175453
+- .gitignore
+
+三、前端结构
+- package：huabang-ai-frontend 1.0.0
+- 核心依赖：@element-plus/icons-vue、axios、dayjs、echarts、element-plus、pinia、vue、vue-echarts、vue-router
+- 开发依赖：@types/node、@vitejs/plugin-vue、typescript、vite、vue-tsc
+
+3.1 前端 API 封装
+- frontend/src/api/ai.ts
+- frontend/src/api/auth.ts
+- frontend/src/api/baison.ts
+- frontend/src/api/dashboard.ts
+- frontend/src/api/dingtalk.ts
+- frontend/src/api/finance.ts
+- frontend/src/api/hr.ts
+- frontend/src/api/inventory.ts
+- frontend/src/api/product.ts
+- frontend/src/api/request.ts
+- frontend/src/api/store.ts
+- frontend/src/api/sync.ts
+- frontend/src/api/system.ts
+- frontend/src/api/task.ts
+
+3.2 前端页面视图
+- frontend/src/views/Login.vue
+- frontend/src/views/ai/Index.vue
+- frontend/src/views/baison/Shops.vue
+- frontend/src/views/boss/Index.vue
+- frontend/src/views/dashboard/Index.vue
+- frontend/src/views/diagnosis/Index.vue
+- frontend/src/views/dingtalk/Index.vue
+- frontend/src/views/finance/ExpenseAnalysis.vue
+- frontend/src/views/finance/FinanceOverview.vue
+- frontend/src/views/finance/Index.vue
+- frontend/src/views/finance/Payments.vue
+- frontend/src/views/finance/Reimbursements.vue
+- frontend/src/views/hr/Attendance.vue
+- frontend/src/views/hr/Employees.vue
+- frontend/src/views/hr/HrOverview.vue
+- frontend/src/views/hr/Leaves.vue
+- frontend/src/views/inventory/Index.vue
+- frontend/src/views/inventory/InventoryBalance.vue
+- frontend/src/views/inventory/Warehouses.vue
+- frontend/src/views/member/Index.vue
+- frontend/src/views/product/Index.vue
+- frontend/src/views/product/ProductMaster.vue
+- frontend/src/views/product/SkuArchive.vue
+- frontend/src/views/public/BrandStory.vue
+- frontend/src/views/public/CompanyIntro.vue
+- frontend/src/views/public/Contact.vue
+- frontend/src/views/public/Home.vue
+- frontend/src/views/public/Products.vue
+- frontend/src/views/public/Space.vue
+- frontend/src/views/public/Stores.vue
+- frontend/src/views/store/Index.vue
+- frontend/src/views/store/StoreOverview.vue
+- frontend/src/views/system/BaisonApi.vue
+- frontend/src/views/system/Roles.vue
+- frontend/src/views/system/Sync.vue
+- frontend/src/views/system/Users.vue
+- frontend/src/views/task/Detail.vue
+- frontend/src/views/task/Index.vue
+- frontend/src/views/warning/Index.vue
+
+3.3 当前路由清单
+- path=dashboard | name=Dashboard | title=经营总览
+- path=boss | name=Boss | title=经营日报
+- path=ai-diagnosis | name=AiDiagnosis | title=AI经营诊断
+- path=store | name=Store | title=门店分析
+- path=store/overview | name=StoreOverview | title=门店总览
+- path=product | name=Product | title=商品分析
+- path=product/products | name=ProductMaster | title=商品主档
+- path=product/skus | name=SkuArchive | title=SKU档案
+- path=inventory | name=Inventory | title=库存预警
+- path=inventory/warehouses | name=Warehouses | title=仓库档案
+- path=inventory/balance | name=InventoryBalance | title=库存余额
+- path=member | name=Member | title=会员运营
+- path=finance | name=Finance | title=利润分析
+- path=task | name=Task | title=任务管理
+- path=task/:id | name=TaskDetail | title=任务详情
+- path=warning | name=Warning | title=异常稽核
+- path=ai | name=AI | title=AI助手
+- path=dingtalk | name=DingTalk | title=钉钉通知
+- path=baison/shops | name=BaisonShops | title=百胜门店档案
+- path=fin/overview | name=FinanceOverview | title=财务首页
+- path=fin/reimbursements | name=Reimbursements | title=报销管理
+- path=fin/payments | name=Payments | title=付款申请
+- path=fin/expense-analysis | name=ExpenseAnalysis | title=费用分析
+- path=hr/overview | name=HrOverview | title=人事首页
+- path=hr/employees | name=HrEmployees | title=员工档案
+- path=hr/attendance | name=HrAttendance | title=考勤管理
+- path=hr/leaves | name=HrLeaves | title=请假外出
+- path=users | name=- | title=用户管理
+- path=roles | name=- | title=角色权限
+- path=sync | name=- | title=数据同步
+- path=baison-api | name=- | title=百胜API管理
+
+3.4 当前侧边栏一级菜单
+- 经营总览 -> /app/dashboard
+- AI经营诊断
+  - 销售诊断
+  - 商品诊断
+  - 库存诊断
+  - 人力诊断
+  - 财务诊断
+- 销售中心
+  - 门店总览
+  - 单店分析
+  - 会员运营
+  - 导购销售
+  - 线上销售
+  - 线上总览
+  - 平台销售
+  - 退款售后
+  - 销售异常
+- 商品经营
+  - 商品主档
+  - SKU档案
+  - 动销分析
+  - 爆款补货
+  - 滞销清仓
+- 采购协同
+  - 采购订单
+  - 供应商管理
+  - 到货跟踪
+- 库存风控
+  - 库存余额
+  - 仓库档案
+  - 库龄分析
+  - 调拨建议
+  - 异常库存
+- 财务利润
+  - 利润分析
+  - 报销管理
+  - 付款申请
+  - 费用分析
+  - 现金安全
+- 人力资源
+  - 员工档案
+  - 考勤管理
+  - 请假外出
+  - 人效分析
+- 知识中枢
+  - 经营知识库
+  - 制度文档
+  - AI问答记录
+- 系统设置
+  - 角色权限
+  - 数据同步
+  - 百胜API管理
+  - 钉钉配置
+
+3.5 当前经营总览页面
+- 文件：frontend/src/views/dashboard/Index.vue
+- 一级菜单：经营总览，直接访问 /app/dashboard
+- 模块：公司经营核心 API 卡片、销售模块、库存模块、人力资源、AI经营诊断、数据治理/待接入清单
+- 已保留接口：dashboard overview、sales-trend、store-rank
+- 新增后端字段：inventory_by_category，用于库存按品类展示
+- 未造假字段：纯利润、固定成本、线上销售、人效等未完整接入项以待接入/规划中提示
+
+四、后端结构
+4.1 requirements 主要依赖
+- fastapi==0.115.5
+- uvicorn[standard]==0.32.1
+- python-multipart==0.0.12
+- sqlalchemy==2.0.36
+- alembic==1.14.0
+- asyncpg==0.30.0
+- psycopg2-binary==2.9.10
+- redis==5.2.1
+- python-jose[cryptography]==3.3.0
+- passlib[bcrypt]==1.7.4
+- apscheduler==3.10.4
+- httpx==0.28.1
+- aiohttp==3.11.10
+- openpyxl==3.1.5
+- pandas==2.2.3
+- pydantic==2.10.3
+- pydantic-settings==2.6.1
+- email-validator==2.2.0
+- structlog==24.4.0
+- python-json-logger==2.0.7
+- python-dotenv==1.0.1
+- pytz==2024.2
+- tenacity==9.0.0
+- pytest==8.3.4
+- pytest-asyncio==0.24.0
+- httpx==0.28.1
+- dingtalk-stream==0.24.3
+
+4.2 API 模块与接口概览
+- backend/app/api/v1/__init__.py | prefix=由上级router挂载
+  - 未直接声明 router 方法或为聚合路由
+- backend/app/api/v1/acceptance.py | prefix=/acceptance
+  - POST /acceptance/validate-import
+  - GET /acceptance/error-download/{batch_no}
+  - POST /acceptance/mapping/save
+  - GET /acceptance/mapping/{data_type}
+  - GET /acceptance/mapping-table/{data_type}
+  - GET /acceptance/validate-history
+  - POST /acceptance/reconcile/reference
+  - POST /acceptance/reconcile/run
+  - GET /acceptance/reconcile/result/{reconcile_date}
+  - POST /acceptance/checklist
+  - GET /acceptance/dashboard
+  - POST /acceptance/sign-off
+- backend/app/api/v1/ai.py | prefix=/ai
+  - POST /ai/ask
+- backend/app/api/v1/auth.py | prefix=/auth
+  - POST /auth/login
+  - POST /auth/refresh
+  - POST /auth/logout
+  - POST /auth/change-password
+- backend/app/api/v1/baison.py | prefix=/integrations/baison
+  - GET /integrations/baison/catalog
+  - POST /integrations/baison/api-test
+  - POST /integrations/baison/sync/module/{module_key}
+  - POST /integrations/baison/test/shop-list
+  - POST /integrations/baison/sync/shop-list
+  - POST /integrations/baison/sync/shops
+  - GET /integrations/baison/shops
+  - GET /integrations/baison/shops/{shop_code}
+- backend/app/api/v1/dashboard.py | prefix=/dashboard
+  - GET /dashboard/overview
+  - GET /dashboard/sales-trend
+  - GET /dashboard/store-rank
+  - GET /dashboard/task-summary
+- backend/app/api/v1/deps.py | prefix=由上级router挂载
+  - 未直接声明 router 方法或为聚合路由
+- backend/app/api/v1/dingtalk.py | prefix=/dingtalk
+  - POST /dingtalk/test-push
+  - POST /dingtalk/push-daily-report
+  - GET /dingtalk/scheduler/jobs
+  - POST /dingtalk/push-log
+  - GET /dingtalk/push-log
+  - GET /dingtalk/overview
+- backend/app/api/v1/dingtalk_finance.py | prefix=/finance
+  - GET /finance/overview
+  - GET /finance/expenses
+  - GET /finance/reimbursements
+  - GET /finance/payments
+- backend/app/api/v1/etl.py | prefix=/etl
+  - POST /etl/run
+  - GET /etl/status
+  - GET /etl/logs
+- backend/app/api/v1/finance.py | prefix=/finance
+  - POST /finance/manual-expense
+  - POST /finance/manual-cash
+  - GET /finance/profit-daily
+  - GET /finance/cash-safety
+- backend/app/api/v1/hr.py | prefix=/hr
+  - GET /hr/overview
+  - GET /hr/employees
+  - GET /hr/attendance
+  - GET /hr/attendance/summary
+  - GET /hr/attendance/departments
+  - GET /hr/approvals
+  - GET /hr/departments
+  - POST /hr/sync-dingtalk
+  - GET /hr/leaves
+- backend/app/api/v1/inventory.py | prefix=由上级router挂载
+  - GET /inventory/warehouses
+  - POST /sync/baison/warehouses
+  - GET /inventory/balance
+  - GET /inventory/summary
+  - GET /inventory/overview
+  - POST /sync/baison/inventory
+- backend/app/api/v1/mobile.py | prefix=/mobile
+  - GET /mobile/overview
+  - GET /mobile/store-analysis
+  - GET /mobile/product-analysis
+  - GET /mobile/inventory-styles
+  - GET /mobile/inventory-analysis
+- backend/app/api/v1/product.py | prefix=由上级router挂载
+  - GET /product/list
+  - POST /sync/baison/products
+  - GET /product/sku-list
+  - GET /product/image-proxy
+  - GET /product/quality-summary
+  - POST /sync/baison/skus
+- backend/app/api/v1/report.py | prefix=/report
+  - POST /report/boss-daily/generate
+  - GET /report/boss-daily/{report_date}
+  - GET /report/boss-daily
+- backend/app/api/v1/router.py | prefix=/api/v1
+  - 未直接声明 router 方法或为聚合路由
+- backend/app/api/v1/rules.py | prefix=/rules
+  - POST /rules/run
+  - GET /rules/results
+  - GET /rules/metrics
+  - GET /rules/store-ranking
+  - GET /rules/product-ranking
+  - POST /rules/create-drafts
+- backend/app/api/v1/store.py | prefix=/store
+  - GET /store/list
+  - GET /store/sales-analysis
+- backend/app/api/v1/sync.py | prefix=/sync
+  - POST /sync/baison/import-excel
+  - POST /sync/preview
+  - POST /sync/rollback/{batch_no}
+  - GET /sync/status
+  - GET /sync/logs
+- backend/app/api/v1/system.py | prefix=/system
+  - GET /system/users
+  - POST /system/users
+  - PUT /system/users/{user_id}
+  - DELETE /system/users/{user_id}
+  - GET /system/roles
+  - GET /system/params
+- backend/app/api/v1/task.py | prefix=/task
+  - GET /task/list
+  - POST /task/create
+  - GET /task/{task_id}
+  - POST /task/{task_id}/confirm
+  - POST /task/{task_id}/feedback
+  - POST /task/{task_id}/review
+  - POST /task/{task_id}/close
+
+4.3 模型层
+- backend/app/models/__init__.py
+- backend/app/models/ai.py
+- backend/app/models/app.py
+- backend/app/models/baison_dwd.py
+- backend/app/models/baison_ods.py
+- backend/app/models/dim.py
+- backend/app/models/dingtalk_attendance.py
+- backend/app/models/dingtalk_event.py
+- backend/app/models/dingtalk_hr_finance.py
+- backend/app/models/dm.py
+- backend/app/models/dwd.py
+- backend/app/models/dws.py
+- backend/app/models/log.py
+- backend/app/models/ods.py
+- backend/app/models/sys.py
+
+4.4 服务层
+- backend/app/services/__init__.py
+- backend/app/services/ai_engine.py
+- backend/app/services/baison_import.py
+- backend/app/services/business_overview_service.py
+- backend/app/services/dingtalk.py
+- backend/app/services/etl/__init__.py
+- backend/app/services/etl/dwd_to_dws.py
+- backend/app/services/etl/dws_to_dm.py
+- backend/app/services/etl/etl_log.py
+- backend/app/services/etl/ods_to_dwd.py
+- backend/app/services/etl/pipeline.py
+- backend/app/services/inventory_analysis_service.py
+- backend/app/services/metrics.py
+- backend/app/services/product_analysis_service.py
+- backend/app/services/report_service.py
+- backend/app/services/rule_engine.py
+- backend/app/services/store_analysis_service.py
+- backend/app/services/validation_service.py
+
+4.5 外部系统集成
+- backend/app/integrations/__init__.py
+- backend/app/integrations/baison/__init__.py
+- backend/app/integrations/baison/auth.py
+- backend/app/integrations/baison/client.py
+- backend/app/integrations/baison/config.py
+- backend/app/integrations/baison/exceptions.py
+- backend/app/integrations/baison/services/__init__.py
+- backend/app/integrations/baison/services/inventory_service.py
+- backend/app/integrations/baison/services/pos_sale_goods_service.py
+- backend/app/integrations/baison/services/pos_ticket_service.py
+- backend/app/integrations/baison/services/product_image_service.py
+- backend/app/integrations/baison/services/product_service.py
+- backend/app/integrations/baison/services/shop_service.py
+- backend/app/integrations/baison/services/sku_service.py
+- backend/app/integrations/baison/services/store_mapping_service.py
+- backend/app/integrations/baison/services/warehouse_service.py
+
+4.6 定时任务
+- backend/app/jobs/__init__.py
+- backend/app/jobs/push_jobs.py
+- backend/app/jobs/report_jobs.py
+- backend/app/jobs/review_jobs.py
+- backend/app/jobs/scheduler.py
+- backend/app/jobs/sync_jobs.py
+
+五、百胜 E3 数据接入现状
+- 集成入口：backend/app/integrations/baison/
+- 已有服务：门店、仓库、商品、SKU、库存、POS小票、POS销售明细、商品图片、门店映射
+- 数据导入服务：backend/app/services/baison_import.py
+- ETL 管线：backend/app/services/etl/ods_to_dwd.py、dwd_to_dws.py、dws_to_dm.py、pipeline.py
+- 经营总览销售口径：优先 DWS 公司日汇总，必要时回退 DWD 小票明细
+- 经营总览库存口径：DWD 库存余额 + SKU/商品成本价估算库存金额
+
+六、钉钉/人力/财务接入现状
+- 钉钉模块：backend/app/modules/dingtalk/
+- 已有同步方向：审批、考勤、员工、财务/人事解析
+- 前端页面：人事首页、员工档案、考勤管理、请假外出、财务首页、报销管理、付款申请、费用分析
+- 经营总览的人力卡片目前主要展示任务闭环数据；在岗人数、人效分析仍需组织/考勤/导购归属进一步接入
+
+七、AI 与经营诊断现状
+- AI 助手页面：frontend/src/views/ai/Index.vue
+- AI经营诊断页面：frontend/src/views/diagnosis/Index.vue
+- 后端 AI 相关：backend/app/api/v1/ai.py、backend/app/services/ai_engine.py、backend/app/models/ai.py
+- 当前 AI经营诊断菜单：总体经营诊断已建；销售诊断、商品诊断、库存诊断、人力诊断、财务诊断为规划中
+- 建议下一阶段：把诊断结果与 app_action_task 任务闭环打通，形成“发现问题 -> 生成任务 -> 责任人处理 -> 复盘改善”的闭环
+
+八、当前一级菜单结构
+1. 经营总览：一级菜单直达 /app/dashboard
+2. AI经营诊断：总体经营诊断 + 分模块诊断规划
+3. 销售中心：线下销售、线上销售、销售异常
+4. 商品经营：商品总览、商品主档、SKU档案、动销/补货/清仓规划
+5. 采购协同：采购总览、采购订单、供应商管理、到货跟踪规划
+6. 库存风控：库存总览、库存余额、仓库档案、库龄/调拨/异常库存
+7. 财务利润：财务首页、利润分析、报销管理、付款申请、费用分析、现金安全规划
+8. 人力资源：人事首页、员工档案、考勤管理、请假外出、人效分析规划
+9. 知识中枢：AI助手、经营知识库、制度文档、AI问答记录规划
+10. 系统设置：用户管理、角色权限、数据同步、百胜API管理、钉钉配置
+
+九、当前已知待完善事项
+- 纯利润/净利率：需固定成本、人员工资、房租水电等财务成本数据接入后才可准确展示
+- 线上销售：目前看板以百胜线下小票为主，线上平台订单/退款/售后需继续接入
+- 人效分析：需员工、排班、考勤、导购归属、小票业绩关联
+- 库龄分析：age_90_plus_amount 仍依赖库龄数据接入
+- AI诊断：当前为页面和规则底座，后续需接入更完整指标与任务闭环
+- 菜单内“规划中”页面需按业务优先级逐步落地
+
+十、关键文件索引
+- frontend/src/layouts/MainLayout.vue
+- frontend/src/router/index.ts
+- frontend/src/views/dashboard/Index.vue
+- frontend/src/views/diagnosis/Index.vue
+- frontend/src/api/dashboard.ts
+- backend/app/main.py
+- backend/app/api/v1/router.py
+- backend/app/api/v1/dashboard.py
+- backend/app/services/business_overview_service.py
+- backend/app/services/baison_import.py
+- backend/app/services/etl/pipeline.py
+- backend/app/core/config.py
+- backend/app/core/database.py
+- backend/app/jobs/scheduler.py
+
+十一、备注
+- 本文档是代码骨架和模块现状说明，不等同于安全审计报告。
+- 文档不记录任何 appkey、appsecret、数据库密码、JWT 密钥、钉钉密钥。
+- 如后续新增接口/页面/数据表，建议同步更新本文档。

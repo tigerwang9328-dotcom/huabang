@@ -23,7 +23,7 @@ router = APIRouter(prefix="/mobile", tags=["小程序移动端"])
 @router.get("/overview")
 async def mobile_overview(
     stat_date: Optional[str] = Query(None),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """移动端经营概览 — 与 /dashboard/overview 同一 service"""
@@ -38,7 +38,7 @@ async def mobile_store_analysis(
     keyword: Optional[str] = None, region_name: Optional[str] = None,
     store_type: Optional[str] = None, business_type: Optional[str] = None,
     status: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """移动端门店分析"""
@@ -58,7 +58,7 @@ async def mobile_product_analysis(
     year: Optional[int] = None, status: Optional[str] = None,
     product_code: Optional[str] = None, color_name: Optional[str] = None,
     size_name: Optional[str] = None, season_name: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """移动端商品分析"""
@@ -109,7 +109,7 @@ async def mobile_inventory_styles(
     keyword: Optional[str] = None,
     mode: str = Query("all", description="all|best|slow"),
     sort_by: str = Query("inventory_desc", description="inventory_desc|sales_desc|turn_desc|code_asc"),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """移动端库存款式明细：按款式聚合库存，并拼接最近 7 天销售，用于畅销/滞销排序。"""
@@ -234,7 +234,7 @@ async def mobile_inventory_analysis(
     size_name: Optional[str] = None, only_positive: Optional[int] = None,
     warehouse_nature: Optional[str] = None, warehouse_category_name: Optional[str] = None,
     region_name: Optional[str] = None, status: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """移动端库存分析"""

@@ -16,6 +16,11 @@
         <el-table-column prop="real_name" label="姓名" width="100" />
         <el-table-column prop="phone" label="手机号" width="130" />
         <el-table-column prop="store_code" label="关联门店" width="100" />
+        <el-table-column label="岗位角色" min-width="160">
+          <template #default="{ row }">
+            <el-tag v-for="r in row.roles || []" :key="r.code" size="small" style="margin-right:4px">{{ r.name }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
@@ -55,6 +60,11 @@
         <el-form-item label="真实姓名"><el-input v-model="createForm.real_name" /></el-form-item>
         <el-form-item label="手机号"><el-input v-model="createForm.phone" /></el-form-item>
         <el-form-item label="关联门店"><el-input v-model="createForm.store_code" placeholder="门店编码（店长/导购必填）" /></el-form-item>
+        <el-form-item label="岗位角色" required>
+          <el-select v-model="createForm.role_ids" multiple placeholder="选择岗位角色" style="width:100%">
+            <el-option v-for="role in roles" :key="role.id" :label="`${role.name}（${scopeName(role.data_scope)}）`" :value="role.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="首次强制改密">
           <el-switch v-model="createForm.must_change_password" />
         </el-form-item>
@@ -73,6 +83,7 @@ import { systemApi } from '@/api/system'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const users = ref<any[]>([])
+const roles = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
@@ -80,7 +91,7 @@ const keyword = ref('')
 const showCreate = ref(false)
 const submitting = ref(false)
 const createForm = reactive({
-  username: '', password: '', real_name: '', phone: '', store_code: '', must_change_password: false
+  username: '', password: '', real_name: '', phone: '', store_code: '', role_ids: [] as number[], must_change_password: false
 })
 
 const loadUsers = async () => {
@@ -88,6 +99,13 @@ const loadUsers = async () => {
   users.value = res.data.data?.items || []
   total.value = res.data.data?.total || 0
 }
+
+const loadRoles = async () => {
+  const res = await systemApi.getRoles()
+  roles.value = res.data.data || []
+}
+
+const scopeName = (s: string) => ({ all: '全公司', company: '公司级', dept: '部门级', store: '门店级', self: '个人级' } as any)[s] || s
 
 const editUser = (user: any) => ElMessage.info('编辑功能开发中')
 
@@ -116,7 +134,7 @@ const submitCreate = async () => {
   }
 }
 
-onMounted(loadUsers)
+onMounted(() => { loadUsers(); loadRoles() })
 </script>
 
 <style scoped>

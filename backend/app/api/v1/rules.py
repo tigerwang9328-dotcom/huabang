@@ -13,7 +13,7 @@ router = APIRouter(prefix="/rules", tags=["规则引擎"])
 async def run_rules(
     stat_date: Optional[str] = None,
     store_code: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """手动运行规则引擎"""
@@ -29,7 +29,7 @@ async def get_rule_results(
     stat_date: Optional[str] = None,
     store_code: Optional[str] = None,
     triggered_only: bool = False,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取规则结果（实时计算）"""
@@ -46,7 +46,7 @@ async def get_rule_results(
 async def get_metrics(
     stat_date: Optional[str] = None,
     store_code: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取经营指标"""
@@ -61,7 +61,7 @@ async def get_metrics(
 async def store_ranking(
     stat_date: Optional[str] = None,
     limit: int = Query(default=10, le=50),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """门店销售排行"""
@@ -76,7 +76,7 @@ async def store_ranking(
 async def product_ranking(
     stat_date: Optional[str] = None,
     limit: int = Query(default=10, le=50),
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """商品销售排行"""
@@ -92,7 +92,7 @@ async def product_ranking(
 async def create_task_drafts_from_rules(
     stat_date: Optional[str] = None,
     store_code: Optional[str] = None,
-    current_user: SysUser = Depends(require_permission("dashboard:view")),
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """运行规则引擎并将命中项生成任务草稿（需人工确认后才可派发）"""
