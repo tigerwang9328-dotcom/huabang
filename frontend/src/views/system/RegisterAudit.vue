@@ -1,118 +1,24 @@
 <template>
-  <div class="register-audit-page">
-    <div class="page-header">
-      <div>
-        <h2>注册审核</h2>
-        <p>审核登录页提交的账号注册申请，通过后自动创建用户并绑定申请岗位。</p>
-      </div>
-      <el-button @click="load" :loading="loading">刷新</el-button>
-    </div>
-
-    <div class="stat-grid">
-      <el-card class="stat-card pending"><span>待审核</span><strong>{{ counts.pending }}</strong></el-card>
-      <el-card class="stat-card approved"><span>已通过</span><strong>{{ counts.approved }}</strong></el-card>
-      <el-card class="stat-card rejected"><span>已驳回</span><strong>{{ counts.rejected }}</strong></el-card>
-    </div>
-
-    <el-card>
-      <template #header>
-        <div class="card-head">
-          <span>申请列表</span>
-          <el-radio-group v-model="status" size="small" @change="load">
-            <el-radio-button label="pending">待审核</el-radio-button>
-            <el-radio-button label="approved">已通过</el-radio-button>
-            <el-radio-button label="rejected">已驳回</el-radio-button>
-            <el-radio-button label="">全部</el-radio-button>
-          </el-radio-group>
-        </div>
-      </template>
-      <el-table :data="items" stripe v-loading="loading" empty-text="暂无注册申请">
-        <el-table-column prop="username" label="用户名" width="140" />
-        <el-table-column prop="real_name" label="姓名" width="110" />
-        <el-table-column prop="phone" label="手机号" width="130" />
-        <el-table-column label="申请岗位" width="130">
-          <template #default="{ row }"><el-tag>{{ roleName(row.apply_role) }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="department" label="部门/门店" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="store_code" label="门店编码" width="110" />
-        <el-table-column prop="remark" label="申请说明" min-width="180" show-overflow-tooltip />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusType(row.status)">{{ statusName(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="申请时间" width="190" />
-        <el-table-column prop="reviewed_by" label="审核人" width="110" />
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <template v-if="row.status === 'pending'">
-              <el-button size="small" type="success" @click="approve(row)">通过</el-button>
-              <el-button size="small" type="danger" @click="reject(row)">驳回</el-button>
-            </template>
-            <span v-else class="muted">已处理</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+  <div class="system-page">
+    <div class="page-head"><div><h1>注册申请审核</h1><p>管理员在这里审核员工账号申请，确认岗位、部门、门店和权限后，系统才会创建正式账号。</p></div><div><el-button @click="load">刷新</el-button><el-button @click="$router.push('/app/system/operation-logs')">查看审核日志</el-button></div></div>
+    <div class="stats"><div v-for="s in statCards" :key="s.key" class="stat" @click="filters.status=s.filter;load()"><b>{{s.count}}</b><span>{{s.label}}</span></div></div>
+    <el-alert v-if="risks.length" class="card" type="warning" :closable="false" show-icon><template #title><div v-for="r in risks" :key="r">{{r}}</div></template></el-alert>
+    <div class="card toolbar"><el-input v-model="filters.keyword" placeholder="用户名/姓名/手机号" style="width:220px" clearable/><el-select v-model="filters.status" placeholder="状态" clearable style="width:150px"><el-option label="待审核" value="pending"/><el-option label="已通过" value="approved"/><el-option label="已驳回" value="rejected"/></el-select><el-select v-model="filters.apply_role" placeholder="申请岗位" clearable style="width:180px"><el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value"/></el-select><el-button type="primary" @click="load">查询</el-button><el-button @click="reset">重置</el-button></div>
+    <div class="card"><el-table :data="rows" v-loading="loading" style="width:100%"><el-table-column label="申请人" min-width="150"><template #default="{row}"><b>{{row.real_name}}</b><div class="muted">{{row.username}}</div></template></el-table-column><el-table-column prop="phone" label="手机号" width="130"/><el-table-column label="申请岗位" width="160"><template #default="{row}">{{row.apply_role_name}}<div class="muted">{{row.apply_role}}</div></template></el-table-column><el-table-column prop="department" label="部门" width="140"/><el-table-column label="门店" width="150"><template #default="{row}"><span v-if="!row.store_code && ['store_manager','guide'].includes(row.apply_role)" class="danger">未绑定门店</span><span v-else>{{row.store_code || '-'}}</span></template></el-table-column><el-table-column prop="remark" label="申请说明" min-width="180" show-overflow-tooltip/><el-table-column prop="created_at" label="申请时间" width="180"/><el-table-column label="状态" width="100"><template #default="{row}"><el-tag :type="row.status==='pending'?'warning':row.status==='approved'?'success':'danger'">{{statusText(row.status)}}</el-tag></template></el-table-column><el-table-column prop="reviewed_by_name" label="审核人" width="110"/><el-table-column label="操作" fixed="right" width="210"><template #default="{row}"><el-button link type="primary" @click="open(row)">查看</el-button><el-button v-if="row.status==='pending'" link type="success" @click="open(row);approveVisible=true">通过</el-button><el-button v-if="row.status==='pending'" link type="danger" @click="reject(row)">驳回</el-button><el-button v-if="row.status==='approved'" link @click="$router.push('/app/system/users')">查看用户</el-button></template></el-table-column></el-table><el-empty v-if="!loading&&!rows.length" description="当前没有符合条件的注册申请"><el-button @click="reset">重置筛选</el-button></el-empty><el-pagination style="margin-top:16px" layout="total, prev, pager, next" :total="total" v-model:current-page="filters.page" :page-size="filters.page_size" @current-change="load"/></div>
+    <el-drawer v-model="drawer" size="520px" title="注册申请详情"><div v-if="current"><div class="drawer-section"><h3>申请信息</h3><el-descriptions :column="1" border><el-descriptions-item label="用户名">{{current.username}}</el-descriptions-item><el-descriptions-item label="姓名">{{current.real_name}}</el-descriptions-item><el-descriptions-item label="手机号">{{current.phone}}</el-descriptions-item><el-descriptions-item label="申请岗位">{{current.apply_role_name}}</el-descriptions-item><el-descriptions-item label="门店">{{current.store_code || '-'}}</el-descriptions-item><el-descriptions-item label="申请IP">{{current.client_ip || '-'}}</el-descriptions-item></el-descriptions></div><div class="drawer-section"><h3>审核配置</h3><el-select v-model="approveForm.role_ids" multiple placeholder="分配角色" style="width:100%"><el-option v-for="r in roles" :key="r.id" :label="r.name" :value="r.id"/></el-select><el-input v-model="approveForm.store_code" style="margin-top:10px" placeholder="绑定主门店"/><el-input v-model="approveForm.review_note" style="margin-top:10px" type="textarea" placeholder="审核备注"/></div><div class="drawer-section"><h3>系统判断</h3><el-alert :type="needsStore(current)?'warning':'success'" :title="needsStore(current)?'该岗位需要门店绑定，请审核前确认门店编码':'当前申请信息基本完整'" :closable="false"/></div></div></el-drawer>
+    <el-dialog v-model="approveVisible" title="确认通过并创建账号" width="520px"><p>将为 <b>{{current?.real_name}}</b> 创建中台账号，并分配所选角色与门店。</p><template #footer><el-button @click="approveVisible=false">取消</el-button><el-button type="primary" @click="approve">确认通过并创建账号</el-button></template></el-dialog>
   </div>
 </template>
-
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { systemApi } from '@/api/system'
-
-const loading = ref(false)
-const status = ref('pending')
-const items = ref<any[]>([])
-const allItems = ref<any[]>([])
-const roleMap: Record<string, string> = {
-  boss: 'BOSS', ceo: '总经理', product_manager: '商品经理', product_specialist: '商品专员',
-  finance_manager: '财务经理', accountant: '会计', cashier: '出纳', warehouse_manager: '仓库主管',
-  operation_manager: '运营经理', store_manager: '店长', guide: '导购', super_admin: '超级管理员'
-}
-const roleName = (code: string) => roleMap[code] || code || '-'
-const statusName = (s: string) => ({ pending: '待审核', approved: '已通过', rejected: '已驳回' } as any)[s] || s
-const statusType = (s: string) => ({ pending: 'warning', approved: 'success', rejected: 'danger' } as any)[s] || 'info'
-const counts = computed(() => ({
-  pending: allItems.value.filter(i => i.status === 'pending').length,
-  approved: allItems.value.filter(i => i.status === 'approved').length,
-  rejected: allItems.value.filter(i => i.status === 'rejected').length,
-}))
-
-const load = async () => {
-  loading.value = true
-  try {
-    const [filtered, all] = await Promise.all([
-      systemApi.getRegisterApplications({ status: status.value || undefined }),
-      systemApi.getRegisterApplications(),
-    ])
-    items.value = filtered.data.data?.items || []
-    allItems.value = all.data.data?.items || []
-  } finally { loading.value = false }
-}
-
-const approve = async (row: any) => {
-  await ElMessageBox.confirm(`确认通过 ${row.real_name || row.username} 的注册申请，并创建账号 ${row.username}？`, '通过注册申请', { type: 'warning' })
-  await systemApi.approveRegisterApplication(row.id)
-  ElMessage.success('已通过申请并创建账号')
-  load()
-}
-
-const reject = async (row: any) => {
-  const { value } = await ElMessageBox.prompt('请输入驳回原因', '驳回注册申请', {
-    inputPlaceholder: '例如：岗位信息不完整 / 非授权人员',
-    confirmButtonText: '确认驳回',
-    cancelButtonText: '取消',
-  })
-  await systemApi.rejectRegisterApplication(row.id, { reason: value })
-  ElMessage.success('已驳回申请')
-  load()
-}
-
-onMounted(load)
+import { computed, onMounted, reactive, ref } from 'vue';import { ElMessage, ElMessageBox } from 'element-plus';import { systemApi } from '@/api/system';
+const loading=ref(false),drawer=ref(false),approveVisible=ref(false);const rows=ref<any[]>([]),roles=ref<any[]>([]),total=ref(0),current=ref<any>();const filters=reactive({page:1,page_size:20,keyword:'',status:'',apply_role:''});const approveForm=reactive({role_ids:[] as number[],dept_id:null as any,store_code:'',store_codes:[] as string[],review_note:''});
+const roleOptions=[{label:'BOSS',value:'boss'},{label:'总经理',value:'ceo'},{label:'商品经理',value:'product_manager'},{label:'商品专员',value:'product_specialist'},{label:'财务经理',value:'finance_manager'},{label:'会计',value:'accountant'},{label:'出纳',value:'cashier'},{label:'仓库主管',value:'warehouse_manager'},{label:'运营经理',value:'operation_manager'},{label:'店长',value:'store_manager'},{label:'导购',value:'guide'}];
+const statCards=computed(()=>[{key:'pending',label:'待审核',filter:'pending',count:rows.value.filter(x=>x.status==='pending').length},{key:'approved',label:'已通过',filter:'approved',count:rows.value.filter(x=>x.status==='approved').length},{key:'rejected',label:'已驳回',filter:'rejected',count:rows.value.filter(x=>x.status==='rejected').length},{key:'today',label:'今日申请',filter:'',count:rows.value.filter(x=>(x.created_at||'').slice(0,10)===new Date().toISOString().slice(0,10)).length}]);
+const risks=computed(()=>rows.value.filter(needsStore).map(x=>`${x.real_name} 申请 ${x.apply_role_name} 但未填写门店`));function needsStore(r:any){return r&&!r.store_code&&['store_manager','guide'].includes(r.apply_role)}function statusText(s:string){return s==='pending'?'待审核':s==='approved'?'已通过':'已驳回'}
+async function load(){loading.value=true;try{const res=await systemApi.getRegisterApplications(filters);rows.value=res.data.data.items||[];total.value=res.data.data.total||0}catch(e:any){ElMessage.error(e.message||'加载失败')}finally{loading.value=false}}
+async function loadRoles(){const res=await systemApi.getRoles({show_legacy:true});roles.value=res.data.data||[]}function reset(){Object.assign(filters,{page:1,keyword:'',status:'',apply_role:''});load()}function open(row:any){current.value=row;approveForm.role_ids=row.assigned_role_ids||[];approveForm.store_code=row.store_code||'';approveForm.review_note='';drawer.value=true}
+async function approve(){if(!current.value)return;await systemApi.approveRegisterApplication(current.value.id,approveForm);ElMessage.success('已通过申请并创建账号');approveVisible.value=false;drawer.value=false;load()}async function reject(row:any){const {value}=await ElMessageBox.prompt('请输入驳回原因','驳回注册申请',{inputPlaceholder:'如：门店信息缺失',inputValue:'门店信息缺失'});await systemApi.rejectRegisterApplication(row.id,{reason:value});ElMessage.success('已驳回');load()}onMounted(()=>{load();loadRoles()});
 </script>
-
 <style scoped>
-.register-audit-page{padding:0}.page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.page-header h2{font-size:20px;margin:0 0 6px;color:#0f172a}.page-header p{margin:0;color:#64748b}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}.stat-card span{display:block;color:#64748b;font-size:13px}.stat-card strong{font-size:28px;color:#0f172a}.stat-card.pending strong{color:#d97706}.stat-card.approved strong{color:#16a34a}.stat-card.rejected strong{color:#dc2626}.card-head{display:flex;justify-content:space-between;align-items:center}.muted{color:#94a3b8;font-size:12px}@media(max-width:900px){.stat-grid{grid-template-columns:1fr}.card-head{align-items:flex-start;gap:12px;flex-direction:column}}
+.system-page{padding:24px;background:#f6f8fb;min-height:100%;}.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}.page-head h1{margin:0;color:#0f172a;font-size:26px}.page-head p{margin:8px 0 0;color:#64748b}.card{background:#fff;border:1px solid #e5eaf2;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 8px 24px rgba(15,23,42,.04)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.stat{background:#fff;border:1px solid #e5eaf2;border-radius:14px;padding:18px}.stat b{font-size:28px;color:#0f172a}.stat span{display:block;color:#64748b;margin-top:6px}.muted{color:#94a3b8;font-size:12px}.danger{color:#ef4444}.ok{color:#10b981}.drawer-section{margin-bottom:18px}.drawer-section h3{margin:0 0 10px;color:#0f172a}.jsonbox{max-height:260px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;font-size:12px;white-space:pre-wrap}@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
 </style>

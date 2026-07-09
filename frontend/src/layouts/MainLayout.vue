@@ -110,10 +110,17 @@
           <span class="header-page-title">{{ currentTitle }}</span>
         </div>
         <div class="header-right">
-          <div class="header-user">
-            <div class="user-avatar">{{ userInitial }}</div>
-            <span class="user-name">{{ authStore.userInfo?.real_name || authStore.userInfo?.username }}</span>
-          </div>
+          <el-dropdown trigger="click" @command="handleUserCommand">
+            <div class="header-user header-user-clickable">
+              <div class="user-avatar">{{ userInitial }}</div>
+              <span class="user-name">{{ authStore.userInfo?.real_name || authStore.userInfo?.username }}</span>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <button class="logout-btn" @click="handleLogout">
             <el-icon><SwitchButton /></el-icon>
             退出
@@ -124,15 +131,34 @@
       <main class="hb-content">
         <router-view />
       </main>
+
+      <el-dialog v-model="passwordDialogVisible" title="修改密码" width="460px" append-to-body>
+        <el-form :model="passwordForm" label-width="96px">
+          <el-form-item label="原密码" required>
+            <el-input v-model="passwordForm.old_password" type="password" show-password autocomplete="current-password" />
+          </el-form-item>
+          <el-form-item label="新密码" required>
+            <el-input v-model="passwordForm.new_password" type="password" show-password autocomplete="new-password" placeholder="至少8位，建议包含字母和数字" />
+          </el-form-item>
+          <el-form-item label="确认密码" required>
+            <el-input v-model="passwordForm.confirm_password" type="password" show-password autocomplete="new-password" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="passwordDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="passwordSubmitting" @click="submitChangePassword">确认修改</el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { ElMessageBox } from "element-plus";
+import { authApi } from "@/api/auth";
+import { ElMessage, ElMessageBox } from "element-plus";
 import {
   ArrowRight,
   Avatar,
@@ -212,12 +238,15 @@ const menuGroups = computed<MenuGroup[]>(() => [
     icon: ChatDotRound,
     permission: "diagnosis:overall:view",
     items: [
-      { path: "/app/ai-diagnosis", icon: ChatDotRound, label: "总体经营诊断", permission: "diagnosis:overall:view" },
-      { label: "销售诊断", icon: TrendCharts, disabled: true, badge: "规划中", permission: "diagnosis:sales:view" },
-      { label: "商品诊断", icon: GoodsFilled, disabled: true, badge: "规划中", permission: "diagnosis:product:view" },
-      { label: "库存诊断", icon: Box, disabled: true, badge: "规划中", permission: "diagnosis:inventory:view" },
-      { label: "人力诊断", icon: UserFilled, disabled: true, badge: "规划中", permission: "diagnosis:hr:view" },
-      { label: "财务诊断", icon: Money, disabled: true, badge: "规划中", permission: "diagnosis:finance:view" },
+      { path: "/app/ai-diagnosis/overview", icon: ChatDotRound, label: "总体经营诊断" },
+      { path: "/app/ai-diagnosis/sales", icon: TrendCharts, label: "销售诊断" },
+      { path: "/app/ai-diagnosis/products", icon: GoodsFilled, label: "商品诊断" },
+      { path: "/app/ai-diagnosis/inventory", icon: Box, label: "库存诊断" },
+      { path: "/app/ai-diagnosis/hr", icon: UserFilled, label: "人力诊断" },
+      { path: "/app/ai-diagnosis/finance", icon: Money, label: "财务诊断" },
+      { path: "/app/ai-diagnosis/members", icon: User, label: "会员诊断" },
+      { path: "/app/ai-diagnosis/audit", icon: Warning, label: "异常稽核" },
+      { path: "/app/ai-diagnosis/actions", icon: List, label: "行动闭环" },
     ],
   },
   {
@@ -337,6 +366,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
       { path: "/app/system/roles", icon: Key, label: "角色权限", permission: "system:role:view" },
       { path: "/app/system/sync", icon: Refresh, label: "数据同步", permission: "system:sync:view" },
       { path: "/app/system/baison-api", icon: Refresh, label: "百胜API管理", permission: "system:baison-api:view" },
+      { path: "/app/system/operation-logs", icon: List, label: "操作日志", permission: "system:operation-log:view" },
       { path: "/app/dingtalk", icon: Bell, label: "钉钉配置", permission: "system:dingtalk:view" },
     ],
   },
@@ -381,6 +411,45 @@ const isAnyChildActive = (children: MenuItem[]): boolean =>
 const isGroupActive = (group: MenuGroup): boolean =>
   Boolean(group.path && isActive(group.path)) ||
   Boolean(group.items?.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false)));
+
+
+const passwordDialogVisible = ref(false);
+const passwordSubmitting = ref(false);
+const passwordForm = reactive({ old_password: "", new_password: "", confirm_password: "" });
+
+const resetPasswordForm = () => {
+  passwordForm.old_password = "";
+  passwordForm.new_password = "";
+  passwordForm.confirm_password = "";
+};
+
+const handleUserCommand = (command: string) => {
+  if (command === "change-password") {
+    resetPasswordForm();
+    passwordDialogVisible.value = true;
+  }
+};
+
+const submitChangePassword = async () => {
+  if (!passwordForm.old_password || !passwordForm.new_password || !passwordForm.confirm_password) {
+    ElMessage.warning("请完整填写原密码、新密码和确认密码");
+    return;
+  }
+  if (passwordForm.new_password !== passwordForm.confirm_password) {
+    ElMessage.warning("两次输入的新密码不一致");
+    return;
+  }
+  passwordSubmitting.value = true;
+  try {
+    await authApi.changePassword({ ...passwordForm });
+    ElMessage.success("密码修改成功，请重新登录");
+    passwordDialogVisible.value = false;
+    await authStore.logout();
+    router.push("/login");
+  } finally {
+    passwordSubmitting.value = false;
+  }
+};
 
 const userInitial = computed(() => {
   const name = authStore.userInfo?.real_name || authStore.userInfo?.username || "用";
@@ -644,4 +713,9 @@ const handleLogout = async () => {
   background: #F5F7FA;
   padding: 24px;
 }
+</style>
+
+<style scoped>
+.header-user-clickable { cursor: pointer; }
+.header-user-clickable:hover .user-name { color: #1e5eff; }
 </style>

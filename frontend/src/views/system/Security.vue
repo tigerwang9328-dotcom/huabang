@@ -1,16 +1,3 @@
-<template>
-  <div class="sys-page">
-    <div class="page-header"><h2>Security</h2><p>{{ desc }}</p></div>
-    <el-card><el-empty :description="desc + '：已预留菜单与权限码，下一阶段接入配置表单。'" /></el-card>
-  </div>
-</template>
-<script setup lang="ts">
-const map:any = {
-  RegisterAudit: '注册审核',
-  DataPermissions: '数据权限',
-  FieldPermissions: '字段权限',
-  Security: '安全设置',
-}
-const desc = map['Security']
-</script>
-<style scoped>.sys-page{padding:0}.page-header{margin-bottom:18px}.page-header h2{font-size:20px;margin:0 0 6px;color:#0f172a}.page-header p{margin:0;color:#64748b}</style>
+<template><div class="system-page"><div class="page-head"><div><h1>安全设置</h1><p>配置登录安全、密码策略、注册申请限制和账号锁定规则。</p></div><el-button type="primary" @click="save">保存设置</el-button></div><el-form :model="form" label-width="220px"><div class="card"><h3>密码策略</h3><el-form-item label="最小密码长度"><el-input-number v-model="form.password_min_length" :min="6"/></el-form-item><el-form-item label="要求数字"><el-switch v-model="form.password_require_number"/></el-form-item><el-form-item label="要求字母"><el-switch v-model="form.password_require_letter"/></el-form-item><el-form-item label="要求特殊字符"><el-switch v-model="form.password_require_special"/></el-form-item></div><div class="card"><h3>登录保护</h3><el-form-item label="最大登录失败次数"><el-input-number v-model="form.login_max_failed" :min="1"/></el-form-item><el-form-item label="锁定分钟数"><el-input-number v-model="form.login_lock_minutes" :min="1"/></el-form-item></div><div class="card"><h3>注册申请保护</h3><el-form-item label="窗口内同IP最大申请次数"><el-input-number v-model="form.register_apply_rate_limit" :min="1"/></el-form-item><el-form-item label="限制窗口分钟数"><el-input-number v-model="form.register_apply_window_minutes" :min="1"/></el-form-item></div><el-alert class="card" type="success" :closable="false" title="登录页已修复：记住我只保存用户名，旧 localStorage 密码会在登录页加载时自动清理。"/></el-form></div></template><script setup lang="ts">import{onMounted,reactive}from'vue';import{ElMessage}from'element-plus';import{systemApi}from'@/api/system';const form=reactive<any>({});async function load(){const r=await systemApi.getSecuritySettings();Object.assign(form,r.data.data)}async function save(){await systemApi.updateSecuritySettings(form);ElMessage.success('安全设置已保存')}onMounted(load)</script>
+<style scoped>.system-page{padding:24px;background:#f6f8fb;min-height:100%}.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}.page-head h1{margin:0;color:#0f172a;font-size:26px}.page-head p{margin:8px 0 0;color:#64748b}.card{background:#fff;border:1px solid #e5eaf2;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 8px 24px rgba(15,23,42,.04)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.stat{background:#fff;border:1px solid #e5eaf2;border-radius:14px;padding:18px}.stat b{font-size:28px;color:#0f172a}.stat span{display:block;color:#64748b;margin-top:6px}.layout2{display:grid;grid-template-columns:360px 1fr;gap:16px}.muted{color:#94a3b8;font-size:12px}.jsonbox{max-height:280px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;font-size:12px;white-space:pre-wrap}@media(max-width:1100px){.layout2{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+</style>

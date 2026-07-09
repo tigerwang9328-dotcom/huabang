@@ -21,5 +21,6 @@ export interface LoginResult {
 export const authApi = {
   login: (params: LoginParams) => request.post<any, any>("/auth/login", params),
   logout: () => request.post("/auth/logout"),
+  changePassword: (data: { old_password: string; new_password: string; confirm_password: string }) => request.post("/auth/change-password", data),
   registerApply: (params: RegisterApplyParams) => request.post("/auth/register-apply", params),
 };

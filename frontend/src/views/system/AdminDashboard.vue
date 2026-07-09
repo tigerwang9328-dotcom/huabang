@@ -1,21 +1,3 @@
-<template>
-  <div class="sys-page">
-    <div class="page-header"><h2>管理后台</h2><p>系统运行、用户权限、数据集成与安全治理总入口</p></div>
-    <div class="admin-grid">
-      <el-card v-for="item in cards" :key="item.title" class="admin-card">
-        <span>{{ item.kicker }}</span><strong>{{ item.title }}</strong><p>{{ item.desc }}</p>
-      </el-card>
-    </div>
-  </div>
-</template>
-<script setup lang="ts">
-const cards = [
-  { kicker: 'USER', title: '用户与岗位', desc: '统一管理账号、注册审核、岗位角色与模块权限。' },
-  { kicker: 'RBAC', title: '权限矩阵', desc: '按经营概览、销售、商品、库存、财务等模块授权。' },
-  { kicker: 'DATA', title: '数据权限', desc: '按全公司、部门、门店、个人控制可见数据范围。' },
-  { kicker: 'SECURITY', title: '安全审计', desc: '登录日志、操作日志、密码策略与接口安全。' },
-]
-</script>
-<style scoped>
-.sys-page{padding:0}.page-header{margin-bottom:18px}.page-header h2{font-size:20px;margin:0 0 6px;color:#0f172a}.page-header p{margin:0;color:#64748b}.admin-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.admin-card span{font-size:11px;color:#c0762a;font-weight:800;letter-spacing:.12em}.admin-card strong{display:block;margin:8px 0;font-size:18px;color:#0f172a}.admin-card p{margin:0;color:#64748b;line-height:1.6}@media(max-width:1100px){.admin-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:700px){.admin-grid{grid-template-columns:1fr}}
+<template><div class="system-page"><div class="page-head"><div><h1>管理后台</h1><p>系统用户、权限、安全和注册审核的管理驾驶舱。</p></div><el-button @click="load">刷新</el-button></div><div class="stats"><div class="stat" v-for="(v,k) in cards" :key="k"><b>{{v}}</b><span>{{labels[k]||k}}</span></div></div><div class="card"><h3>系统待办</h3><el-table :data="todos"><el-table-column prop="label" label="事项"/><el-table-column prop="count" label="数量"/></el-table></div><div class="card toolbar"><el-button type="primary" @click="$router.push('/app/system/users')">用户管理</el-button><el-button @click="$router.push('/app/system/roles')">角色权限</el-button><el-button @click="$router.push('/app/system/register-audit')">注册审核</el-button><el-button @click="$router.push('/app/system/data-permissions')">数据权限</el-button><el-button @click="$router.push('/app/system/field-permissions')">字段权限</el-button><el-button @click="$router.push('/app/system/security')">安全设置</el-button><el-button @click="$router.push('/app/system/operation-logs')">操作日志</el-button></div></div></template><script setup lang="ts">import{onMounted,ref}from'vue';import{systemApi}from'@/api/system';const cards=ref<any>({}),todos=ref<any[]>([]);const labels:any={user_total:'用户总数',user_enabled:'启用用户',user_disabled:'禁用用户',role_count:'角色数量',permission_count:'权限数量',pending_register:'待审核申请',today_login:'今日登录',today_permission_changes:'今日权限变更',data_risk_users:'数据风险用户',security_risks:'安全风险'};async function load(){const r=await systemApi.getSystemDashboardStats();cards.value=r.data.data.cards;todos.value=r.data.data.todos}onMounted(load)</script>
+<style scoped>.system-page{padding:24px;background:#f6f8fb;min-height:100%}.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}.page-head h1{margin:0;color:#0f172a;font-size:26px}.page-head p{margin:8px 0 0;color:#64748b}.card{background:#fff;border:1px solid #e5eaf2;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 8px 24px rgba(15,23,42,.04)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.stat{background:#fff;border:1px solid #e5eaf2;border-radius:14px;padding:18px}.stat b{font-size:28px;color:#0f172a}.stat span{display:block;color:#64748b;margin-top:6px}.layout2{display:grid;grid-template-columns:360px 1fr;gap:16px}.muted{color:#94a3b8;font-size:12px}.jsonbox{max-height:280px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;font-size:12px;white-space:pre-wrap}@media(max-width:1100px){.layout2{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
 </style>

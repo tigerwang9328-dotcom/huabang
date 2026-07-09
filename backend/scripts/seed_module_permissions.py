@@ -99,6 +99,10 @@ MODULES = {
         ("system:log:view", "日志查看"),
         ("system:security:update", "安全设置"),
         ("system:param:view", "系统参数查看"),
+        ("system:user:reset-password", "用户重置密码"),
+        ("system:user:disable", "用户停用"),
+        ("system:user:enable", "用户启用"),
+        ("system:operation-log:view", "操作日志查看"),
     ]),
 }
 
@@ -121,8 +125,8 @@ ALL = [code for _, perms in MODULES.values() for code, _ in perms]
 VIEW_ALL = [c for c in ALL if c.endswith(':view')]
 M = {
     "super_admin": ALL,
-    "boss": [c for c in VIEW_ALL if not c.startswith('system:')] + ["system:dashboard:view", "system:log:view"],
-    "ceo": [c for c in VIEW_ALL if not c.startswith('system:')] + ["system:dashboard:view", "system:log:view"],
+    "boss": [c for c in VIEW_ALL if not c.startswith('system:')] + ["system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
+    "ceo": [c for c in VIEW_ALL if not c.startswith('system:')] + ["system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
     "product_manager": [
         "dashboard:overview:view", "diagnosis:product:view", "diagnosis:inventory:view",
         "sales:overview:view", "sales:store:view", "product:overview:view", "product:master:view", "product:sku:view",
@@ -180,9 +184,9 @@ async def main():
         # roles
         for code, name, scope, sort in ROLES:
             await db.execute(text("""
-                INSERT INTO sys.sys_role(name, code, description, data_scope, status, sort_order)
-                VALUES (:name, :code, :desc, :scope, 1, :sort)
-                ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, data_scope=EXCLUDED.data_scope, status=1, sort_order=EXCLUDED.sort_order
+                INSERT INTO sys.sys_role(name, code, description, data_scope, status, sort_order, is_builtin, is_legacy, is_hidden)
+                VALUES (:name, :code, :desc, :scope, 1, :sort, true, false, false)
+                ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, data_scope=EXCLUDED.data_scope, status=1, sort_order=EXCLUDED.sort_order, is_builtin=true, is_legacy=false, is_hidden=false
             """), {"name": name, "code": code, "desc": "华邦AI中台岗位角色", "scope": scope, "sort": sort})
         # role permissions
         for role_code, perms in M.items():
@@ -193,6 +197,13 @@ async def main():
                 WHERE r.code=:role_code AND p.code = ANY(:perms)
                 ON CONFLICT (role_id, permission_id) DO NOTHING
             """), {"role_code": role_code, "perms": perms})
+        
+        # mark legacy roles without deleting them
+        await db.execute(text("""
+            UPDATE sys.sys_role
+            SET is_legacy=true, is_hidden=true
+            WHERE code <> ALL(:core_codes)
+        """), {"core_codes": [r[0] for r in ROLES]})
         await db.commit()
         rc = (await db.execute(text("SELECT count(*) FROM sys.sys_role"))).scalar()
         pc = (await db.execute(text("SELECT count(*) FROM sys.sys_permission"))).scalar()

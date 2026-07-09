@@ -4,6 +4,7 @@ from sqlalchemy import (
     ForeignKey, UniqueConstraint, Index, JSON
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -20,6 +21,8 @@ class SysUser(Base):
     email = Column(String(128), comment="邮箱")
     dept_id = Column(BigInteger, ForeignKey("sys.sys_department.id"), comment="部门ID")
     store_code = Column(String(32), comment="关联门店编码（店长/导购专用）")
+    employee_no = Column(String(64), comment="员工编号")
+    position = Column(String(64), comment="岗位名称")
     avatar = Column(String(512), comment="头像URL")
     status = Column(Integer, default=1, comment="1启用 0禁用")
     is_admin = Column(Boolean, default=False, comment="超级管理员标志")
@@ -28,6 +31,8 @@ class SysUser(Base):
     last_login_at = Column(DateTime(timezone=True), comment="最后登录时间")
     must_change_password = Column(Boolean, default=False, comment="首次登录必须改密")
     last_login_ip = Column(String(64), comment="最后登录IP")
+    failed_login_count = Column(Integer, default=0, comment="连续登录失败次数")
+    locked_until = Column(DateTime(timezone=True), comment="账号锁定到期时间")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_deleted = Column(Boolean, default=False, comment="软删除")
@@ -64,6 +69,9 @@ class SysRole(Base):
                         comment="数据范围: all/company/dept/store/self")
     status = Column(Integer, default=1)
     sort_order = Column(Integer, default=0)
+    is_builtin = Column(Boolean, default=False, comment="内置角色")
+    is_legacy = Column(Boolean, default=False, comment="历史角色")
+    is_hidden = Column(Boolean, default=False, comment="默认隐藏")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -209,3 +217,54 @@ class SysParam(Base):
     is_system = Column(Boolean, default=False, comment="系统参数不允许删除")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SysRegisterApplication(Base):
+    __tablename__ = "sys_register_application"
+    __table_args__ = ({"schema": "sys"},)
+    id = Column(UUID(as_uuid=False), primary_key=True)
+    username = Column(String(64), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    real_name = Column(String(64), nullable=False)
+    phone = Column(String(32), nullable=False)
+    apply_role = Column(String(64), nullable=False)
+    department = Column(String(128))
+    store_code = Column(String(64))
+    remark = Column(Text)
+    status = Column(String(32), nullable=False, default="pending")
+    client_ip = Column(String(64))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    reviewed_by = Column(BigInteger)
+    reviewed_at = Column(DateTime(timezone=True))
+    reject_reason = Column(Text)
+    approved_user_id = Column(BigInteger)
+    review_note = Column(Text)
+    assigned_role_ids = Column(JSON)
+    assigned_store_codes = Column(JSON)
+    assigned_dept_id = Column(BigInteger)
+
+class SysOperationLog(Base):
+    __tablename__ = "sys_operation_log"
+    __table_args__ = ({"schema": "sys"},)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger)
+    username = Column(String(64))
+    module = Column(String(64), nullable=False)
+    action = Column(String(64), nullable=False)
+    target_type = Column(String(64))
+    target_id = Column(String(128))
+    before_data = Column(JSON)
+    after_data = Column(JSON)
+    ip = Column(String(64))
+    user_agent = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+class SysUserStore(Base):
+    __tablename__ = "sys_user_store"
+    __table_args__ = (UniqueConstraint("user_id", "store_code"), {"schema": "sys"})
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("sys.sys_user.id"), nullable=False)
+    store_code = Column(String(64), nullable=False)
+    store_name = Column(String(128))
+    is_primary = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -187,7 +187,7 @@
               <label class="hb-chk">
                 <input type="checkbox" v-model="rememberMe"/>
                 <span class="chk-box"></span>
-                <span>记住密码</span>
+                <span>记住用户名</span>
               </label>
               <a href="#" class="forgot" @click.prevent>忘记密码？</a>
             </div>
@@ -323,6 +323,7 @@ const registerRoles = [
   { label: "导购", value: "guide" },
 ];
 const REMEMBER_KEY = "hb_login_remember";
+const LEGACY_REMEMBER_KEYS = ["hb_login_remember", "hb_remember_password", "remember_password"];
 
 const sources = [
   { name: "百世ERP",   color: "#3B82F6" },
@@ -335,12 +336,21 @@ const sources = [
 
 function loadRememberedLogin() {
   try {
+    for (const key of LEGACY_REMEMBER_KEYS) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const saved = JSON.parse(raw);
+      if (saved?.password) {
+        delete saved.password;
+        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username: saved.username || "" }));
+      }
+    }
     const raw = localStorage.getItem(REMEMBER_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw);
-    if (saved?.username && saved?.password) {
+    if (saved?.username) {
       form.username = saved.username;
-      form.password = saved.password;
+      form.password = "";
       rememberMe.value = true;
     }
   } catch {
@@ -353,10 +363,7 @@ function saveRememberedLogin() {
     localStorage.removeItem(REMEMBER_KEY);
     return;
   }
-  localStorage.setItem(REMEMBER_KEY, JSON.stringify({
-    username: form.username.trim(),
-    password: form.password,
-  }));
+  localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username: form.username.trim() }));
 }
 
 onMounted(() => {

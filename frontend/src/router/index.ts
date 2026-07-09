@@ -29,7 +29,9 @@ const routes = [
       { path: "", redirect: "/app/dashboard" },
       { path: "dashboard", name: "Dashboard", component: () => import("@/views/dashboard/Index.vue"), meta: { title: "经营总览" } },
       { path: "boss", name: "Boss", component: () => import("@/views/boss/Index.vue"), meta: { title: "经营日报" } },
-      { path: "ai-diagnosis", name: "AiDiagnosis", component: () => import("@/views/diagnosis/Index.vue"), meta: { title: "AI经营诊断" } },
+      { path: "ai-diagnosis", name: "AiDiagnosis", redirect: "/app/ai-diagnosis/overview", meta: { title: "AI经营诊断" } },
+      { path: "ai-diagnosis/overview", name: "AiDiagnosisOverview", component: () => import("@/views/diagnosis/Index.vue"), meta: { title: "AI经营诊断" } },
+      { path: "ai-diagnosis/:module", name: "AiDiagnosisModule", component: () => import("@/views/diagnosis/Index.vue"), meta: { title: "AI经营诊断" } },
       { path: "store", name: "Store", component: () => import("@/views/store/Index.vue"), meta: { title: "门店分析" } },
       { path: "store/overview", name: "StoreOverview", component: () => import("@/views/store/StoreOverview.vue"), meta: { title: "门店总览" } },
       { path: "product", name: "Product", component: () => import("@/views/product/Index.vue"), meta: { title: "商品分析" } },
@@ -72,6 +74,7 @@ const routes = [
           { path: "roles", component: () => import("@/views/system/Roles.vue"), meta: { title: "角色权限", permission: "system:role:view" } },
           { path: "sync", component: () => import("@/views/system/Sync.vue"), meta: { title: "数据同步", permission: "system:sync:view" } },
           { path: "baison-api", component: () => import("@/views/system/BaisonApi.vue"), meta: { title: "百胜API管理", permission: "system:baison-api:view" } },
+          { path: "operation-logs", component: () => import("@/views/system/OperationLogs.vue"), meta: { title: "操作日志", permission: "system:operation-log:view" } },
         ],
       },
     ],
@@ -126,6 +129,7 @@ const routePermissionRules: Array<[string, string]> = [
   ["/app/system/roles", "system:role:view"],
   ["/app/system/sync", "system:sync:view"],
   ["/app/system/baison-api", "system:baison-api:view"],
+  ["/app/system/operation-logs", "system:operation-log:view"],
   ["/app/dingtalk", "system:dingtalk:view"],
 ];
 
