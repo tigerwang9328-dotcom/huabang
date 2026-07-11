@@ -1,6 +1,6 @@
 """API总路由注册"""
 from fastapi import APIRouter
-from app.api.v1 import auth, dashboard, sync, task, finance, ai, ai_diagnosis, dingtalk, system, etl, rules, report, acceptance, baison, dingtalk_finance, hr, store, product, inventory, mobile
+from app.api.v1 import auth, dashboard, sync, task, finance, ai, ai_diagnosis, dingtalk, system, etl, rules, report, acceptance, baison, dingtalk_finance, hr, store, product, inventory, member, mobile
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -21,6 +21,7 @@ api_router.include_router(baison.router)
 api_router.include_router(store.router)
 api_router.include_router(product.router)
 api_router.include_router(inventory.router)
+api_router.include_router(member.router)
 api_router.include_router(dingtalk_finance.router)
 api_router.include_router(hr.router)
 api_router.include_router(mobile.router)

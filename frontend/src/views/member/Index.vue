@@ -1,19 +1,522 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h2>会员运营</h2>
-      <p class="page-desc">会员分层、今日回访名单、沉睡会员、生日会员</p>
-    </div>
-    <el-card>
-      <el-empty description="功能开发中，第一阶段数据导入后即可展示" />
-    </el-card>
+  <div class="member-page">
+    <section class="member-header">
+      <div>
+        <div class="eyebrow">协同 / 会员运营</div>
+        <h1>会员运营</h1>
+        <p>基于百胜小票会员线索、会员档案和回访名单，跟踪会员销售与触达状态。</p>
+      </div>
+      <div class="header-meta">
+        <el-tag :type="statusTagType" effect="light" round>
+          <span class="live-dot"></span>
+          {{ statusText }}
+        </el-tag>
+        <span>最新小票日期：{{ summary.latest_ticket_date || "-" }}</span>
+        <span>同步时间：{{ formatTime(summary.updated_at) }}</span>
+      </div>
+    </section>
+
+    <el-alert
+      v-if="!dataStatus.member_profile_synced"
+      type="warning"
+      show-icon
+      :closable="false"
+      title="会员档案暂未同步"
+      description="当前先展示百胜小票中的会员线索；生日会员、沉睡会员、RFM分层需要会员档案同步后启用。"
+    />
+
+    <section class="summary-grid" v-loading="overviewLoading">
+      <div class="metric-card" v-for="card in metricCards" :key="card.label">
+        <div class="metric-label">{{ card.label }}</div>
+        <div class="metric-value">{{ card.value }}</div>
+        <div class="metric-sub">{{ card.sub }}</div>
+      </div>
+    </section>
+
+    <section class="filter-band">
+      <div class="filter-left">
+        <el-radio-group v-model="preset" size="small" @change="applyPreset">
+          <el-radio-button label="latest">最新日</el-radio-button>
+          <el-radio-button label="last7">近7天</el-radio-button>
+          <el-radio-button label="last30">近30天</el-radio-button>
+          <el-radio-button label="custom">自定义</el-radio-button>
+        </el-radio-group>
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          range-separator="至"
+          :clearable="false"
+          :disabled="preset !== 'custom'"
+          size="small"
+          @change="handleDateChange"
+        />
+        <el-input
+          v-model="keyword"
+          clearable
+          size="small"
+          class="keyword-input"
+          :placeholder="activeTab === 'profile' ? '搜索会员编号/姓名/手机' : '搜索会员线索/门店'"
+          @keyup.enter="handleSearch"
+          @clear="handleSearch"
+        />
+      </div>
+      <div class="filter-actions">
+        <el-button size="small" :icon="Search" type="primary" @click="fetchActiveTab">查询</el-button>
+        <el-button size="small" :icon="Refresh" :loading="activeLoading" @click="refresh">刷新</el-button>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <el-tab-pane label="小票会员线索" name="pos">
+          <el-table :data="posRows" v-loading="posLoading" border stripe size="small">
+            <el-table-column type="index" label="排名" width="68" align="center" />
+            <el-table-column prop="member_key" label="会员标识" min-width="130" />
+            <el-table-column prop="last_store_name" label="最近门店" min-width="190" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span>{{ row.last_store_name }}</span>
+                <span class="muted-code">{{ row.last_store_code }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="total_sales" label="销售额" width="120" sortable align="right">
+              <template #default="{ row }">{{ formatMoney(row.total_sales) }}</template>
+            </el-table-column>
+            <el-table-column prop="total_actual" label="实收金额" width="120" sortable align="right">
+              <template #default="{ row }">{{ formatMoney(row.total_actual) }}</template>
+            </el-table-column>
+            <el-table-column prop="order_count" label="订单数" width="90" sortable align="right" />
+            <el-table-column prop="sales_qty" label="件数" width="90" sortable align="right">
+              <template #default="{ row }">{{ formatQty(row.sales_qty) }}</template>
+            </el-table-column>
+            <el-table-column prop="avg_order_value" label="客单价" width="110" sortable align="right">
+              <template #default="{ row }">{{ formatMoney(row.avg_order_value) }}</template>
+            </el-table-column>
+            <el-table-column prop="first_consume_date" label="首次消费" width="112" />
+            <el-table-column prop="last_consume_date" label="最近消费" width="112" />
+          </el-table>
+          <div class="pagination-row">
+            <el-pagination
+              background
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="posTotal"
+              v-model:current-page="posPage"
+              v-model:page-size="pageSize"
+              :page-sizes="[20, 50, 100, 200]"
+              @current-change="fetchPosMembers"
+              @size-change="handlePageSizeChange"
+            />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="会员档案" name="profile">
+          <el-table :data="profileRows" v-loading="profileLoading" border stripe size="small">
+            <el-table-column prop="member_no" label="会员编号" min-width="130" />
+            <el-table-column prop="member_name" label="会员姓名" min-width="110" />
+            <el-table-column prop="phone" label="手机号" width="130" />
+            <el-table-column prop="member_level" label="等级" width="100" />
+            <el-table-column prop="register_store_name" label="注册门店" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="total_amount" label="累计消费" width="120" align="right">
+              <template #default="{ row }">{{ formatMoney(row.total_amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="total_count" label="消费次数" width="100" align="right" />
+            <el-table-column prop="last_consume_date" label="最近消费" width="112" />
+            <el-table-column prop="rfm_segment" label="分层" width="110" />
+          </el-table>
+          <el-empty v-if="!profileLoading && profileRows.length === 0" description="会员档案未同步，暂无档案数据" />
+          <div class="pagination-row" v-if="profileTotal > 0">
+            <el-pagination
+              background
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="profileTotal"
+              v-model:current-page="profilePage"
+              v-model:page-size="profilePageSize"
+              :page-sizes="[20, 50, 100, 200]"
+              @current-change="fetchProfiles"
+              @size-change="handleProfilePageSizeChange"
+            />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="回访名单" name="visits">
+          <el-table :data="visitRows" v-loading="visitLoading" border stripe size="small">
+            <el-table-column prop="visit_date" label="回访日期" width="112" />
+            <el-table-column prop="member_no" label="会员编号" min-width="130" />
+            <el-table-column prop="member_name" label="会员姓名" min-width="110" />
+            <el-table-column prop="store_name" label="建议门店" min-width="170" show-overflow-tooltip />
+            <el-table-column prop="visit_reason" label="原因" width="110" />
+            <el-table-column prop="priority" label="优先级" width="90" align="right" />
+            <el-table-column prop="sleep_days" label="沉睡天数" width="100" align="right" />
+            <el-table-column prop="visit_status" label="状态" width="100" />
+            <el-table-column prop="ai_suggestion" label="建议话术" min-width="220" show-overflow-tooltip />
+          </el-table>
+          <el-empty v-if="!visitLoading && visitRows.length === 0" description="回访名单未生成，暂无回访数据" />
+        </el-tab-pane>
+      </el-tabs>
+    </section>
   </div>
 </template>
+
 <script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { ElMessage } from "element-plus";
+import { Refresh, Search } from "@element-plus/icons-vue";
+import { memberApi } from "@/api/member";
+
+type Preset = "latest" | "last7" | "last30" | "custom";
+type TabName = "pos" | "profile" | "visits";
+
+const overviewLoading = ref(false);
+const posLoading = ref(false);
+const profileLoading = ref(false);
+const visitLoading = ref(false);
+const activeTab = ref<TabName>("pos");
+const preset = ref<Preset>("latest");
+const keyword = ref("");
+const dateRange = ref<[string, string]>(["", ""]);
+const pageSize = ref(20);
+const posPage = ref(1);
+const posTotal = ref(0);
+const profilePage = ref(1);
+const profilePageSize = ref(20);
+const profileTotal = ref(0);
+const summary = ref<any>({});
+const dataStatus = ref<any>({});
+const posRows = ref<any[]>([]);
+const profileRows = ref<any[]>([]);
+const visitRows = ref<any[]>([]);
+
+function parseDate(value: string) {
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
+function toDateString(d: Date) {
+  const copy = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return copy.toISOString().slice(0, 10);
+}
+
+function shiftDate(value: string, days: number) {
+  const d = parseDate(value);
+  d.setDate(d.getDate() + days);
+  return toDateString(d);
+}
+
+function formatMoney(value: any) {
+  const n = Number(value || 0);
+  if (Math.abs(n) >= 10000) return `¥${(n / 10000).toFixed(2)}万`;
+  return `¥${Math.round(n).toLocaleString("zh-CN")}`;
+}
+
+function formatQty(value: any) {
+  const n = Number(value || 0);
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function formatPercent(value: any) {
+  const n = Number(value || 0);
+  return n ? `${(n * 100).toFixed(1)}%` : "0%";
+}
+
+function formatTime(value: any) {
+  if (!value) return "-";
+  return String(value).replace("T", " ").slice(0, 19);
+}
+
+const statusText = computed(() => (dataStatus.value.member_profile_synced ? "会员档案已同步" : "展示小票会员线索"));
+const statusTagType = computed(() => (dataStatus.value.member_profile_synced ? "success" : "warning"));
+const activeLoading = computed(() => {
+  if (activeTab.value === "profile") return profileLoading.value;
+  if (activeTab.value === "visits") return visitLoading.value;
+  return posLoading.value;
+});
+
+const metricCards = computed(() => [
+  { label: "会员档案数", value: Number(summary.value.profile_members || 0).toLocaleString("zh-CN"), sub: "dim_member" },
+  { label: "小票会员线索", value: Number(summary.value.member_clues || 0).toLocaleString("zh-CN"), sub: `${summary.value.member_tickets || 0} 张会员小票` },
+  { label: "会员销售额", value: formatMoney(summary.value.member_sales), sub: `占比 ${formatPercent(summary.value.member_sales_ratio)}` },
+  { label: "会员实收金额", value: formatMoney(summary.value.member_actual), sub: "按小票会员标识聚合" },
+  { label: "今日回访", value: Number(summary.value.today_visits || 0).toLocaleString("zh-CN"), sub: `${summary.value.pending_visits || 0} 待跟进` },
+  { label: "会员小票占比", value: formatPercent(summary.value.member_ticket_ratio), sub: `${summary.value.total_tickets || 0} 张总小票` },
+]);
+
+async function fetchOverview() {
+  overviewLoading.value = true;
+  try {
+    const { data } = await memberApi.getOverview();
+    if (!data?.success) {
+      ElMessage.error(data?.message || "会员概览加载失败");
+      return;
+    }
+    summary.value = data.data?.summary || {};
+    dataStatus.value = data.data?.data_status || {};
+    if (!dateRange.value[0] && summary.value.latest_ticket_date) applyPreset();
+  } catch (e: any) {
+    ElMessage.error(e?.message || "会员概览加载失败");
+  } finally {
+    overviewLoading.value = false;
+  }
+}
+
+function applyPreset() {
+  const anchor = summary.value.latest_ticket_date || toDateString(new Date());
+  if (preset.value === "latest") dateRange.value = [anchor, anchor];
+  if (preset.value === "last7") dateRange.value = [shiftDate(anchor, -6), anchor];
+  if (preset.value === "last30") dateRange.value = [shiftDate(anchor, -29), anchor];
+  if (preset.value !== "custom") fetchPosMembers();
+}
+
+function handleDateChange() {
+  if (preset.value === "custom") fetchPosMembers();
+}
+
+async function fetchPosMembers() {
+  posLoading.value = true;
+  try {
+    const params: any = {
+      page: posPage.value,
+      page_size: pageSize.value,
+    };
+    if (dateRange.value[0]) params.start_date = dateRange.value[0];
+    if (dateRange.value[1]) params.end_date = dateRange.value[1];
+    if (keyword.value.trim()) params.keyword = keyword.value.trim();
+    const { data } = await memberApi.listPosMembers(params);
+    if (!data?.success) {
+      ElMessage.error(data?.message || "会员线索加载失败");
+      return;
+    }
+    const payload = data.data || {};
+    posRows.value = payload.items || [];
+    posTotal.value = payload.total || 0;
+    if (payload.date_range?.start_date && payload.date_range?.end_date) {
+      dateRange.value = [payload.date_range.start_date, payload.date_range.end_date];
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || "会员线索加载失败");
+  } finally {
+    posLoading.value = false;
+  }
+}
+
+async function fetchProfiles() {
+  profileLoading.value = true;
+  try {
+    const params: any = { page: profilePage.value, page_size: profilePageSize.value };
+    if (keyword.value.trim()) params.keyword = keyword.value.trim();
+    const { data } = await memberApi.listMembers(params);
+    const payload = data?.success ? (data.data || {}) : {};
+    profileRows.value = payload.items || [];
+    profileTotal.value = payload.total || 0;
+  } finally {
+    profileLoading.value = false;
+  }
+}
+
+async function fetchVisits() {
+  visitLoading.value = true;
+  try {
+    const { data } = await memberApi.listVisits({ page: 1, page_size: 100 });
+    visitRows.value = data?.success ? (data.data?.items || []) : [];
+  } finally {
+    visitLoading.value = false;
+  }
+}
+
+function fetchActiveTab() {
+  if (activeTab.value === "profile") return fetchProfiles();
+  if (activeTab.value === "visits") return fetchVisits();
+  return fetchPosMembers();
+}
+
+async function refresh() {
+  await fetchOverview();
+  await fetchActiveTab();
+}
+
+function handleTabChange() {
+  fetchActiveTab();
+}
+
+function handleSearch() {
+  if (activeTab.value === "profile") profilePage.value = 1;
+  if (activeTab.value === "pos") posPage.value = 1;
+  fetchActiveTab();
+}
+
+function handlePageSizeChange() {
+  posPage.value = 1;
+  fetchPosMembers();
+}
+
+function handleProfilePageSizeChange() {
+  profilePage.value = 1;
+  fetchProfiles();
+}
+
+onMounted(async () => {
+  await fetchOverview();
+  await fetchPosMembers();
+});
 </script>
+
 <style scoped>
-.page-container { padding: 0; }
-.page-header { margin-bottom: 20px; }
-.page-header h2 { font-size: 18px; color: #333; margin-bottom: 4px; }
-.page-desc { color: #999; font-size: 13px; }
+.member-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  color: #111827;
+}
+
+.member-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.eyebrow {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.member-header h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.member-header p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.header-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  min-height: 92px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.metric-value {
+  margin-top: 8px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+.metric-sub {
+  margin-top: 7px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.filter-band,
+.table-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.filter-band {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.filter-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.keyword-input {
+  width: 190px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.table-panel {
+  padding: 12px 14px 14px;
+}
+
+.muted-code {
+  margin-left: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.pagination-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+@media (max-width: 1280px) {
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .member-header,
+  .filter-band {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-meta {
+    align-items: flex-start;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 </style>

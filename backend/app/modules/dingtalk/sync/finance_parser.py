@@ -1,4 +1,5 @@
 """财务类审批解析：报销 / 付款 / 费用。分类 + 金额 + 申请人 + 状态。"""
+import json
 import re
 from datetime import datetime
 from typing import Optional
@@ -30,15 +31,43 @@ def _parse_number(v) -> Optional[float]:
     return float(m.group()) if m else None
 
 
+def _decoded(value):
+    if not isinstance(value, str):
+        return value
+    raw = value.strip()
+    if not raw or raw[0] not in "[{":
+        return value
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return value
+
+
+def _amounts(components) -> list[float]:
+    if isinstance(components, list):
+        return [amount for component in components for amount in _amounts(component)]
+    if not isinstance(components, dict):
+        return []
+
+    name = str(components.get("name") or components.get("label") or "")
+    value = _decoded(components.get("value"))
+    money_field = any(k in name.lower() for k in ("金额", "合计", "总额", "amount", "money"))
+    if money_field and not isinstance(value, (dict, list)):
+        number = _parse_number(value)
+        return [number] if number is not None else []
+
+    nested = _amounts(value) if isinstance(value, (dict, list)) else []
+    if nested:
+        return nested
+    for key in ("rowValue", "children", "items"):
+        nested.extend(_amounts(components.get(key)))
+    return nested
+
+
 def extract_amount(form_values) -> Optional[float]:
-    """从审批表单中提取金额。"""
-    for c in form_values or []:
-        name = c.get("name") or c.get("label") or ""
-        if any(k in name for k in ("金额", "费用", "合计", "总额", "amount", "money", "报销", "付款")):
-            num = _parse_number(c.get("value"))
-            if num is not None:
-                return num
-    return None
+    """从普通金额字段或明细表格中提取并汇总金额。"""
+    amounts = _amounts(form_values or [])
+    return sum(amounts) if amounts else None
 
 
 def _parse_dt(v) -> Optional[datetime]:

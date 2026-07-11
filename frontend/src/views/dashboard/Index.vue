@@ -125,23 +125,6 @@
       </div>
     </section>
 
-    <section class="module-card ai-panel">
-      <div class="module-head">
-        <div>
-          <p class="module-kicker">AI DIAGNOSIS</p>
-          <h2>AI经营诊断</h2>
-        </div>
-        <router-link to="/app/ai-diagnosis" class="diagnosis-link">进入总体经营诊断</router-link>
-      </div>
-      <div class="diagnosis-grid">
-        <div v-for="d in diagnosisCards" :key="d.title" class="diagnosis-card" :class="d.level">
-          <span>{{ d.scope }}</span>
-          <strong>{{ d.title }}</strong>
-          <p>{{ d.desc }}</p>
-        </div>
-      </div>
-    </section>
-
     <section class="module-card governance-panel">
       <details>
         <summary>数据治理与待接入清单 · {{ pendingFields.length }} 项</summary>
@@ -269,19 +252,6 @@ const taskCards = computed(() => {
   ];
 });
 
-const diagnosisCards = computed(() => {
-  const sales = numberMetric("business_metrics", "yesterday_sales") || 0;
-  const orders = numberMetric("business_metrics", "yesterday_orders") || 0;
-  const lowStock = numberMetric("inventory_risk", "low_stock_sku_count") || 0;
-  const fixedCostPending = true;
-  return [
-    { scope: "总体", title: sales > 0 ? "经营数据已形成闭环" : "销售流水偏弱或未同步", desc: sales > 0 ? `昨日销售 ${fmtMoney(sales)}，订单 ${orders} 单，可进入门店复盘。` : "请检查百胜小票同步与门店开单情况。", level: sales > 0 ? "ok" : "warn" },
-    { scope: "销售", title: orders <= 3 ? "订单数偏低，需看门店明细" : "订单量正常波动", desc: "建议结合线下门店明细查看是否集中在单店。", level: orders <= 3 ? "warn" : "ok" },
-    { scope: "库存", title: lowStock > 0 ? "存在缺货SKU风险" : "库存风险较低", desc: `当前缺货SKU ${formatBigNum(lowStock)}，建议优先补齐爆款核心尺码。`, level: lowStock > 0 ? "danger" : "ok" },
-    { scope: "财务", title: fixedCostPending ? "固定成本未接入" : "利润口径完整", desc: "房租、水电、人员工资接入后才能输出纯利润与净利率。", level: "warn" },
-  ];
-});
-
 const trendOption = computed(() => ({
   tooltip: { trigger: "axis" },
   legend: { top: 8, right: 12, textStyle: { color: "#64748B" } },
@@ -364,14 +334,9 @@ onMounted(fetchData);
 .category-meta strong { color:#0F172A; }
 .bar-track { height:8px; background:#EEF2F7; border-radius:999px; overflow:hidden; } .bar-track i { display:block; height:100%; border-radius:999px; background:linear-gradient(90deg,#D4AF37,#FF6A00); }
 .module-tip { margin-top:14px; padding:12px; border-radius:12px; background:#FFFBEB; color:#92400E; font-size:12px; line-height:1.6; }
-.diagnosis-link { color:#C05621; font-size:13px; font-weight:700; text-decoration:none; }
-.diagnosis-grid { display:grid; grid-template-columns: repeat(4,1fr); gap:14px; }
-.diagnosis-card { border-radius:14px; padding:16px; border:1px solid #E2E8F0; background:#FAFBFD; }
-.diagnosis-card span { color:#94A3B8; font-size:12px; } .diagnosis-card strong { display:block; margin:8px 0; font-size:16px; } .diagnosis-card p { margin:0; color:#64748B; font-size:12px; line-height:1.55; }
-.diagnosis-card.ok { border-color:#BBF7D0; background:#F0FDF4; } .diagnosis-card.warn { border-color:#FDE68A; background:#FFFBEB; } .diagnosis-card.danger { border-color:#FECACA; background:#FEF2F2; }
 .governance-panel { margin-bottom:20px; } details summary { cursor:pointer; color:#64748B; font-size:13px; font-weight:700; } .pending-table { margin-top:14px; border-top:1px solid #EEF2F7; } .pending-row { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-bottom:1px solid #F1F5F9; font-size:12px; } code { background:#F1F5F9; padding:2px 6px; border-radius:6px; color:#0F172A; }
 .empty-row { padding:18px; color:#94A3B8; text-align:center; font-size:13px; }
 @media (max-width: 1440px) { .api-grid { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 1280px) { .api-grid { grid-template-columns: repeat(3, 1fr); } .sales-layout, .module-grid.two-col { grid-template-columns: 1fr; } .diagnosis-grid { grid-template-columns: repeat(2,1fr); } }
-@media (max-width: 760px) { .ops-hero, .module-head { flex-direction:column; align-items:flex-start; } .hero-actions { flex-wrap:wrap; } .api-grid, .inventory-kpis, .hr-grid, .diagnosis-grid { grid-template-columns:1fr; } .store-row { grid-template-columns: 44px 1fr; } .store-row span:nth-child(n+3) { display:none; } }
+@media (max-width: 1280px) { .api-grid { grid-template-columns: repeat(3, 1fr); } .sales-layout, .module-grid.two-col { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .ops-hero, .module-head { flex-direction:column; align-items:flex-start; } .hero-actions { flex-wrap:wrap; } .api-grid, .inventory-kpis, .hr-grid { grid-template-columns:1fr; } .store-row { grid-template-columns: 44px 1fr; } .store-row span:nth-child(n+3) { display:none; } }
 </style>

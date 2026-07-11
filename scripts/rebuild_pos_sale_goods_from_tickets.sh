@@ -24,6 +24,14 @@ PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -v start_dat
 
 BEGIN;
 
+ALTER TABLE dwd.dwd_pos_sale_goods
+  ADD COLUMN IF NOT EXISTS cost_price numeric(18,4),
+  ADD COLUMN IF NOT EXISTS cost_amount numeric(18,2),
+  ADD COLUMN IF NOT EXISTS gross_profit numeric(18,2),
+  ADD COLUMN IF NOT EXISTS gross_margin numeric(12,6),
+  ADD COLUMN IF NOT EXISTS cost_source varchar(32),
+  ADD COLUMN IF NOT EXISTS is_cost_missing boolean NOT NULL DEFAULT true;
+
 DELETE FROM dws.dws_product_daily
 WHERE stat_date >= :'start_date'::date
   AND stat_date <= :'end_date'::date;
@@ -36,6 +44,7 @@ INSERT INTO dwd.dwd_pos_sale_goods
 (source_system, biz_date, store_code, product_code, sku_code, product_name, goods_id,
  category_code, category_name, brand_code, brand_name, outer_product_code,
  sales_qty, sales_amount, standard_amount, discount_rate, tag_price,
+ cost_price, cost_amount, gross_profit, gross_margin, cost_source, is_cost_missing,
  stock_qty_snapshot, batch_no, raw_ref_id, synced_at, created_at, updated_at)
 WITH whitelist(code) AS (
   VALUES ('134681'),('285204'),('285702'),('185805'),('185808'),('285101'),('285102'),('GZ001'),('GZ002'),('GYNG')
@@ -67,14 +76,45 @@ WITH whitelist(code) AS (
   FROM detail
   WHERE NULLIF(item->>'spdm','') IS NOT NULL
   GROUP BY biz_date, store_code, NULLIF(item->>'spdm',''), concat_ws('|', NULLIF(item->>'spdm',''), NULLIF(item->>'gg1dm',''), NULLIF(item->>'gg2dm',''))
+), costed AS (
+  SELECT
+    n.*,
+    COALESCE(
+      NULLIF(sk.cost_price, 0),
+      NULLIF(sk.market_price, 0),
+      NULLIF(p.cost_price, 0)
+    ) AS unit_cost,
+    CASE
+      WHEN NULLIF(sk.cost_price, 0) IS NOT NULL THEN 'sku_cost'
+      WHEN NULLIF(sk.market_price, 0) IS NOT NULL THEN 'sku_market_estimate'
+      WHEN NULLIF(p.cost_price, 0) IS NOT NULL THEN 'product_cost'
+      ELSE 'missing'
+    END AS cost_source,
+    CASE
+      WHEN NULLIF(sk.cost_price, 0) IS NOT NULL OR NULLIF(p.cost_price, 0) IS NOT NULL
+      THEN false ELSE true
+    END AS is_cost_missing
+  FROM normalized n
+  LEFT JOIN dim.dim_sku sk
+    ON REPLACE(n.sku_code, '|', '') = sk.sku_code
+  LEFT JOIN dim.dim_product p
+    ON n.product_code = p.product_code
 )
 SELECT
   'baison_ticket_detail', biz_date, store_code, product_code, sku_code, product_name, NULL,
   NULL, NULL, NULL, NULL, NULL,
   sales_qty, sales_amount, standard_amount,
   CASE WHEN standard_amount > 0 THEN ROUND(sales_amount / standard_amount, 4) ELSE NULL END,
-  tag_price, NULL, 'REBUILD_TICKET_DAILY', raw_ref_id, now(), now(), now()
-FROM normalized;
+  tag_price,
+  unit_cost,
+  CASE WHEN unit_cost IS NOT NULL THEN ROUND(sales_qty * unit_cost, 2) END,
+  CASE WHEN unit_cost IS NOT NULL THEN ROUND(sales_amount - sales_qty * unit_cost, 2) END,
+  CASE WHEN unit_cost IS NOT NULL AND sales_amount <> 0
+       THEN ROUND((sales_amount - sales_qty * unit_cost) / sales_amount, 6) END,
+  cost_source,
+  is_cost_missing,
+  NULL, 'REBUILD_TICKET_DAILY', raw_ref_id, now(), now(), now()
+FROM costed;
 
 INSERT INTO dws.dws_product_daily
 (stat_date, product_code, store_code, sales_quantity, return_quantity, net_quantity,
@@ -90,11 +130,12 @@ SELECT
   COALESCE(SUM(sales_amount),0),
   0,
   COALESCE(SUM(sales_amount),0),
-  0,
-  0,
-  NULL,
+  COALESCE(SUM(cost_amount),0),
+  COALESCE(SUM(gross_profit),0),
+  CASE WHEN SUM(sales_amount) <> 0
+       THEN ROUND(SUM(gross_profit) / SUM(sales_amount), 6) END,
   CASE WHEN SUM(standard_amount) > 0 THEN ROUND(SUM(sales_amount) / SUM(standard_amount), 4) ELSE NULL END,
-  false,
+  BOOL_AND(NOT is_cost_missing),
   now(), now()
 FROM dwd.dwd_pos_sale_goods
 WHERE biz_date >= :'start_date'::date
@@ -114,6 +155,50 @@ DO UPDATE SET sales_quantity = EXCLUDED.sales_quantity,
               is_cost_complete = EXCLUDED.is_cost_complete,
               etl_at = now();
 
+WITH store_cost AS (
+  SELECT stat_date, store_code,
+         SUM(cost_amount) AS cost_amount,
+         SUM(gross_profit) AS gross_profit,
+         CASE WHEN SUM(sales_amount) <> 0
+              THEN SUM(gross_profit) / SUM(sales_amount) END AS gross_margin,
+         BOOL_AND(is_cost_complete) AS is_cost_complete
+  FROM dws.dws_product_daily
+  WHERE stat_date >= :'start_date'::date
+    AND stat_date <= :'end_date'::date
+  GROUP BY stat_date, store_code
+)
+UPDATE dws.dws_store_daily d
+SET cost_amount = c.cost_amount,
+    gross_profit = c.gross_profit,
+    gross_margin = c.gross_margin,
+    is_cost_complete = c.is_cost_complete,
+    etl_at = now()
+FROM store_cost c
+WHERE d.stat_date = c.stat_date
+  AND d.store_code = c.store_code
+  AND d.channel = 'offline';
+
+WITH company_cost AS (
+  SELECT stat_date,
+         SUM(cost_amount) AS cost_amount,
+         SUM(gross_profit) AS gross_profit,
+         CASE WHEN SUM(sales_amount) <> 0
+              THEN SUM(gross_profit) / SUM(sales_amount) END AS gross_margin,
+         BOOL_AND(is_cost_complete) AS is_cost_complete
+  FROM dws.dws_product_daily
+  WHERE stat_date >= :'start_date'::date
+    AND stat_date <= :'end_date'::date
+  GROUP BY stat_date
+)
+UPDATE dws.dws_company_daily d
+SET total_cost_amount = c.cost_amount,
+    gross_profit = c.gross_profit,
+    gross_margin = c.gross_margin,
+    is_cost_complete = c.is_cost_complete,
+    etl_at = now()
+FROM company_cost c
+WHERE d.stat_date = c.stat_date;
+
 COMMIT;
 
 WITH whitelist(code) AS (
@@ -131,7 +216,10 @@ WHERE t.stat_date >= :'start_date'::date
   AND t.stat_date <= :'end_date'::date
   AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.code=t.store_code);
 
-SELECT biz_date, sum(sales_amount) AS amount, sum(sales_qty) AS qty, count(*) AS rows
+SELECT biz_date, sum(sales_amount) AS amount, sum(sales_qty) AS qty,
+       sum(cost_amount) AS cost_amount, sum(gross_profit) AS gross_profit,
+       count(*) FILTER (WHERE is_cost_missing) AS estimated_or_missing_rows,
+       count(*) AS rows
 FROM dwd.dwd_pos_sale_goods
 WHERE biz_date >= :'start_date'::date
   AND biz_date <= :'end_date'::date

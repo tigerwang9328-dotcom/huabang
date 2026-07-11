@@ -206,15 +206,16 @@ const metricCards = computed(() => {
       { label: "慢款滞销", value: num(s.slow_product_count, "款"), desc: "清仓风险" },
     ],
     inventory: [
-      { label: "库存数量", value: num(s.total_inventory_qty, "件"), desc: "当前在库" },
+      { label: "库存数量", value: num(s.total_inventory_qty, "件"), desc: `库存快照 ${s.inventory_stat_date || "--"}` },
       { label: "库存金额", value: money(s.inventory_amount), desc: "资金占用" },
       { label: "90天以上", value: money(s.age_90_amount), desc: "老库存金额" },
       { label: "负库存SKU", value: num(s.negative_sku_count, "个"), desc: "仓库复核" },
     ],
     hr: [
-      { label: "在岗人数", value: num(s.employee_count, "人"), desc: "员工档案口径" },
-      { label: "人均销售", value: money(s.avg_sales_per_employee), desc: "人效核心指标" },
-      { label: "低人效门店", value: num(s.low_efficiency_store_count, "家"), desc: "需复盘" },
+      { label: "员工数", value: num(s.employee_count, "人"), desc: "钉钉在职员工" },
+      { label: "人均销售", value: money(s.avg_sales_per_employee), desc: "销售额 / 在职员工" },
+      { label: "今日出勤", value: num(s.attendance_employee_count, "人"), desc: `考勤 ${s.attendance_stat_date || "--"}` },
+      { label: "考勤异常", value: num(s.attendance_abnormal_count, "人"), desc: "缺卡/迟到/早退" },
     ],
     finance: [
       { label: "销售成本", value: money(s.cost_of_goods), desc: "商品成本" },
@@ -223,9 +224,11 @@ const metricCards = computed(() => {
       { label: "预估利润", value: money(s.operating_profit), desc: "需财务核准" },
     ],
     members: [
-      { label: "今日回访", value: num(s.visit_count, "人"), desc: "会员机会" },
-      { label: "待回访", value: num(s.pending_visit_count, "人"), desc: "待执行" },
-      { label: "回访成交", value: money(s.conversion_amount), desc: "已转化金额" },
+      { label: "会员订单", value: num(s.member_order_count, "单"), desc: "小票会员字段" },
+      { label: "活跃会员", value: num(s.active_member_count, "人"), desc: "当日去重成交" },
+      { label: "会员销售", value: money(s.member_sales_amount), desc: "会员成交金额" },
+      { label: "会员订单占比", value: pct(s.member_order_ratio), desc: "会员经营质量" },
+      { label: "待回访", value: num(s.pending_visit_count, "人"), desc: `回访清单 ${s.visit_stat_date || "--"}` },
     ],
     audit: [
       { label: "异常数量", value: num(s.audit_count, "项"), desc: "需复核" },

@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional
+import logging
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
+logger = logging.getLogger(__name__)
 
 LEVEL_LABEL = {"high": "高", "medium": "中", "low": "低"}
 
@@ -28,6 +31,17 @@ def _int(value: Any, default: int = 0) -> int:
     except Exception:
         return default
 
+
+
+
+def _as_date(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value:
+        return date.fromisoformat(str(value)[:10])
+    return date.today() - timedelta(days=1)
 
 def _date_str(value: Any) -> str:
     if not value:
@@ -68,6 +82,8 @@ class AIDiagnosisService:
             result = await self.db.execute(text(sql), params or {})
             return [dict(r._mapping) for r in result.fetchall()]
         except Exception:
+            await self.db.rollback()
+            logger.exception("AI diagnosis query failed")
             return []
 
     async def _one(self, sql: str, params: Optional[dict] = None) -> dict:
@@ -84,7 +100,7 @@ class AIDiagnosisService:
             limit 1
             """
         )
-        return row.get("dt") or (date.today() - timedelta(days=1)).isoformat()
+        return _as_date(row.get("dt") or (date.today() - timedelta(days=1)))
 
     def _quality(self, warnings: list[str], missing: list[str], source_tables: list[str]) -> dict:
         return {
@@ -143,7 +159,7 @@ class AIDiagnosisService:
         }
 
     async def overview(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
+        dt = _as_date(stat_date or await self._latest_date())
         company = await self._one("select * from dws.dws_company_daily where stat_date=:dt", {"dt": dt})
         if not company:
             company = await self._one("select * from dm.dm_boss_daily_report where report_date=:dt", {"dt": dt})
@@ -251,8 +267,8 @@ class AIDiagnosisService:
         return _int(row.get("c"))
 
     async def sales(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
-        params = {"dt": dt, "store_code": store_code}
+        dt = _as_date(stat_date or await self._latest_date())
+        params = {"dt": dt, "store_code": store_code or ""}
         store_filter = "and s.store_code=:store_code" if store_code else ""
         summary = await self._one(
             f"""
@@ -282,7 +298,7 @@ class AIDiagnosisService:
               select store_code, avg(net_sales_amount) avg_sales7, avg(order_count) avg_orders7,
                      avg(avg_order_value) avg_aov7, avg(items_per_order) avg_items7
               from dws.dws_store_daily
-              where stat_date < :dt::date and stat_date >= :dt::date - interval '7 day'
+              where stat_date < CAST(:dt AS date) and stat_date >= CAST(:dt AS date) - interval '7 day'
               group by store_code
             )
             select t.store_code, coalesce(t.store_name,t.store_code) store_name, t.net_sales_amount,
@@ -353,26 +369,26 @@ class AIDiagnosisService:
         return risks
 
     async def products(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
+        dt = _as_date(stat_date or await self._latest_date())
         products = await self._rows(
             """
             with sales30 as (
               select product_code, sum(net_quantity) qty30, sum(net_sales_amount) sales30, avg(gross_margin) gm
               from dws.dws_product_daily
-              where stat_date >= :dt::date - interval '30 day' and stat_date <= :dt::date
+              where stat_date >= CAST(:dt AS date) - interval '30 day' and stat_date <= CAST(:dt AS date)
               group by product_code
             ),
             sales7 as (
               select product_code, sum(net_quantity) qty7
               from dws.dws_product_daily
-              where stat_date >= :dt::date - interval '7 day' and stat_date <= :dt::date
+              where stat_date >= CAST(:dt AS date) - interval '7 day' and stat_date <= CAST(:dt AS date)
               group by product_code
             ),
             inv as (
               select product_code, sum(quantity) qty, sum(cost_amount) amount,
                      max(age_days) age_days, count(*) filter(where quantity<=0) zero_sku
               from dwd.dwd_inventory_snapshot
-              where snapshot_date=(select max(snapshot_date) from dwd.dwd_inventory_snapshot where snapshot_date<=:dt::date)
+              where snapshot_date=(select max(snapshot_date) from dwd.dwd_inventory_snapshot where snapshot_date<=CAST(:dt AS date))
               group by product_code
             )
             select p.product_code, max(p.product_name) product_name, coalesce(s7.qty7,0) qty7,
@@ -424,18 +440,21 @@ class AIDiagnosisService:
         }
 
     async def inventory(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
-        params = {"dt": dt, "store_code": store_code}
+        dt = _as_date(stat_date or await self._latest_date())
+        params = {"dt": dt, "store_code": store_code or ""}
         store_filter = "and store_code=:store_code" if store_code else ""
+        inventory_date_filter = "stat_date<=CAST(:dt AS date)" if stat_date else "true"
+        warning_date_filter = "warning_date<=CAST(:dt AS date)" if stat_date else "true"
         summary = await self._one(
             f"""
-            select coalesce(sum(total_quantity),0) total_quantity, coalesce(sum(total_cost_amount),0) total_amount,
+            select max(stat_date) inventory_stat_date,
+                   coalesce(sum(total_quantity),0) total_quantity, coalesce(sum(total_cost_amount),0) total_amount,
                    coalesce(sum(age_91_180_amount),0)+coalesce(sum(age_180_plus_amount),0) age_90_amount,
                    coalesce(sum(age_180_plus_amount),0) age_180_amount,
                    coalesce(sum(negative_sku_count),0) negative_sku_count,
                    coalesce(sum(sku_count),0) sku_count
             from dws.dws_inventory_daily
-            where stat_date=(select max(stat_date) from dws.dws_inventory_daily where stat_date<=:dt::date) {store_filter}
+            where stat_date=(select max(stat_date) from dws.dws_inventory_daily where {inventory_date_filter}) {store_filter}
             """,
             params,
         )
@@ -444,7 +463,7 @@ class AIDiagnosisService:
             select warning_type, warning_level, store_code, product_code, sku_code,
                    current_quantity, current_cost_amount, age_days, description
             from dm.dm_inventory_warning
-            where warning_date=(select max(warning_date) from dm.dm_inventory_warning where warning_date<=:dt::date)
+            where warning_date=(select max(warning_date) from dm.dm_inventory_warning where {warning_date_filter})
             {store_filter}
             order by case warning_level when 'critical' then 1 when 'warning' then 2 else 3 end, current_cost_amount desc nulls last
             limit 80
@@ -462,6 +481,7 @@ class AIDiagnosisService:
         return {
             "summary": {
                 "stat_date": dt,
+                "inventory_stat_date": _date_str(summary.get("inventory_stat_date")),
                 "total_inventory_qty": _int(summary.get("total_quantity")),
                 "inventory_amount": _num(summary.get("total_amount")),
                 "age_90_amount": _num(summary.get("age_90_amount")),
@@ -476,156 +496,453 @@ class AIDiagnosisService:
             "data_quality": self._quality(warnings, ["库龄估算字段"] if not warnings_rows else [], ["dws_inventory_daily", "dm_inventory_warning"]),
         }
 
+
     async def finance(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
+        dt = _as_date(stat_date or await self._latest_date())
+        params = {"dt": dt, "store_code": store_code or ""}
         row = await self._one(
             """
             select coalesce(sum(net_sales),0) net_sales, coalesce(sum(cost_of_goods),0) cost_of_goods,
                    coalesce(sum(gross_profit),0) gross_profit, avg(gross_margin) gross_margin,
                    coalesce(sum(total_expense),0) total_expense, coalesce(sum(operating_profit),0) operating_profit,
-                   bool_and(is_cost_complete) is_cost_complete, bool_and(is_expense_complete) is_expense_complete
+                   bool_and(is_cost_complete) is_cost_complete, bool_and(is_expense_complete) is_expense_complete,
+                   'dm_finance_profit_daily' as source_table
             from dm.dm_finance_profit_daily
-            where stat_date=:dt and (:store_code is null or store_code=:store_code or store_code='ALL')
+            where stat_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
             """,
-            {"dt": dt, "store_code": store_code},
+            params,
         )
         if not row or _num(row.get("net_sales")) == 0:
-            row = await self._one("select * from dws.dws_finance_daily where stat_date=:dt and store_code='ALL'", {"dt": dt})
+            row = await self._one(
+                """
+                select coalesce(sum(net_sales_amount),0) net_sales,
+                       coalesce(sum(cost_amount),0) cost_of_goods,
+                       coalesce(sum(gross_profit),0) gross_profit,
+                       case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) end gross_margin,
+                       coalesce(sum(total_expense),0) total_expense,
+                       coalesce(sum(operating_profit_estimate),0) operating_profit,
+                       bool_and(is_profit_complete) is_cost_complete,
+                       false as is_expense_complete,
+                       'dws_finance_daily' as source_table
+                from dws.dws_finance_daily
+                where stat_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
+                """,
+                params,
+            )
+        if not row or _num(row.get("net_sales")) == 0:
+            row = await self._one(
+                """
+                with sales as (
+                  select coalesce(sum(net_sales_amount),0) net_sales,
+                         coalesce(sum(total_cost_amount),0) company_cost,
+                         coalesce(sum(gross_profit),0) company_gross_profit,
+                         avg(gross_margin) company_gross_margin
+                  from dws.dws_company_daily
+                  where stat_date=:dt and :store_code = ''
+                ), store_sales as (
+                  select coalesce(sum(net_sales_amount),0) net_sales,
+                         coalesce(sum(cost_amount),0) store_cost,
+                         coalesce(sum(gross_profit),0) store_gross_profit,
+                         case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) end store_gross_margin
+                  from dws.dws_store_daily
+                  where stat_date=:dt and (:store_code = '' or store_code=:store_code)
+                ), product_cost as (
+                  select coalesce(sum(cost_amount),0) cost_amount,
+                         coalesce(sum(gross_profit),0) gross_profit,
+                         bool_and(is_cost_complete) is_cost_complete
+                  from dws.dws_product_daily
+                  where stat_date=:dt and (:store_code = '' or store_code=:store_code)
+                ), expense_dwd as (
+                  select coalesce(sum(expense_amount),0) total_expense
+                  from dwd.dwd_finance_expense
+                  where expense_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
+                ), expense_dingtalk as (
+                  select coalesce(sum(amount),0) total_expense
+                  from finance_expense_records
+                  where expense_date=:dt
+                    and :store_code = ''
+                    and upper(coalesce(approval_status,'')) in ('COMPLETED','APPROVED','FINISHED')
+                ), expense as (
+                  select coalesce(nullif(expense_dwd.total_expense,0), expense_dingtalk.total_expense, 0) total_expense
+                  from expense_dwd cross join expense_dingtalk
+                )
+                select coalesce(nullif(store_sales.net_sales,0), sales.net_sales, 0) net_sales,
+                       coalesce(nullif(store_sales.store_cost,0), nullif(sales.company_cost,0), nullif(product_cost.cost_amount,0), 0) cost_of_goods,
+                       coalesce(nullif(store_sales.store_gross_profit,0), nullif(sales.company_gross_profit,0), nullif(product_cost.gross_profit,0), 0) gross_profit,
+                       coalesce(store_sales.store_gross_margin, sales.company_gross_margin) gross_margin,
+                       expense.total_expense,
+                       coalesce(nullif(store_sales.store_gross_profit,0), nullif(sales.company_gross_profit,0), nullif(product_cost.gross_profit,0), 0) - expense.total_expense operating_profit,
+                       (coalesce(product_cost.is_cost_complete,false)
+                        and coalesce(nullif(store_sales.store_cost,0), nullif(sales.company_cost,0), nullif(product_cost.cost_amount,0), 0) > 0) is_cost_complete,
+                       (expense.total_expense > 0) is_expense_complete,
+                       'dws_company_daily/dws_store_daily/dws_product_daily' as source_table
+                from sales cross join store_sales cross join product_cost cross join expense
+                """,
+                params,
+            )
         diagnoses = []
+        warnings = []
         missing = []
-        if not row:
-            missing.append("财务利润日报")
-        if row and not row.get("is_expense_complete"):
-            missing.append("费用/固定成本")
-            diagnoses.append(self._diag("finance", "medium", "利润仍为预估口径", "当前费用、房租水电或人员工资未完整接入，不能把预估利润当最终财报。", [f"净销售：{_money(row.get('net_sales') or row.get('net_sales_amount'))}", f"毛利率：{_pct(row.get('gross_margin'))}"], "成本或费用口径未完全归集，利润结论需要财务复核。", "财务补齐固定成本和费用归集，系统保留预估标识。", "财务经理", "本周内", "费用接入率、预估与核准利润差异", "dm_finance_profit_daily / dws_finance_daily"))
-        if row and _num(row.get("gross_margin")) > 0 and _num(row.get("gross_margin")) < 0.45:
-            diagnoses.append(self._diag("finance", "high", "毛利率偏低风险", f"当前毛利率 {_pct(row.get('gross_margin'))}，低于男装经营预警线。", [f"毛利：{_money(row.get('gross_profit'))}", f"销售成本：{_money(row.get('cost_of_goods') or row.get('cost_amount'))}"], "折扣、商品结构或成本归集可能拉低利润。", "商品与财务复核高折扣订单、低毛利款和成本完整性。", "财务经理 / 商品经理", "今日下班前", "毛利率、异常折扣订单数、低毛利款销售占比", "dm_finance_profit_daily"))
+        if not row or _num(row.get("net_sales")) == 0:
+            missing.append("销售/财务基础数据")
+        cost_complete = bool(row.get("is_cost_complete")) and _num(row.get("cost_of_goods")) > 0
+        expense_complete = bool(row.get("is_expense_complete")) and _num(row.get("total_expense")) > 0
+        if row and _num(row.get("net_sales")) > 0 and not cost_complete:
+            warnings.append("成本字段未完整接入，财务诊断按销售额与现有毛利字段兜底。")
+            diagnoses.append(self._diag("finance", "medium", "成本口径未完整", "当前销售已接入，但成本金额为0或不完整，毛利和利润只能作为预估参考。", [f"净销售：{_money(row.get('net_sales'))}", f"成本：{_money(row.get('cost_of_goods'))}"], "商品成本未完整同步或DWS成本汇总未生成。", "财务与商品部核对成本价、商品成本汇总和缺失成本款。", "财务经理 / 商品经理", "本周内", "成本完整率、毛利率可用性", row.get("source_table") or "finance fallback"))
+        if row and _num(row.get("net_sales")) > 0 and not expense_complete:
+            warnings.append("费用明细未接入，经营利润暂未扣除完整费用。")
+            diagnoses.append(self._diag("finance", "medium", "费用口径未完整", "当前费用明细为空或不完整，经营利润不能作为最终财报。", [f"净销售：{_money(row.get('net_sales'))}", f"已接费用：{_money(row.get('total_expense'))}"], "报销、房租、水电、工资或其他费用未进入日汇总。", "财务补录费用或启用钉钉/金蝶费用同步，页面继续保留预估标识。", "财务经理", "本周内", "费用接入率、预估利润与核准利润差异", "dwd_finance_expense"))
+        gm = _num(row.get("gross_margin"))
+        if gm == 0 and _num(row.get("net_sales")) > 0 and _num(row.get("gross_profit")) > 0:
+            gm = _num(row.get("gross_profit")) / _num(row.get("net_sales"))
+        if gm > 0 and gm < 0.45:
+            diagnoses.append(self._diag("finance", "high", "毛利率偏低风险", f"当前毛利率 {_pct(gm)}，低于经营预警线。", [f"毛利：{_money(row.get('gross_profit'))}", f"销售成本：{_money(row.get('cost_of_goods'))}"], "折扣、商品结构或成本归集可能拉低利润。", "商品与财务复核高折扣订单、低毛利款和成本完整性。", "财务经理 / 商品经理", "今日下班前", "毛利率、异常折扣订单数、低毛利款销售占比", row.get("source_table") or "finance"))
+        if _num(row.get("operating_profit")) < 0:
+            diagnoses.append(self._diag("finance", "high", "经营利润为负", f"当前预估经营利润 {_money(row.get('operating_profit'))}。", [f"净销售：{_money(row.get('net_sales'))}", f"费用：{_money(row.get('total_expense'))}"], "销售毛利无法覆盖费用，或费用一次性集中入账。", "财务拆解费用结构，运营复盘低效门店和低毛利商品。", "财务经理 / 运营经理", "今日18:00前", "经营利润、费用率、毛利率", row.get("source_table") or "finance"))
         return {
             "summary": {
                 "stat_date": dt,
-                "net_sales": _num(row.get("net_sales") or row.get("net_sales_amount")),
-                "cost_of_goods": _num(row.get("cost_of_goods") or row.get("cost_amount")),
+                "net_sales": _num(row.get("net_sales")),
+                "cost_of_goods": _num(row.get("cost_of_goods")),
                 "gross_profit": _num(row.get("gross_profit")),
-                "gross_margin": _num(row.get("gross_margin")),
+                "gross_margin": gm,
                 "total_expense": _num(row.get("total_expense")),
-                "operating_profit": _num(row.get("operating_profit") or row.get("operating_profit_estimate")),
+                "operating_profit": _num(row.get("operating_profit")),
                 "finance_risk_count": len(diagnoses),
             },
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses],
             "diagnoses": diagnoses,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses)],
-            "data_quality": self._quality(["财务诊断为预估口径，需财务核准后作为最终结论。"] if missing else [], missing, ["dm_finance_profit_daily", "dws_finance_daily"]),
+            "data_quality": self._quality(warnings, missing, ["dm_finance_profit_daily", "dws_finance_daily", "dws_company_daily", "dws_product_daily", "dwd_finance_expense", "finance_expense_records"]),
         }
 
     async def hr(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
+        dt = _as_date(stat_date or await self._latest_date())
+        params = {"dt": dt, "store_code": store_code or ""}
         stores = await self._rows(
             """
+            with emp as (
+              select store_code, count(*) filter(where coalesce(status,'active') in ('active','在职','正常')) employee_count
+              from dim.dim_employee
+              group by store_code
+            ), tasks as (
+              select related_store_code store_code,
+                     count(*) task_count,
+                     count(*) filter(where status in ('done','completed','review_passed','closed')) done_count,
+                     count(*) filter(where due_date < :dt and status not in ('done','completed','review_passed','closed','cancelled')) overdue_count
+              from app.app_action_task
+              where is_deleted=false and related_date <= :dt
+              group by related_store_code
+            )
             select s.store_code, coalesce(ds.store_name,s.store_code) store_name, s.net_sales_amount,
-                   nullif(count(e.id),0) employee_count,
-                   case when count(e.id)>0 then s.net_sales_amount/count(e.id) end sales_per_employee
+                   s.order_count, s.net_item_count,
+                   coalesce(emp.employee_count,0) employee_count,
+                   case when coalesce(emp.employee_count,0)>0 then s.net_sales_amount/emp.employee_count end sales_per_employee,
+                   coalesce(tasks.task_count,0) task_count,
+                   coalesce(tasks.done_count,0) done_count,
+                   coalesce(tasks.overdue_count,0) overdue_count
             from dws.dws_store_daily s
             left join dim.dim_store ds on ds.store_code=s.store_code
-            left join dim.dim_employee e on e.store_code=s.store_code and e.status='active'
-            where s.stat_date=:dt and (:store_code is null or s.store_code=:store_code)
-            group by s.store_code, ds.store_name, s.net_sales_amount
-            order by sales_per_employee nulls last
+            left join emp on emp.store_code=s.store_code
+            left join tasks on tasks.store_code=s.store_code
+            where s.stat_date=:dt and (:store_code = '' or s.store_code=:store_code)
+            order by s.net_sales_amount desc nulls last
             limit 80
             """,
-            {"dt": dt, "store_code": store_code},
+            params,
         )
-        valid = [s for s in stores if s.get("sales_per_employee") is not None]
-        avg = sum(_num(s.get("sales_per_employee")) for s in valid) / len(valid) if valid else 0
+        attendance_date_filter = "work_date<=CAST(:dt AS date)" if stat_date else "true"
+        hr_actual = await self._one(
+            f"""
+            select (select count(*) from dingtalk_employees where active=true) employee_count,
+                   max(work_date) attendance_stat_date,
+                   count(*) attendance_employee_count,
+                   count(*) filter(where attendance_status='abnormal') attendance_abnormal_count,
+                   coalesce(sum(late_count),0) late_count,
+                   coalesce(sum(early_leave_count),0) early_leave_count,
+                   coalesce(sum(missing_check_count),0) missing_check_count,
+                   coalesce(sum(leave_count),0) leave_count
+            from hr_attendance_daily
+            where work_date=(select max(work_date) from hr_attendance_daily where {attendance_date_filter})
+            """,
+            params,
+        )
+        mapped_emp = sum(_int(s.get("employee_count")) for s in stores)
+        actual_emp = _int(hr_actual.get("employee_count"))
+        active_store_count = len([s for s in stores if _num(s.get("net_sales_amount")) > 0])
+        use_store_proxy = mapped_emp == 0
+        valid = [s for s in stores if (_num(s.get("sales_per_employee")) > 0 or use_store_proxy)]
+        if use_store_proxy:
+            store_eff_avg = sum(_num(s.get("net_sales_amount")) for s in stores) / active_store_count if active_store_count else 0
+        else:
+            store_eff_avg = sum(_num(s.get("sales_per_employee")) for s in valid) / len(valid) if valid else 0
+        total_sales = sum(_num(s.get("net_sales_amount")) for s in stores)
+        avg_eff = total_sales / actual_emp if actual_emp else store_eff_avg
+        total_tasks = sum(_int(s.get("task_count")) for s in stores)
+        done_tasks = sum(_int(s.get("done_count")) for s in stores)
         diagnoses = []
-        for s in valid[:20]:
-            spe = _num(s.get("sales_per_employee"))
-            if avg > 0 and spe < avg * 0.75:
-                name = s.get("store_name") or s.get("store_code")
-                diagnoses.append(self._diag("hr", "medium", f"{name}人效偏低", f"{name} 人均销售 {_money(spe)}，低于公司均值 {_money(avg)}。", [f"门店销售：{_money(s.get('net_sales_amount'))}", f"在岗人数：{_int(s.get('employee_count'))}", f"人均销售：{_money(spe)}"], "可能是人员排班与销售节奏不匹配，或导购执行、会员回访不足。", "运营经理复盘排班、会员回访和导购成交动作；若任务完成率低，纳入干部执行力复盘。", "运营经理 / 店长", "今日21:00前", "明日人均销售、订单数、会员回访完成率", "dws_store_daily + dim_employee"))
+        for s in stores:
+            name = s.get("store_name") or s.get("store_code")
+            eff = _num(s.get("net_sales_amount")) if use_store_proxy else _num(s.get("sales_per_employee"))
+            if store_eff_avg > 0 and eff < store_eff_avg * 0.75:
+                label = "门店销售效率偏低" if use_store_proxy else "人效偏低"
+                metric_name = "门店销售" if use_store_proxy else "人均销售"
+                diagnoses.append(self._diag("hr", "medium", f"{name}{label}", f"{name} {metric_name} {_money(eff)}，低于公司均值 {_money(store_eff_avg)}。", [f"门店销售：{_money(s.get('net_sales_amount'))}", f"员工数：{_int(s.get('employee_count'))}", f"逾期任务：{_int(s.get('overdue_count'))}"], "人员档案、排班或执行动作与销售节奏不匹配；若员工档案为空，当前按门店经营单元做兜底判断。", "运营经理复盘排班、导购成交动作和会员回访；补齐员工档案后切换为真实人效。", "运营经理 / 店长", "今日21:00前", "人均销售、订单数、任务完成率", "dws_store_daily + dim_employee + app_action_task"))
+            if _int(s.get("overdue_count")) > 0:
+                diagnoses.append(self._diag("hr", "medium", f"{name}执行任务逾期", f"{name} 存在 {_int(s.get('overdue_count'))} 个逾期行动任务。", [f"任务数：{_int(s.get('task_count'))}", f"已完成：{_int(s.get('done_count'))}", f"逾期：{_int(s.get('overdue_count'))}"], "行动闭环执行不到位，会影响诊断问题复盘。", "店长清理逾期任务，运营跟进反馈证据。", "店长 / 运营经理", "今日闭店前", "逾期任务清零、反馈提交率", "app_action_task"))
+        attendance_abnormal = _int(hr_actual.get("attendance_abnormal_count"))
+        if attendance_abnormal > 0:
+            diagnoses.append(self._diag("hr", "medium", "考勤异常待处理", f"最新考勤日有 {attendance_abnormal} 人异常。", [f"考勤人数：{_int(hr_actual.get('attendance_employee_count'))}", f"缺卡：{_int(hr_actual.get('missing_check_count'))}", f"迟到：{_int(hr_actual.get('late_count'))}", f"早退：{_int(hr_actual.get('early_leave_count'))}"], "缺卡、迟到或早退记录需要主管确认，避免影响排班和出勤统计。", "人事当天核对异常记录，通知员工补卡或提交说明。", "人事 / 部门主管", "今日18:00前", "考勤异常关闭率、缺卡数", "hr_attendance_daily"))
+        warnings = []
+        missing = []
+        if actual_emp > 0:
+            if use_store_proxy:
+                warnings.append("钉钉员工与考勤已接入，但员工尚未映射到具体门店；门店人效暂按经营单元兜底。")
+            missing.append("员工门店归属/排班/工资")
+        elif use_store_proxy:
+            warnings.append("员工档案为空，当前人事诊断按门店经营效率和任务闭环做兜底。")
+            missing.append("员工档案/排班/考勤")
+        else:
+            warnings.append("考勤、排班、工资暂未完整接入；当前以员工档案、销售和任务闭环诊断。")
+            missing.append("考勤/排班/工资")
         return {
             "summary": {
                 "stat_date": dt,
-                "employee_count": sum(_int(s.get("employee_count")) for s in valid),
-                "avg_sales_per_employee": avg,
-                "low_efficiency_store_count": len(diagnoses),
-                "task_completion_rate": None,
+                "attendance_stat_date": _date_str(hr_actual.get("attendance_stat_date")),
+                "employee_count": actual_emp or mapped_emp or active_store_count,
+                "attendance_employee_count": _int(hr_actual.get("attendance_employee_count")),
+                "attendance_abnormal_count": attendance_abnormal,
+                "missing_check_count": _int(hr_actual.get("missing_check_count")),
+                "avg_sales_per_employee": avg_eff,
+                "low_efficiency_store_count": len([d for d in diagnoses if "效率" in d.get("title", "") or "人效" in d.get("title", "")]),
+                "task_completion_rate": round(done_tasks / total_tasks, 4) if total_tasks else None,
             },
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses[:8]],
-            "diagnoses": diagnoses,
+            "diagnoses": diagnoses[:30],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(["当前人力诊断主要基于销售、人均产出和员工档案；考勤、排班、工资数据暂未完整接入。"], ["考勤/排班/工资"], ["dws_store_daily", "dim_employee"]),
+            "data_quality": self._quality(warnings, missing, ["dws_store_daily", "dim_employee", "dingtalk_employees", "hr_attendance_daily", "app_action_task"]),
         }
 
     async def members(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
-        row = await self._one(
-            """
-            select count(*) as visit_count,
+        dt = _as_date(stat_date or await self._latest_date())
+        params = {"dt": dt, "store_code": store_code or ""}
+        visit_date_filter = "visit_date<=CAST(:dt AS date)" if stat_date else "true"
+        visit = await self._one(
+            f"""
+            select max(visit_date) visit_stat_date,
+                   count(*) as visit_count,
                    count(*) filter(where visit_status='pending') pending_count,
                    count(*) filter(where is_converted=true) converted_count,
                    coalesce(sum(conversion_amount),0) conversion_amount
             from dm.dm_member_visit_list
-            where visit_date=:dt and (:store_code is null or store_code=:store_code)
+            where visit_date=(select max(visit_date) from dm.dm_member_visit_list where {visit_date_filter})
+              and (:store_code = '' or store_code=:store_code)
             """,
-            {"dt": dt, "store_code": store_code},
+            params,
+        )
+        ticket = await self._one(
+            """
+            select count(*) total_orders,
+                   count(*) filter(where nullif(coalesce(vip_code, customer_code), '') is not null) member_orders,
+                   count(distinct nullif(coalesce(vip_code, customer_code), '')) active_members,
+                   coalesce(sum(sales_amount),0) total_sales,
+                   coalesce(sum(sales_amount) filter(where nullif(coalesce(vip_code, customer_code), '') is not null),0) member_sales
+            from dwd.dwd_pos_ticket
+            where biz_date=:dt and (:store_code = '' or store_code=:store_code)
+              and coalesce(is_void,false)=false and coalesce(is_pending,false)=false
+            """,
+            params,
+        )
+        member_dim = await self._one(
+            """
+            select count(*) total_members,
+                   count(*) filter(where last_consume_date >= CAST(:dt AS date) - interval '30 day') active_30d,
+                   count(*) filter(where last_consume_date < CAST(:dt AS date) - interval '90 day' or last_consume_date is null) sleep_90d
+            from dim.dim_member
+            where (:store_code = '' or register_store=:store_code or last_consume_store=:store_code)
+            """,
+            params,
         )
         diagnoses = []
-        if _int(row.get("pending_count")) > 0:
-            diagnoses.append(self._diag("member", "medium", "会员回访待执行", f"今日仍有 {_int(row.get('pending_count'))} 条会员回访建议待处理。", [f"今日回访名单：{_int(row.get('visit_count'))}", f"待处理：{_int(row.get('pending_count'))}", f"已成交金额：{_money(row.get('conversion_amount'))}"], "会员复购机会需要导购跟进，否则销售机会会自然流失。", "店长分配导购回访，优先处理高价值/沉睡/生日会员。", "店长 / 导购", "今日20:30前", "回访完成率、回访成交金额、会员复购率", "dm_member_visit_list"))
+        total_orders = _num(ticket.get("total_orders"))
+        member_orders = _num(ticket.get("member_orders"))
+        member_sales = _num(ticket.get("member_sales"))
+        total_sales = _num(ticket.get("total_sales"))
+        member_order_ratio = member_orders / total_orders if total_orders else 0
+        member_sales_ratio = member_sales / total_sales if total_sales else 0
+        if _int(visit.get("pending_count")) > 0:
+            diagnoses.append(self._diag("member", "medium", "会员回访待执行", f"今日仍有 {_int(visit.get('pending_count'))} 条会员回访建议待处理。", [f"今日回访名单：{_int(visit.get('visit_count'))}", f"待处理：{_int(visit.get('pending_count'))}", f"已成交金额：{_money(visit.get('conversion_amount'))}"], "会员复购机会需要导购跟进，否则销售机会会自然流失。", "店长分配导购回访，优先处理高价值/沉睡/生日会员。", "店长 / 导购", "今日20:30前", "回访完成率、回访成交金额、会员复购率", "dm_member_visit_list"))
+        if total_orders > 0 and member_order_ratio < 0.35:
+            diagnoses.append(self._diag("member", "medium", "会员成交占比偏低", f"今日会员订单占比 {member_order_ratio*100:.1f}%，会员销售占比 {member_sales_ratio*100:.1f}%。", [f"总订单：{_int(total_orders)}", f"会员订单：{_int(member_orders)}", f"会员销售：{_money(member_sales)}"], "导购识别会员、老客邀约或会员权益触达不足。", "门店复盘会员识别动作，优先对昨日/近30日消费会员做二次邀约。", "运营经理 / 店长", "今日闭店前", "会员订单占比、会员销售占比、回访成交金额", "dwd_pos_ticket.vip_code"))
+        if _int(member_dim.get("sleep_90d")) > 0:
+            diagnoses.append(self._diag("member", "low", "沉睡会员池待激活", f"会员档案中90天以上未消费会员 {_int(member_dim.get('sleep_90d'))} 人。", [f"会员总数：{_int(member_dim.get('total_members'))}", f"近30日活跃：{_int(member_dim.get('active_30d'))}"], "老会员复购触达不足，存在可唤醒销售机会。", "按门店导出沉睡会员池，结合新品/生日/储值权益做分层触达。", "会员运营 / 店长", "本周内", "沉睡会员回访完成率、复购金额", "dim_member"))
+        warnings = []
+        missing = []
+        if _int(member_dim.get("total_members")) == 0:
+            warnings.append("会员档案为空，当前会员诊断按小票vip_code/customer_code交易字段兜底。")
+            missing.append("会员档案/RFM明细")
+        if _int(visit.get("visit_count")) == 0:
+            warnings.append("会员回访清单为空，当前只做会员成交占比诊断。")
         return {
-            "summary": {"stat_date": dt, "visit_count": _int(row.get("visit_count")), "pending_visit_count": _int(row.get("pending_count")), "converted_count": _int(row.get("converted_count")), "conversion_amount": _num(row.get("conversion_amount"))},
-            "risks": [{"name": "待回访会员", "value": _int(row.get("pending_count")), "level": "medium"}],
+            "summary": {
+                "stat_date": dt,
+                "visit_stat_date": _date_str(visit.get("visit_stat_date")),
+                "visit_count": _int(visit.get("visit_count")),
+                "pending_visit_count": _int(visit.get("pending_count")),
+                "converted_count": _int(visit.get("converted_count")),
+                "conversion_amount": _num(visit.get("conversion_amount")),
+                "active_member_count": _int(ticket.get("active_members")),
+                "member_order_count": _int(member_orders),
+                "member_sales_amount": member_sales,
+                "member_order_ratio": member_order_ratio,
+                "member_sales_ratio": member_sales_ratio,
+            },
+            "risks": [
+                {"name": "会员订单占比", "value": f"{member_order_ratio*100:.1f}%", "level": "medium" if member_order_ratio < 0.35 and total_orders > 0 else "low"},
+                {"name": "待回访会员", "value": _int(visit.get("pending_count")), "level": "medium"},
+            ],
             "diagnoses": diagnoses,
-            "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses)],
-            "data_quality": self._quality(["会员诊断依赖会员档案、消费偏好和回访明细；若百胜会员数据未同步，结论会偏保守。"], ["会员偏好/手机号按权限脱敏"], ["dm_member_visit_list", "dim_member"]),
+            "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
+            "data_quality": self._quality(warnings, missing, ["dm_member_visit_list", "dim_member", "dwd_pos_ticket"]),
         }
 
     async def audit(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
+        dt = _as_date(stat_date or await self._latest_date())
+        params = {"dt": dt, "store_code": store_code or ""}
         rows = await self._rows(
             """
             select exception_type, severity, store_code, product_code, sku_code, order_no, description, data_snapshot
             from dm.dm_exception_audit
-            where audit_date=:dt and (:store_code is null or store_code=:store_code)
+            where audit_date=:dt and (:store_code = '' or store_code=:store_code)
             order by case severity when 'critical' then 1 when 'warning' then 2 else 3 end
             limit 80
             """,
-            {"dt": dt, "store_code": store_code},
+            params,
         )
+        generated = []
+        if not rows:
+            generated = await self._rows(
+                """
+                with low_discount as (
+                  select '低折扣小票' exception_type,
+                         case when discount_rate < 0.45 then 'critical' else 'warning' end severity,
+                         store_code, null::varchar product_code, null::varchar sku_code, ticket_no order_no,
+                         concat('小票折扣率 ', round(discount_rate::numeric*100,1), '%，销售额 ', sales_amount) description,
+                         json_build_object('sales_amount', sales_amount, 'standard_amount', standard_amount, 'discount_rate', discount_rate) data_snapshot
+                  from dwd.dwd_pos_ticket
+                  where biz_date=:dt and (:store_code = '' or store_code=:store_code)
+                    and coalesce(is_void,false)=false and coalesce(is_pending,false)=false
+                    and standard_amount > 0 and discount_rate is not null and discount_rate < 0.60
+                  order by discount_rate asc
+                  limit 20
+                ), negative_inventory as (
+                  select '负库存' exception_type, 'critical' severity, store_code, product_code, sku_code, null::varchar order_no,
+                         concat('SKU负库存：', sku_code, '，数量 ', current_quantity) description,
+                         json_build_object('current_quantity', current_quantity, 'current_cost_amount', current_cost_amount) data_snapshot
+                  from dm.dm_inventory_warning
+                  where warning_date=(select max(warning_date) from dm.dm_inventory_warning where warning_date<=CAST(:dt AS date))
+                    and (:store_code = '' or store_code=:store_code)
+                    and (warning_type ilike '%negative%' or current_quantity < 0)
+                  limit 20
+                ), low_margin as (
+                  select '低毛利商品' exception_type, 'warning' severity, store_code, product_code, null::varchar sku_code, null::varchar order_no,
+                         concat('商品毛利率 ', round(gross_margin::numeric*100,1), '%，销售额 ', net_sales_amount) description,
+                         json_build_object('gross_margin', gross_margin, 'net_sales_amount', net_sales_amount, 'cost_amount', cost_amount) data_snapshot
+                  from dws.dws_product_daily
+                  where stat_date=:dt and (:store_code = '' or store_code=:store_code)
+                    and net_sales_amount > 0 and gross_margin is not null and gross_margin < 0.35
+                  order by gross_margin asc, net_sales_amount desc
+                  limit 20
+                ), abnormal_store as (
+                  select '门店经营异常' exception_type, 'warning' severity, s.store_code, null::varchar product_code, null::varchar sku_code, null::varchar order_no,
+                         concat('门店销售 ', s.net_sales_amount, '，订单 ', s.order_count, '，连带率 ', coalesce(s.items_per_order,0)) description,
+                         json_build_object('net_sales_amount', s.net_sales_amount, 'order_count', s.order_count, 'items_per_order', s.items_per_order) data_snapshot
+                  from dws.dws_store_daily s
+                  where s.stat_date=:dt and (:store_code = '' or s.store_code=:store_code)
+                    and (coalesce(s.order_count,0)=0 or coalesce(s.net_sales_amount,0)<=0 or coalesce(s.items_per_order,0)<1)
+                  limit 20
+                )
+                select * from low_discount
+                union all select * from negative_inventory
+                union all select * from low_margin
+                union all select * from abnormal_store
+                limit 80
+                """,
+                params,
+            )
+        source_rows = rows or generated
         diagnoses = []
-        for r in rows:
-            level = "high" if r.get("severity") == "critical" else "medium"
+        for r in source_rows:
+            level = "high" if r.get("severity") in ("critical", "high") else "medium"
             obj = r.get("order_no") or r.get("sku_code") or r.get("product_code") or r.get("store_code") or "经营对象"
-            diagnoses.append(self._diag("audit", level, f"{r.get('exception_type')}异常", r.get("description") or f"{obj} 触发异常稽核。", [f"对象：{obj}", f"门店：{r.get('store_code') or '-'}"], "可能存在折扣、退款、负库存、低毛利或数据同步异常，需要人工复核。", "责任部门复核单据与审批记录，必要时补充说明并转行动任务。", "财务经理 / 仓库主管 / 运营经理", "今日18:00前", "异常是否关闭、复核记录、同类异常是否复发", "dm_exception_audit"))
+            diagnoses.append(self._diag("audit", level, f"{r.get('exception_type')}异常", r.get("description") or f"{obj} 触发异常稽核。", [f"对象：{obj}", f"门店：{r.get('store_code') or '-'}"], "可能存在折扣、退款、负库存、低毛利或数据同步异常，需要人工复核。", "责任部门复核单据与审批记录，必要时补充说明并转行动任务。", "财务经理 / 仓库主管 / 运营经理", "今日18:00前", "异常是否关闭、复核记录、同类异常是否复发", "dm_exception_audit / realtime rules"))
+        warnings = [] if rows else ["异常稽核DM表暂无记录，当前按小票折扣、库存预警、低毛利和门店异常实时规则兜底生成。"]
         return {
-            "summary": {"stat_date": dt, "audit_count": len(rows), "high_count": sum(1 for d in diagnoses if d["level"] == "high")},
+            "summary": {"stat_date": dt, "audit_count": len(source_rows), "high_count": sum(1 for d in diagnoses if d["level"] == "high")},
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses[:12]],
             "diagnoses": diagnoses,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:10])],
-            "data_quality": self._quality([] if rows else ["异常稽核暂无记录；如销售/库存已有同步但这里为空，需要确认稽核规则任务是否运行。"], [], ["dm_exception_audit"]),
+            "data_quality": self._quality(warnings, [], ["dm_exception_audit", "dwd_pos_ticket", "dm_inventory_warning", "dws_product_daily", "dws_store_daily"]),
         }
 
     async def action_tasks(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
-        dt = stat_date or await self._latest_date()
-        overview = await self.overview(dt, store_code)
-        tasks = overview.get("action_suggestions", [])
+        dt = _as_date(stat_date or await self._latest_date())
+        module_payloads = []
+        for module_name, fn in [
+            ("sales", self.sales),
+            ("products", self.products),
+            ("inventory", self.inventory),
+            ("finance", self.finance),
+            ("hr", self.hr),
+            ("members", self.members),
+            ("audit", self.audit),
+        ]:
+            module_date = None if stat_date is None and module_name in ("inventory", "hr", "members") else dt
+            payload = await fn(module_date, store_code)
+            module_payloads.append((module_name, payload))
+        diagnoses = []
+        suggestions = []
+        for module_name, payload in module_payloads:
+            diagnoses.extend(payload.get("diagnoses", []))
+            for task in payload.get("action_suggestions", []):
+                task = dict(task)
+                task["module"] = module_name
+                suggestions.append(task)
+        priority_rank = {"高": 0, "中": 1, "低": 2, "high": 0, "medium": 1, "low": 2}
+        suggestions.sort(key=lambda x: priority_rank.get(x.get("priority"), 3))
         existing = await self._rows(
             """
             select task_no, source_type task_source, title problem_type, description, assignee_name owner,
                    due_date::text deadline, risk_level priority, status, feedback_requirement
             from app.app_action_task
             where is_deleted=false and related_date=:dt
+              and (:store_code = '' or related_store_code=:store_code)
             order by priority desc, due_date asc nulls last
-            limit 50
+            limit 80
             """,
-            {"dt": dt},
+            {"dt": dt, "store_code": store_code or ""},
         )
+        warnings = []
+        missing = []
+        for _, payload in module_payloads:
+            q = payload.get("data_quality", {})
+            warnings.extend(q.get("warnings", []))
+            missing.extend(q.get("missing_fields", []))
         return {
-            "summary": {"stat_date": dt, "suggestion_count": len(tasks), "existing_task_count": len(existing), "overdue_count": await self._overdue_task_count(dt)},
-            "risks": [{"name": "建议任务", "value": len(tasks), "level": "medium"}, {"name": "正式任务", "value": len(existing), "level": "low"}],
-            "diagnoses": overview.get("diagnoses", []),
-            "action_suggestions": existing + tasks,
-            "data_quality": self._quality(["第一阶段仅生成建议任务，不自动派发；正式派发需人工确认。"], [], ["app_action_task", "AI diagnosis rules"]),
+            "summary": {
+                "stat_date": dt,
+                "suggestion_count": len(suggestions),
+                "existing_task_count": len(existing),
+                "overdue_count": await self._overdue_task_count(dt),
+            },
+            "risks": [
+                {"name": "建议任务", "value": len(suggestions), "level": "medium" if suggestions else "low"},
+                {"name": "正式任务", "value": len(existing), "level": "low"},
+            ],
+            "diagnoses": diagnoses[:80],
+            "action_suggestions": existing + suggestions[:50],
+            "data_quality": self._quality(["第一阶段仅生成建议任务，不自动派发；正式派发需人工确认。"] + warnings[:6], sorted(set(missing)), ["app_action_task", "AI diagnosis rules", "dws/dwd/dm"]),
         }
 
     async def module(self, module: str, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:

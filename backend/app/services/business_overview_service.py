@@ -40,6 +40,19 @@ def _estimated(val, decimals: int = 0, reason: str = "") -> dict:
     return {"value": val, "display": str(val), "status": "estimated", "reason": reason}
 
 
+def _build_platform_sales(offline_sales, online_sales) -> list[dict]:
+    """Build the mobile channel split without dropping a real zero-value channel."""
+    offline = float(offline_sales or 0)
+    online = float(online_sales or 0)
+    total = offline + online
+    if total <= 0:
+        return []
+    return [
+        {"name": "线下门店", "amount": round(offline, 2), "pct": round(offline / total * 100, 1)},
+        {"name": "线上渠道", "amount": round(online, 2), "pct": round(online / total * 100, 1)},
+    ]
+
+
 async def get_base_counts(db: AsyncSession) -> dict:
     """获取基础数据资产计数（门店/商品/SKU/仓库/库存记录）"""
     counts = {}
@@ -176,6 +189,9 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
 
         # 库存品类结构：用于经营概览库存模块，按商品品类汇总库存数量。
         "inventory_by_category": [],
+
+        # 销售渠道结构：用于移动端展示平台销售金额与占比。
+        "platform_sales": [],
     }
 
     # 库存余额表已落库的可直接计算指标。
@@ -285,7 +301,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
         if scoped_to_store:
             raise RuntimeError("store scoped user skips company DWS metrics")
         dws_result = await db.execute(text("""
-            SELECT total_sales_amount, total_order_count, total_item_count,
+            SELECT total_sales_amount, offline_sales_amount, online_sales_amount,
+                   total_order_count, total_item_count,
                    gross_profit, gross_margin, avg_order_value,
                    items_per_order, avg_discount_rate
             FROM dws.dws_company_daily
@@ -299,6 +316,10 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             total_items = int(dws_row["total_item_count"] or 0)
             bm["yesterday_sales_pinke"] = _value(round(pinke_sales, 2), 2)
             bm["yesterday_sales"] = bm["yesterday_sales_pinke"]
+            data["platform_sales"] = _build_platform_sales(
+                dws_row.get("offline_sales_amount"),
+                dws_row.get("online_sales_amount"),
+            )
             bm["yesterday_orders"] = _value(total_orders)
             bm["yesterday_items"] = _value(total_items)
             if dws_row.get("gross_profit") is not None:
@@ -518,6 +539,11 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                     bm["gross_margin"] = setter(gross_margin, 1, status_reason) if setter is _estimated else setter(gross_margin, 1)
         except Exception:
             logger.exception("获取 DWD 销售/小票数据失败，使用待接入占位")
+
+    # 门店权限或旧日期缺少 DWS 渠道汇总时，当前 POS 数据均属于线下门店。
+    if not data["platform_sales"]:
+        sales_value = data["business_metrics"]["yesterday_sales"].get("value")
+        data["platform_sales"] = _build_platform_sales(sales_value, 0)
 
     # 尝试获取任务汇总
     try:

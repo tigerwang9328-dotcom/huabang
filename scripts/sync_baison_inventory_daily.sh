@@ -60,16 +60,29 @@ async def main():
                 (stat_date, store_code, total_quantity, total_cost_amount,
                  negative_sku_count, sku_count, is_cost_complete, etl_at, created_at)
                 SELECT CURRENT_DATE,
-                       warehouse_code,
-                       COALESCE(SUM(qty), 0)::int,
-                       0,
-                       COUNT(*) FILTER (WHERE qty < 0)::int,
-                       COUNT(DISTINCT COALESCE(NULLIF(sku_code, ''), product_code, barcode))::int,
-                       false,
+                       b.warehouse_code,
+                       COALESCE(SUM(b.qty), 0)::int,
+                       COALESCE(SUM(b.qty * COALESCE(
+                           NULLIF(sk.cost_price, 0),
+                           NULLIF(sk.market_price, 0),
+                           NULLIF(p.cost_price, 0)
+                       )), 0),
+                       COUNT(*) FILTER (WHERE b.qty < 0)::int,
+                       COUNT(DISTINCT COALESCE(NULLIF(b.sku_code, ''), b.product_code, b.barcode))::int,
+                       BOOL_AND(
+                           NULLIF(sk.cost_price, 0) IS NOT NULL
+                           OR NULLIF(p.cost_price, 0) IS NOT NULL
+                       ),
                        now(), now()
-                FROM dwd.dwd_inventory_balance
-                WHERE UPPER(warehouse_code::text) = ANY(:allowed)
-                GROUP BY warehouse_code
+                FROM dwd.dwd_inventory_balance b
+                LEFT JOIN dim.dim_sku sk
+                  ON sk.product_code = b.product_code
+                 AND TRIM(LEADING '-' FROM COALESCE(sk.color_code, '')) =
+                     TRIM(LEADING '-' FROM COALESCE(b.color_code, ''))
+                 AND COALESCE(sk.size_code, '') = COALESCE(b.size_code, '')
+                LEFT JOIN dim.dim_product p ON b.product_code = p.product_code
+                WHERE UPPER(b.warehouse_code::text) = ANY(:allowed)
+                GROUP BY b.warehouse_code
                 ON CONFLICT (stat_date, store_code)
                 DO UPDATE SET total_quantity = EXCLUDED.total_quantity,
                               total_cost_amount = EXCLUDED.total_cost_amount,
