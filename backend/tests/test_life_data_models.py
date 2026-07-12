@@ -1,3 +1,8 @@
+from pathlib import Path
+from runpy import run_path
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import BigInteger, Date, DateTime, Integer, JSON, String, Text
 
 from app.models.life_data import (
@@ -5,6 +10,12 @@ from app.models.life_data import (
     LifeDataCapture,
     LifeDataCollectorState,
     LifeDataVideoSnapshot,
+)
+
+
+_ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
+_LIFE_DATA_MIGRATION = (
+    _ALEMBIC_DIR / "versions" / "f1b2c3d4e5f6_life_data_collector.py"
 )
 
 
@@ -97,3 +108,19 @@ def test_life_data_models_define_required_columns():
         assert set(model.__table__.columns.keys()) == set(expected)
         for column_name, column_type in expected.items():
             assert isinstance(model.__table__.columns[column_name].type, column_type)
+
+
+def test_life_data_migration_revision_chain():
+    migration = run_path(str(_LIFE_DATA_MIGRATION))
+
+    assert migration["revision"] == "f1b2c3d4e5f6"
+    assert migration["down_revision"] == "a1b2c3d4e5f6"
+
+
+def test_life_data_migration_has_one_resolvable_head():
+    config = Config()
+    config.set_main_option("script_location", str(_ALEMBIC_DIR))
+    script = ScriptDirectory.from_config(config)
+
+    assert script.get_heads() == ["f1b2c3d4e5f6"]
+    assert script.get_current_head() == "f1b2c3d4e5f6"

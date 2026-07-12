@@ -1,7 +1,7 @@
 """add life data collector tables
 
 Revision ID: f1b2c3d4e5f6
-Revises: f0a1b2c3d4e5
+Revises: a1b2c3d4e5f6
 Create Date: 2026-07-12
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 revision = "f1b2c3d4e5f6"
-down_revision = "f0a1b2c3d4e5"
+down_revision = "a1b2c3d4e5f6"
 branch_labels = None
 depends_on = None
 
