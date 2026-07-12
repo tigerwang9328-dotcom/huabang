@@ -38,6 +38,12 @@ def upgrade():
         ON app.life_data_capture (account_id)
         """
     )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_app_life_data_capture_created_at
+        ON app.life_data_capture (created_at)
+        """
+    )
 
     op.execute(
         """

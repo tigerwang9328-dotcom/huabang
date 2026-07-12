@@ -29,7 +29,11 @@ class LifeDataCapture(Base):
     response_payload = Column(JSON, nullable=False)
     response_hash = Column(String(64), nullable=False)
     captured_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
 
 
 class LifeDataVideoSnapshot(Base):

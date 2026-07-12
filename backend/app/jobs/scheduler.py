@@ -18,6 +18,7 @@ def setup_jobs():
     from app.jobs.report_jobs import run_morning_report
     from app.jobs.push_jobs import run_member_visit_push, run_replenishment_push, run_overdue_reminder
     from app.jobs.review_jobs import run_evening_diagnosis
+    from app.jobs.life_data_jobs import cleanup_life_data_captures
 
     # 每天凌晨1:00 - 同步百盛数据 + ETL
     scheduler.add_job(
@@ -102,6 +103,18 @@ def setup_jobs():
         name="晚间门店诊断",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # 每天03:20 - 清理超过90天的LifeData原始采集数据
+    scheduler.add_job(
+        cleanup_life_data_captures,
+        CronTrigger(hour=3, minute=20, timezone="Asia/Shanghai"),
+        id="life_data_capture_cleanup",
+        name="LifeData原始采集数据清理",
+        replace_existing=True,
+        misfire_grace_time=3600,
+        coalesce=True,
+        max_instances=1,
     )
 
     logger.info("✅ 定时任务已注册: %d个任务", len(scheduler.get_jobs()))
