@@ -47,3 +47,6 @@ backend/error_exports/
 
 # Git worktrees
 .worktrees/
+
+# Superpowers execution ledger
+.superpowers/
