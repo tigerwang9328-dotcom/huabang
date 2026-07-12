@@ -1,7 +1,10 @@
 """Tests for the token-authenticated life-data ingest endpoint."""
 
 import hashlib
+import json
+import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,7 +32,11 @@ def payload(**overrides):
         "request_payload": {"offset": 0, "limit": 100},
         "response_payload": {
             "code": 0,
-            "data": {"itemRank": {"data": [{"item_id": "video-1"}]}},
+            "data": {
+                "itemRank": {
+                    "data": [{"item_id": "video-1", "item_play_cnt": 2_001}]
+                }
+            },
         },
         "captured_at": "2026-07-12T01:02:03Z",
     }
@@ -53,6 +60,13 @@ def isolate_ingest_dependencies(monkeypatch):
     )
     monkeypatch.setattr(settings, "LIFE_DATA_ACCOUNT_ID", ACCOUNT_ID)
     monkeypatch.setattr(settings, "LIFE_DATA_MAX_PAYLOAD_BYTES", 2_000_000)
+
+    redis = SimpleNamespace(eval=AsyncMock(return_value=1))
+
+    async def fake_get_redis():
+        return redis
+
+    monkeypatch.setattr(life_data, "get_redis", fake_get_redis, raising=False)
 
     async def fake_ingest(self, db, body):
         assert self.task_creator_id == settings.LIFE_DATA_TASK_CREATOR_ID
@@ -149,6 +163,120 @@ def test_ingest_rejects_payload_over_configured_limit(client, valid_token):
     assert response.status_code == 413
 
 
+def test_ingest_rejects_raw_content_length_above_exact_limit(
+    client,
+    valid_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "LIFE_DATA_MAX_PAYLOAD_BYTES", 512)
+    encoded = json.dumps(payload(), separators=(",", ":")).encode("utf-8")
+
+    response = client.post(
+        PATH,
+        content=encoded,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": "513",
+            "X-Collector-Token": valid_token,
+        },
+    )
+
+    assert response.status_code == 413
+
+
+def test_ingest_allows_raw_content_length_at_exact_limit(
+    client,
+    valid_token,
+    monkeypatch,
+):
+    encoded = json.dumps(payload(), separators=(",", ":")).encode("utf-8")
+    monkeypatch.setattr(settings, "LIFE_DATA_MAX_PAYLOAD_BYTES", len(encoded))
+
+    response = client.post(
+        PATH,
+        content=encoded,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(len(encoded)),
+            "X-Collector-Token": valid_token,
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_ingest_rate_limit_uses_atomic_redis_script_and_fixed_account_key(
+    client,
+    valid_token,
+    monkeypatch,
+):
+    redis = SimpleNamespace(eval=AsyncMock(return_value=60))
+
+    async def fake_get_redis():
+        return redis
+
+    monkeypatch.setattr(life_data, "get_redis", fake_get_redis, raising=False)
+
+    response = client.post(
+        PATH,
+        json=payload(),
+        headers={"X-Collector-Token": valid_token},
+    )
+
+    assert response.status_code == 200
+    redis.eval.assert_awaited_once()
+    script, key_count, key, window_seconds = redis.eval.await_args.args
+    assert "INCR" in script
+    assert "EXPIRE" in script
+    assert key_count == 1
+    assert key == f"rate_limit:life_data_ingest:{ACCOUNT_ID}"
+    assert window_seconds == 60
+
+
+def test_ingest_rate_limit_rejects_request_61(client, valid_token, monkeypatch):
+    redis = SimpleNamespace(eval=AsyncMock(return_value=61))
+
+    async def fake_get_redis():
+        return redis
+
+    monkeypatch.setattr(life_data, "get_redis", fake_get_redis, raising=False)
+
+    response = client.post(
+        PATH,
+        json=payload(),
+        headers={"X-Collector-Token": valid_token},
+    )
+
+    assert response.status_code == 429
+
+
+def test_ingest_rate_limit_fails_open_without_logging_token(
+    client,
+    valid_token,
+    monkeypatch,
+    caplog,
+):
+    redis = SimpleNamespace(
+        eval=AsyncMock(side_effect=RuntimeError(f"redis down: {valid_token}"))
+    )
+
+    async def fake_get_redis():
+        return redis
+
+    monkeypatch.setattr(life_data, "get_redis", fake_get_redis, raising=False)
+
+    with caplog.at_level(logging.WARNING, logger=life_data.__name__):
+        response = client.post(
+            PATH,
+            json=payload(),
+            headers={"X-Collector-Token": valid_token},
+        )
+
+    assert response.status_code == 200
+    redis.eval.assert_awaited_once()
+    assert valid_token not in caplog.text
+
+
 @pytest.mark.parametrize(
     "invalid_fields",
     [
@@ -198,6 +326,52 @@ def test_schema_allows_business_life_account_id_field():
     )
 
     assert body.request_payload["life_account_id"] == "7319301636050913280"
+
+
+@pytest.mark.parametrize("schema_version", ["1", "1.1", "2.0"])
+def test_schema_rejects_unsupported_schema_version(schema_version):
+    with pytest.raises(ValidationError):
+        LifeDataIngestRequest.model_validate(payload(schema_version=schema_version))
+
+
+@pytest.mark.parametrize("response_code", [None, -1, 1, "0", False])
+def test_schema_requires_exact_success_response_code(response_code):
+    response_payload = payload()["response_payload"]
+    response_payload["code"] = response_code
+
+    with pytest.raises(ValidationError):
+        LifeDataIngestRequest.model_validate(
+            payload(response_payload=response_payload)
+        )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [],
+        [{"item_id": "missing-play-count"}],
+        [{"item_play_cnt": 2_001}],
+        ["not-an-object"],
+    ],
+)
+def test_schema_requires_valid_item_rank_row_for_video_page(rows):
+    response_payload = {"code": 0, "data": {"itemRank": {"data": rows}}}
+
+    with pytest.raises(ValidationError):
+        LifeDataIngestRequest.model_validate(
+            payload(response_payload=response_payload)
+        )
+
+
+def test_schema_allows_non_video_page_without_item_rank_rows():
+    body = LifeDataIngestRequest.model_validate(
+        payload(
+            page_path="/trade/overview",
+            response_payload={"code": 0, "data": {"overview": {"gmv": 39810}}},
+        )
+    )
+
+    assert body.page_path == "/trade/overview"
 
 
 def test_schema_rejects_sensitive_key_in_deep_json_without_recursion_error():

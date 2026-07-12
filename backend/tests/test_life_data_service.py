@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.services.life_data_service import (
     LifeDataIngestService,
@@ -107,6 +108,33 @@ def test_metrics_hash_is_stable_for_key_order_and_capture_time():
     )
 
     assert first.metrics_hash == second.metrics_hash
+
+
+def test_metrics_hash_ignores_title_and_unknown_raw_fields():
+    row = extract_video_rows(load_fixture())[0]
+    changed = deepcopy(row)
+    changed["item_desc"] = "a renamed title"
+    changed["new_unknown_field"] = {"future": "api metadata"}
+
+    first = normalize_video(row, STAT_START, STAT_END, CAPTURED_AT)
+    second = normalize_video(changed, STAT_START, STAT_END, CAPTURED_AT)
+
+    assert first.metrics_hash == second.metrics_hash
+    assert second.metrics["raw_row"]["new_unknown_field"] == {
+        "future": "api metadata"
+    }
+    assert "raw" not in second.metrics
+
+
+def test_metrics_hash_changes_when_normalized_play_count_changes():
+    row = extract_video_rows(load_fixture())[0]
+    changed = deepcopy(row)
+    changed["item_play_cnt"] = row["item_play_cnt"] + 1
+
+    first = normalize_video(row, STAT_START, STAT_END, CAPTURED_AT)
+    second = normalize_video(changed, STAT_START, STAT_END, CAPTURED_AT)
+
+    assert first.metrics_hash != second.metrics_hash
 
 
 def test_extract_video_rows_ignores_non_video_item_rank_entries():
@@ -276,7 +304,56 @@ async def test_ingest_duplicate_event_refreshes_seen_without_more_work():
     assert len(db.collector_state_writes) == 2
     duplicate_state = db.collector_state_writes[-1]
     assert duplicate_before <= duplicate_state["last_seen_at"] <= duplicate_after
+    assert duplicate_state["last_success_at"] == duplicate_state["last_seen_at"]
     assert duplicate_state["updated_at"] == duplicate_state["last_seen_at"]
+    assert duplicate_state["last_event_id"] == "event-000000000001"
+
+
+@pytest.mark.asyncio
+async def test_collector_state_upsert_keeps_all_timestamps_monotonic():
+    db = FakeAsyncSession()
+    service = LifeDataIngestService(task_creator_id=1, alert_threshold=2000)
+
+    await service.ingest(db, make_body())
+
+    state_statement = next(
+        statement
+        for table_name, _values, statement in reversed(db.calls)
+        if table_name == "life_data_collector_state"
+    )
+    sql = str(state_statement.compile(dialect=postgresql.dialect())).lower()
+    assert "last_seen_at = greatest(" in sql
+    assert "last_success_at = greatest(" in sql
+    assert "updated_at = greatest(" in sql
+    assert "last_event_id = case when" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response_payload",
+    [
+        {"code": 1, "data": {"itemRank": {"data": []}}},
+        {
+            "code": 0,
+            "data": {
+                "itemRank": {"data": [{"item_id": "missing-play-count"}]}
+            },
+        },
+    ],
+)
+async def test_ingest_defensively_rejects_invalid_video_response_without_success_state(
+    response_payload,
+):
+    db = FakeAsyncSession()
+    service = LifeDataIngestService(task_creator_id=1, alert_threshold=2000)
+    body = make_body()
+    body["response_payload"] = response_payload
+
+    with pytest.raises(ValueError):
+        await service.ingest(db, body)
+
+    assert db.captures == {}
+    assert db.collector_state_writes == []
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import update
+from sqlalchemy import case, func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.app import AppActionTask
@@ -241,9 +241,7 @@ def normalize_video(
         else _to_int(row.get("interaction_count"))
     )
 
-    raw_row = _json_safe(row)
-    metrics = {
-        "raw_row": raw_row,
+    normalized_metrics = {
         "item_id": item_id,
         "play_count": play_count,
         "play_5s_rate": _to_float(
@@ -293,6 +291,10 @@ def normalize_video(
         "stat_start": stat_start.isoformat(),
         "stat_end": stat_end.isoformat(),
     }
+    metrics = {
+        **normalized_metrics,
+        "raw_row": _json_safe(row),
+    }
     return NormalizedVideo(
         item_id=item_id,
         title=title,
@@ -303,7 +305,7 @@ def normalize_video(
         pay_gmv_fen=pay_gmv_fen,
         verify_gmv_fen=verify_gmv_fen,
         refund_gmv_fen=refund_gmv_fen,
-        metrics_hash=_canonical_hash(metrics),
+        metrics_hash=_canonical_hash(normalized_metrics),
         metrics=metrics,
     )
 
@@ -439,13 +441,32 @@ async def _upsert_collector_state(
     statement = pg_insert(LifeDataCollectorState).values(**values)
     update_values: dict[str, Any] = {
         "status": "online",
-        "last_seen_at": statement.excluded.last_seen_at,
-        "updated_at": statement.excluded.updated_at,
+        "last_seen_at": func.greatest(
+            LifeDataCollectorState.last_seen_at,
+            statement.excluded.last_seen_at,
+        ),
+        "updated_at": func.greatest(
+            LifeDataCollectorState.updated_at,
+            statement.excluded.updated_at,
+        ),
     }
     if success:
         update_values.update(
-            last_success_at=statement.excluded.last_success_at,
-            last_event_id=statement.excluded.last_event_id,
+            last_success_at=func.greatest(
+                LifeDataCollectorState.last_success_at,
+                statement.excluded.last_success_at,
+            ),
+            last_event_id=case(
+                (
+                    LifeDataCollectorState.last_success_at.is_(None)
+                    | (
+                        statement.excluded.last_success_at
+                        > LifeDataCollectorState.last_success_at
+                    ),
+                    statement.excluded.last_event_id,
+                ),
+                else_=LifeDataCollectorState.last_event_id,
+            ),
         )
     statement = statement.on_conflict_do_update(
         index_elements=[LifeDataCollectorState.account_id],
@@ -467,6 +488,19 @@ class LifeDataIngestService:
         account_id = str(payload["account_id"])
         request_payload = payload["request_payload"]
         response_payload = payload["response_payload"]
+
+        if not isinstance(response_payload, dict):
+            raise ValueError("LifeData response_payload must be an object")
+        response_code = response_payload.get("code")
+        if type(response_code) is not int or response_code != 0:
+            raise ValueError("LifeData response code must be 0")
+        rows = extract_video_rows(response_payload)
+        if (
+            str(payload["page_path"]).rstrip("/")
+            == "/flow/content/analysis/video"
+            and not rows
+        ):
+            raise ValueError("LifeData video response has no valid itemRank row")
 
         capture_statement = (
             pg_insert(LifeDataCapture)
@@ -490,12 +524,11 @@ class LifeDataIngestService:
                 account_id=account_id,
                 event_id=event_id,
                 seen_at=received_at,
-                success=False,
+                success=True,
             )
             return IngestResult(True, 0, 0, 0)
 
         stat_start, stat_end = _stat_period(request_payload, captured_at)
-        rows = extract_video_rows(response_payload)
         snapshots_created = 0
         tasks_created = 0
 
