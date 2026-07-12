@@ -44,3 +44,6 @@ backend/.venv/
 
 # 验收相关临时文件
 backend/error_exports/
+
+# Git worktrees
+.worktrees/
