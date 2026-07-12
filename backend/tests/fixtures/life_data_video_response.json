@@ -1,0 +1,39 @@
+{
+  "code": 0,
+  "data": {
+    "rankings": {
+      "itemRank": {
+        "total": 1,
+        "data": [
+          {
+            "item_id": "video-over-2000",
+            "item_desc": "summer outfit video",
+            "item_title": "compatibility title must not win",
+            "item_author_id": "author-001",
+            "item_author_nickname": "example creator",
+            "author_name": "compatibility author must not win",
+            "item_create_ts": "2026-07-10 08:30:00",
+            "item_play_cnt": 34310,
+            "item_pay_gmv": 4500,
+            "item_pay_gmv_all": 5700,
+            "pay_gmv_fen": 999999,
+            "item_indirect_pay_gmv": 1200,
+            "item_verify_gmv": 0,
+            "verify_gmv_fen": 888888,
+            "item_verify_cert_cnt": 3,
+            "refund_gmv": 125,
+            "refund_gmv_fen": 777777,
+            "play_5s_rate": 0.49048197,
+            "play_finish_rate": 0.1825,
+            "item_like_cnt": 200,
+            "item_comment_cnt": 50,
+            "item_favourite_cnt": 60,
+            "item_follow_cnt": 11,
+            "enter_poi_cnt": 42,
+            "thous_play_pay_gmv": 131
+          }
+        ]
+      }
+    }
+  }
+}
