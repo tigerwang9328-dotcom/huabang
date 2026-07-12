@@ -57,7 +57,19 @@ def test_extract_and_normalize_video_fixture_uses_real_api_keys():
     assert video.refund_gmv_fen == 125
     assert video.published_at == datetime(2026, 7, 10, 0, 30, tzinfo=timezone.utc)
     assert video.metrics["play_5s_rate"] == 0.49048197
-    assert video.metrics["interaction_count"] == 321
+    assert video.metrics["play_finish_rate"] == 0.1825
+    assert video.metrics["avg_play_duration"] == 7.25
+    assert video.metrics["item_duration"] == 28.4
+    assert video.metrics["item_like_cnt"] == 200
+    assert video.metrics["item_comment_cnt"] == 50
+    assert video.metrics["item_favourite_cnt"] == 60
+    assert video.metrics["item_share_cnt"] == 25
+    assert video.metrics["item_follow_cnt"] == 11
+    assert video.metrics["interaction_count"] == 346
+    assert video.metrics["item_pay_cert_cnt"] == 4
+    assert video.metrics["item_verify_cert_cnt"] == 3
+    assert video.metrics["refund_cert_cnt"] == 1
+    assert video.metrics["enter_poi_cnt"] == 42
     assert video.metrics["direct_pay_gmv_fen"] == 4500
     assert video.metrics["indirect_pay_gmv_fen"] == 1200
     assert video.metrics["raw_row"]["item_pay_gmv"] == 4500
@@ -134,6 +146,69 @@ def test_metrics_hash_changes_when_normalized_play_count_changes():
     first = normalize_video(row, STAT_START, STAT_END, CAPTURED_AT)
     second = normalize_video(changed, STAT_START, STAT_END, CAPTURED_AT)
 
+    assert first.metrics_hash != second.metrics_hash
+
+
+@pytest.mark.parametrize(
+    ("field_name", "changed_value"),
+    [
+        ("item_like_cnt", 201),
+        ("item_comment_cnt", 51),
+        ("item_favourite_cnt", 61),
+        ("item_share_cnt", 26),
+        ("item_follow_cnt", 12),
+        ("item_duration", 29.4),
+        ("item_pay_cert_cnt", 5),
+        ("item_verify_cert_cnt", 4),
+        ("refund_cert_cnt", 2),
+        ("enter_poi_cnt", 43),
+        ("play_5s_rate", 0.51),
+        ("play_finish_rate", 0.2),
+        ("avg_play_duration", 8.25),
+        ("item_pay_gmv_all", 5800),
+        ("item_pay_gmv", 4600),
+        ("item_indirect_pay_gmv", 1300),
+        ("item_verify_gmv", 100),
+        ("refund_gmv", 126),
+        ("thous_play_pay_gmv", 132),
+    ],
+)
+def test_metrics_hash_changes_when_optimization_metric_changes(
+    field_name,
+    changed_value,
+):
+    row = extract_video_rows(load_fixture())[0]
+    changed = deepcopy(row)
+    changed[field_name] = changed_value
+
+    first = normalize_video(row, STAT_START, STAT_END, CAPTURED_AT)
+    second = normalize_video(changed, STAT_START, STAT_END, CAPTURED_AT)
+
+    assert first.metrics_hash != second.metrics_hash
+
+
+@pytest.mark.parametrize(
+    ("canonical_field", "alias_field", "value"),
+    [
+        ("item_favourite_cnt", "item_favorite_cnt", 73),
+        ("refund_cert_cnt", "item_refund_cert_cnt", 2),
+    ],
+)
+def test_optimization_metric_alias_is_normalized_and_hashed(
+    canonical_field,
+    alias_field,
+    value,
+):
+    row = extract_video_rows(load_fixture())[0]
+    row.pop(canonical_field)
+    row[alias_field] = value
+    changed = deepcopy(row)
+    changed[alias_field] = value + 1
+
+    first = normalize_video(row, STAT_START, STAT_END, CAPTURED_AT)
+    second = normalize_video(changed, STAT_START, STAT_END, CAPTURED_AT)
+
+    assert first.metrics[canonical_field] == value
     assert first.metrics_hash != second.metrics_hash
 
 

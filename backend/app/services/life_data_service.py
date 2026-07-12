@@ -226,17 +226,30 @@ def normalize_video(
         _first(row, "refund_gmv", "item_refund_gmv", "refund_gmv_fen")
     )
 
+    item_like_cnt = _to_int(row.get("item_like_cnt"))
+    item_comment_cnt = _to_int(row.get("item_comment_cnt"))
+    item_favourite_cnt = _to_int(
+        _first(row, "item_favourite_cnt", "item_favorite_cnt")
+    )
+    item_share_cnt = _to_int(row.get("item_share_cnt"))
+    item_follow_cnt = _to_int(row.get("item_follow_cnt"))
     interaction_keys = (
         "item_like_cnt",
         "item_comment_cnt",
         "item_favourite_cnt",
+        "item_favorite_cnt",
+        "item_share_cnt",
         "item_follow_cnt",
     )
     has_real_interactions = any(
         row.get(key) not in (None, "") for key in interaction_keys
     )
     interaction_count = (
-        sum(_to_int(row.get(key)) for key in interaction_keys)
+        item_like_cnt
+        + item_comment_cnt
+        + item_favourite_cnt
+        + item_share_cnt
+        + item_follow_cnt
         if has_real_interactions
         else _to_int(row.get("interaction_count"))
     )
@@ -269,8 +282,14 @@ def normalize_video(
                 "avg_play_time",
             )
         ),
+        "item_duration": _to_float(row.get("item_duration")),
+        "item_like_cnt": item_like_cnt,
+        "item_comment_cnt": item_comment_cnt,
+        "item_favourite_cnt": item_favourite_cnt,
+        "item_share_cnt": item_share_cnt,
+        "item_follow_cnt": item_follow_cnt,
         "interaction_count": interaction_count,
-        "enter_poi_count": _to_int(
+        "enter_poi_cnt": _to_int(
             _first(row, "enter_poi_cnt", "store_visit_count", "poi_visit_count")
         ),
         "pay_gmv_fen": pay_gmv_fen,
@@ -280,11 +299,17 @@ def normalize_video(
         "indirect_pay_gmv_fen": _to_int(
             _first(row, "item_indirect_pay_gmv", "indirect_pay_gmv_fen")
         ),
+        "item_pay_cert_cnt": _to_int(
+            _first(row, "item_pay_cert_cnt", "pay_cert_count")
+        ),
         "verify_gmv_fen": verify_gmv_fen,
-        "verify_cert_count": _to_int(
+        "item_verify_cert_cnt": _to_int(
             _first(row, "item_verify_cert_cnt", "verify_cert_count")
         ),
         "refund_gmv_fen": refund_gmv_fen,
+        "refund_cert_cnt": _to_int(
+            _first(row, "refund_cert_cnt", "item_refund_cert_cnt")
+        ),
         "thousand_play_pay_gmv_fen": _to_int(
             _first(row, "thous_play_pay_gmv", "thousand_play_pay_gmv_fen")
         ),
