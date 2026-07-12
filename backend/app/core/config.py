@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     KINGDEE_API_KEY: str = ""
     KINGDEE_API_ENABLED: bool = False
 
+    # 生意经采集
+    LIFE_DATA_COLLECTOR_TOKEN_SHA256: str = ""
+    LIFE_DATA_ACCOUNT_ID: str = "1798826701211732"
+    LIFE_DATA_TASK_CREATOR_ID: int = 1
+    LIFE_DATA_MAX_PAYLOAD_BYTES: int = 2_000_000
+
     # 文件上传
     UPLOAD_MAX_SIZE_MB: int = 50
     UPLOAD_ALLOWED_TYPES: str = "xlsx,xls,csv"
