@@ -201,9 +201,9 @@ const metricCards = computed(() => {
     ],
     products: [
       { label: "商品数", value: num(s.product_count, "款"), desc: "参与诊断商品" },
-      { label: "近7日销量", value: num(s.sales_qty_7d, "件"), desc: "动销表现" },
-      { label: "爆款缺货", value: num(s.hot_low_stock_count, "款"), desc: "补货/调拨优先" },
-      { label: "慢款滞销", value: num(s.slow_product_count, "款"), desc: "清仓风险" },
+      { label: "近30日入库", value: num(s.inbound_qty_30d, "件"), desc: "百胜进货单口径" },
+      { label: "入库覆盖", value: num(s.inbound_product_count, "款"), desc: "已有生命周期数据" },
+      { label: "90天以上库存", value: num(s.aged_inventory_product_count, "款"), desc: "优先复盘老库存" },
     ],
     inventory: [
       { label: "库存数量", value: num(s.total_inventory_qty, "件"), desc: `库存快照 ${s.inventory_stat_date || "--"}` },
@@ -224,10 +224,10 @@ const metricCards = computed(() => {
       { label: "预估利润", value: money(s.operating_profit), desc: "需财务核准" },
     ],
     members: [
-      { label: "会员订单", value: num(s.member_order_count, "单"), desc: "小票会员字段" },
-      { label: "活跃会员", value: num(s.active_member_count, "人"), desc: "当日去重成交" },
       { label: "会员销售", value: money(s.member_sales_amount), desc: "会员成交金额" },
       { label: "会员订单占比", value: pct(s.member_order_ratio), desc: "会员经营质量" },
+      { label: "当日充值", value: money(s.recharge_amount), desc: `储值明细 ${s.deposit_stat_date || "--"}` },
+      { label: "充值人数", value: num(s.recharge_member_count, "人"), desc: `充值客单 ${money(s.avg_recharge_amount)}` },
       { label: "待回访", value: num(s.pending_visit_count, "人"), desc: `回访清单 ${s.visit_stat_date || "--"}` },
     ],
     audit: [

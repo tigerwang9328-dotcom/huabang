@@ -385,23 +385,101 @@ class AIDiagnosisService:
               group by product_code
             ),
             inv as (
-              select product_code, sum(quantity) qty, sum(cost_amount) amount,
-                     max(age_days) age_days, count(*) filter(where quantity<=0) zero_sku
-              from dwd.dwd_inventory_snapshot
-              where snapshot_date=(select max(snapshot_date) from dwd.dwd_inventory_snapshot where snapshot_date<=CAST(:dt AS date))
+              select i.product_code, sum(i.qty) qty,
+                     sum(i.qty * coalesce(sku.cost_price, product.cost_price, 0)) amount,
+                     count(*) filter(where i.qty<=0) zero_sku
+              from dwd.dwd_inventory_balance i
+              left join dim.dim_sku sku on sku.sku_code=i.sku_code
+              left join dim.dim_product product on product.product_code=i.product_code
+              group by i.product_code
+            ),
+            inbound30 as (
+              select product_code, sum(quantity) inbound_quantity_30d
+              from dwd.dwd_baison_purchase_inbound
+              where record_date >= CAST(:dt AS date) - interval '29 day' and record_date <= CAST(:dt AS date)
               group by product_code
             )
             select p.product_code, max(p.product_name) product_name, coalesce(s7.qty7,0) qty7,
                    coalesce(s30.qty30,0) qty30, coalesce(inv.qty,0) inventory_qty,
-                   coalesce(inv.amount,0) inventory_amount, inv.age_days, inv.zero_sku,
-                   s30.gm
+                   coalesce(inv.amount,0) inventory_amount,
+                   greatest(coalesce(CAST(:dt AS date) - p.launch_date,0),
+                            coalesce(CAST(:dt AS date) - inbound.first_inbound_date,0)) age_days,
+                   inv.zero_sku, s30.gm, inbound.first_inbound_date, inbound.last_inbound_date,
+                   coalesce(inbound.total_inbound_quantity,0) total_inbound_quantity,
+                   coalesce(in30.inbound_quantity_30d,0) inbound_quantity_30d,
+                   coalesce(inbound.last_purchase_price,0) last_purchase_price,
+                   coalesce(inbound.receipt_count,0) receipt_count
             from dim.dim_product p
             left join sales30 s30 on s30.product_code=p.product_code
             left join sales7 s7 on s7.product_code=p.product_code
             left join inv on inv.product_code=p.product_code
-            group by p.product_code, s7.qty7, s30.qty30, s30.sales30, s30.gm, inv.qty, inv.amount, inv.age_days, inv.zero_sku
+            left join dws.dws_product_inbound_summary inbound on inbound.product_code=p.product_code
+            left join inbound30 in30 on in30.product_code=p.product_code
+            group by p.product_code, s7.qty7, s30.qty30, s30.sales30, s30.gm, inv.qty, inv.amount,
+                     p.launch_date, inv.zero_sku, inbound.first_inbound_date, inbound.last_inbound_date,
+                     inbound.total_inbound_quantity, in30.inbound_quantity_30d,
+                     inbound.last_purchase_price, inbound.receipt_count
             order by coalesce(s7.qty7,0) desc, coalesce(inv.amount,0) desc
             limit 120
+            """,
+            {"dt": dt},
+        )
+        product_summary = await self._one(
+            """
+            with company as (
+              select coalesce(sum(net_sales_amount),0) net_sales,
+                     coalesce(sum(total_order_count),0) order_count,
+                     case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) else 0 end gross_margin
+              from dws.dws_company_daily where stat_date=CAST(:dt AS date)
+            ), sales30 as (
+              select product_code, sum(net_quantity) qty30
+              from dws.dws_product_daily
+              where stat_date between CAST(:dt AS date)-interval '29 day' and CAST(:dt AS date)
+              group by product_code
+            ), sales7 as (
+              select product_code, sum(net_quantity) qty7
+              from dws.dws_product_daily
+              where stat_date between CAST(:dt AS date)-interval '6 day' and CAST(:dt AS date)
+              group by product_code
+            ), inv as (
+              select product_code, sum(qty) inventory_qty,
+                     count(*) filter(where qty<=0) zero_sku
+              from dwd.dwd_inventory_balance group by product_code
+            ), inbound as (
+              select product_code, first_inbound_date from dws.dws_product_inbound_summary
+            ), inbound30 as (
+              select product_code, sum(quantity) inbound_qty30
+              from dwd.dwd_baison_purchase_inbound
+              where record_date between CAST(:dt AS date)-interval '29 day' and CAST(:dt AS date)
+              group by product_code
+            ), participating as (
+              select product_code from sales30 union select product_code from inv union select product_code from inbound
+            ), base as (
+              select x.product_code, coalesce(s30.qty30,0) qty30, coalesce(s7.qty7,0) qty7,
+                     coalesce(inv.inventory_qty,0) inventory_qty, coalesce(inv.zero_sku,0) zero_sku,
+                     coalesce(i30.inbound_qty30,0) inbound_qty30, inbound.first_inbound_date,
+                     greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
+                              coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days
+              from participating x
+              left join dim.dim_product p on p.product_code=x.product_code
+              left join sales30 s30 on s30.product_code=x.product_code
+              left join sales7 s7 on s7.product_code=x.product_code
+              left join inv on inv.product_code=x.product_code
+              left join inbound on inbound.product_code=x.product_code
+              left join inbound30 i30 on i30.product_code=x.product_code
+            ), metrics as (
+              select count(*) product_count,
+                     count(*) filter(where qty30>0) active_product_count,
+                     coalesce(sum(qty7),0) sales_qty_7d, coalesce(sum(qty30),0) sales_qty_30d,
+                     coalesce(sum(inbound_qty30),0) inbound_qty_30d,
+                     count(*) filter(where first_inbound_date is not null) inbound_product_count,
+                     count(*) filter(where inventory_qty>0 and age_days>=90) aged_inventory_product_count,
+                     count(*) filter(where qty7>=5 and inventory_qty<=greatest(3,qty7*0.5)) hot_low_stock_count,
+                     count(*) filter(where inventory_qty>20 and qty30<=1 and age_days>=90) slow_product_count,
+                     count(*) filter(where qty30>0 and inventory_qty<=0) stockout_product_count
+              from base
+            )
+            select company.*, metrics.* from company cross join metrics
             """,
             {"dt": dt},
         )
@@ -417,55 +495,128 @@ class AIDiagnosisService:
             age = _int(p.get("age_days"))
             if qty7 >= 5 and inv <= max(3, qty7 * 0.5):
                 hot_low += 1
-                diagnoses.append(self._diag("product", "high", f"{name}爆款缺货风险", f"{code} 近7日销量 {qty7:.0f} 件，当前库存 {inv:.0f} 件，可售天数偏低。", [f"近7日销量：{qty7:.0f}", f"库存：{inv:.0f}", f"毛利率：{_pct(p.get('gm'))}"], "多店动销较快但库存承接不足，可能影响今日成交。", "商品部优先查尺码颜色，仓库配合跨店调拨；如供应链可承接，评估返单。", "商品经理 / 仓库主管", "今日18:00前", "明日缺货SKU数、爆款销售损失、调拨完成率", "dws_product_daily + dwd_inventory_snapshot"))
+                diagnoses.append(self._diag("product", "high", f"{name}爆款缺货风险", f"{code} 近7日销量 {qty7:.0f} 件，当前库存 {inv:.0f} 件，可售天数偏低。", [f"近7日销量：{qty7:.0f}", f"库存：{inv:.0f}", f"毛利率：{_pct(p.get('gm'))}"], "多店动销较快但库存承接不足，可能影响今日成交。", "商品部优先查尺码颜色，仓库配合跨店调拨；如供应链可承接，评估返单。", "商品经理 / 仓库主管", "今日18:00前", "明日缺货SKU数、爆款销售损失、调拨完成率", "dws_product_daily + dwd_inventory_balance"))
             elif inv > 20 and qty30 <= 1 and age >= 90:
                 slow += 1
-                diagnoses.append(self._diag("product", "medium" if age < 180 else "high", f"{name}滞销库存风险", f"{code} 库龄 {age} 天，近30日销量 {qty30:.0f} 件，库存 {inv:.0f} 件。", [f"库龄：{age}天", f"近30日销量：{qty30:.0f}", f"库存金额：{_money(p.get('inventory_amount'))}"], "商品生命周期进入清仓/死库存阶段，占用库存资金。", "商品部制定清仓或组合销售方案，弱店调出，高库龄池专项复盘。", "商品经理 / 店长", "本周内", "7日动销件数、清仓回款、库存金额下降幅度", "dim_product + dwd_inventory_snapshot"))
+                first_inbound = p.get("first_inbound_date") or "未覆盖"
+                last_inbound = p.get("last_inbound_date") or "未覆盖"
+                diagnoses.append(self._diag("product", "medium" if age < 180 else "high", f"{name}滞销库存风险", f"{code} 库龄 {age} 天，近30日销量 {qty30:.0f} 件，库存 {inv:.0f} 件。", [f"首次入库：{first_inbound}", f"最近入库：{last_inbound}", f"库龄：{age}天", f"近30日销量：{qty30:.0f}", f"库存金额：{_money(p.get('inventory_amount'))}", f"最近采购价：{_money(p.get('last_purchase_price'))}"], "商品生命周期进入清仓/死库存阶段，占用库存资金。", "商品部制定清仓或组合销售方案，弱店调出，高库龄池专项复盘。", "商品经理 / 店长", "本周内", "7日动销件数、清仓回款、库存金额下降幅度", "dim_product + dwd_inventory_balance + dws_product_inbound_summary"))
         warnings = [] if products else ["商品诊断暂无商品销售/库存快照数据，已降级为空诊断。"]
+        summary_hot_low = _int(product_summary.get("hot_low_stock_count"))
+        summary_slow = _int(product_summary.get("slow_product_count"))
+        summary_stockout = _int(product_summary.get("stockout_product_count"))
+        health_score = product_summary.get("health_score")
+        if health_score is None:
+            product_count = max(_int(product_summary.get("product_count")), 1)
+            active_count = max(_int(product_summary.get("active_product_count")), 1)
+            hot_penalty = min(30, summary_hot_low * 2)
+            slow_penalty = min(25, summary_slow / product_count * 500)
+            stockout_penalty = min(35, summary_stockout / active_count * 100)
+            health_score = round(max(0, 100 - hot_penalty - slow_penalty - stockout_penalty))
         return {
             "summary": {
                 "stat_date": dt,
-                "product_count": len(products),
-                "active_product_count": sum(1 for p in products if _num(p.get("qty30")) > 0),
-                "sales_qty_7d": sum(_num(p.get("qty7")) for p in products),
-                "sales_qty_30d": sum(_num(p.get("qty30")) for p in products),
-                "hot_low_stock_count": hot_low,
-                "slow_product_count": slow,
-                "stockout_product_count": sum(1 for p in products if _int(p.get("zero_sku")) > 0),
+                "health_score": _int(health_score),
+                "net_sales": _num(product_summary.get("net_sales")),
+                "order_count": _int(product_summary.get("order_count")),
+                "gross_margin": _num(product_summary.get("gross_margin")),
+                "product_count": _int(product_summary.get("product_count")),
+                "active_product_count": _int(product_summary.get("active_product_count")),
+                "sales_qty_7d": _num(product_summary.get("sales_qty_7d")),
+                "sales_qty_30d": _num(product_summary.get("sales_qty_30d")),
+                "inbound_qty_30d": _num(product_summary.get("inbound_qty_30d")),
+                "inbound_product_count": _int(product_summary.get("inbound_product_count")),
+                "aged_inventory_product_count": _int(product_summary.get("aged_inventory_product_count")),
+                "hot_low_stock_count": summary_hot_low,
+                "slow_product_count": summary_slow,
+                "stockout_product_count": summary_stockout,
             },
-            "risks": [{"name": "爆款缺货", "value": hot_low, "level": "high"}, {"name": "慢款/滞销", "value": slow, "level": "medium"}],
+            "risks": [{"name": "爆款缺货", "value": summary_hot_low, "level": "high"}, {"name": "慢款/滞销", "value": summary_slow, "level": "medium"}],
             "diagnoses": diagnoses[:30],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(warnings, ["售罄率/完整生命周期字段"] if products else ["商品销售或库存"], ["dim_product", "dws_product_daily", "dwd_inventory_snapshot"]),
+            "data_quality": self._quality(warnings, ["百胜入库历史当前回溯730天"] if products else ["商品销售、库存或进货"], ["dim_product", "dws_product_daily", "dwd_inventory_balance", "dwd_baison_purchase_inbound", "dws_product_inbound_summary"]),
         }
 
     async def inventory(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
         dt = _as_date(stat_date or await self._latest_date())
         params = {"dt": dt, "store_code": store_code or ""}
         store_filter = "and store_code=:store_code" if store_code else ""
-        inventory_date_filter = "stat_date<=CAST(:dt AS date)" if stat_date else "true"
-        warning_date_filter = "warning_date<=CAST(:dt AS date)" if stat_date else "true"
+        balance_store_filter = "and i.warehouse_code=:store_code" if store_code else ""
         summary = await self._one(
             f"""
-            select max(stat_date) inventory_stat_date,
-                   coalesce(sum(total_quantity),0) total_quantity, coalesce(sum(total_cost_amount),0) total_amount,
-                   coalesce(sum(age_91_180_amount),0)+coalesce(sum(age_180_plus_amount),0) age_90_amount,
-                   coalesce(sum(age_180_plus_amount),0) age_180_amount,
-                   coalesce(sum(negative_sku_count),0) negative_sku_count,
-                   coalesce(sum(sku_count),0) sku_count
-            from dws.dws_inventory_daily
-            where stat_date=(select max(stat_date) from dws.dws_inventory_daily where {inventory_date_filter}) {store_filter}
+            with company as (
+              select coalesce(sum(net_sales_amount),0) net_sales,
+                     coalesce(sum(order_count),0) order_count,
+                     case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) else 0 end gross_margin
+              from dws.dws_store_daily
+              where stat_date=CAST(:dt AS date) and (:store_code='' or store_code=:store_code)
+            ), lines as (
+              select i.warehouse_code store_code, i.product_code,
+                     coalesce(nullif(i.sku_code,''),concat(i.product_code,trim(leading '-' from coalesce(i.color_code,'')),coalesce(i.size_code,''))) sku_code,
+                     i.qty,
+                     coalesce(nullif(sku.cost_price,0),nullif(sku.market_price,0),nullif(p.cost_price,0),0) cost_price,
+                     greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
+                              coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days,
+                     i.synced_at
+              from dwd.dwd_inventory_balance i
+              left join dim.dim_sku sku
+                on sku.product_code=i.product_code
+               and trim(leading '-' from coalesce(sku.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
+               and coalesce(sku.size_code,'')=coalesce(i.size_code,'')
+              left join dim.dim_product p on p.product_code=i.product_code
+              left join dws.dws_product_inbound_summary inbound on inbound.product_code=i.product_code
+              where true {balance_store_filter}
+            )
+            select max((lines.synced_at at time zone 'Asia/Shanghai')::date) inventory_stat_date,
+                   coalesce(sum(lines.qty),0) total_quantity,
+                   coalesce(sum(lines.qty*lines.cost_price),0) total_amount,
+                   coalesce(sum(greatest(lines.qty,0)*lines.cost_price) filter(where age_days>=90),0) age_90_amount,
+                   coalesce(sum(greatest(lines.qty,0)*lines.cost_price) filter(where age_days>=180),0) age_180_amount,
+                   count(distinct (store_code,sku_code)) filter(where qty<0) negative_sku_count,
+                   count(distinct (store_code,sku_code)) filter(where qty<>0) sku_count,
+                   count(distinct (store_code,sku_code)) filter(where qty>0 and age_days>=90) age_90_sku_count,
+                   company.net_sales, company.order_count, company.gross_margin
+            from lines cross join company
+            group by company.net_sales,company.order_count,company.gross_margin
             """,
             params,
         )
         warnings_rows = await self._rows(
             f"""
-            select warning_type, warning_level, store_code, product_code, sku_code,
-                   current_quantity, current_cost_amount, age_days, description
-            from dm.dm_inventory_warning
-            where warning_date=(select max(warning_date) from dm.dm_inventory_warning where {warning_date_filter})
-            {store_filter}
-            order by case warning_level when 'critical' then 1 when 'warning' then 2 else 3 end, current_cost_amount desc nulls last
+            with lines as (
+              select i.warehouse_code store_code, i.product_code,
+                     coalesce(nullif(i.sku_code,''),concat(i.product_code,trim(leading '-' from coalesce(i.color_code,'')),coalesce(i.size_code,''))) sku_code,
+                     i.qty,
+                     coalesce(nullif(sku.cost_price,0),nullif(sku.market_price,0),nullif(p.cost_price,0),0) cost_price,
+                     greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
+                              coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days
+              from dwd.dwd_inventory_balance i
+              left join dim.dim_sku sku
+                on sku.product_code=i.product_code
+               and trim(leading '-' from coalesce(sku.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
+               and coalesce(sku.size_code,'')=coalesce(i.size_code,'')
+              left join dim.dim_product p on p.product_code=i.product_code
+              left join dws.dws_product_inbound_summary inbound on inbound.product_code=i.product_code
+              where true {balance_store_filter}
+            ), sku_inventory as (
+              select store_code,product_code,sku_code,sum(qty) current_quantity,
+                     sum(qty*cost_price) current_cost_amount,max(age_days) age_days
+              from lines group by store_code,product_code,sku_code
+            ), realtime_warning as (
+              select 'negative' warning_type,'critical' warning_level,store_code,product_code,sku_code,
+                     current_quantity,current_cost_amount,age_days,
+                     concat('当前库存 ',current_quantity,' 件，请复核同步、调拨或销售出库。') description
+              from sku_inventory where current_quantity<0
+              union all
+              select case when age_days>=180 then 'age_180' else 'age_90' end,
+                     case when age_days>=180 then 'critical' else 'warning' end,
+                     store_code,product_code,sku_code,current_quantity,current_cost_amount,age_days,
+                     concat('库龄 ',age_days,' 天，库存 ',current_quantity,' 件，金额 ',round(current_cost_amount,2),' 元。')
+              from sku_inventory where current_quantity>0 and age_days>=90
+            )
+            select * from realtime_warning
+            order by case warning_level when 'critical' then 1 when 'warning' then 2 else 3 end,
+                     current_cost_amount desc nulls last
             limit 80
             """,
             params,
@@ -474,13 +625,22 @@ class AIDiagnosisService:
         for w in warnings_rows:
             level = "high" if w.get("warning_level") == "critical" else "medium"
             wtype = w.get("warning_type") or "inventory"
-            diagnoses.append(self._diag("inventory", level, f"{wtype}库存预警", w.get("description") or f"{w.get('sku_code') or w.get('product_code')} 触发库存异常。", [f"门店：{w.get('store_code') or 'ALL'}", f"SKU：{w.get('sku_code') or '-'}", f"库存：{_int(w.get('current_quantity'))}", f"金额：{_money(w.get('current_cost_amount'))}"], "库存结构与销售节奏不匹配，可能存在老库存、负库存、断码或门店压货。", "仓库与商品部复核库存，优先处理负库存和爆款断货，再处理高库龄清仓。", "仓库主管 / 商品经理", "今日18:30前", "负库存SKU数、90天以上库存金额、调拨完成率", "dm_inventory_warning"))
+            warning_name = {"negative": "负库存", "age_90": "90天以上老库存", "age_180": "180天以上老库存"}.get(wtype, "库存异常")
+            diagnoses.append(self._diag("inventory", level, warning_name, w.get("description") or f"{w.get('sku_code') or w.get('product_code')} 触发库存异常。", [f"门店：{w.get('store_code') or 'ALL'}", f"SKU：{w.get('sku_code') or '-'}", f"库存：{_int(w.get('current_quantity'))}", f"金额：{_money(w.get('current_cost_amount'))}"], "库存结构与销售节奏不匹配，可能存在老库存、负库存、断码或门店压货。", "仓库与商品部复核库存，优先处理负库存和爆款断货，再处理高库龄清仓。", "仓库主管 / 商品经理", "今日18:30前", "负库存SKU数、90天以上库存金额、调拨完成率", "dwd_inventory_balance + dim_product + dws_product_inbound_summary"))
         if _num(summary.get("age_90_amount")) > 0:
             diagnoses.append(self._diag("inventory", "high", "90天以上库存占用资金", f"90天以上库存金额 {_money(summary.get('age_90_amount'))}，需要进入清仓池管理。", [f"总库存金额：{_money(summary.get('total_amount'))}", f"90天以上：{_money(summary.get('age_90_amount'))}", f"180天以上：{_money(summary.get('age_180_amount'))}"], "老库存持续占用现金，若不处理会影响新品采购和经营利润。", "商品部输出清仓池，财务跟踪回款，门店按清仓策略执行。", "商品经理 / 财务经理", "本周五前", "90天以上库存金额下降幅度、清仓销售额", "dws_inventory_daily"))
-        warnings = [] if summary else ["库存诊断暂无库存日汇总，可能库存同步或 ETL 未完成。"]
+        warnings = [] if summary else ["库存诊断暂无当前库存余额，可能库存同步未完成。"]
+        negative_count = _int(summary.get("negative_sku_count"))
+        sku_count = max(_int(summary.get("sku_count")), 1)
+        age_ratio = _num(summary.get("age_90_amount")) / max(_num(summary.get("total_amount")), 1)
+        health_score = round(max(0, 100 - min(30, negative_count*3) - min(40, age_ratio*100)))
         return {
             "summary": {
                 "stat_date": dt,
+                "health_score": health_score,
+                "net_sales": _num(summary.get("net_sales")),
+                "order_count": _int(summary.get("order_count")),
+                "gross_margin": _num(summary.get("gross_margin")),
                 "inventory_stat_date": _date_str(summary.get("inventory_stat_date")),
                 "total_inventory_qty": _int(summary.get("total_quantity")),
                 "inventory_amount": _num(summary.get("total_amount")),
@@ -488,12 +648,12 @@ class AIDiagnosisService:
                 "age_180_amount": _num(summary.get("age_180_amount")),
                 "negative_sku_count": _int(summary.get("negative_sku_count")),
                 "sku_count": _int(summary.get("sku_count")),
-                "age_90_sku_count": sum(1 for w in warnings_rows if w.get("warning_type") in ("age_90", "age_180")),
+                "age_90_sku_count": _int(summary.get("age_90_sku_count")),
             },
             "risks": [{"name": r.get("warning_type"), "value": r.get("sku_code") or r.get("product_code"), "level": "high" if r.get("warning_level") == "critical" else "medium"} for r in warnings_rows[:12]],
             "diagnoses": diagnoses[:40],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:10])],
-            "data_quality": self._quality(warnings, ["库龄估算字段"] if not warnings_rows else [], ["dws_inventory_daily", "dm_inventory_warning"]),
+            "data_quality": self._quality(warnings, [], ["dwd_inventory_balance", "dim_sku", "dim_product", "dws_product_inbound_summary", "dws_store_daily"]),
         }
 
 
@@ -764,6 +924,43 @@ class AIDiagnosisService:
             """,
             params,
         )
+        deposit = await self._one(
+            """
+            with daily as (
+              select max(biz_date) deposit_stat_date,
+                     coalesce(sum(recharge_count),0) recharge_count,
+                     coalesce(sum(recharge_amount),0) recharge_amount,
+                     case when sum(recharge_count)>0 then sum(recharge_amount)/sum(recharge_count) else 0 end avg_recharge_amount,
+                     coalesce(sum(consume_amount),0) consume_amount
+              from dws.dws_member_deposit_daily
+              where biz_date=:dt and (:store_code = '' or store_code=:store_code)
+            ), daily_member as (
+              select count(DISTINCT member_no) recharge_member_count
+              from dwd.dwd_baison_member_deposit_log
+              where change_type='0' and biz_date=:dt
+                and (:store_code = '' or store_code=:store_code)
+            ), member30 as (
+              select count(*) recharge_member_count_30d,
+                     count(*) filter(where recharge_times>=2) repeat_recharge_member_count
+              from (
+                select member_no, count(*) recharge_times
+                from dwd.dwd_baison_member_deposit_log
+                where change_type='0' and biz_date between CAST(:dt AS date)-interval '29 day' and CAST(:dt AS date)
+                  and (:store_code = '' or store_code=:store_code)
+                group by member_no
+              ) x
+            ), large_recharge as (
+              select count(*) large_recharge_count
+              from dwd.dwd_baison_member_deposit_log
+              where change_type='0' and biz_date=:dt and money_change>=5000
+                and (:store_code = '' or store_code=:store_code)
+            )
+            select daily.*, daily_member.recharge_member_count, member30.recharge_member_count_30d,
+                   member30.repeat_recharge_member_count, large_recharge.large_recharge_count
+            from daily cross join daily_member cross join member30 cross join large_recharge
+            """,
+            params,
+        )
         diagnoses = []
         total_orders = _num(ticket.get("total_orders"))
         member_orders = _num(ticket.get("member_orders"))
@@ -777,6 +974,13 @@ class AIDiagnosisService:
             diagnoses.append(self._diag("member", "medium", "会员成交占比偏低", f"今日会员订单占比 {member_order_ratio*100:.1f}%，会员销售占比 {member_sales_ratio*100:.1f}%。", [f"总订单：{_int(total_orders)}", f"会员订单：{_int(member_orders)}", f"会员销售：{_money(member_sales)}"], "导购识别会员、老客邀约或会员权益触达不足。", "门店复盘会员识别动作，优先对昨日/近30日消费会员做二次邀约。", "运营经理 / 店长", "今日闭店前", "会员订单占比、会员销售占比、回访成交金额", "dwd_pos_ticket.vip_code"))
         if _int(member_dim.get("sleep_90d")) > 0:
             diagnoses.append(self._diag("member", "low", "沉睡会员池待激活", f"会员档案中90天以上未消费会员 {_int(member_dim.get('sleep_90d'))} 人。", [f"会员总数：{_int(member_dim.get('total_members'))}", f"近30日活跃：{_int(member_dim.get('active_30d'))}"], "老会员复购触达不足，存在可唤醒销售机会。", "按门店导出沉睡会员池，结合新品/生日/储值权益做分层触达。", "会员运营 / 店长", "本周内", "沉睡会员回访完成率、复购金额", "dim_member"))
+        recharge_30d = _int(deposit.get("recharge_member_count_30d"))
+        repeat_recharge = _int(deposit.get("repeat_recharge_member_count"))
+        repeat_rate = repeat_recharge / recharge_30d if recharge_30d else 0
+        if _int(deposit.get("large_recharge_count")) > 0:
+            diagnoses.append(self._diag("member", "medium", "大额充值待复核", f"当日有 {_int(deposit.get('large_recharge_count'))} 笔5000元及以上会员充值。", [f"充值金额：{_money(deposit.get('recharge_amount'))}", f"充值人数：{_int(deposit.get('recharge_member_count'))}", f"充值客单：{_money(deposit.get('avg_recharge_amount'))}"], "大额充值可能是重点会员经营成果，也需要复核门店、会员和收款记录。", "会员运营与财务核对充值会员、支付凭证和门店归属。", "会员运营 / 财务", "今日18:00前", "大额充值复核完成率、充值到账一致性", "dwd_baison_member_deposit_log"))
+        if recharge_30d >= 5 and repeat_rate < 0.20:
+            diagnoses.append(self._diag("member", "medium", "会员复充率偏低", f"近30日充值会员 {recharge_30d} 人，复充会员 {repeat_recharge} 人，复充率 {repeat_rate*100:.1f}%。", [f"充值会员：{recharge_30d}", f"复充会员：{repeat_recharge}", f"复充率：{repeat_rate*100:.1f}%"], "首次充值后的权益触达和二次消费承接不足。", "按首次充值日期分层回访，优先跟进已消费但未复充会员。", "会员运营 / 店长", "本周内", "30日复充率、复充金额、储值消费率", "dwd_baison_member_deposit_log"))
         warnings = []
         missing = []
         if _int(member_dim.get("total_members")) == 0:
@@ -784,6 +988,9 @@ class AIDiagnosisService:
             missing.append("会员档案/RFM明细")
         if _int(visit.get("visit_count")) == 0:
             warnings.append("会员回访清单为空，当前只做会员成交占比诊断。")
+        if not deposit.get("deposit_stat_date"):
+            warnings.append("百胜储值明细未同步到当前诊断日期，充值与复充指标暂为0。")
+            missing.append("会员储值明细")
         return {
             "summary": {
                 "stat_date": dt,
@@ -792,11 +999,22 @@ class AIDiagnosisService:
                 "pending_visit_count": _int(visit.get("pending_count")),
                 "converted_count": _int(visit.get("converted_count")),
                 "conversion_amount": _num(visit.get("conversion_amount")),
+                "total_member_count": _int(member_dim.get("total_members")),
+                "active_member_count_30d": _int(member_dim.get("active_30d")),
+                "sleeping_member_count_90d": _int(member_dim.get("sleep_90d")),
                 "active_member_count": _int(ticket.get("active_members")),
                 "member_order_count": _int(member_orders),
                 "member_sales_amount": member_sales,
                 "member_order_ratio": member_order_ratio,
                 "member_sales_ratio": member_sales_ratio,
+                "deposit_stat_date": _date_str(deposit.get("deposit_stat_date")),
+                "recharge_count": _int(deposit.get("recharge_count")),
+                "recharge_member_count": _int(deposit.get("recharge_member_count")),
+                "recharge_amount": _num(deposit.get("recharge_amount")),
+                "avg_recharge_amount": _num(deposit.get("avg_recharge_amount")),
+                "stored_value_consume_amount": _num(deposit.get("consume_amount")),
+                "repeat_recharge_member_count": repeat_recharge,
+                "repeat_recharge_rate": repeat_rate,
             },
             "risks": [
                 {"name": "会员订单占比", "value": f"{member_order_ratio*100:.1f}%", "level": "medium" if member_order_ratio < 0.35 and total_orders > 0 else "low"},
@@ -804,7 +1022,7 @@ class AIDiagnosisService:
             ],
             "diagnoses": diagnoses,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(warnings, missing, ["dm_member_visit_list", "dim_member", "dwd_pos_ticket"]),
+            "data_quality": self._quality(warnings, missing, ["dm_member_visit_list", "dim_member", "dwd_pos_ticket", "dwd_baison_member_deposit_log", "dws_member_deposit_daily"]),
         }
 
     async def audit(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
