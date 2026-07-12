@@ -31,6 +31,7 @@ test('declares the required Tampermonkey metadata', () => {
   const source = fs.readFileSync(scriptPath, 'utf8')
 
   for (const line of [
+    '// @version      1.0.1',
     '// @match        https://www.life-data.cn/*',
     '// @run-at       document-start',
     '// @grant        GM_xmlhttpRequest',
@@ -130,13 +131,13 @@ test('keeps only the three LifeData session headers for in-browser replay', () =
       Cookie: 'never-leave-browser',
       Authorization: 'Bearer never-upload',
       'X-TT-LS-Session-ID': 'session-value',
-      'Root-Life-Account-ID': ACCOUNT_ID,
+      'Root-Life-Account-ID': LIFE_ACCOUNT_ID,
       'Life-Account-ID': LIFE_ACCOUNT_ID,
       'X-Ignored': 'ignored',
     }),
     {
       'x-tt-ls-session-id': 'session-value',
-      'root-life-account-id': ACCOUNT_ID,
+      'root-life-account-id': LIFE_ACCOUNT_ID,
       'life-account-id': LIFE_ACCOUNT_ID,
     },
   )
@@ -206,6 +207,7 @@ test('builds a whitelisted ingest payload without headers or sensitive keys', ()
       },
     },
     capturedAt: '2026-07-12T08:00:00.000Z',
+    queueDepth: 7,
   })
 
   assert.deepEqual(Object.keys(payload).sort(), [
@@ -214,12 +216,14 @@ test('builds a whitelisted ingest payload without headers or sensitive keys', ()
     'endpoint',
     'event_id',
     'page_path',
+    'queue_depth',
     'request_payload',
     'response_payload',
     'schema_version',
   ])
   assert.equal(payload.account_id, ACCOUNT_ID)
   assert.equal(payload.endpoint, '/api/dito/query')
+  assert.equal(payload.queue_depth, 7)
   assert.deepEqual(payload.request_payload, {
     groupid: ACCOUNT_ID,
     nested: {},
@@ -298,5 +302,56 @@ test('refreshes last_seven_days to Shanghai yesterday without mutating custom da
   assert.deepEqual(
     core.refreshRelativeDateRange(custom, new Date('2026-07-12T16:30:00.000Z')),
     custom,
+  )
+})
+test('classifies permanent and retryable collector upload responses', () => {
+  assert.deepEqual(core.classifyUploadResponse(200, { success: true, code: 200 }), {
+    ok: true,
+    retryable: false,
+    reason: 'ok',
+  })
+  for (const status of [400, 403, 413, 422]) {
+    assert.equal(core.classifyUploadResponse(status, null).retryable, false)
+  }
+  assert.equal(
+    core.classifyUploadResponse(200, { success: false, code: 400 }).retryable,
+    false,
+  )
+  for (const status of [0, 401, 429, 503, 500]) {
+    assert.equal(core.classifyUploadResponse(status, null).retryable, true)
+  }
+})
+
+test('validates exact page sizes and unique item ids before publishing', () => {
+  const seen = new Set()
+  const first = {
+    total: 114,
+    data: Array.from({ length: 100 }, (_, index) => ({
+      item_id: `video-${index}`,
+    })),
+  }
+  const second = {
+    total: 114,
+    data: Array.from({ length: 14 }, (_, index) => ({
+      item_id: `video-${index + 100}`,
+    })),
+  }
+  assert.equal(core.validateVideoPage(first, 114, 0, 100, seen).length, 100)
+  assert.equal(core.validateVideoPage(second, 114, 100, 100, seen).length, 14)
+  assert.equal(seen.size, 114)
+  assert.throws(
+    () => core.validateVideoPage({ total: 114, data: second.data.slice(0, 13) }, 114, 100, 100, new Set()),
+    /预期 14 条，实际 13 条/,
+  )
+  assert.throws(
+    () =>
+      core.validateVideoPage(
+        { total: 2, data: [{ item_id: 'same' }, { item_id: 'same' }] },
+        2,
+        0,
+        100,
+        new Set(),
+      ),
+    /item_id 重复/,
   )
 })
