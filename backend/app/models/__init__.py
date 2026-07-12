@@ -39,3 +39,9 @@ from app.models.dingtalk_hr_finance import (
     FinanceExpenseRecord, HrAttendanceDaily,
 )
 from app.models.baison_ods import (OdsBaisonProductApi, OdsBaisonSkuApi, OdsBaisonWarehouseApi, OdsBaisonInventoryApi, DwdInventoryBalance)
+from app.models.life_data import (
+    LifeDataAlertEvent,
+    LifeDataCapture,
+    LifeDataCollectorState,
+    LifeDataVideoSnapshot,
+)
