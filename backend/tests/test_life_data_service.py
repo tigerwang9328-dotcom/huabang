@@ -41,6 +41,7 @@ def make_body(event_id: str = "event-000000000001") -> dict:
         },
         "response_payload": load_fixture(),
         "captured_at": CAPTURED_AT.isoformat(),
+        "queue_depth": 0,
     }
 
 
@@ -385,6 +386,20 @@ async def test_ingest_duplicate_event_refreshes_seen_without_more_work():
 
 
 @pytest.mark.asyncio
+async def test_ingest_success_and_duplicate_persist_latest_queue_depth():
+    db = FakeAsyncSession()
+    service = LifeDataIngestService(task_creator_id=1, alert_threshold=2000)
+    body = make_body()
+    body["queue_depth"] = 9
+
+    await service.ingest(db, body)
+    body["queue_depth"] = 2
+    await service.ingest(db, body)
+
+    assert [state["queue_depth"] for state in db.collector_state_writes] == [9, 2]
+
+
+@pytest.mark.asyncio
 async def test_collector_state_upsert_keeps_all_timestamps_monotonic():
     db = FakeAsyncSession()
     service = LifeDataIngestService(task_creator_id=1, alert_threshold=2000)
@@ -401,6 +416,76 @@ async def test_collector_state_upsert_keeps_all_timestamps_monotonic():
     assert "last_success_at = greatest(" in sql
     assert "updated_at = greatest(" in sql
     assert "last_event_id = case when" in sql
+    assert "status = case when" in sql
+    assert "queue_depth = case when" in sql
+
+
+@pytest.mark.asyncio
+async def test_status_error_and_online_recovery_preserve_error_history():
+    db = FakeAsyncSession()
+    service = LifeDataIngestService(task_creator_id=1)
+
+    before_error = datetime.now(timezone.utc)
+    await service.update_status(
+        db,
+        {
+            "account_id": "1798826701211732",
+            "status": "error",
+            "queue_depth": 6,
+            "last_error": "LifeData request timeout",
+        },
+    )
+    after_error = datetime.now(timezone.utc)
+    error_state = db.collector_state_writes[-1]
+    assert error_state["status"] == "error"
+    assert error_state["queue_depth"] == 6
+    assert error_state["last_error"] == "LifeData request timeout"
+    assert before_error <= error_state["last_error_at"] <= after_error
+    assert error_state["last_seen_at"] == error_state["last_error_at"]
+
+    await service.update_status(
+        db,
+        {
+            "account_id": "1798826701211732",
+            "status": "online",
+            "queue_depth": 1,
+            "last_error": None,
+        },
+    )
+    online_state = db.collector_state_writes[-1]
+    assert online_state["status"] == "online"
+    assert online_state["queue_depth"] == 1
+    assert "last_error" not in online_state
+    assert "last_error_at" not in online_state
+
+
+@pytest.mark.asyncio
+async def test_status_upsert_is_monotonic_for_state_queue_and_error():
+    db = FakeAsyncSession()
+    service = LifeDataIngestService(task_creator_id=1)
+
+    await service.update_status(
+        db,
+        {
+            "account_id": "1798826701211732",
+            "status": "error",
+            "queue_depth": 5,
+            "last_error": "network timeout",
+        },
+    )
+
+    state_statement = next(
+        statement
+        for table_name, _values, statement in reversed(db.calls)
+        if table_name == "life_data_collector_state"
+    )
+    sql = str(state_statement.compile(dialect=postgresql.dialect())).lower()
+    assert "last_seen_at = greatest(" in sql
+    assert "updated_at = greatest(" in sql
+    assert "status = case when" in sql
+    assert "queue_depth = case when" in sql
+    assert "last_error_at = greatest(" in sql
+    assert "last_error = case when" in sql
 
 
 @pytest.mark.asyncio

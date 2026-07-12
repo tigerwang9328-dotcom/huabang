@@ -353,6 +353,9 @@ def _body_mapping(body: Any) -> dict[str, Any]:
         "schema_version",
         "event_id",
         "account_id",
+        "status",
+        "queue_depth",
+        "last_error",
         "page_path",
         "endpoint",
         "request_payload",
@@ -450,22 +453,38 @@ async def _upsert_collector_state(
     db: Any,
     *,
     account_id: str,
-    event_id: str,
     seen_at: datetime,
-    success: bool,
+    status: str,
+    queue_depth: int,
+    event_id: str | None = None,
+    success: bool = False,
+    last_error: str | None = None,
 ) -> None:
     values: dict[str, Any] = {
         "account_id": account_id,
-        "status": "online",
+        "status": status,
         "last_seen_at": seen_at,
+        "queue_depth": queue_depth,
         "updated_at": seen_at,
     }
     if success:
         values.update(last_success_at=seen_at, last_event_id=event_id)
+    if status == "error":
+        values.update(last_error_at=seen_at, last_error=last_error)
 
     statement = pg_insert(LifeDataCollectorState).values(**values)
+    incoming_is_latest = LifeDataCollectorState.last_seen_at.is_(None) | (
+        statement.excluded.last_seen_at >= LifeDataCollectorState.last_seen_at
+    )
     update_values: dict[str, Any] = {
-        "status": "online",
+        "status": case(
+            (incoming_is_latest, statement.excluded.status),
+            else_=LifeDataCollectorState.status,
+        ),
+        "queue_depth": case(
+            (incoming_is_latest, statement.excluded.queue_depth),
+            else_=LifeDataCollectorState.queue_depth,
+        ),
         "last_seen_at": func.greatest(
             LifeDataCollectorState.last_seen_at,
             statement.excluded.last_seen_at,
@@ -493,6 +512,24 @@ async def _upsert_collector_state(
                 else_=LifeDataCollectorState.last_event_id,
             ),
         )
+    if status == "error":
+        update_values.update(
+            last_error_at=func.greatest(
+                LifeDataCollectorState.last_error_at,
+                statement.excluded.last_error_at,
+            ),
+            last_error=case(
+                (
+                    LifeDataCollectorState.last_error_at.is_(None)
+                    | (
+                        statement.excluded.last_error_at
+                        > LifeDataCollectorState.last_error_at
+                    ),
+                    statement.excluded.last_error,
+                ),
+                else_=LifeDataCollectorState.last_error,
+            ),
+        )
     statement = statement.on_conflict_do_update(
         index_elements=[LifeDataCollectorState.account_id],
         set_=update_values,
@@ -511,6 +548,7 @@ class LifeDataIngestService:
         received_at = datetime.now(tz=UTC)
         event_id = str(payload["event_id"])
         account_id = str(payload["account_id"])
+        queue_depth = _to_int(payload.get("queue_depth"))
         request_payload = payload["request_payload"]
         response_payload = payload["response_payload"]
 
@@ -547,8 +585,10 @@ class LifeDataIngestService:
             await _upsert_collector_state(
                 db,
                 account_id=account_id,
-                event_id=event_id,
                 seen_at=received_at,
+                status="online",
+                queue_depth=queue_depth,
+                event_id=event_id,
                 success=True,
             )
             return IngestResult(True, 0, 0, 0)
@@ -705,8 +745,10 @@ class LifeDataIngestService:
         await _upsert_collector_state(
             db,
             account_id=account_id,
-            event_id=event_id,
             seen_at=received_at,
+            status="online",
+            queue_depth=queue_depth,
+            event_id=event_id,
             success=True,
         )
         return IngestResult(
@@ -714,4 +756,22 @@ class LifeDataIngestService:
             videos_seen=len(rows),
             snapshots_created=snapshots_created,
             tasks_created=tasks_created,
+        )
+
+    async def update_status(self, db: Any, body: Any) -> None:
+        """Persist a heartbeat or sanitized error using server receive time."""
+
+        payload = _body_mapping(body)
+        status = str(payload["status"])
+        last_error = payload.get("last_error")
+        if status == "error" and not str(last_error or "").strip():
+            raise ValueError("error collector status requires last_error")
+
+        await _upsert_collector_state(
+            db,
+            account_id=str(payload["account_id"]),
+            seen_at=datetime.now(tz=UTC),
+            status=status,
+            queue_depth=_to_int(payload.get("queue_depth")),
+            last_error=str(last_error) if last_error is not None else None,
         )

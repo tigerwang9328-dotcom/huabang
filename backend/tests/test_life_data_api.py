@@ -14,10 +14,14 @@ from app.api.v1 import life_data
 from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
-from app.schemas.life_data import LifeDataIngestRequest
+from app.schemas.life_data import (
+    LifeDataCollectorStatusRequest,
+    LifeDataIngestRequest,
+)
 
 
 PATH = "/api/v1/life-data/ingest"
+STATUS_PATH = "/api/v1/life-data/status"
 ACCOUNT_ID = "1798826701211732"
 VALID_TOKEN = "collector-secret"
 
@@ -39,6 +43,18 @@ def payload(**overrides):
             },
         },
         "captured_at": "2026-07-12T01:02:03Z",
+    }
+    body.update(overrides)
+    return body
+
+
+def status_payload(**overrides):
+    body = {
+        "schema_version": "1.0",
+        "account_id": ACCOUNT_ID,
+        "status": "online",
+        "queue_depth": 0,
+        "last_error": None,
     }
     body.update(overrides)
     return body
@@ -83,6 +99,17 @@ def isolate_ingest_dependencies(monkeypatch):
         life_data.LifeDataIngestService,
         "ingest",
         fake_ingest,
+    )
+
+    async def fake_update_status(self, db, body):
+        assert self.task_creator_id == settings.LIFE_DATA_TASK_CREATOR_ID
+        assert body.account_id == ACCOUNT_ID
+
+    monkeypatch.setattr(
+        life_data.LifeDataIngestService,
+        "update_status",
+        fake_update_status,
+        raising=False,
     )
 
     yield
@@ -381,3 +408,91 @@ def test_schema_rejects_sensitive_key_in_deep_json_without_recursion_error():
 
     with pytest.raises(ValidationError):
         LifeDataIngestRequest.model_validate(payload(request_payload=nested))
+
+
+def test_status_accepts_online_heartbeat(client, valid_token):
+    response = client.post(
+        STATUS_PATH,
+        json=status_payload(queue_depth=3),
+        headers={"X-Collector-Token": valid_token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"accepted": True}
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_status"),
+    [
+        (status_payload(account_id="wrong"), 403),
+        (status_payload(), 401),
+    ],
+)
+def test_status_enforces_fixed_account_and_token(
+    client,
+    valid_token,
+    body,
+    expected_status,
+):
+    headers = {} if expected_status == 401 else {"X-Collector-Token": valid_token}
+
+    response = client.post(STATUS_PATH, json=body, headers=headers)
+
+    assert response.status_code == expected_status
+
+
+def test_status_reuses_content_limit(client, valid_token, monkeypatch):
+    monkeypatch.setattr(settings, "LIFE_DATA_MAX_PAYLOAD_BYTES", 64)
+
+    response = client.post(
+        STATUS_PATH,
+        json=status_payload(last_error="x" * 50),
+        headers={"X-Collector-Token": valid_token},
+    )
+
+    assert response.status_code == 413
+
+
+def test_status_reuses_redis_rate_limit(client, valid_token, monkeypatch):
+    redis = SimpleNamespace(eval=AsyncMock(return_value=61))
+
+    async def fake_get_redis():
+        return redis
+
+    monkeypatch.setattr(life_data, "get_redis", fake_get_redis, raising=False)
+
+    response = client.post(
+        STATUS_PATH,
+        json=status_payload(),
+        headers={"X-Collector-Token": valid_token},
+    )
+
+    assert response.status_code == 429
+
+
+@pytest.mark.parametrize(
+    "invalid_body",
+    [
+        status_payload(status="error", last_error=None),
+        status_payload(status="error", last_error="   "),
+        status_payload(status="offline"),
+        status_payload(queue_depth=-1),
+        status_payload(queue_depth=101),
+        status_payload(last_error="x" * 501),
+        status_payload(extra_field="forbidden"),
+        status_payload(schema_version="1.1"),
+    ],
+)
+def test_status_schema_rejects_invalid_contract(invalid_body):
+    with pytest.raises(ValidationError):
+        LifeDataCollectorStatusRequest.model_validate(invalid_body)
+
+
+def test_status_schema_requires_error_text_and_allows_online_without_it():
+    error = LifeDataCollectorStatusRequest.model_validate(
+        status_payload(status="error", queue_depth=7, last_error="network timeout")
+    )
+    online = LifeDataCollectorStatusRequest.model_validate(status_payload())
+
+    assert error.last_error == "network timeout"
+    assert online.last_error is None

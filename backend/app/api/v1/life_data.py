@@ -12,7 +12,12 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.schemas.common import ApiResponse
-from app.schemas.life_data import LifeDataIngestRequest, LifeDataIngestResponse
+from app.schemas.life_data import (
+    LifeDataCollectorStatusRequest,
+    LifeDataCollectorStatusResponse,
+    LifeDataIngestRequest,
+    LifeDataIngestResponse,
+)
 from app.services.life_data_service import LifeDataIngestService
 
 
@@ -123,3 +128,33 @@ async def ingest_life_data(
         data.tasks_created,
     )
     return ApiResponse.ok(data=data)
+
+
+@router.post(
+    "/status",
+    response_model=ApiResponse[LifeDataCollectorStatusResponse],
+)
+async def report_life_data_collector_status(
+    body: LifeDataCollectorStatusRequest,
+    _content_length: None = Depends(enforce_content_length),
+    _: None = Depends(verify_collector_token),
+    _rate_limit: None = Depends(enforce_collector_rate_limit),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[LifeDataCollectorStatusResponse]:
+    """Persist one heartbeat or sanitized collector error state."""
+
+    if body.account_id != settings.LIFE_DATA_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="采集账号无权限")
+
+    service = LifeDataIngestService(
+        task_creator_id=settings.LIFE_DATA_TASK_CREATOR_ID,
+        alert_threshold=2_000,
+    )
+    await service.update_status(db, body)
+    logger.info(
+        "生意经采集器状态已接收 account_id=%s status=%s queue_depth=%s",
+        body.account_id,
+        body.status,
+        body.queue_depth,
+    )
+    return ApiResponse.ok(data=LifeDataCollectorStatusResponse())

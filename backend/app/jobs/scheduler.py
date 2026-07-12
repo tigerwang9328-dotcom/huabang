@@ -18,7 +18,10 @@ def setup_jobs():
     from app.jobs.report_jobs import run_morning_report
     from app.jobs.push_jobs import run_member_visit_push, run_replenishment_push, run_overdue_reminder
     from app.jobs.review_jobs import run_evening_diagnosis
-    from app.jobs.life_data_jobs import cleanup_life_data_captures
+    from app.jobs.life_data_jobs import (
+        cleanup_life_data_captures,
+        mark_stale_life_data_collectors_offline,
+    )
 
     # 每天凌晨1:00 - 同步百盛数据 + ETL
     scheduler.add_job(
@@ -113,6 +116,18 @@ def setup_jobs():
         name="LifeData原始采集数据清理",
         replace_existing=True,
         misfire_grace_time=3600,
+        coalesce=True,
+        max_instances=1,
+    )
+
+    # 每5分钟检查采集器心跳，超过15分钟未上报即标记离线
+    scheduler.add_job(
+        mark_stale_life_data_collectors_offline,
+        CronTrigger(minute="*/5", timezone="Asia/Shanghai"),
+        id="life_data_collector_offline",
+        name="LifeData采集器离线检查",
+        replace_existing=True,
+        misfire_grace_time=300,
         coalesce=True,
         max_instances=1,
     )

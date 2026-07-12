@@ -81,6 +81,7 @@ class LifeDataIngestRequest(BaseModel):
     request_payload: dict[str, Any]
     response_payload: dict[str, Any]
     captured_at: datetime
+    queue_depth: int = Field(default=0, ge=0, le=100)
 
     @field_validator("request_payload", "response_payload")
     @classmethod
@@ -112,3 +113,27 @@ class LifeDataIngestResponse(BaseModel):
     videos_seen: int = Field(ge=0)
     snapshots_created: int = Field(ge=0)
     tasks_created: int = Field(ge=0)
+
+
+class LifeDataCollectorStatusRequest(BaseModel):
+    """One server-timestamped collector heartbeat or error report."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1.0"]
+    account_id: str = Field(min_length=1, max_length=32)
+    status: Literal["online", "error"]
+    queue_depth: int = Field(default=0, ge=0, le=100)
+    last_error: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def require_error_message(self) -> "LifeDataCollectorStatusRequest":
+        if self.status == "error" and not (self.last_error or "").strip():
+            raise ValueError("error 状态必须包含 last_error")
+        return self
+
+
+class LifeDataCollectorStatusResponse(BaseModel):
+    """Acknowledgement returned without echoing collector details."""
+
+    accepted: Literal[True] = True

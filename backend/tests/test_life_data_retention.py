@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.models.life_data import LifeDataCapture
+from app.models.life_data import LifeDataCapture, LifeDataCollectorState
 
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -110,6 +110,63 @@ async def test_cleanup_rolls_back_logs_and_reraises_database_errors(
     assert "LifeData原始采集数据清理失败" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_stale_collector_job_marks_only_old_nonoffline_rows_and_commits(
+    monkeypatch,
+):
+    from app.jobs import life_data_jobs
+
+    now = datetime(2026, 7, 12, 4, 0, tzinfo=timezone.utc)
+    session = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(rowcount=1)),
+        commit=AsyncMock(),
+        rollback=AsyncMock(),
+    )
+    monkeypatch.setattr(life_data_jobs, "_utc_now", lambda: now)
+    monkeypatch.setattr(
+        life_data_jobs,
+        "AsyncSessionLocal",
+        lambda: _SessionContext(session),
+    )
+
+    updated = await life_data_jobs.mark_stale_life_data_collectors_offline()
+
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile()
+    sql = str(compiled)
+    assert statement.table.fullname == LifeDataCollectorState.__table__.fullname
+    assert "UPDATE app.life_data_collector_state" in sql
+    assert "last_seen_at < :" in sql
+    assert "status != :" in sql
+    assert now - timedelta(minutes=15) in compiled.params.values()
+    assert "offline" in compiled.params.values()
+    assert updated == 1
+    session.commit.assert_awaited_once_with()
+    session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_collector_job_rolls_back_and_reraises(monkeypatch):
+    from app.jobs import life_data_jobs
+
+    session = SimpleNamespace(
+        execute=AsyncMock(side_effect=RuntimeError("database unavailable")),
+        commit=AsyncMock(),
+        rollback=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        life_data_jobs,
+        "AsyncSessionLocal",
+        lambda: _SessionContext(session),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await life_data_jobs.mark_stale_life_data_collectors_offline()
+
+    session.rollback.assert_awaited_once_with()
+    session.commit.assert_not_awaited()
+
+
 def test_scheduler_registers_daily_life_data_cleanup(monkeypatch):
     from app.jobs import life_data_jobs
     from app.jobs import scheduler as scheduler_module
@@ -128,6 +185,31 @@ def test_scheduler_registers_daily_life_data_cleanup(monkeypatch):
     assert job["func"] is life_data_jobs.cleanup_life_data_captures
     assert fields["hour"] == "3"
     assert fields["minute"] == "20"
+    assert str(job["trigger"].timezone) == "Asia/Shanghai"
+    assert job["replace_existing"] is True
+    assert job["coalesce"] is True
+    assert job["max_instances"] == 1
+
+
+def test_scheduler_registers_collector_offline_check_every_five_minutes(
+    monkeypatch,
+):
+    from app.jobs import life_data_jobs
+    from app.jobs import scheduler as scheduler_module
+
+    recording_scheduler = _RecordingScheduler()
+    monkeypatch.setattr(scheduler_module, "scheduler", recording_scheduler)
+
+    scheduler_module.setup_jobs()
+
+    job = next(
+        job
+        for job in recording_scheduler.jobs
+        if job["id"] == "life_data_collector_offline"
+    )
+    fields = {field.name: str(field) for field in job["trigger"].fields}
+    assert job["func"] is life_data_jobs.mark_stale_life_data_collectors_offline
+    assert fields["minute"] == "*/5"
     assert str(job["trigger"].timezone) == "Asia/Shanghai"
     assert job["replace_existing"] is True
     assert job["coalesce"] is True
