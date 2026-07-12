@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.0.1
+// @version      1.0.2
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @match        https://www.life-data.cn/*
 // @run-at       document-start
@@ -450,25 +450,71 @@
       }
     }
 
+    function clearStatusErrorTimer() {
+      if (state.statusErrorTimer !== null) {
+        page.clearTimeout(state.statusErrorTimer)
+        state.statusErrorTimer = null
+      }
+    }
+
     function setError(message) {
       state.error = String(message || '')
       updatePanel()
       if (state.error) {
         scheduleStatusError(state.error)
-      } else if (state.ready && state.isLeader) {
-        if (state.statusErrorTimer !== null) {
-          page.clearTimeout(state.statusErrorTimer)
-          state.statusErrorTimer = null
-        }
-        void postCollectorStatus('online')
+      } else {
+        clearStatusErrorTimer()
+        if (state.ready && state.isLeader) void postCollectorStatus('online')
       }
     }
 
     function setStatus(patch) {
-      Object.assign(state, patch)
-      updatePanel()
+      const next = { ...(patch || {}) }
+      const hasError = Object.prototype.hasOwnProperty.call(next, 'error')
+      const error = next.error
+      delete next.error
+      Object.assign(state, next)
+      if (hasError) setError(error)
+      else updatePanel()
     }
 
+    function hasConfirmedLeaderLease(now = Date.now()) {
+      const first = getValue(KEYS.leader, null)
+      const second = getValue(KEYS.leader, null)
+      return Boolean(
+        first &&
+          second &&
+          first.tabId === tabId &&
+          second.tabId === tabId &&
+          Number(first.expiresAt) === Number(second.expiresAt) &&
+          Number(first.expiresAt) > now,
+      )
+    }
+
+    async function runExclusiveAction(action) {
+      if (!state.isLeader || !hasConfirmedLeaderLease()) {
+        applyLeadership(false)
+        return false
+      }
+      const locks = page.navigator && page.navigator.locks
+      if (!locks || typeof locks.request !== 'function') return action()
+      let actionStarted = false
+      try {
+        return await locks.request(
+          'huabang-life-data-action',
+          { ifAvailable: true, mode: 'exclusive' },
+          async (lock) => {
+            if (!lock || !hasConfirmedLeaderLease()) return false
+            actionStarted = true
+            return action()
+          },
+        )
+      } catch (error) {
+        if (actionStarted) throw error
+        setError('浏览器互斥锁获取失败，本次采集动作已取消')
+        return false
+      }
+    }
     function findFieldValue(root, names) {
       const wanted = new Set(names.map((name) => name.toLowerCase()))
       const stack = [root]
@@ -811,13 +857,16 @@
         if (state.ready && synchronizeLeadership()) maybeCollectNewTemplate()
         return
       }
-      await publishCapture(template, template.requestPayload, response)
+      if (!state.ready || !synchronizeLeadership()) return
+      await runExclusiveAction(() =>
+        publishCapture(template, template.requestPayload, response),
+      )
     }
     async function replayLifeData(template, requestPayload) {
       const headers = pickLifeDataHeaders(getValue(KEYS.headers, {}))
       assertExpectedAccount(requestPayload, headers, page.location.href)
-      const response = await page.fetch.call(
-        page,
+      if (!nativePageFetch) throw new Error('LifeData 原生 fetch 不可用')
+      const response = await nativePageFetch(
         `${LIFE_DATA_ORIGIN}${template.endpoint}`,
         {
           method: 'POST',
@@ -835,8 +884,7 @@
         throw new Error(`LifeData API 返回非 0：${String(businessJson.code)}`)
       }
       return businessJson
-    }
-    function newEventId() {
+    }    function newEventId() {
       return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
         ? globalThis.crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(16).slice(2)}-event`
@@ -848,8 +896,12 @@
     }
 
     function writeQueue(queue) {
-      setValue(KEYS.queue, queue)
+      if (!setValue(KEYS.queue, queue)) {
+        setError('离线队列写入失败，事件状态未保存')
+        return false
+      }
       updatePanel()
+      return true
     }
 
     function sanitizeStatusError(message) {
@@ -985,7 +1037,9 @@
         },
         100,
       )
-      writeQueue(next)
+      if (!writeQueue(next)) {
+        return { status: 'queue_failed', dropped: false }
+      }
       if (dropped) setError('离线队列已满，已丢弃最旧事件')
       return { status: 'queued', dropped }
     }
@@ -1002,7 +1056,9 @@
           return { status: 'discarded', dropped: false }
         }
         const result = queuePayload(payload)
-        if (!result.dropped) setError('上传失败，事件已进入离线队列')
+        if (result.status === 'queued' && !result.dropped) {
+          setError('上传失败，事件已进入离线队列')
+        }
         return result
       }
     }
@@ -1035,7 +1091,7 @@
         const latest = readQueue().filter(
           (queued) => queued.payload.event_id !== item.payload.event_id,
         )
-        writeQueue(latest)
+        if (!writeQueue(latest)) return
         setStatus({ lastUpload: new Date().toISOString() })
         if (latest.length === 0) setError('')
       } catch (error) {
@@ -1045,7 +1101,7 @@
         )
         if (error.retryable === false) {
           if (failedIndex >= 0) latest.splice(failedIndex, 1)
-          writeQueue(latest)
+          if (!writeQueue(latest)) return
           setError(`永久上传错误，事件已移出队列：${error.message}`)
         } else {
           const failed = failedIndex >= 0 ? latest[failedIndex] : null
@@ -1053,7 +1109,7 @@
             failed.attempt = Number(failed.attempt || 0) + 1
             failed.nextAttemptAt =
               Date.now() + retryDelayForAttempt(failed.attempt)
-            writeQueue(latest)
+            if (!writeQueue(latest)) return
           }
           setError('离线队列重试失败，将按退避时间继续')
         }
@@ -1061,6 +1117,7 @@
         state.flushing = false
       }
     }
+
     async function collectVideo() {
       if (!state.isLeader) {
         setError('其他标签正在负责定时采集')
@@ -1129,7 +1186,8 @@
             new Date(),
           )
           const response = await replayLifeData(template, request)
-          await publishCapture(template, request, response)
+          const result = await publishCapture(template, request, response)
+          if (result.status === 'uploaded') setError('')
         } catch (error) {
           setError(`业务模板重放失败：${error.message || '未知错误'}`)
         }
@@ -1141,24 +1199,38 @@
       const template = latestVideoTemplate()
       if (!template || Number(template.learnedAt) <= state.triggeredTemplateAt) return
       state.triggeredTemplateAt = Number(template.learnedAt)
-      void collectVideo()
+      void runExclusiveAction(() => collectVideo())
     }
 
     function startLeaderTimers() {
       if (state.videoTimer !== null) return
-      state.videoTimer = page.setInterval(() => void collectVideo(), VIDEO_INTERVAL)
+      state.videoTimer = page.setInterval(() => {
+        if (synchronizeLeadership()) {
+          void runExclusiveAction(() => collectVideo())
+        }
+      }, VIDEO_INTERVAL)
       state.otherTimer = page.setInterval(
-        () => void replayOtherTemplates(),
+        () => {
+          if (synchronizeLeadership()) {
+            void runExclusiveAction(() => replayOtherTemplates())
+          }
+        },
         OTHER_INTERVAL,
       )
-      state.queueTimer = page.setInterval(() => void flushQueue(), 5_000)
+      state.queueTimer = page.setInterval(() => {
+        if (synchronizeLeadership()) {
+          void runExclusiveAction(() => flushQueue())
+        }
+      }, 5_000)
       state.statusTimer = page.setInterval(
-        () => void postCollectorStatus('online'),
+        () => {
+          if (synchronizeLeadership()) void postCollectorStatus('online')
+        },
         60_000,
       )
       void postCollectorStatus('online')
       maybeCollectNewTemplate()
-      void flushQueue()
+      void runExclusiveAction(() => flushQueue())
     }
 
     function stopLeaderTimers() {
@@ -1177,17 +1249,7 @@
       }
     }
 
-    function synchronizeLeadership() {
-      const now = Date.now()
-      const decision = nextLeaderLease(getValue(KEYS.leader, null), tabId, now)
-      if (decision.isLeader) setValue(KEYS.leader, decision.lease)
-      const confirmed = getValue(KEYS.leader, null)
-      const isLeader = Boolean(
-        decision.isLeader &&
-          confirmed &&
-          confirmed.tabId === tabId &&
-          Number(confirmed.expiresAt) > now,
-      )
+    function applyLeadership(isLeader) {
       const changed = state.isLeader !== isLeader
       state.isLeader = isLeader
       if (isLeader) {
@@ -1199,6 +1261,15 @@
       if (changed) updatePanel()
       return isLeader
     }
+
+    function synchronizeLeadership() {
+      const now = Date.now()
+      const decision = nextLeaderLease(getValue(KEYS.leader, null), tabId, now)
+      const wroteLease = decision.isLeader && setValue(KEYS.leader, decision.lease)
+      const isLeader = Boolean(wroteLease && hasConfirmedLeaderLease(now))
+      return applyLeadership(isLeader)
+    }
+
     function formatTime(value) {
       if (!value) return '—'
       try {
@@ -1265,7 +1336,7 @@
           setError('其他标签持有主标签租约，请在主标签立即采集')
           return
         }
-        void collectVideo()
+        void runExclusiveAction(() => collectVideo())
       })
       state.panel = {
         account: shadow.querySelector('.account'),
@@ -1293,7 +1364,9 @@
       if (typeof entered === 'string' && entered.trim()) {
         setValue(KEYS.token, entered.trim())
         setError('')
-        if (state.isLeader) void flushQueue()
+        if (state.isLeader) {
+          void runExclusiveAction(() => flushQueue())
+        }
         return true
       }
       setError('采集令牌未配置，采集结果只会保存在离线队列')
@@ -1316,7 +1389,9 @@
     ensureObservers()
     installSpaObserver()
     GM_registerMenuCommand('立即采集 LifeData 视频', () => {
-      if (synchronizeLeadership()) void collectVideo()
+      if (synchronizeLeadership()) {
+        void runExclusiveAction(() => collectVideo())
+      }
     })
     GM_registerMenuCommand('配置/更换采集令牌', () => ensureToken(true))
 

@@ -111,16 +111,16 @@ function jsonResponse(body, url = DITO_URL) {
 }
 
 function createHarness(options = {}) {
-  const storage = new Map([
-    ...(options.withToken === false
-      ? []
-      : [['lifeDataCollectorToken', 'collector-token']]),
-    ...(options.storage || []),
-  ])
+  const storage = options.sharedStorage || new Map()
+  if (options.withToken !== false && !storage.has('lifeDataCollectorToken')) {
+    storage.set('lifeDataCollectorToken', 'collector-token')
+  }
+  for (const [key, value] of options.storage || []) storage.set(key, value)
   const gmRequests = []
   const menus = new Map()
   const intervals = []
   const timeouts = []
+  let timeoutId = 0
   const createdNodes = []
   let sandboxPromptCalls = 0
   let pagePromptCalls = 0
@@ -174,6 +174,7 @@ function createHarness(options = {}) {
       href: `https://www.life-data.cn/flow/content/analysis/video?groupid=${ACCOUNT_ID}`,
       pathname: '/flow/content/analysis/video',
     },
+    navigator: { locks: options.locks || null },
     history: {
       pushState() {},
       replaceState() {},
@@ -188,10 +189,14 @@ function createHarness(options = {}) {
     },
     clearInterval() {},
     setTimeout(callback, delay) {
-      timeouts.push({ callback, delay })
-      return timeouts.length
+      timeoutId += 1
+      timeouts.push({ id: timeoutId, callback, delay, canceled: false })
+      return timeoutId
     },
-    clearTimeout() {},
+    clearTimeout(id) {
+      const timer = timeouts.find((entry) => entry.id === id)
+      if (timer) timer.canceled = true
+    },
     addEventListener: pageEvents.addEventListener.bind(pageEvents),
     removeEventListener: pageEvents.removeEventListener.bind(pageEvents),
   }
@@ -221,6 +226,9 @@ function createHarness(options = {}) {
       return storage.has(key) ? storage.get(key) : fallback
     },
     GM_setValue(key, value) {
+      if (options.gmSetFailure && options.gmSetFailure(key, value)) {
+        throw new Error(`GM_setValue failed for ${key}`)
+      }
       storage.set(key, structuredClone(value))
     },
     GM_registerMenuCommand(label, callback) {
@@ -244,6 +252,7 @@ function createHarness(options = {}) {
     crypto: {
       randomUUID() {
         uuid += 1
+        if (uuid === 1 && options.tabId) return options.tabId
         return `00000000-0000-4000-8000-${String(uuid).padStart(12, '0')}`
       },
     },
@@ -431,6 +440,7 @@ async function waitFor(predicate, message) {
 
 test('HTTP 200 business code 400 is permanent and never enters the queue', async () => {
   const harness = createHarness({
+    ready: true,
     gmResponder: () => ({
       status: 200,
       body: { success: false, code: 400 },
@@ -449,6 +459,7 @@ test('HTTP 200 business code 400 is permanent and never enters the queue', async
 
 test('HTTP 503 remains retryable and enters the bounded queue', async () => {
   const harness = createHarness({
+    ready: true,
     gmResponder: () => ({ status: 503, body: { success: false, code: 503 } }),
   })
 
@@ -786,4 +797,222 @@ test('queued video page uploads keep the collection error visible', async () => 
   )
 
   assert.match(harness.panelText('.error'), /队列|上传失败/)
+})
+test('active replay of one other template creates exactly one additional ingest', async () => {
+  const harness = createHarness({
+    ready: true,
+    fetchResponse(url) {
+      return jsonResponse(
+        { code: 0, data: { contentSummary: { play_count: 11 } } },
+        String(url),
+      )
+    },
+  })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await waitFor(() => ingestRequests(harness).length === 1, 'initial ingest missing')
+  const before = ingestRequests(harness).length
+  const replayTimer = harness.intervals.find(
+    (entry) => entry.delay === 1_800_000,
+  )
+  assert.ok(replayTimer)
+  replayTimer.callback()
+  await waitFor(
+    () => ingestRequests(harness).length >= 2,
+    'active other replay ingest missing',
+  )
+  await harness.flush()
+
+  assert.equal(before, 1)
+  assert.equal(ingestRequests(harness).length, 2)
+  assert.equal(harness.nativeFetchCalls.length, 1)
+})
+
+test('successful recovery cancels a pending debounced status error', async () => {
+  let permanent = true
+  const harness = createHarness({
+    ready: true,
+    gmResponder(request) {
+      if (request.url.endsWith('/status')) {
+        return { status: 200, body: { success: true, code: 200 } }
+      }
+      return permanent
+        ? { status: 200, body: { success: false, code: 400 } }
+        : { status: 200, body: { success: true, code: 200 } }
+    },
+  })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+  assert.equal(
+    harness.timeouts.filter((entry) => entry.delay === 30_000).length,
+    1,
+  )
+
+  permanent = false
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 12 } } },
+  )
+  await harness.flush()
+  for (const timer of harness.timeouts.filter(
+    (entry) => entry.delay === 30_000 && !entry.canceled,
+  )) {
+    timer.callback()
+  }
+  await harness.flush()
+
+  const errorStatuses = statusRequests(harness)
+    .map((request) => JSON.parse(request.data))
+    .filter((body) => body.status === 'error')
+  assert.equal(errorStatuses.length, 0)
+})
+
+test('a failed GM leader write cannot retain leadership from an old lease', () => {
+  const tabId = '00000000-0000-4000-8000-000000000001'
+  const harness = createHarness({
+    ready: true,
+    storage: [[
+      'lifeDataLeader',
+      { tabId, expiresAt: Date.now() + 60_000 },
+    ]],
+    gmSetFailure(key) {
+      return key === 'lifeDataLeader'
+    },
+  })
+
+  assert.equal(
+    harness.intervals.some((entry) => entry.delay === 300_000),
+    false,
+  )
+  assert.equal(harness.panelText('.leader'), '待命标签')
+})
+
+test('a failed GM queue write is explicit and is never reported as queued', async () => {
+  const harness = createHarness({
+    ready: true,
+    gmSetFailure(key) {
+      return key === 'lifeDataQueue'
+    },
+    gmResponder(request) {
+      return request.url.endsWith('/ingest')
+        ? { status: 503, body: { success: false, code: 503 } }
+        : { status: 200, body: { success: true, code: 200 } }
+    },
+  })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+
+  assert.equal(harness.storage.has('lifeDataQueue'), false)
+  assert.match(harness.panelText('.error'), /队列写入失败|未保存/)
+})
+test('nonleader only learns other templates while the leader replays once', async () => {
+  const sharedStorage = new Map([
+    ['lifeDataCollectorToken', 'collector-token'],
+  ])
+  const leader = createHarness({
+    ready: true,
+    sharedStorage,
+    tabId: 'leader-tab',
+    fetchResponse(url) {
+      return jsonResponse(
+        { code: 0, data: { contentSummary: { play_count: 20 } } },
+        String(url),
+      )
+    },
+  })
+  const follower = createHarness({
+    ready: true,
+    sharedStorage,
+    tabId: 'follower-tab',
+  })
+
+  observeXhr(
+    follower,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await follower.flush()
+  assert.equal(ingestRequests(follower).length, 0)
+  assert.equal((sharedStorage.get('lifeDataQueue') || []).length, 0)
+
+  const replayTimer = leader.intervals.find(
+    (entry) => entry.delay === 1_800_000,
+  )
+  assert.ok(replayTimer)
+  replayTimer.callback()
+  await waitFor(
+    () => ingestRequests(leader).length === 1,
+    'leader did not replay the shared other template',
+  )
+  assert.equal(ingestRequests(leader).length, 1)
+})
+
+test('Chrome Web Locks wraps observed other upload as one exclusive action', async () => {
+  const lockCalls = []
+  const locks = {
+    request(name, options, callback) {
+      lockCalls.push({ name, options })
+      return Promise.resolve(callback({ name }))
+    },
+  }
+  const harness = createHarness({ ready: true, locks })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await waitFor(() => ingestRequests(harness).length === 1, 'ingest missing')
+
+  assert.equal(
+    lockCalls.some(
+      (call) =>
+        call.name === 'huabang-life-data-action' &&
+        call.options.ifAvailable === true &&
+        call.options.mode === 'exclusive',
+    ),
+    true,
+  )
+})
+test('flush keeps an explicit error when removing an uploaded queue item cannot be stored', async () => {
+  const payload = {
+    schema_version: '1.0',
+    event_id: 'queue-write-failure-after-upload',
+    account_id: ACCOUNT_ID,
+    page_path: '/summary',
+    endpoint: '/api/dito/query',
+    queue_depth: 1,
+    request_payload: {},
+    response_payload: { code: 0 },
+    captured_at: '2026-07-12T00:00:00.000Z',
+  }
+  const harness = createHarness({
+    ready: true,
+    storage: [[
+      'lifeDataQueue',
+      [{ payload, attempt: 0, nextAttemptAt: 0 }],
+    ]],
+    gmSetFailure(key) {
+      return key === 'lifeDataQueue'
+    },
+  })
+  await harness.flush()
+
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 1)
+  assert.match(harness.panelText('.error'), /队列写入失败|未保存/)
 })
