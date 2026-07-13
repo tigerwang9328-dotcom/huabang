@@ -28,6 +28,7 @@ const routes = [
     children: [
       { path: "", redirect: "/app/dashboard" },
       { path: "dashboard", name: "Dashboard", component: () => import("@/views/dashboard/Index.vue"), meta: { title: "经营总览" } },
+      { path: "marketing/investment", name: "InvestmentOptimization", component: () => import("@/views/marketing/InvestmentOptimization.vue"), meta: { title: "投流优化" } },
       { path: "boss", name: "Boss", component: () => import("@/views/boss/Index.vue"), meta: { title: "经营日报" } },
       { path: "ai-diagnosis", name: "AiDiagnosis", redirect: "/app/ai-diagnosis/overview", meta: { title: "AI经营诊断" } },
       { path: "ai-diagnosis/overview", name: "AiDiagnosisOverview", component: () => import("@/views/diagnosis/Index.vue"), meta: { title: "AI经营诊断" } },

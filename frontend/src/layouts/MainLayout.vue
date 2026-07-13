@@ -234,6 +234,12 @@ const menuGroups = computed<MenuGroup[]>(() => [
     permission: "dashboard:overview:view",
   },
   {
+    path: "/app/marketing/investment",
+    label: "投流优化",
+    icon: TrendCharts,
+    permission: "dashboard:overview:view",
+  },
+  {
     label: "AI经营诊断",
     icon: ChatDotRound,
     permission: "diagnosis:overall:view",
