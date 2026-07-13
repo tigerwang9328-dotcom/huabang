@@ -241,6 +241,7 @@ function createHarness(options = {}) {
         ? options.gmResponder(request, gmRequests.length)
         : { status: 200, body: { success: true, code: 200 } }
       queueMicrotask(() => {
+        if (response && response.type === 'manual') return
         if (response && response.type === 'error') request.onerror({})
         else if (response && response.type === 'timeout') request.ontimeout({})
         else
@@ -439,12 +440,48 @@ async function waitFor(predicate, message) {
   assert.fail(message)
 }
 
+function createSharedLockManager() {
+  const active = new Set()
+  const pending = new Map()
+  const calls = []
+  const drain = (name) => {
+    if (active.has(name)) return
+    const queue = pending.get(name) || []
+    const entry = queue.shift()
+    if (!entry) return
+    active.add(name)
+    Promise.resolve()
+      .then(() => entry.callback({ name }))
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        active.delete(name)
+        drain(name)
+      })
+  }
+  return {
+    calls,
+    locks: {
+      request(name, options, callback) {
+        calls.push({ name, options })
+        return new Promise((resolve, reject) => {
+          const queue = pending.get(name) || []
+          queue.push({ callback, resolve, reject })
+          pending.set(name, queue)
+          drain(name)
+        })
+      },
+    },
+  }
+}
 
 function createBusyLockController() {
   let busy = true
   const pending = []
   const locks = {
     request(name, options, callback) {
+      if (name === 'huabang-life-data-queue') {
+        return Promise.resolve(callback({ name }))
+      }
       if (options.ifAvailable) {
         return Promise.resolve(callback(busy ? null : { name }))
       }
@@ -1242,8 +1279,11 @@ test('busy scheduled lock leaves a new video template retryable on maintenance',
 
 test('rejected waiting Web Lock reports an explicit collector error', async () => {
   const locks = {
-    request() {
-      return Promise.reject(new Error('lock service unavailable'))
+    request(name, _options, callback) {
+      if (name === 'huabang-life-data-action') {
+        return Promise.reject(new Error('lock service unavailable'))
+      }
+      return Promise.resolve(callback({ name }))
     },
   }
   const harness = createHarness({ ready: true, locks })
@@ -1287,6 +1327,145 @@ test('Chrome Web Locks wraps observed other upload as one exclusive action', asy
     true,
   )
 })
+
+test('shared queue lock preserves fallback while another tab flushes', async () => {
+  const oldPayload = {
+    schema_version: '1.0',
+    event_id: 'old-event',
+    account_id: ACCOUNT_ID,
+    page_path: '/summary',
+    endpoint: '/api/dito/query',
+    queue_depth: 1,
+    request_payload: {},
+    response_payload: { code: 0 },
+    captured_at: '2026-07-12T00:00:00.000Z',
+  }
+  const sharedStorage = new Map([
+    ['lifeDataCollectorToken', 'collector-token'],
+    [
+      'lifeDataQueue',
+      [{ payload: oldPayload, attempt: 0, nextAttemptAt: 0 }],
+    ],
+  ])
+  const sharedQueueLock = createSharedLockManager()
+  const leaderLocks = {
+    request(name, options, callback) {
+      if (name === 'huabang-life-data-queue') {
+        return sharedQueueLock.locks.request(name, options, callback)
+      }
+      return Promise.resolve(callback({ name }))
+    },
+  }
+  const fallbackLocks = {
+    request(name, options, callback) {
+      if (name === 'huabang-life-data-queue') {
+        return sharedQueueLock.locks.request(name, options, callback)
+      }
+      return Promise.reject(new Error('force observed fallback'))
+    },
+  }
+  const leader = createHarness({
+    ready: true,
+    sharedStorage,
+    tabId: 'queue-leader',
+    locks: leaderLocks,
+    gmResponder(request) {
+      return request.url.endsWith('/ingest')
+        ? { type: 'manual' }
+        : { status: 200, body: { success: true, code: 200 } }
+    },
+  })
+  await waitFor(
+    () => ingestRequests(leader).length === 1,
+    'leader flush did not start',
+  )
+
+  const currentQueue = structuredClone(sharedStorage.get('lifeDataQueue'))
+  currentQueue[0].nextAttemptAt = Date.now() + 60_000
+  sharedStorage.set('lifeDataQueue', currentQueue)
+  sharedStorage.set('lifeDataLeader', {
+    tabId: 'fallback-tab',
+    expiresAt: Date.now() + 60_000,
+  })
+  const fallback = createHarness({
+    ready: true,
+    sharedStorage,
+    tabId: 'fallback-tab',
+    locks: fallbackLocks,
+  })
+  observeXhr(
+    fallback,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 99 } } },
+  )
+  await waitFor(
+    () => (sharedStorage.get('lifeDataQueue') || []).length === 2,
+    'fallback event was not queued while flush was pending',
+  )
+
+  ingestRequests(leader)[0].onload({
+    status: 200,
+    responseText: JSON.stringify({ success: true, code: 200 }),
+  })
+  await waitFor(
+    () =>
+      (sharedStorage.get('lifeDataQueue') || []).length === 1 &&
+      sharedStorage.get('lifeDataQueue')[0].payload.event_id !== 'old-event',
+    'flush lost fallback event or resurrected old event',
+  )
+
+  const finalQueue = sharedStorage.get('lifeDataQueue')
+  assert.equal(finalQueue.length, 1)
+  assert.equal(finalQueue[0].payload.event_id === 'old-event', false)
+  assert.equal(
+    finalQueue[0].payload.response_payload.data.contentSummary.play_count,
+    99,
+  )
+  const queueLockCalls = sharedQueueLock.calls.filter(
+    (call) => call.name === 'huabang-life-data-queue',
+  )
+  assert.equal(queueLockCalls.length >= 2, true)
+  assert.equal(
+    queueLockCalls.every(
+      (call) =>
+        call.options.mode === 'exclusive' &&
+        !Object.prototype.hasOwnProperty.call(call.options, 'ifAvailable'),
+    ),
+    true,
+  )
+})
+
+test('queue Web Lock rejection is explicit and never claims queued', async () => {
+  const locks = {
+    request(name, _options, callback) {
+      if (name === 'huabang-life-data-queue') {
+        return Promise.reject(new Error('queue lock unavailable'))
+      }
+      return Promise.resolve(callback({ name }))
+    },
+  }
+  const harness = createHarness({
+    ready: true,
+    locks,
+    gmResponder(request) {
+      return request.url.endsWith('/ingest')
+        ? { status: 503, body: { success: false, code: 503 } }
+        : { status: 200, body: { success: true, code: 200 } }
+    },
+  })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
+  assert.match(harness.panelText('.error'), /队列.*锁.*失败|状态未保存/)
+  assert.doesNotMatch(harness.panelText('.error'), /已进入离线队列/)
+})
+
 test('flush keeps an explicit error when removing an uploaded queue item cannot be stored', async () => {
   const payload = {
     schema_version: '1.0',

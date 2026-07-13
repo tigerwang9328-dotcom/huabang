@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.0.4
+// @version      1.0.5
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @match        https://www.life-data.cn/*
 // @run-at       document-start
@@ -938,10 +938,10 @@
       setStatus({ lastCapture: payload.captured_at, error: '' })
       if (!state.ready || !synchronizeLeadership()) return
       const result = await runExclusiveAction(
-        () => {
+        async () => {
           if (!hasConfirmedLeaderLease()) {
             applyLeadership(false)
-            const queued = queuePayload(payload)
+            const queued = await queuePayload(payload)
             if (queued.status === 'queued' && !queued.dropped) {
               setError('主标签已切换，事件已进入离线队列')
             }
@@ -952,7 +952,7 @@
         'observed',
       )
       if (result && result.status === 'lock_unavailable') {
-        const queued = queuePayload(payload)
+        const queued = await queuePayload(payload)
         if (queued.status === 'queued' && !queued.dropped) {
           setError(`${result.message}，事件已进入离线队列`)
         }
@@ -1018,6 +1018,45 @@
       }
       updatePanel()
       return true
+    }
+
+    async function mutateQueueExclusive(mutator) {
+      const mutate = () => {
+        const before = readQueue()
+        let mutation
+        try {
+          mutation = mutator(before)
+        } catch (_error) {
+          setError('离线队列更新失败，事件状态未保存')
+          return { status: 'queue_failed', queue: before, value: null }
+        }
+        const next = mutation && mutation.queue
+        if (!Array.isArray(next)) {
+          setError('离线队列更新结果无效，事件状态未保存')
+          return { status: 'queue_failed', queue: before, value: null }
+        }
+        if (!writeQueue(next)) {
+          return { status: 'queue_failed', queue: before, value: null }
+        }
+        return {
+          status: 'mutated',
+          queue: next,
+          value: mutation.value,
+        }
+      }
+
+      const locks = page.navigator && page.navigator.locks
+      if (!locks || typeof locks.request !== 'function') return mutate()
+      try {
+        return await locks.request(
+          'huabang-life-data-queue',
+          { mode: 'exclusive' },
+          mutate,
+        )
+      } catch (_error) {
+        setError('离线队列互斥锁获取失败，事件状态未保存')
+        return { status: 'queue_failed', queue: readQueue(), value: null }
+      }
     }
 
     function sanitizeStatusError(message) {
@@ -1141,21 +1180,26 @@
       })
     }
 
-    function queuePayload(payload) {
-      const before = readQueue()
-      const dropped = before.length >= 100
-      const next = enqueueBounded(
-        before,
-        {
-          payload,
-          attempt: 0,
-          nextAttemptAt: Date.now() + retryDelayForAttempt(0),
-        },
-        100,
-      )
-      if (!writeQueue(next)) {
+    async function queuePayload(payload) {
+      const mutation = await mutateQueueExclusive((before) => {
+        const dropped = before.length >= 100
+        return {
+          queue: enqueueBounded(
+            before,
+            {
+              payload,
+              attempt: 0,
+              nextAttemptAt: Date.now() + retryDelayForAttempt(0),
+            },
+            100,
+          ),
+          value: { dropped },
+        }
+      })
+      if (mutation.status === 'queue_failed') {
         return { status: 'queue_failed', dropped: false }
       }
+      const dropped = Boolean(mutation.value && mutation.value.dropped)
       if (dropped) setError('离线队列已满，已丢弃最旧事件')
       return { status: 'queued', dropped }
     }
@@ -1171,7 +1215,7 @@
           setError(`永久上传错误：${error.message}`)
           return { status: 'discarded', dropped: false }
         }
-        const result = queuePayload(payload)
+        const result = await queuePayload(payload)
         if (result.status === 'queued' && !result.dropped) {
           setError('上传失败，事件已进入离线队列')
         }
@@ -1215,29 +1259,42 @@
       const item = queue[index]
       try {
         await postPayload(item.payload)
-        const latest = readQueue().filter(
-          (queued) => queued.payload.event_id !== item.payload.event_id,
-        )
-        if (!writeQueue(latest)) return
+        const mutation = await mutateQueueExclusive((latest) => ({
+          queue: latest.filter(
+            (queued) => queued.payload.event_id !== item.payload.event_id,
+          ),
+          value: null,
+        }))
+        if (mutation.status === 'queue_failed') return
         setStatus({ lastUpload: new Date().toISOString() })
-        if (latest.length === 0) setError('')
+        if (mutation.queue.length === 0) setError('')
       } catch (error) {
-        const latest = readQueue()
-        const failedIndex = latest.findIndex(
-          (queued) => queued.payload.event_id === item.payload.event_id,
-        )
         if (error.retryable === false) {
-          if (failedIndex >= 0) latest.splice(failedIndex, 1)
-          if (!writeQueue(latest)) return
+          const mutation = await mutateQueueExclusive((latest) => ({
+            queue: latest.filter(
+              (queued) => queued.payload.event_id !== item.payload.event_id,
+            ),
+            value: null,
+          }))
+          if (mutation.status === 'queue_failed') return
           setError(`永久上传错误，事件已移出队列：${error.message}`)
         } else {
-          const failed = failedIndex >= 0 ? latest[failedIndex] : null
-          if (failed) {
-            failed.attempt = Number(failed.attempt || 0) + 1
-            failed.nextAttemptAt =
-              Date.now() + retryDelayForAttempt(failed.attempt)
-            if (!writeQueue(latest)) return
-          }
+          const mutation = await mutateQueueExclusive((latest) => ({
+            queue: latest.map((queued) => {
+              if (queued.payload.event_id !== item.payload.event_id) {
+                return queued
+              }
+              const attempt = Number(queued.attempt || 0) + 1
+              return {
+                ...queued,
+                attempt,
+                nextAttemptAt:
+                  Date.now() + retryDelayForAttempt(attempt),
+              }
+            }),
+            value: null,
+          }))
+          if (mutation.status === 'queue_failed') return
           setError('离线队列重试失败，将按退避时间继续')
         }
       } finally {
