@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.0.3
+// @version      1.0.4
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @match        https://www.life-data.cn/*
 // @run-at       document-start
@@ -409,6 +409,9 @@
     const VIDEO_PATH = '/flow/content/analysis/video'
     const VIDEO_INTERVAL = 300_000
     const OTHER_INTERVAL = 1_800_000
+    const REPLAY_FETCH_TIMEOUT = 20_000
+    const OBSERVED_LOCK_WAIT_TIMEOUT = 30_000
+    const OBSERVED_LOCK_WAITER_LIMIT = 20
     const tabId =
       globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
         ? globalThis.crypto.randomUUID()
@@ -424,6 +427,7 @@
       queueTimer: null,
       statusTimer: null,
       statusErrorTimer: null,
+      observedLockWaiters: 0,
       triggeredTemplateAt: 0,
       lastCapture: '',
       lastUpload: '',
@@ -492,34 +496,97 @@
     }
 
     async function runExclusiveAction(action, actionType = 'scheduled') {
+      const waitsForLock = actionType === 'observed'
+      const unavailable = (reason, message) => ({
+        status: 'lock_unavailable',
+        reason,
+        message,
+      })
       if (!state.isLeader || !hasConfirmedLeaderLease()) {
         applyLeadership(false)
-        return false
+        return waitsForLock
+          ? unavailable('leadership_lost', '主标签租约已失效')
+          : false
       }
       const locks = page.navigator && page.navigator.locks
       if (!locks || typeof locks.request !== 'function') return action()
-      const waitsForLock = actionType === 'observed'
+      if (
+        waitsForLock &&
+        state.observedLockWaiters >= OBSERVED_LOCK_WAITER_LIMIT
+      ) {
+        return unavailable('waiter_limit', '浏览器互斥锁等待数量已达上限')
+      }
+
       const lockOptions = waitsForLock
         ? { mode: 'exclusive' }
         : { ifAvailable: true, mode: 'exclusive' }
       let actionStarted = false
+      let waitingRegistered = false
+      let waitController = null
+      let waitTimer = null
+      const stopWaiting = () => {
+        if (waitTimer !== null) {
+          page.clearTimeout(waitTimer)
+          waitTimer = null
+        }
+        if (waitingRegistered) {
+          state.observedLockWaiters = Math.max(
+            0,
+            state.observedLockWaiters - 1,
+          )
+          waitingRegistered = false
+        }
+      }
+
+      if (waitsForLock) {
+        const AbortControllerClass =
+          page.AbortController || globalThis.AbortController
+        if (typeof AbortControllerClass !== 'function') {
+          return unavailable(
+            'abort_unsupported',
+            '浏览器不支持互斥锁等待中止',
+          )
+        }
+        waitController = new AbortControllerClass()
+        lockOptions.signal = waitController.signal
+        state.observedLockWaiters += 1
+        waitingRegistered = true
+        waitTimer = page.setTimeout(
+          () => waitController.abort(),
+          OBSERVED_LOCK_WAIT_TIMEOUT,
+        )
+      }
+
       try {
         return await locks.request(
           'huabang-life-data-action',
           lockOptions,
           async (lock) => {
-            if (!lock) return false
-            if (!waitsForLock && !hasConfirmedLeaderLease()) return false
+            if (!lock) {
+              return waitsForLock
+                ? unavailable('lock_missing', '浏览器互斥锁未获取')
+                : false
+            }
+            if (waitsForLock) stopWaiting()
+            else if (!hasConfirmedLeaderLease()) return false
             actionStarted = true
             return action()
           },
         )
       } catch (error) {
         if (actionStarted) throw error
+        if (waitsForLock) {
+          return waitController && waitController.signal.aborted
+            ? unavailable('wait_timeout', '浏览器互斥锁等待超时（30 秒）')
+            : unavailable('lock_rejected', '浏览器互斥锁获取失败')
+        }
         setError('浏览器互斥锁获取失败，本次采集动作已取消')
         return false
+      } finally {
+        if (waitsForLock) stopWaiting()
       }
     }
+
     function findFieldValue(root, names) {
       const wanted = new Set(names.map((name) => name.toLowerCase()))
       const stack = [root]
@@ -857,40 +924,83 @@
         learnedAt: Date.now(),
       }
       saveTemplate(template)
-      setStatus({ lastCapture: new Date().toISOString(), error: '' })
       if (template.isVideo) {
+        setStatus({ lastCapture: new Date().toISOString(), error: '' })
         if (state.ready && synchronizeLeadership()) maybeCollectNewTemplate()
         return
       }
+
+      const payload = buildCapturePayload(
+        template,
+        template.requestPayload,
+        response,
+      )
+      setStatus({ lastCapture: payload.captured_at, error: '' })
       if (!state.ready || !synchronizeLeadership()) return
-      await runExclusiveAction(
-        () => publishCapture(template, template.requestPayload, response),
+      const result = await runExclusiveAction(
+        () => {
+          if (!hasConfirmedLeaderLease()) {
+            applyLeadership(false)
+            const queued = queuePayload(payload)
+            if (queued.status === 'queued' && !queued.dropped) {
+              setError('主标签已切换，事件已进入离线队列')
+            }
+            return queued
+          }
+          return uploadOrQueue(payload)
+        },
         'observed',
       )
+      if (result && result.status === 'lock_unavailable') {
+        const queued = queuePayload(payload)
+        if (queued.status === 'queued' && !queued.dropped) {
+          setError(`${result.message}，事件已进入离线队列`)
+        }
+      }
     }
+
     async function replayLifeData(template, requestPayload) {
       const headers = pickLifeDataHeaders(getValue(KEYS.headers, {}))
       assertExpectedAccount(requestPayload, headers, page.location.href)
       if (!nativePageFetch) throw new Error('LifeData 原生 fetch 不可用')
-      const response = await nativePageFetch(
-        `${LIFE_DATA_ORIGIN}${template.endpoint}`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json;charset=UTF-8',
-            ...headers,
-          },
-          body: JSON.stringify(sanitizeBusinessJson(requestPayload)),
-        },
+      const controller = new page.AbortController()
+      const timeoutId = page.setTimeout(
+        () => controller.abort(),
+        REPLAY_FETCH_TIMEOUT,
       )
-      if (!response.ok) throw new Error(`LifeData HTTP ${response.status}`)
-      const businessJson = await response.json()
-      if (!isSuccessfulResponse(businessJson)) {
-        throw new Error(`LifeData API 返回非 0：${String(businessJson.code)}`)
+      try {
+        const response = await nativePageFetch(
+          `${LIFE_DATA_ORIGIN}${template.endpoint}`,
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json;charset=UTF-8',
+              ...headers,
+            },
+            body: JSON.stringify(sanitizeBusinessJson(requestPayload)),
+            signal: controller.signal,
+          },
+        )
+        if (!response.ok) throw new Error(`LifeData HTTP ${response.status}`)
+        const businessJson = await response.json()
+        if (!isSuccessfulResponse(businessJson)) {
+          throw new Error(
+            `LifeData API 返回非 0：${String(businessJson.code)}`,
+          )
+        }
+        return businessJson
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new Error('LifeData 请求超时（20 秒）')
+        }
+        throw error
+      } finally {
+        page.clearTimeout(timeoutId)
       }
-      return businessJson
-    }    function newEventId() {
+    }
+
+    function newEventId() {
       return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
         ? globalThis.crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(16).slice(2)}-event`
@@ -1069,18 +1179,29 @@
       }
     }
 
-    async function publishCapture(template, requestPayload, responsePayload) {
-      const capturedAt = new Date().toISOString()
-      const payload = buildIngestPayload({
+    function buildCapturePayload(
+      template,
+      requestPayload,
+      responsePayload,
+    ) {
+      return buildIngestPayload({
         eventId: newEventId(),
         endpoint: template.endpoint,
         pagePath: template.pagePath,
         requestPayload,
         responsePayload,
-        capturedAt,
+        capturedAt: new Date().toISOString(),
         queueDepth: readQueue().length,
       })
-      setStatus({ lastCapture: capturedAt })
+    }
+
+    async function publishCapture(template, requestPayload, responsePayload) {
+      const payload = buildCapturePayload(
+        template,
+        requestPayload,
+        responsePayload,
+      )
+      setStatus({ lastCapture: payload.captured_at })
       return uploadOrQueue(payload)
     }
     async function flushQueue() {

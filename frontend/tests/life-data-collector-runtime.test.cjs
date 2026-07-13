@@ -175,6 +175,7 @@ function createHarness(options = {}) {
       pathname: '/flow/content/analysis/video',
     },
     navigator: { locks: options.locks || null },
+    AbortController: options.AbortController || AbortController,
     history: {
       pushState() {},
       replaceState() {},
@@ -436,6 +437,67 @@ async function waitFor(predicate, message) {
     await new Promise((resolve) => setImmediate(resolve))
   }
   assert.fail(message)
+}
+
+
+function createBusyLockController() {
+  let busy = true
+  const pending = []
+  const locks = {
+    request(name, options, callback) {
+      if (options.ifAvailable) {
+        return Promise.resolve(callback(busy ? null : { name }))
+      }
+      if (!busy) return Promise.resolve(callback({ name }))
+      return new Promise((resolve, reject) => {
+        const entry = {
+          name,
+          options,
+          callback,
+          resolve,
+          reject,
+          settled: false,
+          onAbort: null,
+        }
+        entry.onAbort = () => {
+          if (entry.settled) return
+          entry.settled = true
+          const error = new Error('Web Lock request aborted')
+          error.name = 'AbortError'
+          reject(error)
+        }
+        pending.push(entry)
+        if (options.signal) {
+          if (options.signal.aborted) entry.onAbort()
+          else {
+            options.signal.addEventListener('abort', entry.onAbort, {
+              once: true,
+            })
+          }
+        }
+      })
+    },
+  }
+  return {
+    locks,
+    pendingCount() {
+      return pending.filter((entry) => !entry.settled).length
+    },
+    release() {
+      busy = false
+      for (const entry of pending.splice(0)) {
+        if (entry.settled) continue
+        entry.settled = true
+        if (entry.options.signal) {
+          entry.options.signal.removeEventListener('abort', entry.onAbort)
+        }
+        Promise.resolve(entry.callback({ name: entry.name })).then(
+          entry.resolve,
+          entry.reject,
+        )
+      }
+    },
+  }
 }
 
 test('HTTP 200 business code 400 is permanent and never enters the queue', async () => {
@@ -962,6 +1024,48 @@ test('nonleader only learns other templates while the leader replays once', asyn
   assert.equal(ingestRequests(leader).length, 1)
 })
 
+test('hanging native replay fetch aborts after 20 seconds with an explicit error', async () => {
+  let fetchSignal = null
+  const harness = createHarness({
+    ready: true,
+    fetchResponse(_url, init) {
+      fetchSignal = init.signal
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener(
+          'abort',
+          () => {
+            const error = new Error('fetch aborted')
+            error.name = 'AbortError'
+            reject(error)
+          },
+          { once: true },
+        )
+      })
+    },
+  })
+
+  observeXhr(
+    harness,
+    videoRequest(),
+    videoResponse([{ item_id: 'learn-template', item_play_cnt: 1 }], 1),
+  )
+  await waitFor(() => fetchSignal !== null, 'native replay fetch did not start')
+  const fetchTimeout = harness.timeouts.find(
+    (entry) => entry.delay === 20_000 && !entry.canceled,
+  )
+  assert.ok(fetchTimeout)
+  fetchTimeout.callback()
+  await waitFor(
+    () => /20.*秒|超时/.test(harness.panelText('.error')),
+    'fetch timeout did not surface an explicit error',
+  )
+
+  assert.equal(fetchSignal.aborted, true)
+  assert.equal(fetchTimeout.canceled, true)
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
+})
+
 test('busy Web Lock queues an observed response and uploads it exactly once after release', async () => {
   let busy = true
   const pending = []
@@ -1000,10 +1104,6 @@ test('busy Web Lock queues an observed response and uploads it exactly once afte
     true,
   )
 
-  harness.storage.set('lifeDataLeader', {
-    tabId: 'another-tab',
-    expiresAt: Date.now() + 60_000,
-  })
   busy = false
   for (const resume of pending.splice(0)) resume()
   await waitFor(
@@ -1014,6 +1114,79 @@ test('busy Web Lock queues an observed response and uploads it exactly once afte
 
   assert.equal(ingestRequests(harness).length, 1)
   assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
+})
+
+test('only 20 observed responses wait for a busy lock and the 21st is queued', async () => {
+  const controller = createBusyLockController()
+  const harness = createHarness({ ready: true, locks: controller.locks })
+
+  for (let index = 0; index < 21; index += 1) {
+    observeXhr(
+      harness,
+      summaryRequest(),
+      { code: 0, data: { contentSummary: { play_count: index } } },
+    )
+  }
+  await harness.flush()
+
+  assert.equal(controller.pendingCount(), 20)
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 1)
+  assert.match(harness.panelText('.error'), /等待|队列|上限/)
+})
+
+test('observed lock wait timeout queues the captured payload', async () => {
+  const controller = createBusyLockController()
+  const harness = createHarness({ ready: true, locks: controller.locks })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+  assert.equal(controller.pendingCount(), 1)
+
+  const lockTimeout = harness.timeouts.find(
+    (entry) => entry.delay === 30_000 && !entry.canceled,
+  )
+  assert.ok(lockTimeout)
+  lockTimeout.callback()
+  await waitFor(
+    () => (harness.storage.get('lifeDataQueue') || []).length === 1,
+    'timed-out observed payload was not queued',
+  )
+
+  assert.equal(controller.pendingCount(), 0)
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.match(harness.panelText('.error'), /超时.*队列|队列.*超时/)
+})
+
+test('leader transfer while waiting queues the capture without uploading', async () => {
+  const controller = createBusyLockController()
+  const harness = createHarness({ ready: true, locks: controller.locks })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+  assert.equal(controller.pendingCount(), 1)
+
+  harness.storage.set('lifeDataLeader', {
+    tabId: 'another-tab',
+    expiresAt: Date.now() + 60_000,
+  })
+  controller.release()
+  await waitFor(
+    () => (harness.storage.get('lifeDataQueue') || []).length === 1,
+    'capture was not queued after leadership changed',
+  )
+  await harness.flush()
+
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 1)
 })
 
 test('busy scheduled lock leaves a new video template retryable on maintenance', async () => {
@@ -1083,8 +1256,8 @@ test('rejected waiting Web Lock reports an explicit collector error', async () =
   await harness.flush()
 
   assert.equal(ingestRequests(harness).length, 0)
-  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
-  assert.match(harness.panelText('.error'), /互斥锁获取失败|锁获取失败/)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 1)
+  assert.match(harness.panelText('.error'), /互斥锁|锁获取失败|队列/)
 })
 
 test('Chrome Web Locks wraps observed other upload as one exclusive action', async () => {
