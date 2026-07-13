@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.life_data import LifeDataCapture, LifeDataCollectorState, LifeDataVideoSnapshot
+from app.models.life_data import LifeDataCapture, LifeDataCollectorState
 
 
 def _walk(value: Any) -> Iterable[Mapping[str, Any]]:
@@ -46,6 +46,37 @@ def _capture_value(capture: Any, key: str, default: Any = None) -> Any:
     if isinstance(capture, Mapping):
         return capture.get(key, default)
     return getattr(capture, key, default)
+
+
+def _period_end(capture: Any) -> str | None:
+    request = _capture_value(capture, "request_payload", {})
+    for row in _walk(request):
+        value = row.get("end_date")
+        if isinstance(value, str) and len(value) == 10:
+            return value
+    return None
+
+
+def _latest_period_captures(captures: list[Any]) -> tuple[list[Any], str | None]:
+    latest_end = max((_period_end(row) for row in captures if _period_end(row)), default=None)
+    if latest_end is None:
+        return captures, None
+    anchors = [
+        _capture_value(row, "captured_at")
+        for row in captures
+        if _period_end(row) == latest_end and isinstance(_capture_value(row, "captured_at"), datetime)
+    ]
+    anchor = max(anchors, default=None)
+    selected = []
+    for row in captures:
+        end = _period_end(row)
+        captured_at = _capture_value(row, "captured_at")
+        if end == latest_end:
+            selected.append(row)
+        elif end is None and anchor and isinstance(captured_at, datetime):
+            if abs((captured_at - anchor).total_seconds()) <= 300:
+                selected.append(row)
+    return selected, latest_end
 
 
 def _ratio(numerator: int | None, denominator: int | None) -> float | None:
@@ -178,7 +209,7 @@ def build_investment_overview(
     snapshots: Iterable[Any],
     collector_state: Any,
 ) -> dict[str, Any]:
-    captures = list(captures)
+    captures, stat_end = _latest_period_captures(list(captures))
     ad_payloads = [
         _capture_value(row, "response_payload", {})
         for row in captures
@@ -218,7 +249,7 @@ def build_investment_overview(
     )
     state_status = _capture_value(collector_state, "status", "offline") if collector_state else "offline"
     return {
-        "period": {"label": "近7日", "latest_capture_at": latest.isoformat() if isinstance(latest, datetime) else latest},
+        "period": {"label": "近7日", "stat_end": stat_end, "latest_capture_at": latest.isoformat() if isinstance(latest, datetime) else latest},
         "collector": {"status": state_status},
         "summary": summary,
         "materials": _materials(ad_payloads),
@@ -234,16 +265,16 @@ async def get_investment_overview(db: AsyncSession, account_id: str) -> dict[str
     captures = (
         await db.execute(
             select(LifeDataCapture)
-            .where(LifeDataCapture.account_id == account_id)
+            .where(
+                LifeDataCapture.account_id == account_id,
+                LifeDataCapture.page_path.in_([
+                    "/dito/pc/ad/analysis",
+                    "/dito/pc/business/page",
+                    "/trade/overview",
+                    "/flow/my/overview",
+                ]),
+            )
             .order_by(LifeDataCapture.captured_at.desc())
-            .limit(300)
-        )
-    ).scalars().all()
-    snapshots = (
-        await db.execute(
-            select(LifeDataVideoSnapshot)
-            .where(LifeDataVideoSnapshot.account_id == account_id)
-            .order_by(LifeDataVideoSnapshot.captured_at.desc())
             .limit(300)
         )
     ).scalars().all()
@@ -252,4 +283,4 @@ async def get_investment_overview(db: AsyncSession, account_id: str) -> dict[str
             select(LifeDataCollectorState).where(LifeDataCollectorState.account_id == account_id)
         )
     ).scalar_one_or_none()
-    return build_investment_overview(captures, snapshots, state)
+    return build_investment_overview(captures, [], state)

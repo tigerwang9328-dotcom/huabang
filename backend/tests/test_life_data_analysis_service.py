@@ -52,3 +52,27 @@ def test_never_invents_roi_when_cost_is_missing():
     assert result["summary"]["verify_roi"] is None
     assert result["ai_recommendation"]["action"] == "collect_more_data"
     assert result["data_quality"]["missing"]
+
+
+def test_uses_latest_statistical_period_instead_of_historical_maximum():
+    def capture(end_date: str, cost: int, verify: int):
+        return [
+            {
+                "page_path": "/dito/pc/ad/analysis",
+                "captured_at": datetime.fromisoformat(f"{end_date}T03:00:00+00:00"),
+                "request_payload": {"biz_params": {"common_params": {"end_date": end_date}}},
+                "response_payload": {"code": 0, "data": {"indicator": [{"total_ad_cost": cost}]}},
+            },
+            {
+                "page_path": "/dito/pc/business/page",
+                "captured_at": datetime.fromisoformat(f"{end_date}T03:00:01+00:00"),
+                "request_payload": {"biz_params": {"common_params": {"end_date": end_date}}},
+                "response_payload": {"code": 0, "data": {"Overview": {"data": [{"verify_gmv": verify}]}}},
+            },
+        ]
+
+    rows = capture("2026-07-12", 999999, 888888) + capture("2026-07-13", 10000, 12000)
+    result = build_investment_overview(rows, [], {"status": "online"})
+    assert result["summary"]["ad_cost_fen"] == 10000
+    assert result["summary"]["verify_gmv_fen"] == 12000
+    assert result["period"]["stat_end"] == "2026-07-13"
