@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..', 'src')
 
 test('investment optimization page exposes verified-outcome decision UI', () => {
   const source = fs.readFileSync(path.join(root, 'views', 'marketing', 'InvestmentOptimization.vue'), 'utf8')
-  for (const required of ['实际核销ROI', 'AI 下一步建议', '人工确认后执行', '同期估算', '素材效能', '人群分析', '地域分析', '时间趋势']) {
+  for (const required of ['实际核销ROI', 'AI 下一步建议', '人工确认后执行', '同期估算', '素材效能', '人群分析', '地域分析', '时间趋势', '采集分组', '经营', '广告']) {
     assert.equal(source.includes(required), true, `missing: ${required}`)
   }
 })

@@ -115,6 +115,17 @@ class LifeDataIngestResponse(BaseModel):
     tasks_created: int = Field(ge=0)
 
 
+class LifeDataCollectorGroupHealth(BaseModel):
+    """Health of one bounded LifeData API group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["healthy", "error", "missing"]
+    template_count: int = Field(default=0, ge=0, le=80)
+    last_success_at: datetime | None = None
+    last_error: str | None = Field(default=None, max_length=500)
+
+
 class LifeDataCollectorStatusRequest(BaseModel):
     """One server-timestamped collector heartbeat or error report."""
 
@@ -125,6 +136,20 @@ class LifeDataCollectorStatusRequest(BaseModel):
     status: Literal["online", "error"]
     queue_depth: int = Field(default=0, ge=0, le=100)
     last_error: str | None = Field(default=None, max_length=500)
+    template_count: int = Field(default=0, ge=0, le=80)
+    last_full_success_at: datetime | None = None
+    groups: dict[str, LifeDataCollectorGroupHealth] = Field(default_factory=dict)
+
+    @field_validator("groups")
+    @classmethod
+    def allow_known_groups_only(
+        cls,
+        value: dict[str, LifeDataCollectorGroupHealth],
+    ) -> dict[str, LifeDataCollectorGroupHealth]:
+        unknown = set(value) - {"video", "business", "advertising", "other"}
+        if unknown:
+            raise ValueError("包含未知采集分组")
+        return value
 
     @model_validator(mode="after")
     def require_error_message(self) -> "LifeDataCollectorStatusRequest":

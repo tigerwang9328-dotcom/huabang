@@ -3,6 +3,8 @@
 // @namespace    https://hbreare.com/
 // @version      1.1.0
 // @description  在已登录的生意经页面内采集白名单业务 JSON
+// @updateURL     https://hbreare.com/life-data-collector.user.js
+// @downloadURL   https://hbreare.com/life-data-collector.user.js
 // @match        https://www.life-data.cn/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -515,6 +517,13 @@
       lastUpload: '',
       videoCount: null,
       lastFullResult: '',
+      lastFullSuccessAt: null,
+      groupHealth: {
+        video: { status: 'missing', lastSuccessAt: null, lastError: null },
+        business: { status: 'missing', lastSuccessAt: null, lastError: null },
+        advertising: { status: 'missing', lastSuccessAt: null, lastError: null },
+        other: { status: 'missing', lastSuccessAt: null, lastError: null },
+      },
       error: '',
       panel: null,
     }
@@ -1143,6 +1152,39 @@
       return (redacted.trim() || '采集器错误').slice(0, 500)
     }
 
+    function templateGroupCounts() {
+      const counts = { video: 0, business: 0, advertising: 0, other: 0 }
+      for (const template of Object.values(readTemplates())) {
+        const group = classifyTemplate(template)
+        counts[group] += 1
+      }
+      return counts
+    }
+
+    function setGroupHealth(group, status, error = null) {
+      const current = state.groupHealth[group]
+      if (!current) return
+      current.status = status
+      current.lastError = error ? sanitizeStatusError(error) : null
+      if (status === 'healthy') current.lastSuccessAt = new Date().toISOString()
+      updatePanel()
+    }
+
+    function serializedGroupHealth() {
+      const counts = templateGroupCounts()
+      return Object.fromEntries(
+        Object.entries(state.groupHealth).map(([group, health]) => [
+          group,
+          {
+            status: counts[group] === 0 ? 'missing' : health.status,
+            template_count: counts[group],
+            last_success_at: health.lastSuccessAt,
+            last_error: health.lastError,
+          },
+        ]),
+      )
+    }
+
     function postCollectorStatus(status, lastError = null) {
       const token = String(getValue(KEYS.token, '') || '').trim()
       if (!token || !state.isLeader) return Promise.resolve(false)
@@ -1153,6 +1195,9 @@
         queue_depth: Math.min(100, readQueue().length),
         last_error:
           status === 'error' ? sanitizeStatusError(lastError) : null,
+        template_count: Object.keys(readTemplates()).length,
+        last_full_success_at: state.lastFullSuccessAt,
+        groups: serializedGroupHealth(),
       }
       return new Promise((resolve) => {
         GM_xmlhttpRequest({
@@ -1431,8 +1476,14 @@
           if (result.status !== 'uploaded') allUploaded = false
         }
         setStatus({ videoCount: total })
-        if (allUploaded) setError('')
+        if (allUploaded) {
+          setGroupHealth('video', 'healthy')
+          setError('')
+        } else {
+          setGroupHealth('video', 'error', '部分视频上传失败')
+        }
       } catch (error) {
+        setGroupHealth('video', 'error', error.message || '未知错误')
         setError(`视频采集失败：${error.message || '未知错误'}`)
       } finally {
         state.collecting = false
@@ -1440,7 +1491,11 @@
     }
     async function replayOtherTemplates() {
       if (!state.isLeader) return
+      const attempted = new Set()
+      const failed = new Map()
       for (const template of otherTemplates()) {
+        const group = classifyTemplate(template)
+        attempted.add(group)
         try {
           const request = refreshRelativeDateRange(
             template.requestPayload,
@@ -1450,8 +1505,16 @@
           const result = await publishCapture(template, request, response)
           if (result.status === 'uploaded') setError('')
         } catch (error) {
+          failed.set(group, error.message || '未知错误')
           setError(`业务模板重放失败：${error.message || '未知错误'}`)
         }
+      }
+      for (const group of attempted) {
+        setGroupHealth(
+          group,
+          failed.has(group) ? 'error' : 'healthy',
+          failed.get(group) || null,
+        )
       }
     }
 
@@ -1464,6 +1527,15 @@
         await collectVideo()
         await replayOtherTemplates()
         state.lastFullResult = `完成，共 ${Object.keys(readTemplates()).length} 个模板`
+        const required = serializedGroupHealth()
+        if (
+          required.video.status === 'healthy' &&
+          required.business.status === 'healthy' &&
+          required.advertising.status === 'healthy'
+        ) {
+          state.lastFullSuccessAt = new Date().toISOString()
+        }
+        void postCollectorStatus('online')
       } finally {
         state.fullCollecting = false
         updatePanel()
@@ -1569,6 +1641,15 @@
       refs.upload.textContent = formatTime(state.lastUpload)
       refs.video.textContent = state.videoCount == null ? '—' : String(state.videoCount)
       refs.templates.textContent = String(Object.keys(readTemplates()).length)
+      const groups = serializedGroupHealth()
+      refs.groups.textContent = [
+        ['视频', groups.video],
+        ['经营', groups.business],
+        ['广告', groups.advertising],
+        ['其他', groups.other],
+      ]
+        .map(([label, health]) => `${label}${health.template_count}:${health.status === 'healthy' ? '正常' : health.status === 'error' ? '异常' : '缺失'}`)
+        .join(' · ')
       refs.fullResult.textContent = state.lastFullResult || '等待全量采集'
       refs.queue.textContent = String(readQueue().length)
       refs.error.textContent = state.error || '无'
@@ -1600,6 +1681,7 @@
             <div class="row"><span>最近上传</span><span class="value upload"></span></div>
             <div class="row"><span>视频数</span><span class="value video"></span></div>
             <div class="row"><span>已登记模板</span><span class="value templates"></span></div>
+            <div class="row"><span>分组状态</span><span class="value groups"></span></div>
             <div class="row"><span>全量结果</span><span class="value full-result"></span></div>
             <div class="row"><span>队列数</span><span class="value queue"></span></div>
             <div class="row"><span>错误</span><span class="value error"></span></div>
@@ -1632,6 +1714,7 @@
         upload: shadow.querySelector('.upload'),
         video: shadow.querySelector('.video'),
         templates: shadow.querySelector('.templates'),
+        groups: shadow.querySelector('.groups'),
         fullResult: shadow.querySelector('.full-result'),
         queue: shadow.querySelector('.queue'),
         error: shadow.querySelector('.error'),

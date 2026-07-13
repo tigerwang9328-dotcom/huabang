@@ -774,6 +774,14 @@ test('leader posts a sanitized online status heartbeat every 60 seconds', async 
     status: 'online',
     queue_depth: 0,
     last_error: null,
+    template_count: 0,
+    last_full_success_at: null,
+    groups: {
+      video: { status: 'missing', template_count: 0, last_success_at: null, last_error: null },
+      business: { status: 'missing', template_count: 0, last_success_at: null, last_error: null },
+      advertising: { status: 'missing', template_count: 0, last_success_at: null, last_error: null },
+      other: { status: 'missing', template_count: 0, last_success_at: null, last_error: null },
+    },
   })
   const serialized = request.data.toLowerCase()
   assert.equal(serialized.includes('collector-token'), false)

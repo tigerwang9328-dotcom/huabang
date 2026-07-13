@@ -58,6 +58,8 @@
           <div><dt>核销券数</dt><dd>{{ summary.verify_cert_count ?? '—' }}</dd></div>
           <div><dt>单张核销成本</dt><dd>{{ money(summary.cost_per_verify_fen) }}</dd></div>
           <div><dt>统计周期</dt><dd>{{ data.period?.label || '近7日' }}</dd></div>
+          <div><dt>已登记接口</dt><dd>{{ data.collector?.template_count || 0 }}</dd></div>
+          <div class="group-health"><dt>采集分组</dt><dd>{{ collectorGroups }}</dd></div>
         </dl>
       </article>
     </section>
@@ -122,6 +124,12 @@ const loading = ref(false)
 const data = ref<any>({ summary: {}, ai_recommendation: {}, data_quality: { missing: [] }, materials: [], demographics: [] })
 const summary = computed(() => data.value.summary || {})
 const recommendation = computed(() => data.value.ai_recommendation || {})
+const collectorGroups = computed(() => {
+  const groups = data.value.collector?.groups || {}
+  return [['视频', 'video'], ['经营', 'business'], ['广告', 'advertising'], ['其他', 'other']]
+    .map(([label, key]) => `${label}:${groups[key]?.status === 'healthy' ? '正常' : groups[key]?.status === 'error' ? '异常' : '待采集'}`)
+    .join(' · ')
+})
 const money = (fen: number | null | undefined) => fen == null ? '—' : `¥${(fen / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const ratio = (value: number | null | undefined) => value == null ? '—' : Number(value).toFixed(2)
 const percent = (value: number | null | undefined) => value == null ? '—' : `${(value * 100).toFixed(1)}%`

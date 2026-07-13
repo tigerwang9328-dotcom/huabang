@@ -33,7 +33,20 @@ def test_builds_verified_roi_and_manual_ai_recommendation():
         },
     ]
 
-    result = build_investment_overview(captures, [], {"status": "online"})
+    result = build_investment_overview(
+        captures,
+        [],
+        {
+            "status": "online",
+            "template_count": 7,
+            "last_full_success_at": datetime(2026, 7, 13, 3, 22, tzinfo=timezone.utc),
+            "group_health": {
+                "video": {"status": "healthy", "template_count": 1},
+                "business": {"status": "healthy", "template_count": 3},
+                "advertising": {"status": "healthy", "template_count": 2},
+            },
+        },
+    )
 
     assert result["summary"]["ad_cost_fen"] == 132717
     assert result["summary"]["verify_gmv_fen"] == 116000
@@ -45,6 +58,9 @@ def test_builds_verified_roi_and_manual_ai_recommendation():
     assert result["regions"][0]["name"] == "贵阳市"
     assert result["trends"][0]["date"] == "2026-07-06"
     assert result["materials"][0]["play_count"] == 1000
+    assert result["collector"]["template_count"] == 7
+    assert result["collector"]["groups"]["advertising"]["status"] == "healthy"
+    assert result["collector"]["last_full_success_at"] == "2026-07-13T03:22:00+00:00"
 
 
 def test_never_invents_roi_when_cost_is_missing():

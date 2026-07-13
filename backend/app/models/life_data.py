@@ -92,6 +92,9 @@ class LifeDataCollectorState(Base):
     last_error = Column(Text)
     last_event_id = Column(String(64))
     queue_depth = Column(Integer, nullable=False, default=0)
+    template_count = Column(Integer, nullable=False, default=0)
+    last_full_success_at = Column(DateTime(timezone=True))
+    group_health = Column(JSON, nullable=False, default=dict)
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),

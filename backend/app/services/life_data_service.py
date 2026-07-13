@@ -459,6 +459,9 @@ async def _upsert_collector_state(
     event_id: str | None = None,
     success: bool = False,
     last_error: str | None = None,
+    template_count: int | None = None,
+    last_full_success_at: datetime | None = None,
+    group_health: dict[str, Any] | None = None,
 ) -> None:
     values: dict[str, Any] = {
         "account_id": account_id,
@@ -471,6 +474,12 @@ async def _upsert_collector_state(
         values.update(last_success_at=seen_at, last_event_id=event_id)
     if status == "error":
         values.update(last_error_at=seen_at, last_error=last_error)
+    if template_count is not None:
+        values["template_count"] = template_count
+    if last_full_success_at is not None:
+        values["last_full_success_at"] = last_full_success_at
+    if group_health is not None:
+        values["group_health"] = group_health
 
     statement = pg_insert(LifeDataCollectorState).values(**values)
     incoming_is_latest = LifeDataCollectorState.last_seen_at.is_(None) | (
@@ -529,6 +538,21 @@ async def _upsert_collector_state(
                 ),
                 else_=LifeDataCollectorState.last_error,
             ),
+        )
+    if template_count is not None:
+        update_values["template_count"] = case(
+            (incoming_is_latest, statement.excluded.template_count),
+            else_=LifeDataCollectorState.template_count,
+        )
+    if group_health is not None:
+        update_values["group_health"] = case(
+            (incoming_is_latest, statement.excluded.group_health),
+            else_=LifeDataCollectorState.group_health,
+        )
+    if last_full_success_at is not None:
+        update_values["last_full_success_at"] = func.greatest(
+            LifeDataCollectorState.last_full_success_at,
+            statement.excluded.last_full_success_at,
         )
     statement = statement.on_conflict_do_update(
         index_elements=[LifeDataCollectorState.account_id],
@@ -762,6 +786,7 @@ class LifeDataIngestService:
         """Persist a heartbeat or sanitized error using server receive time."""
 
         payload = _body_mapping(body)
+        provided_fields = getattr(body, "model_fields_set", set(payload))
         status = str(payload["status"])
         last_error = payload.get("last_error")
         if status == "error" and not str(last_error or "").strip():
@@ -774,4 +799,27 @@ class LifeDataIngestService:
             status=status,
             queue_depth=_to_int(payload.get("queue_depth")),
             last_error=str(last_error) if last_error is not None else None,
+            template_count=(
+                _to_int(payload.get("template_count"))
+                if "template_count" in provided_fields
+                else None
+            ),
+            last_full_success_at=payload.get("last_full_success_at"),
+            group_health=(
+                {
+                    str(name): {
+                        str(key): (
+                            value.isoformat() if isinstance(value, datetime) else value
+                        )
+                        for key, value in (
+                            health.model_dump().items()
+                            if hasattr(health, "model_dump")
+                            else health.items()
+                        )
+                    }
+                    for name, health in (payload.get("groups") or {}).items()
+                }
+                if "groups" in provided_fields
+                else None
+            ),
         )

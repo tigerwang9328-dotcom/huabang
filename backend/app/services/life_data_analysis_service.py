@@ -248,9 +248,19 @@ def build_investment_overview(
         default=None,
     )
     state_status = _capture_value(collector_state, "status", "offline") if collector_state else "offline"
+    last_full_success_at = _capture_value(collector_state, "last_full_success_at") if collector_state else None
     return {
         "period": {"label": "近7日", "stat_end": stat_end, "latest_capture_at": latest.isoformat() if isinstance(latest, datetime) else latest},
-        "collector": {"status": state_status},
+        "collector": {
+            "status": state_status,
+            "template_count": _capture_value(collector_state, "template_count", 0) if collector_state else 0,
+            "last_full_success_at": (
+                last_full_success_at.isoformat()
+                if isinstance(last_full_success_at, datetime)
+                else last_full_success_at
+            ),
+            "groups": _capture_value(collector_state, "group_health", {}) if collector_state else {},
+        },
         "summary": summary,
         "materials": _materials(ad_payloads),
         "demographics": _demographics(ad_payloads),

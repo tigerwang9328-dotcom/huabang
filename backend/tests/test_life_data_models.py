@@ -17,6 +17,9 @@ _ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
 _LIFE_DATA_MIGRATION = (
     _ALEMBIC_DIR / "versions" / "f1b2c3d4e5f6_life_data_collector.py"
 )
+_GROUP_HEALTH_MIGRATION = (
+    _ALEMBIC_DIR / "versions" / "a2b3c4d5e6f7_life_data_group_health.py"
+)
 
 
 def _unique_column_sets(model):
@@ -100,6 +103,9 @@ def test_life_data_models_define_required_columns():
             "last_error": Text,
             "last_event_id": String,
             "queue_depth": Integer,
+            "template_count": Integer,
+            "last_full_success_at": DateTime,
+            "group_health": JSON,
             "updated_at": DateTime,
         },
     }
@@ -122,5 +128,12 @@ def test_life_data_migration_has_one_resolvable_head():
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["e5f6a7b8c9d0"]
-    assert script.get_current_head() == "e5f6a7b8c9d0"
+    assert script.get_heads() == ["a2b3c4d5e6f7"]
+    assert script.get_current_head() == "a2b3c4d5e6f7"
+
+
+def test_group_health_migration_follows_life_data_collector():
+    migration = run_path(str(_GROUP_HEALTH_MIGRATION))
+
+    assert migration["revision"] == "a2b3c4d5e6f7"
+    assert migration["down_revision"] == "e5f6a7b8c9d0"

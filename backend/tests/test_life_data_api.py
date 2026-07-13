@@ -496,3 +496,43 @@ def test_status_schema_requires_error_text_and_allows_online_without_it():
 
     assert error.last_error == "network timeout"
     assert online.last_error is None
+
+
+def test_status_schema_accepts_bounded_group_health():
+    body = LifeDataCollectorStatusRequest.model_validate(
+        status_payload(
+            template_count=7,
+            last_full_success_at="2026-07-13T03:22:07Z",
+            groups={
+                "video": {
+                    "status": "healthy",
+                    "template_count": 1,
+                    "last_success_at": "2026-07-13T03:22:07Z",
+                    "last_error": None,
+                },
+                "advertising": {
+                    "status": "missing",
+                    "template_count": 0,
+                    "last_success_at": None,
+                    "last_error": None,
+                },
+            },
+        )
+    )
+
+    assert body.template_count == 7
+    assert body.groups["video"].status == "healthy"
+
+
+def test_status_schema_rejects_unknown_group_name():
+    with pytest.raises(ValidationError):
+        LifeDataCollectorStatusRequest.model_validate(
+            status_payload(
+                groups={
+                    "unknown": {
+                        "status": "healthy",
+                        "template_count": 1,
+                    }
+                }
+            )
+        )
