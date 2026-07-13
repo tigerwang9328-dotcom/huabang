@@ -31,7 +31,7 @@ test('declares the required Tampermonkey metadata', () => {
   const source = fs.readFileSync(scriptPath, 'utf8')
 
   for (const line of [
-    '// @version      1.0.5',
+    '// @version      1.1.0',
     '// @match        https://www.life-data.cn/*',
     '// @run-at       document-start',
     '// @grant        GM_xmlhttpRequest',
@@ -43,6 +43,13 @@ test('declares the required Tampermonkey metadata', () => {
   ]) {
     assert.equal(source.includes(line), true, `missing metadata: ${line}`)
   }
+})
+
+test('collector panel reports learned api templates and full collection feedback', () => {
+  const source = fs.readFileSync(scriptPath, 'utf8')
+  assert.equal(source.includes('已登记模板'), true)
+  assert.equal(source.includes('立即全量采集'), true)
+  assert.equal(source.includes('采集中…'), true)
 })
 
 test('classifies the learned LifeData business paths into collection groups', () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.0.5
+// @version      1.1.0
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @match        https://www.life-data.cn/*
 // @run-at       document-start
@@ -501,6 +501,7 @@
       ready: false,
       isLeader: false,
       collecting: false,
+      fullCollecting: false,
       flushing: false,
       leaderTimer: null,
       videoTimer: null,
@@ -513,6 +514,7 @@
       lastCapture: '',
       lastUpload: '',
       videoCount: null,
+      lastFullResult: '',
       error: '',
       panel: null,
     }
@@ -1454,8 +1456,18 @@
     }
 
     async function runFullCollection() {
-      await collectVideo()
-      await replayOtherTemplates()
+      if (state.fullCollecting) return
+      state.fullCollecting = true
+      state.lastFullResult = '采集中…'
+      updatePanel()
+      try {
+        await collectVideo()
+        await replayOtherTemplates()
+        state.lastFullResult = `完成，共 ${Object.keys(readTemplates()).length} 个模板`
+      } finally {
+        state.fullCollecting = false
+        updatePanel()
+      }
     }
 
     function maybeCollectNewTemplate() {
@@ -1556,8 +1568,12 @@
       refs.capture.textContent = formatTime(state.lastCapture)
       refs.upload.textContent = formatTime(state.lastUpload)
       refs.video.textContent = state.videoCount == null ? '—' : String(state.videoCount)
+      refs.templates.textContent = String(Object.keys(readTemplates()).length)
+      refs.fullResult.textContent = state.lastFullResult || '等待全量采集'
       refs.queue.textContent = String(readQueue().length)
       refs.error.textContent = state.error || '无'
+      refs.collect.disabled = state.fullCollecting
+      refs.collect.textContent = state.fullCollecting ? '采集中…' : '立即全量采集'
     }
 
     function createPanel() {
@@ -1573,7 +1589,7 @@
           .body{padding:10px 12px}.panel.min .body{display:none}
           .row{display:grid;grid-template-columns:84px 1fr;gap:8px;margin:6px 0}.value{overflow-wrap:anywhere;color:#d1d5db}
           .error{color:#fca5a5;max-height:54px;overflow:auto}
-          button{border:0;border-radius:7px;padding:7px 10px;cursor:pointer}.toggle{background:transparent;color:#f9fafb;padding:2px 6px}.collect{width:100%;margin-top:8px;background:#2563eb;color:#fff;font-weight:700}
+          button{border:0;border-radius:7px;padding:7px 10px;cursor:pointer}.toggle{background:transparent;color:#f9fafb;padding:2px 6px}.collect{width:100%;margin-top:8px;background:#2563eb;color:#fff;font-weight:700}.collect:disabled{opacity:.65;cursor:wait}
         </style>
         <section class="panel">
           <div class="head"><span>LifeData 采集器</span><button class="toggle" type="button">—</button></div>
@@ -1583,9 +1599,11 @@
             <div class="row"><span>最近采集</span><span class="value capture"></span></div>
             <div class="row"><span>最近上传</span><span class="value upload"></span></div>
             <div class="row"><span>视频数</span><span class="value video"></span></div>
+            <div class="row"><span>已登记模板</span><span class="value templates"></span></div>
+            <div class="row"><span>全量结果</span><span class="value full-result"></span></div>
             <div class="row"><span>队列数</span><span class="value queue"></span></div>
             <div class="row"><span>错误</span><span class="value error"></span></div>
-            <button class="collect" type="button">立即采集</button>
+            <button class="collect" type="button">立即全量采集</button>
           </div>
         </section>`
       document.documentElement.appendChild(host)
@@ -1613,8 +1631,11 @@
         capture: shadow.querySelector('.capture'),
         upload: shadow.querySelector('.upload'),
         video: shadow.querySelector('.video'),
+        templates: shadow.querySelector('.templates'),
+        fullResult: shadow.querySelector('.full-result'),
         queue: shadow.querySelector('.queue'),
         error: shadow.querySelector('.error'),
+        collect: shadow.querySelector('.collect'),
       }
       updatePanel()
     }
