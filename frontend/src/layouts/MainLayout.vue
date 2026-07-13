@@ -286,6 +286,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
       { path: "/app/product", icon: GoodsFilled, label: "商品总览" },
       { path: "/app/product/products", icon: GoodsFilled, label: "商品主档" },
       { path: "/app/product/skus", icon: Box, label: "SKU档案" },
+      { path: "/app/product/size-wall", icon: Box, label: "断码尺码墙" },
       { label: "动销分析", icon: TrendCharts, disabled: true, badge: "规划中" },
       { label: "爆款补货", icon: DataLine, disabled: true, badge: "规划中" },
       { label: "滞销清仓", icon: Warning, disabled: true, badge: "规划中" },

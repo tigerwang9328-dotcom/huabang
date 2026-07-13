@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 import logging
+import json
+import hashlib
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.store_whitelist import ALLOWED_STORE_CODES
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +72,16 @@ def _pct(value: Any) -> str:
     return f"{n:.1f}%"
 
 
+def _is_expense_sync_covered(last_sync_at: Any, dt: date, now: Optional[datetime] = None) -> bool:
+    if not last_sync_at:
+        return False
+    sync_at = last_sync_at if isinstance(last_sync_at, datetime) else datetime.fromisoformat(str(last_sync_at))
+    if sync_at.tzinfo is None:
+        sync_at = sync_at.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return current - sync_at <= timedelta(hours=36) and sync_at.date() - dt <= timedelta(days=30) and dt <= sync_at.date()
+
+
 class AIDiagnosisService:
     """规则版 AI 经营诊断服务。
 
@@ -102,6 +117,26 @@ class AIDiagnosisService:
         )
         return _as_date(row.get("dt") or (date.today() - timedelta(days=1)))
 
+    async def _common_metrics(self, dt: date, store_code: Optional[str] = None) -> dict:
+        params = {"dt": dt, "store_code": store_code or ""}
+        sales = await self._one(
+            """
+            select coalesce(sum(net_sales_amount),0) net_sales,
+                   coalesce(sum(gross_profit),0) gross_profit,
+                   case when sum(net_sales_amount)<>0 then sum(gross_profit)/sum(net_sales_amount) end gross_margin
+            from dws.dws_store_daily
+            where stat_date=:dt and (:store_code='' or store_code=:store_code)
+            """, params)
+        orders = await self._one(
+            """
+            select count(distinct ticket_no) order_count
+            from dwd.dwd_pos_ticket
+            where biz_date=:dt and (:store_code='' or store_code=:store_code)
+              and coalesce(is_void,false)=false and coalesce(is_pending,false)=false
+            """, params)
+        return {"net_sales": _num(sales.get("net_sales")), "order_count": _int(orders.get("order_count")),
+                "gross_profit": _num(sales.get("gross_profit")), "gross_margin": sales.get("gross_margin")}
+
     def _quality(self, warnings: list[str], missing: list[str], source_tables: list[str]) -> dict:
         return {
             "is_complete": len(warnings) == 0 and len(missing) == 0,
@@ -125,8 +160,9 @@ class AIDiagnosisService:
         review: str,
         source: str,
     ) -> dict:
+        identity = hashlib.sha256(f"{module}|{title}|{description}".encode("utf-8")).hexdigest()[:16]
         return {
-            "id": f"{module}-{abs(hash(title + description)) % 1000000}",
+            "id": f"{module}-{identity}",
             "module": module,
             "level": level,
             "level_label": LEVEL_LABEL.get(level, level),
@@ -143,10 +179,13 @@ class AIDiagnosisService:
 
     def _task_from_diag(self, diag: dict, idx: int) -> dict:
         return {
+            "diagnosis_id": diag.get("id"),
+            "module": diag.get("module"),
             "task_no": f"AI-{datetime.now():%Y%m%d}-{idx:03d}",
             "task_source": "AI经营诊断",
             "problem_type": diag.get("title"),
             "description": diag.get("description"),
+            "evidence": diag.get("evidence") or [],
             "possible_reason": diag.get("possible_reason"),
             "today_action": diag.get("suggested_action"),
             "owner": diag.get("suggested_owner_role"),
@@ -310,6 +349,22 @@ class AIDiagnosisService:
             """,
             params,
         )
+        target = await self._one(
+            """
+            select coalesce(sum(target_amount),0) target_amount,
+                   coalesce(sum(actual_amount),0) actual_amount,
+                   case when sum(target_amount)>0 then sum(actual_amount)/sum(target_amount) else 0 end achievement_rate
+            from (
+              select distinct on (store_code) store_code,target_amount,actual_amount
+              from dws.dws_store_target_monthly
+              where month_date=date_trunc('month',CAST(:dt AS date))::date
+                and snapshot_date<=CAST(:dt AS date)
+                and (:store_code='' or store_code=:store_code)
+              order by store_code,snapshot_date desc
+            ) target_snapshot
+            """,
+            params,
+        )
         diagnoses = []
         for s in stores:
             sales_now = _num(s.get("net_sales_amount"))
@@ -341,9 +396,12 @@ class AIDiagnosisService:
             elif avg_items > 0 and items < avg_items * 0.85:
                 diagnoses.append(self._diag("sales", "medium", f"{name}连带率偏低", f"{name} 连带率 {items:.2f}，低于近7日均值 {avg_items:.2f}。", [f"连带率：{items:.2f}", f"近7日均值：{avg_items:.2f}"], "搭配销售执行弱，导购可能只完成单件成交。", "店长组织班前搭配训练，设置当日连带率改善目标。", "店长 / 导购", "今日闭店前", "明日连带率、成套成交笔数", "dws.dws_store_daily"))
         warnings = [] if stores else ["销售诊断暂无门店日汇总数据，可能是当日 ETL 未完成或百胜销售未同步。"]
+        target_rate = _num(target.get("achievement_rate"))
+        health_score = max(0, 100 - len([d for d in diagnoses if d.get("level")=="high"])*12 - len([d for d in diagnoses if d.get("level")=="medium"])*6)
         return {
             "summary": {
                 "stat_date": dt,
+                "health_score": health_score,
                 "net_sales": _num(summary.get("net_sales")),
                 "order_count": _int(summary.get("order_count")),
                 "item_count": _int(summary.get("item_count")),
@@ -352,11 +410,14 @@ class AIDiagnosisService:
                 "gross_margin": _num(summary.get("gross_margin")),
                 "return_rate": _num(summary.get("return_rate")),
                 "risk_store_count": _int(summary.get("risk_store_count")),
+                "monthly_target_amount": _num(target.get("target_amount")),
+                "monthly_actual_amount": _num(target.get("actual_amount")),
+                "monthly_achievement_rate": target_rate,
             },
             "risks": self._store_rank_risks(stores),
             "diagnoses": diagnoses[:30],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(warnings, ["销售目标/同比数据"] if stores else ["门店销售汇总"], ["dws_store_daily", "dim_store"]),
+            "data_quality": self._quality(warnings, ["同比数据"] if stores else ["门店销售汇总"], ["dws_store_daily", "dim_store", "dws_store_target_monthly"]),
         }
 
     def _store_rank_risks(self, stores: list[dict]) -> list[dict]:
@@ -388,7 +449,7 @@ class AIDiagnosisService:
               select i.product_code, sum(i.qty) qty,
                      sum(i.qty * coalesce(sku.cost_price, product.cost_price, 0)) amount,
                      count(*) filter(where i.qty<=0) zero_sku
-              from dwd.dwd_inventory_balance i
+              from dwd.v_apparel_inventory_balance i
               left join dim.dim_sku sku on sku.sku_code=i.sku_code
               left join dim.dim_product product on product.product_code=i.product_code
               group by i.product_code
@@ -444,7 +505,7 @@ class AIDiagnosisService:
             ), inv as (
               select product_code, sum(qty) inventory_qty,
                      count(*) filter(where qty<=0) zero_sku
-              from dwd.dwd_inventory_balance group by product_code
+              from dwd.v_apparel_inventory_balance group by product_code
             ), inbound as (
               select product_code, first_inbound_date from dws.dws_product_inbound_summary
             ), inbound30 as (
@@ -558,7 +619,7 @@ class AIDiagnosisService:
                      greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
                               coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days,
                      i.synced_at
-              from dwd.dwd_inventory_balance i
+              from dwd.v_apparel_inventory_balance i
               left join dim.dim_sku sku
                 on sku.product_code=i.product_code
                and trim(leading '-' from coalesce(sku.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
@@ -590,7 +651,7 @@ class AIDiagnosisService:
                      coalesce(nullif(sku.cost_price,0),nullif(sku.market_price,0),nullif(p.cost_price,0),0) cost_price,
                      greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
                               coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days
-              from dwd.dwd_inventory_balance i
+              from dwd.v_apparel_inventory_balance i
               left join dim.dim_sku sku
                 on sku.product_code=i.product_code
                and trim(leading '-' from coalesce(sku.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
@@ -659,7 +720,7 @@ class AIDiagnosisService:
 
     async def finance(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
         dt = _as_date(stat_date or await self._latest_date())
-        params = {"dt": dt, "store_code": store_code or ""}
+        params = {"dt": dt, "store_code": store_code or "", "allowed_store_codes": sorted(ALLOWED_STORE_CODES)}
         row = await self._one(
             """
             select coalesce(sum(net_sales),0) net_sales, coalesce(sum(cost_of_goods),0) cost_of_goods,
@@ -689,6 +750,25 @@ class AIDiagnosisService:
                 """,
                 params,
             )
+        sales_metrics = await self._one(
+            """
+            select count(distinct ticket_no) order_count
+            from dwd.dwd_pos_ticket
+            where biz_date=:dt
+              and store_code=ANY(:allowed_store_codes)
+              and (:store_code='' or store_code=:store_code)
+              and coalesce(is_void,false)=false
+              and coalesce(is_pending,false)=false
+            """,
+            params,
+        )
+        expense_source = await self._one(
+            """select last_sync_at from sys.sys_integration_config where system_code='dingtalk' and status='api'"""
+        )
+        cost_source = await self._one(
+            """select bool_and(is_cost_complete) is_cost_complete from dws.dws_product_daily
+               where stat_date=:dt and (:store_code='' or store_code=:store_code)""", params
+        )
         if not row or _num(row.get("net_sales")) == 0:
             row = await self._one(
                 """
@@ -745,11 +825,13 @@ class AIDiagnosisService:
         missing = []
         if not row or _num(row.get("net_sales")) == 0:
             missing.append("销售/财务基础数据")
-        cost_complete = bool(row.get("is_cost_complete")) and _num(row.get("cost_of_goods")) > 0
-        expense_complete = bool(row.get("is_expense_complete")) and _num(row.get("total_expense")) > 0
+        cost_complete = bool(row.get("is_cost_complete")) and bool(cost_source.get("is_cost_complete")) and _num(row.get("cost_of_goods")) > 0
+        expense_complete = bool(row.get("is_expense_complete")) or _is_expense_sync_covered(expense_source.get("last_sync_at"), dt)
         if row and _num(row.get("net_sales")) > 0 and not cost_complete:
             warnings.append("成本字段未完整接入，财务诊断按销售额与现有毛利字段兜底。")
             diagnoses.append(self._diag("finance", "medium", "成本口径未完整", "当前销售已接入，但成本金额为0或不完整，毛利和利润只能作为预估参考。", [f"净销售：{_money(row.get('net_sales'))}", f"成本：{_money(row.get('cost_of_goods'))}"], "商品成本未完整同步或DWS成本汇总未生成。", "财务与商品部核对成本价、商品成本汇总和缺失成本款。", "财务经理 / 商品经理", "本周内", "成本完整率、毛利率可用性", row.get("source_table") or "finance fallback"))
+        elif row and _num(row.get("cost_of_goods")) > 0:
+            warnings.append("成本已按百胜商品成本接入，毛利仍属经营估算口径，最终以财务核准为准。")
         if row and _num(row.get("net_sales")) > 0 and not expense_complete:
             warnings.append("费用明细未接入，经营利润暂未扣除完整费用。")
             diagnoses.append(self._diag("finance", "medium", "费用口径未完整", "当前费用明细为空或不完整，经营利润不能作为最终财报。", [f"净销售：{_money(row.get('net_sales'))}", f"已接费用：{_money(row.get('total_expense'))}"], "报销、房租、水电、工资或其他费用未进入日汇总。", "财务补录费用或启用钉钉/金蝶费用同步，页面继续保留预估标识。", "财务经理", "本周内", "费用接入率、预估利润与核准利润差异", "dwd_finance_expense"))
@@ -760,21 +842,28 @@ class AIDiagnosisService:
             diagnoses.append(self._diag("finance", "high", "毛利率偏低风险", f"当前毛利率 {_pct(gm)}，低于经营预警线。", [f"毛利：{_money(row.get('gross_profit'))}", f"销售成本：{_money(row.get('cost_of_goods'))}"], "折扣、商品结构或成本归集可能拉低利润。", "商品与财务复核高折扣订单、低毛利款和成本完整性。", "财务经理 / 商品经理", "今日下班前", "毛利率、异常折扣订单数、低毛利款销售占比", row.get("source_table") or "finance"))
         if _num(row.get("operating_profit")) < 0:
             diagnoses.append(self._diag("finance", "high", "经营利润为负", f"当前预估经营利润 {_money(row.get('operating_profit'))}。", [f"净销售：{_money(row.get('net_sales'))}", f"费用：{_money(row.get('total_expense'))}"], "销售毛利无法覆盖费用，或费用一次性集中入账。", "财务拆解费用结构，运营复盘低效门店和低毛利商品。", "财务经理 / 运营经理", "今日18:00前", "经营利润、费用率、毛利率", row.get("source_table") or "finance"))
+        high_risks = sum(1 for d in diagnoses if d.get("level") == "high")
+        medium_risks = sum(1 for d in diagnoses if d.get("level") == "medium")
+        health_score = max(0, 100 - high_risks*20 - medium_risks*10)
         return {
             "summary": {
                 "stat_date": dt,
+                "health_score": health_score,
                 "net_sales": _num(row.get("net_sales")),
+                "order_count": _int(sales_metrics.get("order_count")),
                 "cost_of_goods": _num(row.get("cost_of_goods")),
                 "gross_profit": _num(row.get("gross_profit")),
                 "gross_margin": gm,
                 "total_expense": _num(row.get("total_expense")),
                 "operating_profit": _num(row.get("operating_profit")),
+                "expense_last_synced_at": str(expense_source.get("last_sync_at") or ""),
+                "expense_complete": expense_complete,
                 "finance_risk_count": len(diagnoses),
             },
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses],
             "diagnoses": diagnoses,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses)],
-            "data_quality": self._quality(warnings, missing, ["dm_finance_profit_daily", "dws_finance_daily", "dws_company_daily", "dws_product_daily", "dwd_finance_expense", "finance_expense_records"]),
+            "data_quality": self._quality(warnings, missing, ["dm_finance_profit_daily", "dws_finance_daily", "dws_company_daily", "dws_store_daily", "dws_product_daily", "dwd_pos_ticket", "dwd_finance_expense", "finance_expense_records"]),
         }
 
     async def hr(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
@@ -783,9 +872,12 @@ class AIDiagnosisService:
         stores = await self._rows(
             """
             with emp as (
-              select store_code, count(*) filter(where coalesce(status,'active') in ('active','在职','正常')) employee_count
-              from dim.dim_employee
-              group by store_code
+              select substring(d.name from '([0-9]{6})') store_code, count(distinct e.dingtalk_user_id) employee_count
+              from dingtalk_employees e
+              cross join lateral jsonb_array_elements_text(e.department_ids) dept_id
+              join dingtalk_departments d on d.dingtalk_dept_id=dept_id
+              where e.active=true and substring(d.name from '([0-9]{6})') = any(:store_codes)
+              group by substring(d.name from '([0-9]{6})')
             ), tasks as (
               select related_store_code store_code,
                      count(*) task_count,
@@ -810,7 +902,7 @@ class AIDiagnosisService:
             order by s.net_sales_amount desc nulls last
             limit 80
             """,
-            params,
+            {**params, "store_codes": list(ALLOWED_STORE_CODES)},
         )
         attendance_date_filter = "work_date<=CAST(:dt AS date)" if stat_date else "true"
         hr_actual = await self._one(
@@ -828,6 +920,16 @@ class AIDiagnosisService:
             """,
             params,
         )
+        approvals = await self._one(
+            """
+            select count(*) filter(where category='leave') leave_approval_count,
+                   count(*) filter(where category='business_trip') outing_approval_count,
+                   count(*) filter(where category='attendance') attendance_approval_count
+            from dingtalk_approval_instances
+            where coalesce(result,'agree')='agree'
+              and coalesce(finish_time,create_time)::date between CAST(:dt AS date)-interval '30 day' and CAST(:dt AS date)
+            """, params)
+        common = await self._common_metrics(dt, store_code)
         mapped_emp = sum(_int(s.get("employee_count")) for s in stores)
         actual_emp = _int(hr_actual.get("employee_count"))
         active_store_count = len([s for s in stores if _num(s.get("net_sales_amount")) > 0])
@@ -858,8 +960,8 @@ class AIDiagnosisService:
         missing = []
         if actual_emp > 0:
             if use_store_proxy:
-                warnings.append("钉钉员工与考勤已接入，但员工尚未映射到具体门店；门店人效暂按经营单元兜底。")
-            missing.append("员工门店归属/排班/工资")
+                warnings.append("钉钉员工已接入，但当前筛选范围没有可识别的门店部门；门店人效暂按经营单元兜底。")
+            missing.append("排班/工资")
         elif use_store_proxy:
             warnings.append("员工档案为空，当前人事诊断按门店经营效率和任务闭环做兜底。")
             missing.append("员工档案/排班/考勤")
@@ -868,12 +970,18 @@ class AIDiagnosisService:
             missing.append("考勤/排班/工资")
         return {
             "summary": {
+                **common,
+                "health_score": max(0, 100 - attendance_abnormal * 4 - len(diagnoses) * 3),
                 "stat_date": dt,
                 "attendance_stat_date": _date_str(hr_actual.get("attendance_stat_date")),
                 "employee_count": actual_emp or mapped_emp or active_store_count,
                 "attendance_employee_count": _int(hr_actual.get("attendance_employee_count")),
                 "attendance_abnormal_count": attendance_abnormal,
                 "missing_check_count": _int(hr_actual.get("missing_check_count")),
+                "leave_approval_count_30d": _int(approvals.get("leave_approval_count")),
+                "outing_approval_count_30d": _int(approvals.get("outing_approval_count")),
+                "attendance_approval_count_30d": _int(approvals.get("attendance_approval_count")),
+                "mapped_store_employee_count": mapped_emp,
                 "avg_sales_per_employee": avg_eff,
                 "low_efficiency_store_count": len([d for d in diagnoses if "效率" in d.get("title", "") or "人效" in d.get("title", "")]),
                 "task_completion_rate": round(done_tasks / total_tasks, 4) if total_tasks else None,
@@ -881,12 +989,13 @@ class AIDiagnosisService:
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses[:8]],
             "diagnoses": diagnoses[:30],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(warnings, missing, ["dws_store_daily", "dim_employee", "dingtalk_employees", "hr_attendance_daily", "app_action_task"]),
+            "data_quality": self._quality(warnings, missing, ["dws_store_daily", "dwd_pos_ticket", "dingtalk_employees", "dingtalk_departments", "hr_attendance_daily", "dingtalk_approval_instances", "app_action_task"]),
         }
 
     async def members(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
         dt = _as_date(stat_date or await self._latest_date())
         params = {"dt": dt, "store_code": store_code or ""}
+        common = await self._common_metrics(dt, store_code)
         visit_date_filter = "visit_date<=CAST(:dt AS date)" if stat_date else "true"
         visit = await self._one(
             f"""
@@ -993,6 +1102,8 @@ class AIDiagnosisService:
             missing.append("会员储值明细")
         return {
             "summary": {
+                **common,
+                "health_score": max(0, 100 - len(diagnoses) * 8),
                 "stat_date": dt,
                 "visit_stat_date": _date_str(visit.get("visit_stat_date")),
                 "visit_count": _int(visit.get("visit_count")),
@@ -1051,17 +1162,15 @@ class AIDiagnosisService:
                   from dwd.dwd_pos_ticket
                   where biz_date=:dt and (:store_code = '' or store_code=:store_code)
                     and coalesce(is_void,false)=false and coalesce(is_pending,false)=false
-                    and standard_amount > 0 and discount_rate is not null and discount_rate < 0.60
+                    and sales_amount > 0 and standard_amount > 0 and discount_rate is not null and discount_rate < 0.60
                   order by discount_rate asc
                   limit 20
                 ), negative_inventory as (
-                  select '负库存' exception_type, 'critical' severity, store_code, product_code, sku_code, null::varchar order_no,
-                         concat('SKU负库存：', sku_code, '，数量 ', current_quantity) description,
-                         json_build_object('current_quantity', current_quantity, 'current_cost_amount', current_cost_amount) data_snapshot
-                  from dm.dm_inventory_warning
-                  where warning_date=(select max(warning_date) from dm.dm_inventory_warning where warning_date<=CAST(:dt AS date))
-                    and (:store_code = '' or store_code=:store_code)
-                    and (warning_type ilike '%negative%' or current_quantity < 0)
+                  select '负库存' exception_type, 'critical' severity, warehouse_code store_code, product_code, sku_code, null::varchar order_no,
+                         concat('SKU负库存：', sku_code, '，数量 ', qty) description,
+                         json_build_object('current_quantity', qty, 'synced_at', synced_at) data_snapshot
+                  from dwd.v_apparel_inventory_balance
+                  where (:store_code = '' or warehouse_code=:store_code) and qty < 0
                   limit 20
                 ), low_margin as (
                   select '低毛利商品' exception_type, 'warning' severity, store_code, product_code, null::varchar sku_code, null::varchar order_no,
@@ -1095,17 +1204,19 @@ class AIDiagnosisService:
             level = "high" if r.get("severity") in ("critical", "high") else "medium"
             obj = r.get("order_no") or r.get("sku_code") or r.get("product_code") or r.get("store_code") or "经营对象"
             diagnoses.append(self._diag("audit", level, f"{r.get('exception_type')}异常", r.get("description") or f"{obj} 触发异常稽核。", [f"对象：{obj}", f"门店：{r.get('store_code') or '-'}"], "可能存在折扣、退款、负库存、低毛利或数据同步异常，需要人工复核。", "责任部门复核单据与审批记录，必要时补充说明并转行动任务。", "财务经理 / 仓库主管 / 运营经理", "今日18:00前", "异常是否关闭、复核记录、同类异常是否复发", "dm_exception_audit / realtime rules"))
-        warnings = [] if rows else ["异常稽核DM表暂无记录，当前按小票折扣、库存预警、低毛利和门店异常实时规则兜底生成。"]
+        common = await self._common_metrics(dt, store_code)
+        warnings = [] if rows else ["异常稽核按小票折扣、实时库存余额、低毛利和门店经营规则实时生成。"]
         return {
-            "summary": {"stat_date": dt, "audit_count": len(source_rows), "high_count": sum(1 for d in diagnoses if d["level"] == "high")},
+            "summary": {**common, "stat_date": dt, "health_score": max(0, 100-len(source_rows)*3), "audit_count": len(source_rows), "high_count": sum(1 for d in diagnoses if d["level"] == "high")},
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses[:12]],
             "diagnoses": diagnoses,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:10])],
-            "data_quality": self._quality(warnings, [], ["dm_exception_audit", "dwd_pos_ticket", "dm_inventory_warning", "dws_product_daily", "dws_store_daily"]),
+            "data_quality": self._quality([], [], ["dm_exception_audit", "dwd_pos_ticket", "dwd_inventory_balance", "dws_product_daily", "dws_store_daily"]),
         }
 
     async def action_tasks(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
         dt = _as_date(stat_date or await self._latest_date())
+        common = await self._common_metrics(dt, store_code)
         module_payloads = []
         for module_name, fn in [
             ("sales", self.sales),
@@ -1149,6 +1260,8 @@ class AIDiagnosisService:
             missing.extend(q.get("missing_fields", []))
         return {
             "summary": {
+                **common,
+                "health_score": max(0, 100 - len([d for d in diagnoses if d.get("level") == "high"]) * 6 - await self._overdue_task_count(dt) * 4),
                 "stat_date": dt,
                 "suggestion_count": len(suggestions),
                 "existing_task_count": len(existing),
@@ -1160,8 +1273,56 @@ class AIDiagnosisService:
             ],
             "diagnoses": diagnoses[:80],
             "action_suggestions": existing + suggestions[:50],
-            "data_quality": self._quality(["第一阶段仅生成建议任务，不自动派发；正式派发需人工确认。"] + warnings[:6], sorted(set(missing)), ["app_action_task", "AI diagnosis rules", "dws/dwd/dm"]),
+            "data_quality": self._quality(warnings[:6], sorted(set(missing)), ["app_action_task", "AI diagnosis rules", "dws/dwd/dm"]),
         }
+
+    async def confirm_action_tasks(self, module: str, diagnosis_ids: list[str], stat_date: Optional[str], store_code: Optional[str], user: Any) -> dict:
+        dt = _as_date(stat_date or await self._latest_date())
+        payload = await self.module(module, dt, store_code)
+        diagnoses = {d.get("id"): d for d in payload.get("diagnoses", [])}
+        missing_ids = [diagnosis_id for diagnosis_id in diagnosis_ids if diagnosis_id not in diagnoses]
+        if missing_ids:
+            raise ValueError(f"诊断不存在或已失效: {', '.join(missing_ids[:3])}")
+        created = 0
+        skipped = 0
+        for idx, diagnosis_id in enumerate(dict.fromkeys(diagnosis_ids[:50]), 1):
+            diag = diagnoses[diagnosis_id]
+            task = self._task_from_diag(diag, idx)
+            source_text = f"{dt}|{store_code or ''}|{diagnosis_id}"
+            source_id = int(hashlib.sha256(source_text.encode("utf-8")).hexdigest()[:15], 16)
+            level = str(task.get("priority") or "中")
+            priority = 3 if level in ("高", "high") else 2 if level in ("中", "medium") else 1
+            task_no = f"AI{dt:%Y%m%d}{source_id:015x}"
+            result = await self.db.execute(text("""
+                insert into app.app_action_task
+                  (task_no,title,description,data_evidence,data_evidence_text,suggested_actions,review_metrics,
+                   feedback_requirement,source_type,source_id,related_store_code,related_date,assignee_name,
+                   assignee_role,creator_id,confirmed_by,confirmed_at,due_date,status,priority,risk_level,requires_human_confirm,is_deleted)
+                values
+                  (:task_no,:title,:description,cast(:evidence as jsonb),:evidence_text,cast(:actions as jsonb),cast(:metrics as jsonb),
+                   :feedback,'ai_diagnosis',:source_id,:store_code,:related_date,:assignee_name,
+                   :assignee_role,:creator_id,:creator_id,now(),:due_date,'pending',:priority,:risk_level,false,false)
+                on conflict (source_type,source_id) where is_deleted=false and source_id is not null do nothing
+                returning id
+            """), {
+                "task_no": task_no, "title": task.get("problem_type") or "AI经营诊断任务",
+                "description": task.get("description") or task.get("today_action") or "",
+                "evidence": json.dumps(task.get("evidence") or [], ensure_ascii=False),
+                "evidence_text": "；".join(task.get("evidence") or []),
+                "actions": json.dumps([task.get("today_action")] if task.get("today_action") else [], ensure_ascii=False),
+                "metrics": json.dumps([task.get("review_metric")] if task.get("review_metric") else [], ensure_ascii=False),
+                "feedback": task.get("feedback_requirement") or "提交处理过程和结果证据。",
+                "source_id": source_id, "store_code": store_code or None, "related_date": dt,
+                "assignee_name": task.get("owner"), "assignee_role": task.get("owner"),
+                "creator_id": getattr(user, "id", None), "due_date": datetime.now(ZoneInfo("Asia/Shanghai")).date() + timedelta(days=1),
+                "priority": priority, "risk_level": "high" if priority == 3 else "medium" if priority == 2 else "low",
+            })
+            if result.scalar_one_or_none() is None:
+                skipped += 1
+            else:
+                created += 1
+        await self.db.commit()
+        return {"created_count": created, "skipped_count": skipped}
 
     async def module(self, module: str, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
         mapping = {

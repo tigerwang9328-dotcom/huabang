@@ -184,7 +184,7 @@ class RuleEngine:
 
     async def _rule_r009(self, stat_date, d, db, store_code):
         r = await db.execute(text("""
-            SELECT COUNT(DISTINCT sku_code) FROM dwd.dwd_inventory_snapshot
+            SELECT COUNT(DISTINCT sku_code) FROM dwd.v_apparel_inventory_snapshot
             WHERE snapshot_date = :d AND quantity <= 0
         """), {"d": d})
         count = r.scalar() or 0

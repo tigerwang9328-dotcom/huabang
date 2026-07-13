@@ -1,6 +1,6 @@
 """系统管理API（用户/角色/权限/字典）"""
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete, or_, and_
@@ -12,6 +12,7 @@ from app.core.security import get_password_hash
 from app.core.store_whitelist import ALLOWED_STORE_CODES, ALLOWED_INVENTORY_CODES
 from app.models.sys import SysUser, SysRole, SysUserRole, SysDepartment, SysMenu, SysParam, SysPermission, SysRolePermission, SysRegisterApplication, SysOperationLog, SysUserStore, SysFieldPermission
 from app.schemas.common import ApiResponse
+from app.services.size_wall_service import SizeWallService
 
 router = APIRouter(prefix="/system", tags=["系统管理"])
 
@@ -19,6 +20,10 @@ ROLE_LABELS = {"super_admin":"超级管理员","boss":"BOSS","ceo":"总经理","
 DATA_SCOPE_NAMES = {"all":"全部数据","company":"公司数据","dept":"部门数据","store":"门店数据","self":"个人数据"}
 FIELD_RESOURCES = [("sales","sales.amount","销售金额"),("sales","sales.profit","销售利润"),("sales","sales.customer_phone","客户手机号"),("product","product.cost_price","商品成本价"),("product","product.gross_margin","商品毛利率"),("inventory","inventory.stock_amount","库存金额"),("finance","finance.payable","应付款"),("finance","finance.receivable","应收款"),("finance","finance.cash_balance","资金余额"),("hr","hr.salary","员工薪资"),("hr","hr.phone","员工手机号")]
 SECURITY_DEFAULTS = {"password_min_length":8,"password_require_number":True,"password_require_letter":True,"password_require_special":False,"login_max_failed":5,"login_lock_minutes":30,"register_apply_rate_limit":5,"register_apply_window_minutes":10,"remember_password_enabled":False}
+
+
+class SizeWallSyncRequest(BaseModel):
+    analysis_date: Optional[date] = None
 
 async def write_operation_log(db, user, module, action, target_type=None, target_id=None, before_data=None, after_data=None, request=None):
     db.add(SysOperationLog(user_id=user.id if user else None, username=user.username if user else None, module=module, action=action, target_type=target_type, target_id=str(target_id) if target_id is not None else None, before_data=before_data, after_data=after_data, ip=request.client.host if request and request.client else None, user_agent=request.headers.get("user-agent") if request else None))
@@ -628,3 +633,18 @@ async def system_dashboard_stats(current_user:SysUser=Depends(require_permission
     user_total=(await db.execute(select(func.count()).select_from(SysUser).where(SysUser.is_deleted==False))).scalar() or 0; enabled=(await db.execute(select(func.count()).select_from(SysUser).where(SysUser.is_deleted==False,SysUser.status==1))).scalar() or 0
     role_count=(await db.execute(select(func.count()).select_from(SysRole))).scalar() or 0; perm_count=(await db.execute(select(func.count()).select_from(SysPermission))).scalar() or 0; pending=(await db.execute(select(func.count()).select_from(SysRegisterApplication).where(SysRegisterApplication.status=="pending"))).scalar() or 0
     return ApiResponse.ok(data={"cards":{"user_total":user_total,"user_enabled":enabled,"user_disabled":max(user_total-enabled,0),"role_count":role_count,"permission_count":perm_count,"pending_register":pending,"today_login":0,"today_permission_changes":0,"data_risk_users":0,"security_risks":0},"todos":[{"label":"待审核注册申请","count":pending}]})
+
+
+@router.post("/sync/size-wall", response_model=ApiResponse)
+async def rebuild_size_wall_snapshot(
+    body: SizeWallSyncRequest,
+    current_user: SysUser = Depends(require_permission("sync:import")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await SizeWallService().build_snapshot(db, body.analysis_date)
+        await db.commit()
+        return ApiResponse.ok(data=result, message="断码尺码墙快照生成完成")
+    except ValueError as exc:
+        await db.rollback()
+        return ApiResponse.fail(str(exc))

@@ -60,7 +60,7 @@ def test_product_diagnosis_exposes_baison_inbound_lifecycle_metrics():
 
     summary = result["summary"]
     assert "dws_product_inbound_summary" in service.sql
-    assert "dwd.dwd_inventory_balance" in service.sql
+    assert "dwd.v_apparel_inventory_balance" in service.sql
     assert "greatest" in service.sql.lower()
     assert summary["net_sales"] == 13722
     assert summary["order_count"] == 31

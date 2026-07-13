@@ -10,4 +10,6 @@ export const aiDiagnosisApi = {
     request.get(`/ai-diagnosis/${module}`, { params }),
   generateTasks: (data: { module?: string; stat_date?: string; store_code?: string }) =>
     request.post("/ai-diagnosis/action-tasks/generate", data),
+  confirmTasks: (data: { module: string; diagnosis_ids: string[]; stat_date?: string; store_code?: string }) =>
+    request.post("/ai-diagnosis/action-tasks/confirm", data),
 };

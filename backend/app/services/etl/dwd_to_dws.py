@@ -245,7 +245,7 @@ class DwdToDws:
                     COUNT(CASE WHEN is_negative THEN 1 END),
                     COUNT(*),
                     BOOL_AND(NOT is_cost_missing)
-                FROM dwd.dwd_inventory_snapshot
+                FROM dwd.v_apparel_inventory_snapshot
                 WHERE snapshot_date = :stat_date
                 GROUP BY store_code
                 ON CONFLICT (stat_date, store_code) DO UPDATE SET

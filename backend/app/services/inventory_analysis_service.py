@@ -43,14 +43,14 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
 
     inv_records_r = await db.execute(text(f"""
         SELECT COUNT(*)
-        FROM dwd.dwd_inventory_balance
+        FROM dwd.v_apparel_inventory_balance
         WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
     """))
     inv_records = inv_records_r.scalar() or 0
 
     inv_qty_r = await db.execute(text(f"""
         SELECT COALESCE(SUM(qty), 0)
-        FROM dwd.dwd_inventory_balance
+        FROM dwd.v_apparel_inventory_balance
         WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
     """))
     total_inv_qty = int(inv_qty_r.scalar() or 0)
@@ -61,7 +61,7 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
                    COALESCE(BTRIM(color_code::text), '') AS color_code,
                    COALESCE(BTRIM(size_code::text), '') AS size_code,
                    SUM(qty) AS qty
-            FROM dwd.dwd_inventory_balance
+            FROM dwd.v_apparel_inventory_balance
             WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
             GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
         ), priced AS (
@@ -92,7 +92,7 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
         ), age_snapshot AS (
             SELECT COUNT(*) AS snapshot_rows,
                    COALESCE(SUM(CASE WHEN age_days > 15 THEN cost_amount ELSE 0 END), 0) AS age_90_plus_amount
-            FROM dwd.dwd_inventory_snapshot
+            FROM dwd.v_apparel_inventory_snapshot
             WHERE UPPER(COALESCE(store_code, '')::text) IN {inventory_in}
         )
         SELECT COALESCE(SUM(priced.qty * priced.unit_price), 0) AS inventory_amount,
@@ -113,7 +113,7 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     zero_r = await db.execute(
         text(f"""
             SELECT COUNT(*)
-            FROM dwd.dwd_inventory_balance
+            FROM dwd.v_apparel_inventory_balance
             WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
               AND (qty = 0 OR available_qty = 0)
         """)
@@ -122,7 +122,7 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
 
     synced_r = await db.execute(text(f"""
         SELECT MAX(synced_at)
-        FROM dwd.dwd_inventory_balance
+        FROM dwd.v_apparel_inventory_balance
         WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
     """))
     last_sync = synced_r.scalar()
@@ -158,7 +158,7 @@ async def get_inventory_overview(db: AsyncSession) -> dict:
                    COALESCE(BTRIM(i.size_code::text), '') AS size_code,
                    SUM(i.qty) AS qty,
                    COUNT(*) AS row_count
-            FROM dwd.dwd_inventory_balance i
+            FROM dwd.v_apparel_inventory_balance i
             WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
             GROUP BY UPPER(COALESCE(i.warehouse_code, '')::text), i.product_code,
                      COALESCE(BTRIM(i.color_code::text), ''), COALESCE(BTRIM(i.size_code::text), '')
@@ -237,7 +237,7 @@ async def get_warehouse_list(
                        COALESCE(BTRIM(i.color_code::text), '') AS color_code,
                        COALESCE(BTRIM(i.size_code::text), '') AS size_code,
                        SUM(i.qty) AS qty
-                FROM dwd.dwd_inventory_balance i
+                FROM dwd.v_apparel_inventory_balance i
                 WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
                 GROUP BY UPPER(COALESCE(i.warehouse_code, '')::text), i.product_code,
                          COALESCE(BTRIM(i.color_code::text), ''), COALESCE(BTRIM(i.size_code::text), '')
@@ -322,7 +322,7 @@ async def get_inventory_balance_list(
     if only_positive:
         conds.append("i.qty > 0")
     where = " AND ".join(conds) if conds else "TRUE"
-    total_r = await db.execute(text(f"SELECT COUNT(*) FROM dwd.dwd_inventory_balance i WHERE {where}").params(**params))
+    total_r = await db.execute(text(f"SELECT COUNT(*) FROM dwd.v_apparel_inventory_balance i WHERE {where}").params(**params))
     total = total_r.scalar() or 0
     rows_r = await db.execute(
         text(f"""SELECT i.id, i.warehouse_code, i.warehouse_name, i.product_code, i.sku_code,
@@ -334,7 +334,7 @@ async def get_inventory_balance_list(
                              ELSE NULL
                         END AS inventory_amount,
                         i.source_system, i.synced_at
-                 FROM dwd.dwd_inventory_balance i
+                 FROM dwd.v_apparel_inventory_balance i
                  LEFT JOIN dim.dim_sku s
                    ON s.source_system = 'baison'
                   AND s.product_code = i.product_code

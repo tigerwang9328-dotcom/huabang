@@ -195,5 +195,12 @@ async def run(days: int = 30, dry_run: bool = False, max_api_calls: int | None =
         return stats
     await save_instances(approval_rows)
     await save_finance(finance_rows)
+    async with AsyncSessionLocal() as s:
+        await s.execute(text("""
+            insert into sys.sys_integration_config(system_code,system_name,status,last_sync_at)
+            values('dingtalk','钉钉','api',now())
+            on conflict(system_code) do update set status='api',last_sync_at=excluded.last_sync_at
+        """))
+        await s.commit()
     logger.info("审批/财务 已落库。")
     return stats

@@ -34,7 +34,7 @@ async def get_product_analysis_summary(db: AsyncSession) -> dict:
     sku_no_barcode = sku_total - sku_with_barcode
 
     # 库存汇总
-    inv_qty_r = await db.execute(text("SELECT COALESCE(SUM(qty), 0) FROM dwd.dwd_inventory_balance"))
+    inv_qty_r = await db.execute(text("SELECT COALESCE(SUM(qty), 0) FROM dwd.v_apparel_inventory_balance"))
     total_inv_qty = int(inv_qty_r.scalar() or 0)
 
     synced_r = await db.execute(text("SELECT MAX(synced_at) FROM dim.dim_product"))

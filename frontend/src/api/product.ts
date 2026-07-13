@@ -13,4 +13,6 @@ export const productApi = {
   // 同步 SKU（全量后台执行，立即返回）
   syncSkus: (payload?: any) =>
     request.post("/sync/baison/skus", payload || { full_sync: true, page_size: 20 }, { timeout: 120000 }),
+  getSizeWallOverview: (params?: any) => request.get("/product/size-wall/overview", { params }),
+  getSizeWallCandidates: (params?: any) => request.get("/product/size-wall/candidates", { params }),
 };

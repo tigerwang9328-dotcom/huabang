@@ -122,5 +122,5 @@ def test_life_data_migration_has_one_resolvable_head():
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["f1b2c3d4e5f6"]
-    assert script.get_current_head() == "f1b2c3d4e5f6"
+    assert script.get_heads() == ["e5f6a7b8c9d0"]
+    assert script.get_current_head() == "e5f6a7b8c9d0"

@@ -229,7 +229,7 @@ class DwsToDm:
         try:
             inv_r = await db.execute(text("""
                 SELECT store_code, product_code, sku_code, quantity, cost_amount, age_days, age_bucket
-                FROM dwd.dwd_inventory_snapshot
+                FROM dwd.v_apparel_inventory_snapshot
                 WHERE snapshot_date = :d
                   AND (quantity < 0 OR age_days > 90 OR cost_amount > 50000)
                 LIMIT 500
@@ -277,7 +277,7 @@ class DwsToDm:
                 FROM dws.dws_product_daily pd
                 JOIN (
                     SELECT store_code, product_code, SUM(quantity) AS quantity
-                    FROM dwd.dwd_inventory_snapshot
+                    FROM dwd.v_apparel_inventory_snapshot
                     WHERE snapshot_date = :snap
                     GROUP BY store_code, product_code
                 ) inv ON pd.store_code = inv.store_code AND pd.product_code = inv.product_code

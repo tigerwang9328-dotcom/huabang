@@ -148,7 +148,7 @@ async def mobile_inventory_styles(
                    COALESCE(SUM(available_qty), 0) AS available_qty,
                    COUNT(DISTINCT sku_code) FILTER (WHERE sku_code IS NOT NULL AND BTRIM(sku_code::text) <> '') AS sku_count,
                    MAX(synced_at) AS last_synced_at
-            FROM dwd.dwd_inventory_balance
+            FROM dwd.v_apparel_inventory_balance
             WHERE UPPER(COALESCE(warehouse_code, '')::text) = ANY(:inventory_codes)
             GROUP BY product_code
         ), sales AS (

@@ -28,7 +28,7 @@ async def fetch_departments(client, token) -> list:
     return out
 
 
-async def fetch_employees(client, token) -> list:
+async def fetch_employees(client, token, department_names: dict[str, str] | None = None) -> list:
     """遍历部门取 userId，再取员工详情。"""
     seen, out = set(), []
     for d in await get_all_dept_ids(client, token):
@@ -39,12 +39,13 @@ async def fetch_employees(client, token) -> list:
             try:
                 data = await post_oapi(client, "/topapi/v2/user/get", token, {"userid": uid})
                 r = data.get("result") or {}
+                dept_ids = r.get("dept_id_list") or []
                 out.append({
                     "dingtalk_user_id": uid,
                     "name": r.get("name"),
                     "mobile": r.get("mobile"),
-                    "department_ids": r.get("dept_id_list"),
-                    "department_names": None,
+                    "department_ids": dept_ids,
+                    "department_names": [department_names[str(x)] for x in dept_ids if department_names and str(x) in department_names] or None,
                     "position": r.get("title"),
                     "job_number": r.get("job_number"),
                     "email": r.get("email"),
@@ -78,7 +79,7 @@ async def save_employees(rows: list) -> int:
             stmt = stmt.on_conflict_do_update(
                 index_elements=["dingtalk_user_id"],
                 set_={k: getattr(stmt.excluded, k) for k in
-                      ("name", "mobile", "department_ids", "position", "job_number", "email", "active", "raw_payload")})
+                      ("name", "mobile", "department_ids", "department_names", "position", "job_number", "email", "active", "raw_payload")})
             await s.execute(stmt)
         await s.commit()
     return len(rows)
@@ -92,7 +93,8 @@ async def run(dry_run: bool = False) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             depts = await fetch_departments(client, token)
-            emps = await fetch_employees(client, token)
+            dept_names = {str(d["dept_id"]): d["name"] for d in depts if d.get("name")}
+            emps = await fetch_employees(client, token, dept_names)
         except DingtalkApiError as e:
             print_permission_help("通讯录/部门", e)
             return {"departments": 0, "employees": 0, "error": "permission"}

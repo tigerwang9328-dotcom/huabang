@@ -3,6 +3,7 @@
 读取标准业务表 dim_product（不返回 raw_data / 成本价 / 任何密钥）。
 """
 import logging
+from datetime import date
 from typing import Optional
 from urllib.parse import quote, unquote, urlparse
 
@@ -14,6 +15,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission
+from app.core.data_scope import get_data_scope
 from app.core.database import get_db
 import asyncio as _asyncio
 
@@ -24,10 +26,20 @@ from app.integrations.baison.services.product_service import GOODS_LIST_METHOD, 
 from app.integrations.baison.services.sku_service import SKU_LIST_METHOD, import_all_skus, import_sku_page
 from app.models.dim import DimProduct, DimSku
 from app.models.sys import SysUser
+from app.services.size_wall_service import SizeWallService
 
 logger = logging.getLogger("product.api")
 
 router = APIRouter(tags=["商品经营中心"])
+
+
+async def _size_wall_codes(db: AsyncSession, current_user: SysUser, store_code: Optional[str]) -> list[str]:
+    scope = await get_data_scope(db, current_user)
+    source_codes = scope.inventory_codes if scope.is_limited_store else ALLOWED_INVENTORY_CODES
+    codes = sorted({str(code).upper() for code in source_codes} & set(ALLOWED_INVENTORY_CODES))
+    if store_code and store_code.upper() not in codes:
+        raise HTTPException(status_code=403, detail="无权查看该门店或仓库")
+    return codes
 
 # 列表返回字段（不含 raw_data / cost_price）
 _COLS = (
@@ -115,7 +127,7 @@ async def _product_metrics(db: AsyncSession, product_codes: list[str]) -> dict[s
     metrics = {code: {"inventory_qty": 0.0, "sales_qty": 0.0, "sales_amount": 0.0} for code in product_codes}
     inv_rows = (await db.execute(text("""
         SELECT product_code, COALESCE(SUM(qty), 0) AS inventory_qty
-        FROM dwd.dwd_inventory_balance
+        FROM dwd.v_apparel_inventory_balance
         WHERE product_code = ANY(:codes)
           AND UPPER(warehouse_code::text) = ANY(:inventory_codes)
         GROUP BY product_code
@@ -157,7 +169,7 @@ async def _sku_metrics(db: AsyncSession, sku_rows: list[dict]) -> dict[str, dict
                COALESCE(BTRIM(color_code::text), '') AS color_code,
                COALESCE(BTRIM(size_code::text), '') AS size_code,
                COALESCE(SUM(qty), 0) AS inventory_qty
-        FROM dwd.dwd_inventory_balance
+        FROM dwd.v_apparel_inventory_balance
         WHERE product_code = ANY(:product_codes)
           AND UPPER(warehouse_code::text) = ANY(:inventory_codes)
         GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
@@ -265,7 +277,7 @@ async def list_products(
             conds.append(text(f"""
                 dim_product.product_code IN (
                     SELECT i.product_code
-                    FROM dwd.dwd_inventory_balance i
+                    FROM dwd.v_apparel_inventory_balance i
                     WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
                     GROUP BY i.product_code
                     HAVING COALESCE(SUM(i.qty), 0) > 0
@@ -390,7 +402,7 @@ async def list_skus(
             conds.append(text(f"""
                 COALESCE((
                     SELECT SUM(i.qty)
-                    FROM dwd.dwd_inventory_balance i
+                    FROM dwd.v_apparel_inventory_balance i
                     WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
                       AND i.product_code = dim_sku.product_code
                       AND COALESCE(BTRIM(i.color_code::text), '') = COALESCE(BTRIM(dim_sku.color_code::text), '')
@@ -475,7 +487,7 @@ async def product_quality_summary(
                        COALESCE(BTRIM(color_code::text), '') AS color_code,
                        COALESCE(BTRIM(size_code::text), '') AS size_code,
                        SUM(qty) AS qty
-                FROM dwd.dwd_inventory_balance
+                FROM dwd.v_apparel_inventory_balance
                 WHERE UPPER(warehouse_code::text) = ANY(:inventory_codes)
                 GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
             ), inv AS (
@@ -577,3 +589,42 @@ async def sync_baison_skus(
     except Exception:
         logger.exception("sku sync error")
         return {"success": False, "message": "内部错误，请查看服务日志"}
+
+
+@router.get("/product/size-wall/overview")
+async def size_wall_overview(
+    analysis_date: Optional[date] = Query(None),
+    store_code: Optional[str] = Query(None),
+    current_user: SysUser = Depends(require_permission("product:overview:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _size_wall_codes(db, current_user, store_code)
+    data = await SizeWallService().overview(db, codes, store_code, analysis_date)
+    return {"success": True, "data": data}
+
+
+@router.get("/product/size-wall/candidates")
+async def size_wall_candidates(
+    analysis_date: Optional[date] = Query(None), store_code: Optional[str] = Query(None),
+    year: Optional[int] = Query(None), size_group: Optional[str] = Query(None),
+    normalized_size_code: Optional[str] = Query(None), raw_size_code: Optional[str] = Query(None),
+    size_code: Optional[str] = Query(None, description="兼容旧版，等同标准尺码筛选"),
+    category_name: Optional[str] = Query(None), price_band: Optional[str] = Query(None),
+    min_score: Optional[int] = Query(None, ge=0, le=100), suggested_action: Optional[str] = Query(None),
+    page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+    current_user: SysUser = Depends(require_permission("product:overview:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _size_wall_codes(db, current_user, store_code)
+    data = await SizeWallService().candidates(
+        db, codes, store_code=store_code, analysis_date=analysis_date, year=year,
+        size_group=size_group, normalized_size_code=normalized_size_code,
+        raw_size_code=raw_size_code, size_code=size_code,
+        category_name=category_name, price_band_value=price_band,
+        min_score=min_score, suggested_action=suggested_action, page=page, page_size=page_size,
+    )
+    image_urls = await sku_color_image_urls(db, data.get("items") or [])
+    for item in data.get("items") or []:
+        key = (str(item.get("product_code") or "").strip(), str(item.get("color_code") or "").strip())
+        item["image_url"] = _image_proxy_path(image_urls.get(key))
+    return {"success": True, "data": data}

@@ -111,7 +111,10 @@
     </section>
 
     <section class="panel">
-      <div class="section-title"><div><p>ACTION LOOP</p><h2>行动建议 / 闭环任务</h2></div></div>
+      <div class="section-title">
+        <div><p>ACTION LOOP</p><h2>行动建议 / 闭环任务</h2></div>
+        <el-button v-if="actions.some((x: any) => x.status === '建议任务')" type="primary" :loading="confirming" @click="confirmTasks">确认并创建正式任务</el-button>
+      </div>
       <el-table :data="actions" empty-text="暂无行动建议" border>
         <el-table-column prop="task_no" label="任务编号" width="150" />
         <el-table-column prop="problem_type" label="问题类型" min-width="180" />
@@ -153,6 +156,7 @@ const currentModule = computed(() => modules.find((m) => m.key === moduleKey.val
 const filters = reactive({ stat_date: "", store_code: "", level: "" });
 const loading = ref(false);
 const generating = ref(false);
+const confirming = ref(false);
 const payload = ref<any>({ summary: {}, risks: [], diagnoses: [], action_suggestions: [], data_quality: {} });
 
 const summary = computed(() => payload.value.summary || {});
@@ -197,7 +201,7 @@ const metricCards = computed(() => {
       { label: "销售件数", value: num(s.item_count, "件"), desc: "净销售件数" },
       { label: "客单价", value: money(s.avg_order_value), desc: "成交质量" },
       { label: "连带率", value: Number(s.items_per_order || 0).toFixed(2), desc: "搭配销售能力" },
-      { label: "退货率", value: pct(s.return_rate), desc: "销售质量" },
+      { label: "月目标达成", value: pct(s.monthly_achievement_rate), desc: `${money(s.monthly_actual_amount)} / ${money(s.monthly_target_amount)}` },
     ],
     products: [
       { label: "商品数", value: num(s.product_count, "款"), desc: "参与诊断商品" },
@@ -268,6 +272,19 @@ const generateTasks = async () => {
     ElMessage.success("已生成建议任务，当前阶段需人工确认后派发");
   } finally {
     generating.value = false;
+  }
+};
+
+const confirmTasks = async () => {
+  const tasks = actions.value.filter((x: any) => x.status === "建议任务");
+  if (!tasks.length) return;
+  confirming.value = true;
+  try {
+    const res = await aiDiagnosisApi.confirmTasks({ module: apiModuleKey.value, diagnosis_ids: tasks.map((x: any) => x.diagnosis_id), stat_date: filters.stat_date, store_code: filters.store_code });
+    ElMessage.success(`已创建 ${res.data.data?.created_count || 0} 个正式任务`);
+    await loadData();
+  } finally {
+    confirming.value = false;
   }
 };
 

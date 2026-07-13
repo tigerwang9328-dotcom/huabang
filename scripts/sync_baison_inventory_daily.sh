@@ -74,7 +74,7 @@ async def main():
                            OR NULLIF(p.cost_price, 0) IS NOT NULL
                        ),
                        now(), now()
-                FROM dwd.dwd_inventory_balance b
+                FROM dwd.v_apparel_inventory_balance b
                 LEFT JOIN dim.dim_sku sk
                   ON sk.product_code = b.product_code
                  AND TRIM(LEADING '-' FROM COALESCE(sk.color_code, '')) =

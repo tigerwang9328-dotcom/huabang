@@ -27,6 +27,16 @@ def _trim(value) -> Optional[str]:
     return text_value or None
 
 
+def _normalize_color(value) -> Optional[str]:
+    normalized = _trim(value)
+    return normalized.lstrip("-") if normalized else None
+
+
+def _api_color(value) -> Optional[str]:
+    normalized = _normalize_color(value)
+    return f"-{normalized}" if normalized else None
+
+
 def _parse_response(data) -> list[dict]:
     if not isinstance(data, dict):
         return []
@@ -54,7 +64,7 @@ def fetch_product_images(pairs: list[tuple[str, str]], client: Optional[BaisonCl
     client = client or BaisonClient()
     rows: list[dict] = []
     for chunk in _chunked(pairs):
-        goods = [{"GoodsCode": product_code, "ColorCode": color_code} for product_code, color_code in chunk]
+        goods = [{"GoodsCode": product_code, "ColorCode": _api_color(color_code)} for product_code, color_code in chunk]
         resp = client.request(
             PRODUCT_IMAGE_BATCH_METHOD,
             {"PageNo": 1, "PageSize": max(len(goods), 1), "Goods": goods},
@@ -92,7 +102,7 @@ def _sku_pairs(sku_rows: list[dict]) -> list[tuple[str, str]]:
     seen = set()
     for row in sku_rows:
         product_code = _trim(row.get("product_code"))
-        color_code = _trim(row.get("color_code"))
+        color_code = _normalize_color(row.get("color_code"))
         if not product_code or not color_code:
             continue
         key = (product_code, color_code)
@@ -109,6 +119,7 @@ async def _load_cached_images(db: AsyncSession, pairs: list[tuple[str, str]]) ->
         SELECT product_code, color_code, image_url
         FROM dim.dim_product_image
         WHERE source_system = :source_system
+          AND (image_url IS NOT NULL OR synced_at >= now() - interval '1 day')
           AND (product_code, color_code) IN (
               SELECT * FROM unnest(CAST(:product_codes AS varchar[]), CAST(:color_codes AS varchar[]))
           )
@@ -134,7 +145,7 @@ async def _upsert_image_rows(
         if not isinstance(row, dict):
             continue
         product_code = _trim(row.get("GoodsCode"))
-        color_code = _trim(row.get("ColorCode"))
+        color_code = _normalize_color(row.get("ColorCode"))
         if not product_code or not color_code:
             continue
         key = (product_code, color_code)

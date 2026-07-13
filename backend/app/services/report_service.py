@@ -354,7 +354,7 @@ class ReportService:
         if not has_return:
             warnings.append("无退货数据（可能当日无退货）")
 
-        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_inventory_snapshot WHERE snapshot_date = :d"), {"d": d})
+        r = await db.execute(text("SELECT COUNT(*) FROM dwd.v_apparel_inventory_snapshot WHERE snapshot_date = :d"), {"d": d})
         if int(r.scalar() or 0) > 0:
             has_inventory = True
         else:

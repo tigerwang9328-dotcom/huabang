@@ -72,7 +72,7 @@ async def get_base_counts(db: AsyncSession) -> dict:
 
     inv_count_result = await db.execute(text(f"""
         SELECT COUNT(*)
-        FROM dwd.dwd_inventory_balance
+        FROM dwd.v_apparel_inventory_balance
         WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
     """))
     counts["inventory_record_count"] = inv_count_result.scalar() or 0
@@ -211,7 +211,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                        COALESCE(SUM({qty_col}), 0) AS total_qty,
                        COALESCE(SUM({available_col}), 0) AS available_qty,
                        BOOL_OR({barcode_expr}) AS missing_barcode
-                FROM dwd.dwd_inventory_balance
+                FROM dwd.v_apparel_inventory_balance
                 WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
                 GROUP BY {inv_key}
             )
@@ -246,7 +246,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                              AND COALESCE(sku.cost_price, p.cost_price) > 0
                        ), 0) AS costed_qty,
                        COALESCE(SUM(i.qty), 0) AS total_qty
-                FROM dwd.dwd_inventory_balance i
+                FROM dwd.v_apparel_inventory_balance i
                 LEFT JOIN dim.dim_sku sku
                   ON sku.product_code = i.product_code
                  AND sku.color_code = i.color_code
@@ -267,7 +267,7 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                 SELECT COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), '未分类') AS category_name,
                        COALESCE(SUM(i.qty), 0) AS qty,
                        COALESCE(SUM(i.qty * COALESCE(sku.cost_price, p.cost_price)), 0) AS amount
-                FROM dwd.dwd_inventory_balance i
+                FROM dwd.v_apparel_inventory_balance i
                 LEFT JOIN dim.dim_product p
                   ON p.product_code = i.product_code
                  AND COALESCE(p.source_system, 'baison') = 'baison'
