@@ -1,7 +1,7 @@
 """Persist LifeData collector API-group health.
 
 Revision ID: a2b3c4d5e6f7
-Revises: e5f6a7b8c9d0
+Revises: e6f7a8b9c0d1
 """
 
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 
 revision = "a2b3c4d5e6f7"
-down_revision = "e5f6a7b8c9d0"
+down_revision = "e6f7a8b9c0d1"
 branch_labels = None
 depends_on = None
 
