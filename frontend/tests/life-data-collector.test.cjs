@@ -46,7 +46,8 @@ test('declares the required Tampermonkey metadata', () => {
 })
 
 test('classifies the learned LifeData business paths into collection groups', () => {
-  assert.equal(core.classifyTemplate({ pagePath: '/flow/content/analysis/video' }), 'video')
+  assert.equal(core.classifyTemplate({ pagePath: '/flow/content/analysis/video', requestPayload: { biz_params: { module_params: { ItemRank: { offset: 0, limit: 100 } } } } }), 'video')
+  assert.equal(core.classifyTemplate({ pagePath: '/flow/content/analysis/video', requestPayload: { biz_params: { module_params: { ContentSummary: {} } } } }), 'other')
   assert.equal(core.classifyTemplate({ pagePath: '/dito/pc/business/page' }), 'business')
   assert.equal(core.classifyTemplate({ pagePath: '/dito/pc/ad/analysis' }), 'advertising')
   assert.equal(core.classifyTemplate({ pagePath: '/store/my/rank' }), 'other')
@@ -71,6 +72,16 @@ test('only accepts responses containing meaningful metrics for their group', () 
   assert.equal(core.hasMeaningfulBusinessData({ code: 0, data: { explain: [{ current_ad_cost: null }] } }, 'advertising'), false)
   assert.equal(core.hasMeaningfulBusinessData({ code: 0, data: { indicator: [{ total_ad_cost: 132717 }] } }, 'advertising'), true)
   assert.equal(core.hasMeaningfulBusinessData({ code: 0, data: { overview: [{ verify_gmv: 116000 }] } }, 'business'), true)
+})
+
+test('merges structurally equivalent templates by keeping the newest valid request', () => {
+  const oldTemplate = { endpoint: '/api/dito/query', pagePath: '/dito/pc/ad/analysis', requestPayload: { biz_params: { module_params: { BudgetCardInfo: {} }, common_params: { start_date: '2026-07-01' } } }, learnedAt: 1 }
+  const newTemplate = { ...oldTemplate, requestPayload: { biz_params: { module_params: { BudgetCardInfo: {} }, common_params: { start_date: '2026-07-06' } } }, learnedAt: 2 }
+  const registry = core.mergeTemplateRegistry({}, oldTemplate)
+  const merged = core.mergeTemplateRegistry(registry, newTemplate)
+  assert.equal(Object.keys(merged).length, 1)
+  assert.equal(Object.values(merged)[0].learnedAt, 2)
+  assert.equal(Object.values(merged)[0].group, 'advertising')
 })
 
 test('builds 100-row video pages without mutating template', () => {

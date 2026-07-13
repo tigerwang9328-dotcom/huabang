@@ -383,7 +383,10 @@
     const pagePath = String(template && (template.pagePath || template.path) || '')
       .split('?')[0]
       .replace(/\/$/, '')
-    if (pagePath === '/flow/content/analysis/video') return 'video'
+    if (pagePath === '/flow/content/analysis/video') {
+      const request = template && (template.requestPayload || template.request_payload)
+      return request && hasPageableItemRank(request) ? 'video' : 'other'
+    }
     if (pagePath === '/dito/pc/business/page' || pagePath === '/trade/overview' || pagePath === '/flow/my/overview') return 'business'
     if (pagePath === '/dito/pc/ad/analysis' || pagePath.startsWith('/ad/analysis')) return 'advertising'
     return 'other'
@@ -419,6 +422,22 @@
     return false
   }
 
+  function mergeTemplateRegistry(current, learned) {
+    const registry = current && typeof current === 'object' ? { ...current } : {}
+    const template = { ...learned }
+    template.group = classifyTemplate(template)
+    template.kind = template.group === 'video' ? 'video' : template.group
+    const key = templateFingerprint(template)
+    const existing = registry[key]
+    if (!existing || Number(template.learnedAt || 0) >= Number(existing.learnedAt || 0)) {
+      registry[key] = template
+    }
+    const entries = Object.entries(registry)
+      .sort((a, b) => Number(b[1].learnedAt || 0) - Number(a[1].learnedAt || 0))
+      .slice(0, 80)
+    return Object.fromEntries(entries)
+  }
+
   const core = {
     ACCOUNT_ID,
     LIFE_ACCOUNT_ID,
@@ -430,6 +449,7 @@
     enqueueBounded,
     extractItemRank,
     hasMeaningfulBusinessData,
+    mergeTemplateRegistry,
     isAllowedEndpoint,
     nextLeaderLease,
     pickLifeDataHeaders,
@@ -696,15 +716,7 @@
     }
 
     function saveTemplate(template) {
-      const templates = readTemplates()
-      const key = [
-        template.kind,
-        template.endpoint,
-        template.pagePath,
-        template.moduleIdentity,
-      ].join('|')
-      templates[key] = template
-      setValue(KEYS.templates, templates)
+      setValue(KEYS.templates, mergeTemplateRegistry(readTemplates(), template))
     }
 
     function latestVideoTemplate() {
@@ -975,16 +987,18 @@
           hasPageableItemRank(record.requestPayload) &&
           extractItemRank(response),
       )
+      const group = classifyTemplate({ pagePath, requestPayload: record.requestPayload })
       const template = {
         endpoint: record.endpoint,
         pagePath,
         requestPayload: sanitizeBusinessJson(record.requestPayload),
-        kind: isVideo ? 'video' : 'other',
+        kind: isVideo ? 'video' : group,
+        group,
         moduleIdentity: getModuleIdentity(record.requestPayload),
         isVideo,
         learnedAt: Date.now(),
       }
-      saveTemplate(template)
+      if (hasMeaningfulBusinessData(response, group)) saveTemplate(template)
       if (template.isVideo) {
         setStatus({ lastCapture: new Date().toISOString(), error: '' })
         if (state.ready && synchronizeLeadership()) maybeCollectNewTemplate()
