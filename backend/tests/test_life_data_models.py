@@ -136,4 +136,4 @@ def test_group_health_migration_follows_life_data_collector():
     migration = run_path(str(_GROUP_HEALTH_MIGRATION))
 
     assert migration["revision"] == "a2b3c4d5e6f7"
-    assert migration["down_revision"] == "e6f7a8b9c0d1"
+    assert migration["down_revision"] == "e5f6a7b8c9d0"
