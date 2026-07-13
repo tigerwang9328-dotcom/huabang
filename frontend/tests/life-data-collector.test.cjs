@@ -31,7 +31,7 @@ test('declares the required Tampermonkey metadata', () => {
   const source = fs.readFileSync(scriptPath, 'utf8')
 
   for (const line of [
-    '// @version      1.0.2',
+    '// @version      1.0.3',
     '// @match        https://www.life-data.cn/*',
     '// @run-at       document-start',
     '// @grant        GM_xmlhttpRequest',

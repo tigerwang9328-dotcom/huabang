@@ -962,6 +962,131 @@ test('nonleader only learns other templates while the leader replays once', asyn
   assert.equal(ingestRequests(leader).length, 1)
 })
 
+test('busy Web Lock queues an observed response and uploads it exactly once after release', async () => {
+  let busy = true
+  const pending = []
+  const lockCalls = []
+  const locks = {
+    request(name, options, callback) {
+      lockCalls.push({ name, options })
+      if (options.ifAvailable) {
+        return Promise.resolve(callback(busy ? null : { name }))
+      }
+      if (!busy) return Promise.resolve(callback({ name }))
+      return new Promise((resolve, reject) => {
+        pending.push(() => {
+          Promise.resolve(callback({ name })).then(resolve, reject)
+        })
+      })
+    },
+  }
+  const harness = createHarness({ ready: true, locks })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
+  assert.equal(
+    lockCalls.some(
+      (call) =>
+        call.options.mode === 'exclusive' &&
+        !Object.prototype.hasOwnProperty.call(call.options, 'ifAvailable'),
+    ),
+    true,
+  )
+
+  harness.storage.set('lifeDataLeader', {
+    tabId: 'another-tab',
+    expiresAt: Date.now() + 60_000,
+  })
+  busy = false
+  for (const resume of pending.splice(0)) resume()
+  await waitFor(
+    () => ingestRequests(harness).length === 1,
+    'observed response was lost while the Web Lock was busy',
+  )
+  await harness.flush()
+
+  assert.equal(ingestRequests(harness).length, 1)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
+})
+
+test('busy scheduled lock leaves a new video template retryable on maintenance', async () => {
+  let busy = true
+  const lockCalls = []
+  const locks = {
+    request(name, options, callback) {
+      lockCalls.push({ name, options })
+      return Promise.resolve(callback(busy ? null : { name }))
+    },
+  }
+  const harness = createHarness({
+    ready: true,
+    locks,
+    fetchResponse(url) {
+      return jsonResponse(
+        videoResponse([{ item_id: 'video-1', item_play_cnt: 10 }], 1),
+        String(url),
+      )
+    },
+  })
+
+  observeXhr(
+    harness,
+    videoRequest(),
+    videoResponse([{ item_id: 'learn-template', item_play_cnt: 1 }], 1),
+  )
+  await harness.flush()
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.equal(harness.nativeFetchCalls.length, 0)
+
+  busy = false
+  const beforeMaintenance = lockCalls.length
+  const maintenance = harness.intervals.find((entry) => entry.delay === 10_000)
+  assert.ok(maintenance)
+  maintenance.callback()
+  await waitFor(
+    () => ingestRequests(harness).length === 1,
+    'maintenance did not retry the untriggered video template',
+  )
+  maintenance.callback()
+  await harness.flush()
+
+  assert.equal(ingestRequests(harness).length, 1)
+  assert.equal(harness.nativeFetchCalls.length, 1)
+  assert.equal(
+    lockCalls
+      .slice(beforeMaintenance)
+      .some((call) => call.options.ifAvailable === true),
+    true,
+  )
+})
+
+test('rejected waiting Web Lock reports an explicit collector error', async () => {
+  const locks = {
+    request() {
+      return Promise.reject(new Error('lock service unavailable'))
+    },
+  }
+  const harness = createHarness({ ready: true, locks })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+
+  assert.equal(ingestRequests(harness).length, 0)
+  assert.equal((harness.storage.get('lifeDataQueue') || []).length, 0)
+  assert.match(harness.panelText('.error'), /互斥锁获取失败|锁获取失败/)
+})
+
 test('Chrome Web Locks wraps observed other upload as one exclusive action', async () => {
   const lockCalls = []
   const locks = {
@@ -983,8 +1108,8 @@ test('Chrome Web Locks wraps observed other upload as one exclusive action', asy
     lockCalls.some(
       (call) =>
         call.name === 'huabang-life-data-action' &&
-        call.options.ifAvailable === true &&
-        call.options.mode === 'exclusive',
+        call.options.mode === 'exclusive' &&
+        !Object.prototype.hasOwnProperty.call(call.options, 'ifAvailable'),
     ),
     true,
   )

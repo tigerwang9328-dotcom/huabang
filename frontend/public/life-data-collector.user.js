@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.0.2
+// @version      1.0.3
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @match        https://www.life-data.cn/*
 // @run-at       document-start
@@ -491,20 +491,25 @@
       )
     }
 
-    async function runExclusiveAction(action) {
+    async function runExclusiveAction(action, actionType = 'scheduled') {
       if (!state.isLeader || !hasConfirmedLeaderLease()) {
         applyLeadership(false)
         return false
       }
       const locks = page.navigator && page.navigator.locks
       if (!locks || typeof locks.request !== 'function') return action()
+      const waitsForLock = actionType === 'observed'
+      const lockOptions = waitsForLock
+        ? { mode: 'exclusive' }
+        : { ifAvailable: true, mode: 'exclusive' }
       let actionStarted = false
       try {
         return await locks.request(
           'huabang-life-data-action',
-          { ifAvailable: true, mode: 'exclusive' },
+          lockOptions,
           async (lock) => {
-            if (!lock || !hasConfirmedLeaderLease()) return false
+            if (!lock) return false
+            if (!waitsForLock && !hasConfirmedLeaderLease()) return false
             actionStarted = true
             return action()
           },
@@ -858,8 +863,9 @@
         return
       }
       if (!state.ready || !synchronizeLeadership()) return
-      await runExclusiveAction(() =>
-        publishCapture(template, template.requestPayload, response),
+      await runExclusiveAction(
+        () => publishCapture(template, template.requestPayload, response),
+        'observed',
       )
     }
     async function replayLifeData(template, requestPayload) {
@@ -1198,8 +1204,13 @@
       if (!state.isLeader) return
       const template = latestVideoTemplate()
       if (!template || Number(template.learnedAt) <= state.triggeredTemplateAt) return
-      state.triggeredTemplateAt = Number(template.learnedAt)
-      void runExclusiveAction(() => collectVideo())
+      void runExclusiveAction(() => {
+        const current = latestVideoTemplate()
+        const learnedAt = Number(current && current.learnedAt)
+        if (!current || learnedAt <= state.triggeredTemplateAt) return false
+        state.triggeredTemplateAt = learnedAt
+        return collectVideo()
+      })
     }
 
     function startLeaderTimers() {
