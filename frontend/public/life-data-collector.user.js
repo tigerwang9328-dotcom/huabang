@@ -361,6 +361,64 @@
     }
   }
 
+  const VOLATILE_TEMPLATE_KEYS = new Set([
+    'start_date', 'end_date', 'date_type', 'offset', 'limit', 'cursor',
+    'page', 'page_no', 'page_num', 'page_size',
+  ])
+
+  function stableTemplateValue(value) {
+    if (Array.isArray(value)) return value.map(stableTemplateValue)
+    if (!value || typeof value !== 'object') return value
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        if (!VOLATILE_TEMPLATE_KEYS.has(String(key).toLowerCase())) {
+          result[key] = stableTemplateValue(value[key])
+        }
+        return result
+      }, {})
+  }
+
+  function classifyTemplate(template) {
+    const pagePath = String(template && (template.pagePath || template.path) || '')
+      .split('?')[0]
+      .replace(/\/$/, '')
+    if (pagePath === '/flow/content/analysis/video') return 'video'
+    if (pagePath === '/dito/pc/business/page' || pagePath === '/trade/overview' || pagePath === '/flow/my/overview') return 'business'
+    if (pagePath === '/dito/pc/ad/analysis' || pagePath.startsWith('/ad/analysis')) return 'advertising'
+    return 'other'
+  }
+
+  function templateFingerprint(template) {
+    const normalized = {
+      endpoint: normalizeEndpoint(template && template.endpoint) || String(template && template.endpoint || ''),
+      pagePath: String(template && (template.pagePath || template.path) || '').split('?')[0],
+      requestPayload: stableTemplateValue(template && (template.requestPayload || template.request_payload) || {}),
+    }
+    return JSON.stringify(normalized)
+  }
+
+  function hasMeaningfulBusinessData(response, group) {
+    if (!response || Number(response.code) !== 0) return false
+    if (group === 'video') return Boolean(extractItemRank(response))
+    const keys = group === 'advertising'
+      ? new Set(['total_ad_cost', 'current_ad_cost', 'ad_pay_gmv', 'total_ad_pay_gmv', 'current_ad_pay_gmv'])
+      : group === 'business'
+        ? new Set(['verify_gmv', 'pay_gmv', 'refund_gmv'])
+        : null
+    if (!keys) return true
+    const stack = [response]
+    while (stack.length) {
+      const current = stack.pop()
+      if (!current || typeof current !== 'object') continue
+      for (const [key, value] of Object.entries(current)) {
+        if (keys.has(String(key).toLowerCase()) && value !== null && value !== '' && Number.isFinite(Number(value))) return true
+        if (value && typeof value === 'object') stack.push(value)
+      }
+    }
+    return false
+  }
+
   const core = {
     ACCOUNT_ID,
     LIFE_ACCOUNT_ID,
@@ -368,8 +426,10 @@
     buildPageOffsets,
     buildVideoRequest,
     classifyUploadResponse,
+    classifyTemplate,
     enqueueBounded,
     extractItemRank,
+    hasMeaningfulBusinessData,
     isAllowedEndpoint,
     nextLeaderLease,
     pickLifeDataHeaders,
@@ -377,6 +437,7 @@
     resolveGroupId,
     retryDelayForAttempt,
     sanitizeBusinessJson,
+    templateFingerprint,
     validateVideoPage,
   }
 

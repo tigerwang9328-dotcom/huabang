@@ -45,6 +45,34 @@ test('declares the required Tampermonkey metadata', () => {
   }
 })
 
+test('classifies the learned LifeData business paths into collection groups', () => {
+  assert.equal(core.classifyTemplate({ pagePath: '/flow/content/analysis/video' }), 'video')
+  assert.equal(core.classifyTemplate({ pagePath: '/dito/pc/business/page' }), 'business')
+  assert.equal(core.classifyTemplate({ pagePath: '/dito/pc/ad/analysis' }), 'advertising')
+  assert.equal(core.classifyTemplate({ pagePath: '/store/my/rank' }), 'other')
+})
+
+test('template fingerprint ignores dates and pagination but keeps module identity', () => {
+  const make = (startDate, offset, moduleName = 'BudgetCardInfo') => ({
+    endpoint: '/api/dito/query',
+    pagePath: '/dito/pc/ad/analysis',
+    requestPayload: {
+      biz_params: {
+        common_params: { start_date: startDate, end_date: '2026-07-12' },
+        module_params: { [moduleName]: { offset, limit: 100 } },
+      },
+    },
+  })
+  assert.equal(core.templateFingerprint(make('2026-07-01', 0)), core.templateFingerprint(make('2026-07-06', 100)))
+  assert.notEqual(core.templateFingerprint(make('2026-07-01', 0)), core.templateFingerprint(make('2026-07-01', 0, 'TargetAreaDistribute')))
+})
+
+test('only accepts responses containing meaningful metrics for their group', () => {
+  assert.equal(core.hasMeaningfulBusinessData({ code: 0, data: { explain: [{ current_ad_cost: null }] } }, 'advertising'), false)
+  assert.equal(core.hasMeaningfulBusinessData({ code: 0, data: { indicator: [{ total_ad_cost: 132717 }] } }, 'advertising'), true)
+  assert.equal(core.hasMeaningfulBusinessData({ code: 0, data: { overview: [{ verify_gmv: 116000 }] } }, 'business'), true)
+})
+
 test('builds 100-row video pages without mutating template', () => {
   const template = makeTemplate()
 
