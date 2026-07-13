@@ -1453,6 +1453,11 @@
       }
     }
 
+    async function runFullCollection() {
+      await collectVideo()
+      await replayOtherTemplates()
+    }
+
     function maybeCollectNewTemplate() {
       if (!state.isLeader) return
       const template = latestVideoTemplate()
@@ -1600,7 +1605,7 @@
           setError('其他标签持有主标签租约，请在主标签立即采集')
           return
         }
-        void runExclusiveAction(() => collectVideo())
+        void runExclusiveAction(() => runFullCollection())
       })
       state.panel = {
         account: shadow.querySelector('.account'),
@@ -1655,6 +1660,11 @@
     GM_registerMenuCommand('立即采集 LifeData 视频', () => {
       if (synchronizeLeadership()) {
         void runExclusiveAction(() => collectVideo())
+      }
+    })
+    GM_registerMenuCommand('立即全量采集 LifeData', () => {
+      if (synchronizeLeadership()) {
+        void runExclusiveAction(() => runFullCollection())
       }
     })
     GM_registerMenuCommand('配置/更换采集令牌', () => ensureToken(true))

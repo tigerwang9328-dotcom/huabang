@@ -931,6 +931,28 @@ test('active replay of one other template creates exactly one additional ingest'
   assert.equal(harness.nativeFetchCalls.length, 1)
 })
 
+test('full collection menu replays video and learned non-video api templates', async () => {
+  const harness = createHarness({
+    fetchResponse(url, init) {
+      const body = JSON.parse(init.body)
+      const modules = body.biz_params.module_params
+      return jsonResponse(
+        modules.ItemRank
+          ? videoResponse([{ item_id: 'full-video', item_play_cnt: 2200 }], 1)
+          : { code: 0, data: { contentSummary: { play_count: 20 } } },
+        String(url),
+      )
+    },
+  })
+  observeXhr(harness, videoRequest(), videoResponse([{ item_id: 'learn-video', item_play_cnt: 1 }], 1))
+  observeXhr(harness, summaryRequest(), { code: 0, data: { contentSummary: { play_count: 10 } } })
+  await harness.flush()
+
+  harness.menus.get('立即全量采集 LifeData')()
+  await waitFor(() => harness.nativeFetchCalls.length === 2, 'full api replay missing')
+  assert.equal(harness.nativeFetchCalls.length, 2)
+})
+
 test('successful recovery cancels a pending debounced status error', async () => {
   let permanent = true
   const harness = createHarness({
