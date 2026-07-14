@@ -33,3 +33,15 @@ test('dashboard places risks and actions after data quality at the bottom', () =
   assert.ok(quality < decisions)
   assert.ok(decisions > source.lastIndexOf('<section'))
 })
+
+test('dashboard falls back to confirmed overview refund metrics when snapshot refunds are unavailable', () => {
+  assert.equal(source.includes('"yesterday_refund_amount" : "yesterday_refund_rate"'), true)
+  assert.equal(source.includes('confirmedOverviewMetric(overviewKey)'), true)
+  assert.equal(source.includes('baison_pos.refund_amount'), true)
+})
+
+test('dashboard never trusts a metadata-less refund snapshot over overview sync state', () => {
+  assert.equal(source.includes('metric_status?.returns === "ready"'), true)
+  const refundMetric = source.slice(source.indexOf('function refundMetric'), source.indexOf('function refundDisplay'))
+  assert.ok(refundMetric.indexOf('overviewMetric') < refundMetric.indexOf('snapshot'))
+})

@@ -26,7 +26,7 @@ class DwsToDm:
             r = await db.execute(text("""
                 SELECT
                     total_sales_amount, offline_sales_amount, online_sales_amount, online_ratio,
-                    net_sales_amount, total_order_count, total_item_count,
+                    total_return_amount, net_sales_amount, total_order_count, total_item_count,
                     avg_order_value, items_per_order, avg_discount_rate,
                     gross_profit, gross_margin, total_cost_amount, is_cost_complete
                 FROM dws.dws_company_daily WHERE stat_date = :d
@@ -35,6 +35,10 @@ class DwsToDm:
             if not row:
                 etl_log.finish_task(run_id, output_rows=0)
                 return 0
+
+            total_sales = float(row[0] or 0)
+            total_return_amount = float(row[4] or 0)
+            return_rate = (total_return_amount / total_sales) if total_sales > 0 else None
 
             # 门店排行 top3/bottom3
             stores_r = await db.execute(text("""
@@ -83,14 +87,14 @@ class DwsToDm:
             await db.execute(text("""
                 INSERT INTO dm.dm_boss_daily_report (
                     report_date, total_sales, offline_sales, online_sales, online_ratio,
-                    net_sales, order_count, item_count, avg_order_value, items_per_order,
+                    net_sales, return_amount, return_rate, order_count, item_count, avg_order_value, items_per_order,
                     avg_discount_rate, gross_profit, gross_margin,
                     cash_balance, cash_safety_days,
                     total_inventory_amount, age_90_plus_amount, age_180_plus_amount,
                     exception_count, is_cost_complete, generated_at
                 ) VALUES (
                     :report_date, :total_sales, :offline, :online, :online_ratio,
-                    :net_sales, :order_count, :item_count, :avg_order, :items_per_order,
+                    :net_sales, :return_amount, :return_rate, :order_count, :item_count, :avg_order, :items_per_order,
                     :avg_discount, :gross_profit, :gross_margin,
                     :cash_balance, :cash_safety_days,
                     :total_inventory, :age_90_plus, :age_180_plus,
@@ -102,6 +106,8 @@ class DwsToDm:
                     online_sales        = EXCLUDED.online_sales,
                     online_ratio        = EXCLUDED.online_ratio,
                     net_sales           = EXCLUDED.net_sales,
+                    return_amount       = EXCLUDED.return_amount,
+                    return_rate         = EXCLUDED.return_rate,
                     order_count         = EXCLUDED.order_count,
                     item_count          = EXCLUDED.item_count,
                     avg_order_value     = EXCLUDED.avg_order_value,
@@ -115,29 +121,30 @@ class DwsToDm:
                     age_180_plus_amount = EXCLUDED.age_180_plus_amount,
                     cash_safety_days    = EXCLUDED.cash_safety_days,
                     exception_count     = EXCLUDED.exception_count,
-                    is_cost_complete    = EXCLUDED.is_cost_complete,
-                    generated_at        = NOW()
+                    is_cost_complete    = EXCLUDED.is_cost_complete
             """), {
                 "report_date": date.fromisoformat(stat_date),
-                "total_sales": float(row[0] or 0),
+                "total_sales": total_sales,
                 "offline": float(row[1] or 0),
                 "online": float(row[2] or 0),
                 "online_ratio": float(row[3] or 0),
-                "net_sales": float(row[4] or 0),
-                "order_count": int(row[5] or 0),
-                "item_count": int(row[6] or 0),
-                "avg_order": float(row[7] or 0),
-                "items_per_order": float(row[8] or 0),
-                "avg_discount": float(row[9] or 0),
-                "gross_profit": float(row[10] or 0),
-                "gross_margin": float(row[11] or 0),
+                "net_sales": float(row[5] or 0),
+                "return_amount": total_return_amount,
+                "return_rate": return_rate,
+                "order_count": int(row[6] or 0),
+                "item_count": int(row[7] or 0),
+                "avg_order": float(row[8] or 0),
+                "items_per_order": float(row[9] or 0),
+                "avg_discount": float(row[10] or 0),
+                "gross_profit": float(row[11] or 0),
+                "gross_margin": float(row[12] or 0),
                 "cash_balance": cash_balance,
                 "cash_safety_days": cash_safety_days,
                 "total_inventory": total_inventory,
                 "age_90_plus": age_90_plus,
                 "age_180_plus": age_180_plus,
                 "exception_count": exception_count,
-                "is_cost_complete": bool(row[13]),
+                "is_cost_complete": bool(row[14]),
             })
             await db.commit()
             etl_log.finish_task(run_id, output_rows=1)

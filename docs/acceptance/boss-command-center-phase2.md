@@ -137,7 +137,7 @@ cd /srv/huabang-ai-center/.worktrees/boss-command-center-three-phase/backend
 
 | 人工验收项 | 操作要求 | 当前状态 | 签字/日期 |
 | --- | --- | --- | --- |
-| 异常证据链 | 打开 `/app/warning`，优先抽查 ID 217、226、231；核对事实、阈值、来源和原始记录下钻 | 样本已准备，待老板确认业务结论 |  |
+| 异常证据链 | 直接打开 [ID 217](https://hbreare.com/app/warning?exception_id=217)、[ID 226](https://hbreare.com/app/warning?exception_id=226)、[ID 231](https://hbreare.com/app/warning?exception_id=231)；核对事实、阈值、来源和原始记录下钻 | 样本已准备，待老板确认业务结论 |  |
 | 经营利润 | 用财务核准表核对同日八类费用和经营利润 | 待验收；当前费用覆盖率为 0 |  |
 | VIP 分层 | 抽查高价值、高余额、沉睡及唤醒候选的原始证据 | 待验收 |  |
 | VIP 唤醒任务 | 打开 `/app/task/1715`，完成真实责任人确认、派发、反馈、复查和关闭，并观察一次通知失败重试 | 待验收；自动状态机已验证，真实业务未签字 |  |

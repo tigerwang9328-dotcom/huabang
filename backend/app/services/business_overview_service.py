@@ -14,7 +14,7 @@ from app.core.store_whitelist import (
     allowed_inventory_sql_in,
     allowed_store_sql_in,
 )
-from app.services.sales_metric_service import PAY_DETAIL_SQL
+from app.services.sales_metric_service import PAY_DETAIL_SQL, has_complete_pos_ticket_sync
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,27 @@ def _estimated(val, decimals: int = 0, reason: str = "") -> dict:
     if isinstance(val, (int, float)):
         val = round(float(val), decimals)
     return {"value": val, "display": str(val), "status": "estimated", "reason": reason}
+
+
+def _build_refund_metrics(*, total_sales, refund_amount, sync_complete: bool) -> dict:
+    if not sync_complete:
+        reason = "百胜POS小票同步未完成，退货金额待确认"
+        return {
+            "yesterday_refund_amount": _pending(reason),
+            "yesterday_refund_rate": _pending("百胜POS小票同步未完成，退货率待确认"),
+        }
+
+    confirmed_sales = float(total_sales or 0)
+    confirmed_refund = float(refund_amount or 0)
+    confirmed_rate = confirmed_refund / confirmed_sales if confirmed_sales > 0 else None
+    return {
+        "yesterday_refund_amount": _value(round(confirmed_refund, 2), 2),
+        "yesterday_refund_rate": (
+            _value(round(confirmed_rate, 4), 4)
+            if confirmed_rate is not None
+            else _pending("当日无销售额，无法计算退货率")
+        ),
+    }
 
 
 def _build_platform_sales(offline_sales, online_sales) -> list[dict]:
@@ -170,6 +191,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             "yesterday_actual_pay_amount": _pending("实收金额尚未接入"),
             "yesterday_orders": _pending("销售明细尚未接入"),
             "yesterday_items": _pending("销售明细尚未接入"),
+            "yesterday_refund_amount": _pending("退货金额尚未接入"),
+            "yesterday_refund_rate": _pending("退货率尚未接入"),
             "gross_profit": _pending("成本价待接入"),
             "gross_margin": _pending("成本价待接入"),
             "discount_rate": _pending("销售明细尚未接入"),
@@ -372,7 +395,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                 SELECT COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS e3_sales,
                        COALESCE(SUM(COALESCE(pay.offline_sales_amount, t.sales_amount)), 0) AS offline_sales_amount,
                        COALESCE(SUM(COALESCE(pay.online_sales_amount, 0)), 0) AS online_sales_amount,
-                       COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount
+                       COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount,
+                       COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS refund_amount
                 FROM dwd.dwd_pos_ticket t
                 LEFT JOIN pay ON pay.ticket_no = t.ticket_no
                 WHERE t.biz_date = :sd
@@ -388,7 +412,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             SELECT ticket.e3_sales,
                    ticket.offline_sales_amount,
                    ticket.online_sales_amount,
-                   ticket.actual_pay_amount + recharge.recharge_amount AS actual_pay_amount
+                   ticket.actual_pay_amount + recharge.recharge_amount AS actual_pay_amount,
+                   ticket.refund_amount
             FROM ticket CROSS JOIN recharge
         """), {
             "sd": query_date,
@@ -400,9 +425,16 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
         offline_sales = float(e3_row["offline_sales_amount"] or 0) if e3_row else 0
         online_sales = float(e3_row["online_sales_amount"] or 0) if e3_row else 0
         actual_pay_amount = float(e3_row["actual_pay_amount"] or 0) if e3_row else 0
+        refund_amount = float(e3_row["refund_amount"] or 0) if e3_row else 0
+        refund_sync_complete = await has_complete_pos_ticket_sync(db, query_date)
         bm = data["business_metrics"]
         bm["yesterday_offline_sales"] = _value(round(offline_sales, 2), 2)
         bm["yesterday_online_sales"] = _value(round(online_sales, 2), 2)
+        bm.update(_build_refund_metrics(
+            total_sales=e3_sales,
+            refund_amount=refund_amount,
+            sync_complete=refund_sync_complete,
+        ))
         data["platform_sales"] = _build_platform_sales(offline_sales, online_sales)
         if e3_sales > 0:
             bm["yesterday_sales_e3"] = _value(round(e3_sales, 2), 2)
