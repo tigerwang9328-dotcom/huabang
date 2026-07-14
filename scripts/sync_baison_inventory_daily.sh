@@ -5,23 +5,28 @@ set -euo pipefail
 BACKEND_DIR="/srv/huabang-ai-center/backend"
 LOG_DIR="/srv/huabang-ai-center/logs"
 LOG_FILE="$LOG_DIR/sync_inventory_daily.log"
+STAT_DATE=$(TZ='Asia/Shanghai' date '+%Y-%m-%d')
 
 mkdir -p "$LOG_DIR"
 cd "$BACKEND_DIR"
 
 echo "==========================================" | tee -a "$LOG_FILE"
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] start baison inventory sync" | tee -a "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] start baison inventory sync stat_date=$STAT_DATE" | tee -a "$LOG_FILE"
 
 set +e
-PYTHONIOENCODING=utf-8 ./.venv/bin/python - <<'PY_EOF' >> "$LOG_FILE" 2>&1
+HUABANG_INVENTORY_STAT_DATE="$STAT_DATE" PYTHONIOENCODING=utf-8 ./.venv/bin/python - <<'PY_EOF' >> "$LOG_FILE" 2>&1
 import asyncio
 import json
+import os
 
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
 from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
 from app.integrations.baison.services.inventory_service import import_all_inventory
+
+
+STAT_DATE = os.environ["HUABANG_INVENTORY_STAT_DATE"]
 
 
 async def main():
@@ -59,7 +64,7 @@ async def main():
                 INSERT INTO dws.dws_inventory_daily AS t
                 (stat_date, store_code, total_quantity, total_cost_amount,
                  negative_sku_count, sku_count, is_cost_complete, etl_at, created_at)
-                SELECT CURRENT_DATE,
+                SELECT CAST(:stat_date AS date),
                        b.warehouse_code,
                        COALESCE(SUM(b.qty), 0)::int,
                        COALESCE(SUM(b.qty * COALESCE(
@@ -91,7 +96,7 @@ async def main():
                               is_cost_complete = EXCLUDED.is_cost_complete,
                               etl_at = now()
             """),
-            {"allowed": allowed},
+            {"allowed": allowed, "stat_date": STAT_DATE},
         )
         await db.commit()
 
