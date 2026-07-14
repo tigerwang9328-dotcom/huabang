@@ -104,12 +104,15 @@ def derive_metric_statuses(
         if ticket.get("return_sync_completed_at") and ticket.get("return_amount") is not None
         else "stale"
     )
+    gross_profit_status = "ready" if bool(sales.get("is_cost_complete")) else "estimated"
+    gross_margin_status = gross_profit_status if _decimal(sales.get("net_sales_amount")) != ZERO else "pending_data"
     return {
         "sales": sales_status,
         "sales_detail": sales_detail_status,
         "returns": returns_status,
         "actual_pay": sales_status,
-        "gross_profit": "ready" if bool(sales.get("is_cost_complete")) else "estimated",
+        "gross_profit": gross_profit_status,
+        "gross_margin": gross_margin_status,
         "online_sales": sales_status,
         "inventory": "ready" if inventory.get("updated_at") else "stale",
         "inventory_age": "estimated" if _decimal(inventory.get("age_unknown_qty")) > 0 else "ready",

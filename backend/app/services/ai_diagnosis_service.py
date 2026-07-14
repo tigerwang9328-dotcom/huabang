@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.store_whitelist import ALLOWED_STORE_CODES
+from app.services.ai_engine import build_template_command_conclusion, sanitize_command_context
 
 
 logger = logging.getLogger(__name__)
@@ -132,28 +133,113 @@ class AIDiagnosisService:
             """
             select coalesce(sum(net_sales_amount),0) net_sales,
                    coalesce(sum(gross_profit),0) gross_profit,
-                   case when sum(net_sales_amount)<>0 then sum(gross_profit)/sum(net_sales_amount) end gross_margin
+                   case when sum(net_sales_amount)<>0 then sum(gross_profit)/sum(net_sales_amount) end gross_margin,
+                   count(*) source_row_count,
+                   bool_and(coalesce(is_cost_complete,false)) is_cost_complete
             from dws.dws_store_daily
             where stat_date=:dt and (:store_code='' or store_code=:store_code)
             """, params)
         orders = await self._one(
             """
-            select count(distinct ticket_no) order_count
+            select count(distinct ticket_no) order_count, count(*) source_row_count
             from dwd.dwd_pos_ticket
             where biz_date=:dt and (:store_code='' or store_code=:store_code)
               and coalesce(is_void,false)=false and coalesce(is_pending,false)=false
             """, params)
-        return {"net_sales": _num(sales.get("net_sales")), "order_count": _int(orders.get("order_count")),
-                "gross_profit": _num(sales.get("gross_profit")), "gross_margin": sales.get("gross_margin")}
+        source_ready = _int(sales.get("source_row_count")) > 0
+        order_ready = _int(orders.get("source_row_count")) > 0
+        gross_profit_status = (
+            "ready" if bool(sales.get("is_cost_complete")) else "estimated"
+        ) if source_ready else "pending_data"
+        gross_margin_status = (
+            gross_profit_status if sales.get("gross_margin") is not None else "pending_data"
+        )
+        return {
+            "net_sales": _num(sales.get("net_sales")),
+            "order_count": _int(orders.get("order_count")),
+            "gross_profit": _num(sales.get("gross_profit")),
+            "gross_margin": sales.get("gross_margin"),
+            "_metric_status": {
+                "net_sales": "ready" if source_ready else "pending_data",
+                "order_count": "ready" if order_ready else "pending_data",
+                "gross_profit": gross_profit_status,
+                "gross_margin": gross_margin_status,
+            },
+        }
 
-    def _quality(self, warnings: list[str], missing: list[str], source_tables: list[str]) -> dict:
+    def _quality(
+        self,
+        warnings: list[str],
+        missing: list[str],
+        source_tables: list[str],
+        metric_status: Optional[dict[str, str]] = None,
+    ) -> dict:
         return {
             "is_complete": len(warnings) == 0 and len(missing) == 0,
             "missing_fields": missing,
             "warnings": warnings,
             "source_tables": source_tables,
+            "metric_status": metric_status or {},
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+    def _attach_command_conclusion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        summary = payload.get("summary") or {}
+        quality = payload.get("data_quality") or {}
+        sources = quality.get("source_tables") or ["diagnosis_service"]
+        source = " / ".join(str(item) for item in sources)
+        metric_map = {
+            "sales_amount": "net_sales",
+            "order_count": "order_count",
+            "item_count": "item_count",
+            "avg_order_value": "avg_order_value",
+            "items_per_order": "items_per_order",
+            "gross_profit": "gross_profit",
+            "gross_margin": "gross_margin",
+            "inventory_amount": "inventory_amount",
+            "age_90_plus_amount": "age_90_amount",
+            "vip_sales": "member_sales_amount",
+            "operating_profit": "operating_profit",
+        }
+        metrics = {}
+        missing = set(quality.get("missing_fields") or [])
+        warnings = quality.get("warnings") or []
+        metric_status = {
+            **(summary.pop("_metric_status", {}) or {}),
+            **(quality.get("metric_status") or {}),
+        }
+        for command_key, summary_key in metric_map.items():
+            if summary_key not in summary:
+                continue
+            status = metric_status.get(summary_key) or metric_status.get(command_key)
+            if not status:
+                status = "pending_data" if summary_key in missing or not quality.get("is_complete", True) else "ready"
+            metrics[command_key] = {
+                "value": summary.get(summary_key),
+                "status": status,
+                "source": source,
+                "as_of": summary.get("stat_date") or summary.get("inventory_stat_date"),
+            }
+        rules = [{
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "level": item.get("level"),
+            "evidence": item.get("evidence") or [],
+            "source": item.get("data_source") or "diagnosis_rules",
+        } for item in payload.get("diagnoses") or []]
+        finance_complete = bool(summary.get("finance_complete"))
+        safe_context = sanitize_command_context({
+            "metrics": metrics,
+            "rules": rules,
+            "tasks": payload.get("action_suggestions") or [],
+            "finance_complete": finance_complete,
+        })
+        payload["command_conclusion"] = {
+            **build_template_command_conclusion(safe_context),
+            "mode": "template",
+            "model_used": "deterministic_rules",
+        }
+        return payload
 
     def _diag(
         self,
@@ -275,7 +361,7 @@ class AIDiagnosisService:
             {"name": "逾期任务数", "value": await self._overdue_task_count(dt), "level": "high" if await self._overdue_task_count(dt) else "low"},
         ]
 
-        return {
+        payload = {
             "summary": {
                 "stat_date": dt,
                 "health_score": score,
@@ -292,8 +378,18 @@ class AIDiagnosisService:
             "risks": risks,
             "diagnoses": top3,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(top3)],
-            "data_quality": self._quality(warnings, sorted(set(missing)), ["dws_company_daily", "dws_store_daily", "dws_inventory_daily", "dm_*"]),
+            "data_quality": self._quality(
+                warnings,
+                sorted(set(missing)),
+                ["dws_company_daily", "dws_store_daily", "dws_inventory_daily", "dm_*"],
+                metric_status={
+                    "net_sales": sales.get("data_quality", {}).get("metric_status", {}).get("net_sales", "pending_data"),
+                    "order_count": sales.get("data_quality", {}).get("metric_status", {}).get("order_count", "pending_data"),
+                    "gross_margin": sales.get("data_quality", {}).get("metric_status", {}).get("gross_margin", "pending_data"),
+                },
+            ),
         }
+        return self._attach_command_conclusion(payload)
 
     def _risk_label(self, payload: dict) -> str:
         ds = payload.get("diagnoses", [])
@@ -327,6 +423,7 @@ class AIDiagnosisService:
               case when sum(s.order_count)>0 then sum(s.net_sales_amount)/sum(s.order_count) end avg_order_value,
               case when sum(s.order_count)>0 then sum(s.net_item_count)::numeric/sum(s.order_count) end items_per_order,
               case when sum(s.net_sales_amount)>0 then sum(s.gross_profit)/sum(s.net_sales_amount) end gross_margin,
+              bool_and(coalesce(s.is_cost_complete,false)) is_cost_complete,
               case when sum(s.sales_amount)>0 then sum(s.return_amount)/sum(s.sales_amount) end return_rate,
               count(*) filter (where s.net_sales_amount<=0 or s.order_count<=0) risk_store_count
             from dws.dws_store_daily s
@@ -355,6 +452,15 @@ class AIDiagnosisService:
             from today t left join avg7 a on a.store_code=t.store_code
             order by t.net_sales_amount desc nulls last
             limit 80
+            """,
+            params,
+        )
+        ticket_source = await self._one(
+            """
+            select count(*) source_row_count
+            from dwd.dwd_pos_ticket
+            where biz_date=:dt and (:store_code='' or store_code=:store_code)
+              and coalesce(is_void,false)=false and coalesce(is_pending,false)=false
             """,
             params,
         )
@@ -405,6 +511,11 @@ class AIDiagnosisService:
             elif avg_items > 0 and items < avg_items * 0.85:
                 diagnoses.append(self._diag("sales", "medium", f"{name}连带率偏低", f"{name} 连带率 {items:.2f}，低于近7日均值 {avg_items:.2f}。", [f"连带率：{items:.2f}", f"近7日均值：{avg_items:.2f}"], "搭配销售执行弱，导购可能只完成单件成交。", "店长组织班前搭配训练，设置当日连带率改善目标。", "店长 / 导购", "今日闭店前", "明日连带率、成套成交笔数", "dws.dws_store_daily"))
         warnings = [] if stores else ["销售诊断暂无门店日汇总数据，可能是当日 ETL 未完成或百胜销售未同步。"]
+        sales_source_ready = bool(stores)
+        order_source_ready = _int(ticket_source.get("source_row_count")) > 0
+        gross_status = (
+            "ready" if bool(summary.get("is_cost_complete")) else "estimated"
+        ) if sales_source_ready and summary.get("gross_margin") is not None else "pending_data"
         target_rate = _num(target.get("achievement_rate"))
         health_score = max(0, 100 - len([d for d in diagnoses if d.get("level")=="high"])*12 - len([d for d in diagnoses if d.get("level")=="medium"])*6)
         return {
@@ -426,7 +537,19 @@ class AIDiagnosisService:
             "risks": self._store_rank_risks(stores),
             "diagnoses": diagnoses[:30],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(warnings, ["同比数据"] if stores else ["门店销售汇总"], ["dws_store_daily", "dim_store", "dws_store_target_monthly"]),
+            "data_quality": self._quality(
+                warnings,
+                ["同比数据"] if stores else ["门店销售汇总"],
+                ["dws_store_daily", "dim_store", "dws_store_target_monthly"],
+                metric_status={
+                    "net_sales": "ready" if sales_source_ready else "pending_data",
+                    "order_count": "ready" if order_source_ready else "pending_data",
+                    "item_count": "ready" if sales_source_ready else "pending_data",
+                    "avg_order_value": "ready" if sales_source_ready else "pending_data",
+                    "items_per_order": "ready" if sales_source_ready else "pending_data",
+                    "gross_margin": gross_status,
+                },
+            ),
         }
 
     def _store_rank_risks(self, stores: list[dict]) -> list[dict]:
@@ -499,7 +622,9 @@ class AIDiagnosisService:
             with company as (
               select coalesce(sum(net_sales_amount),0) net_sales,
                      coalesce(sum(total_order_count),0) order_count,
-                     case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) else 0 end gross_margin
+                     case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) end gross_margin,
+                     count(*) sales_source_row_count,
+                     bool_and(coalesce(is_cost_complete,false)) is_cost_complete
               from dws.dws_company_daily where stat_date=CAST(:dt AS date)
             ), sales30 as (
               select product_code, sum(net_quantity) qty30
@@ -604,7 +729,18 @@ class AIDiagnosisService:
             "risks": [{"name": "爆款缺货", "value": summary_hot_low, "level": "high"}, {"name": "慢款/滞销", "value": summary_slow, "level": "medium"}],
             "diagnoses": diagnoses[:30],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:8])],
-            "data_quality": self._quality(warnings, ["百胜入库历史当前回溯730天"] if products else ["商品销售、库存或进货"], ["dim_product", "dws_product_daily", "dwd_inventory_balance", "dwd_baison_purchase_inbound", "dws_product_inbound_summary"]),
+            "data_quality": self._quality(
+                warnings,
+                ["百胜入库历史当前回溯730天"] if products else ["商品销售、库存或进货"],
+                ["dim_product", "dws_product_daily", "dwd_inventory_balance", "dwd_baison_purchase_inbound", "dws_product_inbound_summary"],
+                metric_status={
+                    "net_sales": "ready" if _int(product_summary.get("sales_source_row_count")) > 0 else "pending_data",
+                    "order_count": "ready" if _int(product_summary.get("sales_source_row_count")) > 0 else "pending_data",
+                    "gross_margin": (
+                        "ready" if bool(product_summary.get("is_cost_complete")) else "estimated"
+                    ) if _int(product_summary.get("sales_source_row_count")) > 0 and product_summary.get("gross_margin") is not None else "pending_data",
+                },
+            ),
         }
 
     async def inventory(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
@@ -617,7 +753,9 @@ class AIDiagnosisService:
             with company as (
               select coalesce(sum(net_sales_amount),0) net_sales,
                      coalesce(sum(order_count),0) order_count,
-                     case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) else 0 end gross_margin
+                     case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) end gross_margin,
+                     count(*) sales_source_row_count,
+                     bool_and(coalesce(is_cost_complete,false)) is_cost_complete
               from dws.dws_store_daily
               where stat_date=CAST(:dt AS date) and (:store_code='' or store_code=:store_code)
             ), lines as (
@@ -645,9 +783,10 @@ class AIDiagnosisService:
                    count(distinct (store_code,sku_code)) filter(where qty<0) negative_sku_count,
                    count(distinct (store_code,sku_code)) filter(where qty<>0) sku_count,
                    count(distinct (store_code,sku_code)) filter(where qty>0 and age_days>=90) age_90_sku_count,
-                   company.net_sales, company.order_count, company.gross_margin
+                   company.net_sales, company.order_count, company.gross_margin,
+                   company.sales_source_row_count, company.is_cost_complete
             from lines cross join company
-            group by company.net_sales,company.order_count,company.gross_margin
+            group by company.net_sales,company.order_count,company.gross_margin,company.sales_source_row_count,company.is_cost_complete
             """,
             params,
         )
@@ -723,7 +862,20 @@ class AIDiagnosisService:
             "risks": [{"name": r.get("warning_type"), "value": r.get("sku_code") or r.get("product_code"), "level": "high" if r.get("warning_level") == "critical" else "medium"} for r in warnings_rows[:12]],
             "diagnoses": diagnoses[:40],
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses[:10])],
-            "data_quality": self._quality(warnings, [], ["dwd_inventory_balance", "dim_sku", "dim_product", "dws_product_inbound_summary", "dws_store_daily"]),
+            "data_quality": self._quality(
+                warnings,
+                [],
+                ["dwd_inventory_balance", "dim_sku", "dim_product", "dws_product_inbound_summary", "dws_store_daily"],
+                metric_status={
+                    "net_sales": "ready" if _int(summary.get("sales_source_row_count")) > 0 else "pending_data",
+                    "order_count": "ready" if _int(summary.get("sales_source_row_count")) > 0 else "pending_data",
+                    "gross_margin": (
+                        "ready" if bool(summary.get("is_cost_complete")) else "estimated"
+                    ) if _int(summary.get("sales_source_row_count")) > 0 and summary.get("gross_margin") is not None else "pending_data",
+                    "inventory_amount": "ready" if summary.get("inventory_stat_date") else "pending_data",
+                    "age_90_amount": "estimated" if summary.get("inventory_stat_date") else "pending_data",
+                },
+            ),
         }
 
 
@@ -737,6 +889,7 @@ class AIDiagnosisService:
                    coalesce(sum(total_expense),0) total_expense, coalesce(sum(operating_profit),0) operating_profit,
                    bool_and(is_cost_complete) is_cost_complete, bool_and(is_expense_complete) is_expense_complete,
                    bool_and(coalesce(finance_approved,false)) finance_approved,
+                   count(*) source_row_count,
                    'dm_finance_profit_daily' as source_table
             from dm.dm_finance_profit_daily
             where stat_date=:dt
@@ -744,7 +897,7 @@ class AIDiagnosisService:
             """,
             params,
         )
-        if not row or _num(row.get("net_sales")) == 0:
+        if not row or _int(row.get("source_row_count")) == 0:
             row = await self._one(
                 """
                 select coalesce(sum(net_sales_amount),0) net_sales,
@@ -755,6 +908,7 @@ class AIDiagnosisService:
                        coalesce(sum(operating_profit_estimate),0) operating_profit,
                        bool_and(is_profit_complete) is_cost_complete,
                        false as is_expense_complete, false as finance_approved,
+                       count(*) source_row_count,
                        'dws_finance_daily' as source_table
                 from dws.dws_finance_daily
                 where stat_date=:dt
@@ -764,7 +918,7 @@ class AIDiagnosisService:
             )
         sales_metrics = await self._one(
             """
-            select count(distinct ticket_no) order_count
+            select count(distinct ticket_no) order_count, count(*) source_row_count
             from dwd.dwd_pos_ticket
             where biz_date=:dt
               and store_code=ANY(:allowed_store_codes)
@@ -781,21 +935,23 @@ class AIDiagnosisService:
             """select bool_and(is_cost_complete) is_cost_complete from dws.dws_product_daily
                where stat_date=:dt and (:store_code='' or store_code=:store_code)""", params
         )
-        if not row or _num(row.get("net_sales")) == 0:
+        if not row or _int(row.get("source_row_count")) == 0:
             row = await self._one(
                 """
                 with sales as (
                   select coalesce(sum(net_sales_amount),0) net_sales,
                          coalesce(sum(total_cost_amount),0) company_cost,
                          coalesce(sum(gross_profit),0) company_gross_profit,
-                         avg(gross_margin) company_gross_margin
+                         avg(gross_margin) company_gross_margin,
+                         count(*) company_source_row_count
                   from dws.dws_company_daily
                   where stat_date=:dt and :store_code = ''
                 ), store_sales as (
                   select coalesce(sum(net_sales_amount),0) net_sales,
                          coalesce(sum(cost_amount),0) store_cost,
                          coalesce(sum(gross_profit),0) store_gross_profit,
-                         case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) end store_gross_margin
+                         case when sum(net_sales_amount)>0 then sum(gross_profit)/sum(net_sales_amount) end store_gross_margin,
+                         count(*) store_source_row_count
                   from dws.dws_store_daily
                   where stat_date=:dt and (:store_code = '' or store_code=:store_code)
                 ), product_cost as (
@@ -824,9 +980,9 @@ class AIDiagnosisService:
                        coalesce(store_sales.store_gross_margin, sales.company_gross_margin) gross_margin,
                        expense.total_expense,
                        coalesce(nullif(store_sales.store_gross_profit,0), nullif(sales.company_gross_profit,0), nullif(product_cost.gross_profit,0), 0) - expense.total_expense operating_profit,
-                       (coalesce(product_cost.is_cost_complete,false)
-                        and coalesce(nullif(store_sales.store_cost,0), nullif(sales.company_cost,0), nullif(product_cost.cost_amount,0), 0) > 0) is_cost_complete,
+                       coalesce(product_cost.is_cost_complete,false) is_cost_complete,
                        false is_expense_complete, false as finance_approved,
+                       greatest(sales.company_source_row_count, store_sales.store_source_row_count) source_row_count,
                        'dws_company_daily/dws_store_daily/dws_product_daily' as source_table
                 from sales cross join store_sales cross join product_cost cross join expense
                 """,
@@ -835,9 +991,9 @@ class AIDiagnosisService:
         diagnoses = []
         warnings = []
         missing = []
-        if not row or _num(row.get("net_sales")) == 0:
+        if not row or _int(row.get("source_row_count")) == 0:
             missing.append("销售/财务基础数据")
-        cost_complete = bool(row.get("is_cost_complete")) and bool(cost_source.get("is_cost_complete")) and _num(row.get("cost_of_goods")) > 0
+        cost_complete = bool(row.get("is_cost_complete")) and bool(cost_source.get("is_cost_complete"))
         expense_complete = bool(row.get("is_expense_complete"))
         finance_approved = bool(row.get("finance_approved"))
         if row and _num(row.get("net_sales")) > 0 and not cost_complete:
@@ -864,6 +1020,8 @@ class AIDiagnosisService:
         high_risks = sum(1 for d in diagnoses if d.get("level") == "high")
         medium_risks = sum(1 for d in diagnoses if d.get("level") == "medium")
         health_score = max(0, 100 - high_risks*20 - medium_risks*10)
+        sales_ready = _int(row.get("source_row_count")) > 0
+        order_ready = _int(sales_metrics.get("source_row_count")) > 0
         return {
             "summary": {
                 "stat_date": dt,
@@ -878,12 +1036,26 @@ class AIDiagnosisService:
                 "operating_profit_status": "ready" if can_assert_operating_profit else "pending_data",
                 "expense_last_synced_at": str(expense_source.get("last_sync_at") or ""),
                 "expense_complete": expense_complete,
+                "finance_complete": can_assert_operating_profit,
                 "finance_risk_count": len(diagnoses),
             },
             "risks": [{"name": d["title"], "value": d["level_label"], "level": d["level"]} for d in diagnoses],
             "diagnoses": diagnoses,
             "action_suggestions": [self._task_from_diag(d, i + 1) for i, d in enumerate(diagnoses)],
-            "data_quality": self._quality(warnings, missing, ["dm_finance_profit_daily", "dws_finance_daily", "dws_company_daily", "dws_store_daily", "dws_product_daily", "dwd_pos_ticket", "dwd_finance_expense", "finance_expense_records"]),
+            "data_quality": self._quality(
+                warnings,
+                missing,
+                ["dm_finance_profit_daily", "dws_finance_daily", "dws_company_daily", "dws_store_daily", "dws_product_daily", "dwd_pos_ticket", "dwd_finance_expense", "finance_expense_records"],
+                metric_status={
+                    "net_sales": "ready" if sales_ready else "pending_data",
+                    "order_count": "ready" if order_ready else "pending_data",
+                    "gross_profit": ("ready" if cost_complete else "estimated") if sales_ready else "pending_data",
+                    "gross_margin": (
+                        "ready" if cost_complete else "estimated"
+                    ) if sales_ready and _num(row.get("net_sales")) > 0 and row.get("gross_margin") is not None else "pending_data",
+                    "operating_profit": "ready" if can_assert_operating_profit else "pending_data",
+                },
+            ),
         }
 
     async def hr(self, stat_date: Optional[str] = None, store_code: Optional[str] = None) -> dict:
@@ -1367,4 +1539,5 @@ class AIDiagnosisService:
             "actions": self.action_tasks,
         }
         fn = mapping.get(module, self.overview)
-        return await fn(stat_date, store_code)
+        payload = await fn(stat_date, store_code)
+        return payload if "command_conclusion" in payload else self._attach_command_conclusion(payload)

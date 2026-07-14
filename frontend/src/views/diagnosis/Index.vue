@@ -53,6 +53,31 @@
       <div class="source-line">数据来源：{{ (dataQuality.source_tables || []).join(" / ") || "规则诊断服务" }}</div>
     </section>
 
+    <section v-if="commandConclusion.facts?.length || commandConclusion.limitations?.length" class="panel">
+      <div class="section-title">
+        <div><p>CONSTRAINED CONCLUSION</p><h2>受约束经营结论</h2></div>
+        <el-tag type="info">{{ commandConclusion.mode === "model" ? "AI归纳" : "规则模板" }}</el-tag>
+      </div>
+      <div class="conclusion-grid">
+        <div class="conclusion-block">
+          <h3>确定事实</h3>
+          <ul><li v-for="fact in commandConclusion.facts || []" :key="fact.key"><b>{{ fact.label }}</b> {{ fact.value }} <span>{{ fact.note }} · {{ fact.source }}</span></li></ul>
+        </div>
+        <div class="conclusion-block">
+          <h3>风险与建议</h3>
+          <ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.reason }}</span></li></ul>
+        </div>
+        <div class="conclusion-block">
+          <h3>行动草稿</h3>
+          <ul><li v-for="item in commandConclusion.actions || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.owner }} · 待人工确认</span></li></ul>
+        </div>
+        <div class="conclusion-block limitations">
+          <h3>数据限制</h3>
+          <ul><li v-for="item in commandConclusion.limitations || []" :key="item">{{ item }}</li></ul>
+        </div>
+      </div>
+    </section>
+
     <section v-if="moduleKey === 'overview'" class="focus-grid">
       <div class="panel">
         <div class="section-title"><div><p>今日行动</p><h2>今日最应该抓的三件事</h2></div></div>
@@ -164,6 +189,7 @@ const risks = computed(() => payload.value.risks || []);
 const diagnoses = computed(() => payload.value.diagnoses || []);
 const actions = computed(() => payload.value.action_suggestions || []);
 const dataQuality = computed(() => payload.value.data_quality || {});
+const commandConclusion = computed(() => payload.value.command_conclusion || {});
 const qualityWarnings = computed(() => [...(dataQuality.value.warnings || []), ...(dataQuality.value.missing_fields || []).map((x: string) => `缺失：${x}`)]);
 const fallbackSummary = "当前模块将优先基于真实销售、商品、库存、财务、任务数据生成诊断；数据不足时会降级显示，不会编造结论。";
 
@@ -313,6 +339,14 @@ onMounted(loadData);
 .section-title h2 { margin: 0; font-size: 21px; }
 .summary-text { color: #334155; line-height: 1.9; font-size: 15px; margin: 0; }
 .source-line { margin-top: 12px; color: #94a3b8; font-size: 12px; }
+.conclusion-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.conclusion-block { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #f8fafc; min-width: 0; }
+.conclusion-block.limitations { background: #fffbeb; border-color: #fde68a; }
+.conclusion-block h3 { margin: 0 0 10px; font-size: 15px; }
+.conclusion-block ul { margin: 0; padding-left: 18px; color: #475569; line-height: 1.65; font-size: 13px; }
+.conclusion-block li + li { margin-top: 7px; }
+.conclusion-block b, .conclusion-block span { display: block; }
+.conclusion-block span { color: #64748b; font-size: 12px; }
 .focus-grid { display: grid; grid-template-columns: 1.4fr .8fr; gap: 18px; }
 .focus-list { display: grid; gap: 12px; }
 .focus-item { border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; background: #f8fafc; }
@@ -330,5 +364,5 @@ onMounted(loadData);
 .evidence { display: flex; flex-wrap: wrap; gap: 6px; }
 .evidence span { background: #f1f5f9; color: #475569; border-radius: 999px; padding: 4px 8px; font-size: 12px; }
 @media (max-width: 1280px) { .score-grid { grid-template-columns: repeat(3, 1fr); } .focus-grid { grid-template-columns: 1fr; } .filters { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 760px) { .ai-diagnosis-page { padding: 20px 14px; } .hero { display: block; } .filters { grid-template-columns: 1fr; margin-top: 16px; } .score-grid { grid-template-columns: 1fr; } .risk-radar { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .ai-diagnosis-page { padding: 20px 14px; } .hero { display: block; } .filters { grid-template-columns: 1fr; margin-top: 16px; } .score-grid { grid-template-columns: 1fr; } .risk-radar, .conclusion-grid { grid-template-columns: 1fr; } }
 </style>

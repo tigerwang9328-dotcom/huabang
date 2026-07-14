@@ -73,12 +73,25 @@ def test_metric_statuses_follow_each_source_freshness():
         "returns": "stale",
         "actual_pay": "stale",
         "gross_profit": "estimated",
+        "gross_margin": "pending_data",
         "online_sales": "stale",
         "inventory": "stale",
         "inventory_age": "estimated",
         "vip_balance": "stale",
         "operating_profit": "pending_data",
     }
+
+
+def test_zero_sales_keeps_gross_profit_ready_but_margin_pending():
+    statuses = derive_metric_statuses(
+        sales={"etl_at": "2026-07-13T20:00:00Z", "is_cost_complete": True, "net_sales_amount": 0},
+        ticket={"synced_at": "2026-07-13T20:00:00Z"},
+        inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
+        members={"updated_at": "2026-07-13T20:00:00Z"},
+    )
+
+    assert statuses["gross_profit"] == "ready"
+    assert statuses["gross_margin"] == "pending_data"
 
 
 def test_return_metric_is_ready_when_synced_ticket_source_reports_zero_returns():
