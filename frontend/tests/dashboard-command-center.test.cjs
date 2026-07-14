@@ -2,6 +2,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 
 const source = fs.readFileSync(
   path.resolve(__dirname, '../src/views/dashboard/Index.vue'),
@@ -44,4 +45,18 @@ test('dashboard never trusts a metadata-less refund snapshot over overview sync 
   assert.equal(source.includes('metric_status?.returns === "ready"'), true)
   const refundMetric = source.slice(source.indexOf('function refundMetric'), source.indexOf('function refundDisplay'))
   assert.ok(refundMetric.indexOf('overviewMetric') < refundMetric.indexOf('snapshot'))
+})
+
+test('dashboard defaults to Shanghai yesterday before 08:00 local time', async () => {
+  const moduleUrl = pathToFileURL(
+    path.resolve(__dirname, '../src/utils/shanghaiDate.mjs'),
+  ).href
+  const { shanghaiDateOffset } = await import(moduleUrl)
+
+  assert.equal(
+    shanghaiDateOffset(-1, new Date('2026-07-14T21:03:00Z')),
+    '2026-07-14',
+  )
+  assert.equal(source.includes('shanghaiDateOffset(-1)'), true)
+  assert.equal(source.includes('yesterday.toISOString().slice(0, 10)'), false)
 })
