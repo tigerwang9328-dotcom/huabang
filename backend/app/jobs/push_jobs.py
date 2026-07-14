@@ -21,8 +21,33 @@ async def run_daily_sync():
 
 
 async def run_member_visit_push():
-    """10:00 会员回访名单推送（TODO: 待接入会员回访规则）"""
-    logger.info("[定时] 会员回访名单推送（暂未实现，跳过）")
+    """10:00 生成会员行动草稿；未经主管确认不联系会员。"""
+    logger.info("[定时] 会员行动清单生成开始")
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.core.database import AsyncSessionLocal
+        from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
+        from app.services.member_action_service import generate_member_action_drafts
+        from app.services.member_segment_service import rebuild_member_segments
+
+        business_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        async with AsyncSessionLocal() as db:
+            segment_result = await rebuild_member_segments(
+                db, calc_date=business_date, store_codes=ALLOWED_INVENTORY_CODES,
+            )
+            action_result = await generate_member_action_drafts(
+                db, store_codes=ALLOWED_INVENTORY_CODES, calc_date=business_date,
+            )
+            await db.commit()
+        logger.info(
+            "[定时] 会员行动清单完成: segments=%s actions=%s",
+            segment_result,
+            action_result,
+        )
+    except Exception as exc:
+        logger.error("[定时] 会员行动清单生成失败: %s", exc, exc_info=True)
 
 
 async def run_replenishment_push():

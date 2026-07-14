@@ -15,4 +15,7 @@ export const memberApi = {
   listWakeups: (params?: any) => request.get("/member/segments/wakeups", { params }),
   rebuildSegments: (params?: any) => request.post("/member/segments/rebuild", null, { params }),
   exportSegments: (params?: any) => request.get("/member/segments/export", { params, responseType: "blob" }),
+  getActionOverview: (params?: any) => request.get("/member/actions/overview", { params }),
+  listActions: (params?: any) => request.get("/member/actions/list", { params }),
+  rebuildActions: (params?: any) => request.post("/member/actions/rebuild", null, { params }),
 };

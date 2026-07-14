@@ -58,7 +58,7 @@
           clearable
           size="small"
           class="keyword-input"
-          :placeholder="['profile','assets','transactions','segments','risks','wakeups'].includes(activeTab) ? '搜索会员编号/姓名' : '搜索会员线索/门店'"
+          :placeholder="['actions','profile','assets','transactions','segments','risks','wakeups'].includes(activeTab) ? '搜索会员编号/姓名' : '搜索会员线索/门店'"
           @keyup.enter="handleSearch"
           @clear="handleSearch"
         />
@@ -66,6 +66,7 @@
       <div class="filter-actions">
         <el-button v-if="isSegmentTab && canExportSensitive" size="small" :icon="Download" @click="exportSegmentData">导出</el-button>
         <el-button v-if="isSegmentTab && canRebuildSegments" size="small" :loading="segmentRebuilding" @click="rebuildSegments">重算分层</el-button>
+        <el-button v-if="activeTab === 'actions' && canRebuildSegments" size="small" :loading="actionRebuilding" @click="rebuildActions">生成今日行动</el-button>
         <el-button size="small" :icon="Search" type="primary" @click="fetchActiveTab">查询</el-button>
         <el-button size="small" :icon="Refresh" :loading="activeLoading" @click="refresh">刷新</el-button>
       </div>
@@ -73,6 +74,29 @@
 
     <section class="table-panel">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <el-tab-pane v-if="canViewSensitiveMembers" label="今日行动" name="actions">
+          <div class="action-summary-grid" v-loading="actionOverviewLoading">
+            <div class="action-summary-item"><span>待确认草稿</span><strong>{{ formatCount(actionOverview.draft_actions) }}</strong><small>联系前须主管确认</small></div>
+            <div class="action-summary-item"><span>触达率</span><strong>{{ formatPercent(actionOverview.contact_rate) }}</strong><small>{{ actionOverview.contacted_actions || 0 }} / {{ actionOverview.confirmed_actions || 0 }} 已确认行动</small></div>
+            <div class="action-summary-item"><span>到店率</span><strong>{{ formatPercent(actionOverview.arrival_rate) }}</strong><small>到店 / 已联系</small></div>
+            <div class="action-summary-item"><span>成交率</span><strong>{{ formatPercent(actionOverview.conversion_rate) }}</strong><small>仅核验百胜小票</small></div>
+            <div class="action-summary-item"><span>行动成交额</span><strong>{{ formatMoney(actionOverview.attributed_sales) }}</strong><small>已关联并核验小票</small></div>
+            <div class="action-summary-item"><span>自然复购</span><strong>{{ formatCount(actionOverview.natural_repurchase_actions) }}</strong><small>时间相邻不归因行动</small></div>
+          </div>
+          <el-alert type="info" :closable="false" show-icon :title="actionOverview.attribution_note || '只有关联且核验通过的百胜小票计入行动成交，其他后续消费列为自然复购。'" class="segment-alert" />
+          <el-table :data="actionRows" v-loading="actionLoading" border stripe size="small">
+            <el-table-column prop="member_action.member_no" label="会员编号" min-width="125" />
+            <el-table-column label="联系理由" min-width="210"><template #default="{ row }">{{ row.member_action?.contact_reason || "-" }}</template></el-table-column>
+            <el-table-column label="建议商品" min-width="170"><template #default="{ row }">{{ productNames(row.member_action?.recommended_products) || "暂无有库存推荐" }}</template></el-table-column>
+            <el-table-column label="责任人" width="120"><template #default="{ row }"><span>{{ row.assignee_name || "待主管选择" }}</span></template></el-table-column>
+            <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag size="small" :type="actionStatusType(row.status)">{{ actionStatusName(row.status) }}</el-tag></template></el-table-column>
+            <el-table-column prop="due_date" label="截止日期" width="108" />
+            <el-table-column label="操作" width="92" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openTask(row.id)">查看任务</el-button></template></el-table-column>
+          </el-table>
+          <el-empty v-if="!actionLoading && !actionRows.length" description="暂无VIP行动草稿，可点击生成今日行动" />
+          <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="actionTotal" v-model:current-page="actionPage" v-model:page-size="actionPageSize" :page-sizes="[20,50,100]" @current-change="fetchMemberActions" @size-change="resetActionPage" /></div>
+        </el-tab-pane>
+
         <el-tab-pane v-if="canViewSegments" label="会员分层" name="segments">
           <el-alert v-if="segmentError" type="error" :closable="false" show-icon :title="segmentError" class="segment-alert" />
           <div class="segment-summary-grid" v-loading="segmentOverviewLoading">
@@ -289,15 +313,17 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Download, Refresh, Search } from "@element-plus/icons-vue";
 import { memberApi } from "@/api/member";
 import { useAuthStore } from "@/stores/auth";
 
 type Preset = "latest" | "last7" | "last30" | "custom";
-type TabName = "segments" | "risks" | "wakeups" | "sales" | "assets" | "transactions" | "pos" | "profile" | "visits";
+type TabName = "actions" | "segments" | "risks" | "wakeups" | "sales" | "assets" | "transactions" | "pos" | "profile" | "visits";
 
 const authStore = useAuthStore();
+const router = useRouter();
 
 const overviewLoading = ref(false);
 const posLoading = ref(false);
@@ -311,7 +337,10 @@ const segmentLoading = ref(false);
 const riskLoading = ref(false);
 const wakeupLoading = ref(false);
 const segmentRebuilding = ref(false);
-const activeTab = ref<TabName>(authStore.hasPermission("member:sensitive:view") ? "assets" : "sales");
+const actionOverviewLoading = ref(false);
+const actionLoading = ref(false);
+const actionRebuilding = ref(false);
+const activeTab = ref<TabName>(authStore.hasPermission("member:sensitive:view") ? "actions" : "sales");
 const preset = ref<Preset>("latest");
 const keyword = ref("");
 const dateRange = ref<[string, string]>(["", ""]);
@@ -340,6 +369,11 @@ const wakeupTotal = ref(0);
 const segmentPage = ref(1);
 const segmentPageSize = ref(20);
 const segmentError = ref("");
+const actionOverview = ref<any>({});
+const actionRows = ref<any[]>([]);
+const actionTotal = ref(0);
+const actionPage = ref(1);
+const actionPageSize = ref(20);
 
 function parseDate(value: string) {
   const d = new Date(`${value}T00:00:00`);
@@ -392,6 +426,8 @@ function preferenceNames(items: any[]) { return (items || []).map(item => item?.
 function productNames(items: any[]) { return (items || []).map(item => item?.product_name || item?.product_code).filter(Boolean).join("、"); }
 function riskTagType(value: string) { return value === "critical" ? "danger" : value === "risk" ? "warning" : "info"; }
 function formatEvidence(row: any) { return JSON.stringify({ labels: row.labels || [], risks: row.risks || [], metrics: row.metrics || {}, data_quality: row.data_quality || {} }, null, 2); }
+function actionStatusName(value: string) { return ({ draft: "待确认", pending: "待处理", processing: "处理中", feedback_submitted: "待复查", review_passed: "复查通过", overdue: "已逾期", closed: "已关闭", cancelled: "已取消" } as any)[value] || value; }
+function actionStatusType(value: string) { return ({ draft: "warning", pending: "info", processing: "primary", feedback_submitted: "warning", review_passed: "success", overdue: "danger", closed: "info", cancelled: "info" } as any)[value] || "info"; }
 
 const statusText = computed(() => (dataStatus.value.member_profile_synced ? "会员档案已同步" : "展示小票会员线索"));
 const statusTagType = computed(() => (dataStatus.value.member_profile_synced ? "success" : "warning"));
@@ -401,6 +437,7 @@ const canViewSensitiveMembers = computed(() => authStore.hasPermission("member:s
 const canExportSensitive = computed(() => authStore.hasPermission("member:sensitive:export"));
 const canRebuildSegments = computed(() => authStore.hasPermission("member:segment:rebuild"));
 const activeLoading = computed(() => {
+  if (activeTab.value === "actions") return actionLoading.value;
   if (activeTab.value === "segments") return segmentLoading.value;
   if (activeTab.value === "risks") return riskLoading.value;
   if (activeTab.value === "wakeups") return wakeupLoading.value;
@@ -411,6 +448,48 @@ const activeLoading = computed(() => {
   if (activeTab.value === "visits") return visitLoading.value;
   return posLoading.value;
 });
+
+async function fetchMemberActions() {
+  if (!canViewSensitiveMembers.value) return;
+  actionOverviewLoading.value = true;
+  actionLoading.value = true;
+  try {
+    const params: any = { page: actionPage.value, page_size: actionPageSize.value };
+    if (keyword.value.trim()) params.keyword = keyword.value.trim();
+    const [overviewResponse, listResponse] = await Promise.all([
+      memberApi.getActionOverview({ days: 30 }),
+      memberApi.listActions(params),
+    ]);
+    if (!overviewResponse.data?.success) throw new Error(overviewResponse.data?.message || "会员行动概览加载失败");
+    if (!listResponse.data?.success) throw new Error(listResponse.data?.message || "会员行动列表加载失败");
+    actionOverview.value = overviewResponse.data.data || {};
+    actionRows.value = listResponse.data.data?.items || [];
+    actionTotal.value = listResponse.data.data?.total || 0;
+  } catch (e: any) {
+    ElMessage.error(e?.message || "会员行动加载失败");
+  } finally {
+    actionOverviewLoading.value = false;
+    actionLoading.value = false;
+  }
+}
+
+function resetActionPage() { actionPage.value = 1; fetchMemberActions(); }
+function openTask(id: number) { router.push(`/app/task/${id}`); }
+
+async function rebuildActions() {
+  actionRebuilding.value = true;
+  try {
+    const { data } = await memberApi.rebuildActions();
+    if (!data?.success) throw new Error(data?.message || "今日行动生成失败");
+    ElMessage.success(`已生成 ${data.data?.created_count || 0} 个行动草稿`);
+    actionPage.value = 1;
+    await fetchMemberActions();
+  } catch (e: any) {
+    ElMessage.error(e?.message || "今日行动生成失败");
+  } finally {
+    actionRebuilding.value = false;
+  }
+}
 
 const metricCards = computed(() => {
   const cards = [];
@@ -657,6 +736,7 @@ async function fetchVisits() {
 }
 
 function fetchActiveTab() {
+  if (activeTab.value === "actions") return fetchMemberActions();
   if (activeTab.value === "segments") return fetchSegments();
   if (activeTab.value === "risks") return fetchRisks();
   if (activeTab.value === "wakeups") return fetchWakeups();
@@ -676,11 +756,13 @@ async function refresh() {
 }
 
 function handleTabChange() {
+  if (activeTab.value === "actions") actionPage.value = 1;
   if (isSegmentTab.value) segmentPage.value = 1;
   fetchActiveTab();
 }
 
 function handleSearch() {
+  if (activeTab.value === "actions") actionPage.value = 1;
   if (isSegmentTab.value) segmentPage.value = 1;
   if (activeTab.value === "assets") assetPage.value = 1;
   if (activeTab.value === "transactions") transactionPage.value = 1;
@@ -703,7 +785,7 @@ onMounted(async () => {
   const overviewRequests = [fetchOverview()];
   if (canViewSegments.value) overviewRequests.push(fetchSegmentOverview());
   await Promise.all(overviewRequests);
-  if (canViewSensitiveMembers.value) await fetchAssets();
+  if (canViewSensitiveMembers.value) await fetchMemberActions();
   else await fetchSalesAnalysis();
 });
 </script>
@@ -845,6 +927,10 @@ onMounted(async () => {
   padding-top: 12px;
 }
 .segment-alert { margin-bottom:10px; }
+.action-summary-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+.action-summary-item { min-width:0; min-height:78px; padding:10px 12px; display:flex; flex-direction:column; gap:5px; border:1px solid #E5E7EB; border-radius:8px; background:#F8FAFC; }
+.action-summary-item span,.action-summary-item small { color:#64748B; font-size:12px; }
+.action-summary-item strong { color:#0F172A; font-size:19px; line-height:1.2; }
 .segment-summary-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
 .segment-summary-item { min-width:0; min-height:68px; padding:10px 12px; display:flex; flex-direction:column; gap:7px; border:1px solid #E5E7EB; border-radius:8px; background:#F8FAFC; }
 .segment-summary-item span { color:#64748B; font-size:12px; }
@@ -872,6 +958,7 @@ onMounted(async () => {
   }
   .vip-sales-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .segment-summary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .action-summary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .sales-analysis-layout { grid-template-columns:1fr; }
 }
 
@@ -891,5 +978,6 @@ onMounted(async () => {
   }
   .vip-sales-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .segment-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .action-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 </style>
