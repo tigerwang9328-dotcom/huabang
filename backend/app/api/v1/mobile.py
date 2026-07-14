@@ -1,5 +1,6 @@
 """小程序/移动端标准 API 出口 — 数据与 Web 端完全一致，复用同一 service 层"""
 import logging
+from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
@@ -9,6 +10,7 @@ from app.core.database import get_db
 from app.api.v1.deps import get_current_user, require_permission
 from app.models.sys import SysUser
 from app.services.business_overview_service import get_overview
+from app.services.command_center_service import get_command_center_snapshot
 from app.services.store_analysis_service import get_store_analysis_summary, get_store_list
 from app.services.product_analysis_service import get_product_analysis_summary, get_product_list, get_sku_list
 from app.services.inventory_analysis_service import (
@@ -18,6 +20,24 @@ from app.services.inventory_analysis_service import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mobile", tags=["小程序移动端"])
+
+
+@router.get("/command-center")
+async def mobile_command_center(
+    stat_date: Optional[str] = Query(None),
+    current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """移动经营指挥台 — 直接复用 Web 端统一经营快照。"""
+    report_date = date.fromisoformat(stat_date) if stat_date else (
+        await db.execute(text("SELECT MAX(report_date) FROM dm.dm_boss_daily_report"))
+    ).scalar()
+    snapshot = (
+        await get_command_center_snapshot(db, report_date)
+        if report_date
+        else {"available": False, "report_date": None}
+    )
+    return {"success": True, "data": snapshot}
 
 
 @router.get("/overview")

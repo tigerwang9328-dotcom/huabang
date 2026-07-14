@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app.services.command_center_service import (
     allocate_fifo_inventory,
     build_metric,
@@ -8,6 +10,7 @@ from app.services.command_center_service import (
     derive_metric_statuses,
     inventory_warning_source_id,
     preserve_trusted_value,
+    get_command_center_snapshot,
 )
 from app.services.sales_metric_service import RETURN_SYNC_COMPLETE_SQL
 from app.services.rule_engine import RuleEngine
@@ -210,3 +213,51 @@ def test_inventory_warning_source_id_survives_daily_warning_rebuilds():
     assert first == repeated
     assert first != other_product
     assert 0 <= first < 2**63
+
+
+class _FakeMappings:
+    def __init__(self, first=None, rows=None):
+        self._first = first
+        self._rows = rows or []
+
+    def first(self):
+        return self._first
+
+    def all(self):
+        return self._rows
+
+
+class _FakeResult:
+    def __init__(self, first=None, rows=None):
+        self._mappings = _FakeMappings(first=first, rows=rows)
+
+    def mappings(self):
+        return self._mappings
+
+
+class _SnapshotDb:
+    def __init__(self, report):
+        self._results = [
+            _FakeResult(first=report),
+            _FakeResult(rows=[]),
+            _FakeResult(rows=[]),
+        ]
+
+    async def execute(self, *_args, **_kwargs):
+        return self._results.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_command_center_snapshot_exposes_mobile_first_screen_counts():
+    report = {
+        "report_date": date(2026, 7, 13),
+        "source_freshness": {},
+        "metric_status": {},
+        "major_exception_count": 12,
+        "pending_task_count": 7,
+    }
+
+    snapshot = await get_command_center_snapshot(_SnapshotDb(report), report["report_date"])
+
+    assert snapshot["core_metrics"]["major_exception_count"]["value"] == 12
+    assert snapshot["core_metrics"]["pending_task_count"]["value"] == 7

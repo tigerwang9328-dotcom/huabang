@@ -1023,6 +1023,8 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "avg_discount_rate": build_metric(data.get("avg_discount_rate"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=4),
         "return_amount": build_metric(data.get("return_amount"), source="baison_pos.refund_amount", as_of=report_date, status=statuses.get("returns")),
         "return_rate": build_metric(data.get("return_rate"), source="baison_pos.refund_amount", as_of=report_date, status=statuses.get("returns"), decimals=4),
+        "major_exception_count": build_metric(data.get("major_exception_count"), source="rule_engine", as_of=report_date, status="ready", decimals=0),
+        "pending_task_count": build_metric(data.get("pending_task_count"), source="action_task", as_of=report_date, status="ready", decimals=0),
         "gross_profit": build_metric(data.get("gross_profit"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason),
         "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason, decimals=4),
         "inventory_amount": build_metric(data.get("total_inventory_amount"), source="apparel_inventory", as_of=source_freshness.get("inventory", {}).get("updated_at"), status=statuses.get("inventory")),
