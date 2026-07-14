@@ -88,7 +88,7 @@
       <el-form label-width="110px">
         <el-form-item label="责任人" required>
           <el-select v-model="memberConfirm.assignee_id" filterable placeholder="选择本门店员工" style="width:100%" @change="syncAssigneeName">
-            <el-option v-for="item in assigneeOptions" :key="item.id" :label="`${item.real_name || item.employee_no}（${item.employee_no}）`" :value="item.id" />
+            <el-option v-for="item in assigneeOptions" :key="item.id" :label="assigneeLabel(item)" :value="item.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="确认联系话术" required>
@@ -214,6 +214,11 @@ async function confirmTask() {
 
 function syncAssigneeName(value?: number) {
   memberConfirm.assignee_name = assigneeOptions.value.find(item => item.id === value)?.real_name || ''
+}
+function assigneeLabel(item: any) {
+  const name = item.real_name || item.employee_no || item.username
+  if (item.mapping_pending) return `${name}（门店映射待补）`
+  return item.employee_no ? `${name}（${item.employee_no}）` : name
 }
 
 async function submitMemberConfirm() {

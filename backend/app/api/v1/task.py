@@ -405,18 +405,40 @@ async def list_task_assignees(
     target_codes = [requested_store] if requested_store else sorted(allowed_codes)
     if not target_codes:
         return ApiResponse.ok(data={"items": []})
-    rows = (await db.execute(text("""
-        SELECT u.id,u.real_name,u.employee_no,u.position,
+    rows = [dict(row) for row in (await db.execute(text("""
+        SELECT u.id,u.username,u.real_name,u.employee_no,u.position,
                ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(us.store_code,u.store_code)),NULL) store_codes
         FROM sys.sys_user u
         LEFT JOIN sys.sys_user_store us ON us.user_id=u.id
         WHERE u.status=1 AND u.is_deleted=false
-          AND NULLIF(BTRIM(COALESCE(u.employee_no,'')),'') IS NOT NULL
           AND (UPPER(COALESCE(u.store_code,''))=ANY(:store_codes) OR UPPER(COALESCE(us.store_code,''))=ANY(:store_codes))
-        GROUP BY u.id,u.real_name,u.employee_no,u.position
+        GROUP BY u.id,u.username,u.real_name,u.employee_no,u.position
         ORDER BY COALESCE(u.real_name,u.employee_no)
-    """), {"store_codes": target_codes})).mappings().all()
-    return ApiResponse.ok(data={"items": [dict(row) for row in rows]})
+    """), {"store_codes": target_codes})).mappings().all()]
+    for row in rows:
+        row["mapping_pending"] = False
+    if not rows:
+        rows = [dict(row) for row in (await db.execute(text("""
+            SELECT u.id,u.username,u.real_name,u.employee_no,u.position,
+                   ARRAY[]::text[] store_codes
+            FROM sys.sys_user u
+            WHERE u.status=1 AND u.is_deleted=false
+              AND NULLIF(BTRIM(COALESCE(u.store_code,'')),'') IS NULL
+              AND NOT EXISTS (SELECT 1 FROM sys.sys_user_store us WHERE us.user_id=u.id)
+              AND (
+                u.is_admin=true OR EXISTS (
+                  SELECT 1 FROM sys.sys_user_role ur
+                  JOIN sys.sys_role r ON r.id=ur.role_id AND r.status=1
+                  JOIN sys.sys_role_permission rp ON rp.role_id=r.id
+                  JOIN sys.sys_permission p ON p.id=rp.permission_id
+                  WHERE ur.user_id=u.id AND p.code='task:feedback'
+                )
+              )
+            ORDER BY COALESCE(u.real_name,u.username)
+        """))).mappings().all()]
+        for row in rows:
+            row["mapping_pending"] = True
+    return ApiResponse.ok(data={"items": rows})
 
 
 @router.post("/create", response_model=ApiResponse)
@@ -622,14 +644,14 @@ async def confirm_task(
             SysUser.status == 1,
             SysUser.is_deleted.is_(False),
         ))
-        if not assignee or not str(assignee.employee_no or "").strip():
-            return ApiResponse.fail("VIP会员行动责任人必须维护员工编号")
+        if not assignee:
+            return ApiResponse.fail("VIP会员行动责任人不存在或未启用")
         assignee_store_codes = {str(code).upper() for code in (await db.execute(
             select(SysUserStore.store_code).where(SysUserStore.user_id == assignee.id)
         )).scalars().all()}
         if assignee.store_code:
             assignee_store_codes.add(str(assignee.store_code).upper())
-        if str(task.related_store_code or "").upper() not in assignee_store_codes:
+        if assignee_store_codes and str(task.related_store_code or "").upper() not in assignee_store_codes:
             return ApiResponse.fail("VIP会员行动责任人必须属于会员归属门店")
         task.assignee_name = str(assignee.real_name or assignee.employee_no)
         evidence = dict(task.data_evidence or {})
@@ -638,7 +660,8 @@ async def confirm_task(
             "confirmed_script": str(body.member_contact_script).strip(),
             "responsibility_status": "confirmed",
             "responsible_user_id": int(assignee.id),
-            "responsible_employee_no": str(assignee.employee_no),
+            "responsible_employee_no": str(assignee.employee_no) if assignee.employee_no else None,
+            "responsibility_mapping_status": "mapped" if assignee_store_codes else "pending_mapping",
             "confirmed_by": int(current_user.id),
             "confirmed_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -650,7 +673,7 @@ async def confirm_task(
             WHERE id=:snapshot_id
         """), {
             "snapshot_id": task.source_id,
-            "employee_no": str(assignee.employee_no),
+            "employee_no": str(assignee.employee_no) if assignee.employee_no else None,
         })
 
     task.status = next_task_status(task.status, "confirm")
