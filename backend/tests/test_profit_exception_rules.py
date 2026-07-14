@@ -62,6 +62,8 @@ def test_vip_excessive_discount_rule_uses_member_sales_and_low_rate_threshold():
 
     assert "vip_code" in db.sql
     assert "customer_code" in db.sql
+    assert "CAST(:store_code AS text) IS NULL" in db.sql
+    assert "UPPER(CAST(:store_code AS text))" in db.sql
     assert "discount_rate<:min_discount_rate" in db.sql
     assert db.params["min_vip_sales"] == 1000
     assert db.params["min_discount_rate"] == 0.4
