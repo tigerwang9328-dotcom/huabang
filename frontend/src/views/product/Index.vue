@@ -79,7 +79,7 @@
           <el-table-column label="经营建议" width="100">
             <template #default="{ row }">
               <el-tooltip :content="row.decision?.reason || '-'" placement="top">
-                <el-tag :type="decisionType(row.decision?.action)" size="small">{{ row.decision?.action || "-" }}</el-tag>
+                <el-tag :type="decisionType(row.decision?.action)" size="small">{{ row.decision?.action_label || "-" }}</el-tag>
               </el-tooltip>
             </template>
           </el-table-column>
@@ -216,7 +216,7 @@ function formatAmount(v: any) {
 }
 function formatRate(v: any) { return `${(Number(v || 0) * 100).toFixed(1)}%`; }
 function decisionType(text: string) {
-  return ({ "补货": "success", "调拨": "warning", "清仓": "danger", "继续销售": "info" } as any)[text] || "info";
+  return ({ replenish: "success", transfer: "warning", clearance: "danger", continue_sale: "info" } as any)[text] || "info";
 }
 function suggestionType(text: string) {
   if (text === "正常") return "success";

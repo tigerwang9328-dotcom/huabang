@@ -78,13 +78,14 @@ def _product_suggestion(row: dict) -> str:
 def _product_decision(row: dict) -> dict:
     sales_qty = _num(row.get("sales_qty"))
     inventory_qty = _num(row.get("inventory_qty"))
+    evidence = {"sales_qty_7d": sales_qty, "inventory_qty": inventory_qty}
     if sales_qty > 0 and inventory_qty <= sales_qty:
-        return {"action": "补货", "reason": "近7天有动销且库存不高于7天销量"}
+        return {"action": "replenish", "action_label": "补货", "rule_code": "product_replenish_low_cover", "reason": "近7天有动销且库存不高于7天销量", "evidence": evidence}
     if sales_qty <= 0 and inventory_qty >= 20:
-        return {"action": "清仓", "reason": "近7天无动销且库存不少于20件"}
+        return {"action": "clearance", "action_label": "清仓", "rule_code": "product_clearance_no_sales", "reason": "近7天无动销且库存不少于20件", "evidence": evidence}
     if sales_qty > 0 and inventory_qty > sales_qty * 8:
-        return {"action": "调拨", "reason": "库存超过近7天销量8倍，建议复核门店分布"}
-    return {"action": "继续销售", "reason": "当前动销与库存结构未触发补货或清仓阈值"}
+        return {"action": "transfer", "action_label": "调拨", "rule_code": "product_transfer_high_cover", "reason": "库存超过近7天销量8倍，建议复核门店分布", "evidence": evidence}
+    return {"action": "continue_sale", "action_label": "继续销售", "rule_code": "product_continue_sale", "reason": "当前动销与库存结构未触发补货、调拨或清仓阈值", "evidence": evidence}
 
 
 def _lifecycle_stage(row: dict) -> str:
