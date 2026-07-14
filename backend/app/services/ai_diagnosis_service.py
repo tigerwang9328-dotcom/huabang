@@ -739,7 +739,8 @@ class AIDiagnosisService:
                    bool_and(coalesce(finance_approved,false)) finance_approved,
                    'dm_finance_profit_daily' as source_table
             from dm.dm_finance_profit_daily
-            where stat_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
+            where stat_date=:dt
+              and ((:store_code = '' and store_code='ALL') or (:store_code <> '' and store_code=:store_code))
             """,
             params,
         )
@@ -756,7 +757,8 @@ class AIDiagnosisService:
                        false as is_expense_complete, false as finance_approved,
                        'dws_finance_daily' as source_table
                 from dws.dws_finance_daily
-                where stat_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
+                where stat_date=:dt
+                  and ((:store_code = '' and store_code='ALL') or (:store_code <> '' and store_code=:store_code))
                 """,
                 params,
             )

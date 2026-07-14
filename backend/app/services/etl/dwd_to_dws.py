@@ -290,11 +290,19 @@ class DwdToDws:
                 FROM dwd.dwd_finance_expense
                 WHERE COALESCE(allocation_start,expense_date)<=:stat_date
                   AND COALESCE(allocation_end,expense_date)>=:stat_date
-            """), {"stat_date": target_date})).mappings().all()
+                  AND (store_code IS NULL OR UPPER(store_code)='ALL' OR UPPER(store_code)=ANY(:store_codes))
+            """), {"stat_date": target_date, "store_codes": sorted(ALLOWED_STORE_CODES)})).mappings().all()
+            sales_by_store = {row["store_code"].upper(): row for row in sales}
+            target_store_codes = sorted(set(sales_by_store) | {
+                str(e["store_code"]).upper() for e in expenses if e["store_code"]
+                and str(e["store_code"]).upper() != "ALL"
+            })
             targets = [("ALL", sales, expenses)] + [
-                (row["store_code"], [row], [e for e in expenses if str(e["store_code"] or "").upper()==row["store_code"].upper()])
-                for row in sales
+                (code, [sales_by_store[code]] if code in sales_by_store else [],
+                 [e for e in expenses if str(e["store_code"] or "").upper()==code])
+                for code in target_store_codes
             ]
+            await db.execute(text("DELETE FROM dws.dws_finance_daily WHERE stat_date=:d"), {"d": target_date})
             count = 0
             for code, scoped_sales, scoped_expenses in targets:
                 result = calculate_profit(
@@ -306,7 +314,9 @@ class DwdToDws:
                         expense_type=e["expense_type"], amount=e["expense_amount"],
                         allocation_start=e["allocation_start"], allocation_end=e["allocation_end"],
                         data_type=e["data_type"] or "estimate",
+                        store_code=e["store_code"],
                     ) for e in scoped_expenses],
+                    expense_scope=code,
                 )
                 params = {"d": target_date, "sc": code, "net": result.net_sales,
                     "cost": result.cost_of_goods, "gp": result.gross_profit, "gm": result.gross_margin,
@@ -316,6 +326,10 @@ class DwdToDws:
                     "gp_status": result.gross_profit_status, "op_status": result.operating_profit_status,
                     "reasons": json.dumps(result.reasons), "dtype": "actual" if result.finance_approved else "estimate",
                     **{f"e_{k}": v for k,v in result.expense_by_type.items()}}
+                if code != "ALL":
+                    params.update({"op": None, "om": None, "approved": False,
+                                   "op_status": "pending_data",
+                                   "reasons": json.dumps([*result.reasons, "headquarters_allocation_pending"])})
                 await db.execute(text("""
                     INSERT INTO dws.dws_finance_daily(stat_date,store_code,net_sales_amount,cost_amount,gross_profit,gross_margin,
                       total_expense,rent_expense,wages_expense,social_security_expense,platform_fee_expense,utilities_expense,
@@ -345,4 +359,4 @@ class DwdToDws:
             await db.rollback()
             etl_log.fail_task(run_id, str(exc))
             print(f"[DwdToDws] finance_daily 失败: {exc}")
-            return 0
+            raise

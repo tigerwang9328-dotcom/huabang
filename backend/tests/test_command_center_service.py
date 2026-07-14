@@ -9,6 +9,7 @@ from app.services.command_center_service import (
     inventory_warning_source_id,
     preserve_trusted_value,
 )
+from app.services.sales_metric_service import RETURN_SYNC_COMPLETE_SQL
 from app.services.rule_engine import RuleEngine
 
 
@@ -80,20 +81,40 @@ def test_metric_statuses_follow_each_source_freshness():
     }
 
 
-def test_return_metric_is_pending_when_sales_is_ready_but_return_source_is_missing():
+def test_return_metric_is_ready_when_synced_ticket_source_reports_zero_returns():
     statuses = derive_metric_statuses(
         sales={
             "etl_at": "2026-07-13T20:00:00Z",
-            "total_return_amount": None,
             "is_cost_complete": True,
         },
-        ticket={"synced_at": "2026-07-13T20:00:00Z"},
+        ticket={
+            "synced_at": "2026-07-13T20:00:00Z",
+            "return_amount": 0,
+            "return_sync_completed_at": "2026-07-13T20:05:00Z",
+        },
         inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
         members={"updated_at": "2026-07-13T20:00:00Z"},
     )
 
     assert statuses["sales_detail"] == "ready"
-    assert statuses["returns"] == "pending_data"
+    assert statuses["returns"] == "ready"
+
+
+def test_return_metric_stays_stale_without_a_complete_covering_sync_run():
+    statuses = derive_metric_statuses(
+        sales={"etl_at": "2026-07-13T20:00:00Z", "is_cost_complete": True},
+        ticket={"synced_at": "2026-07-13T20:00:00Z", "return_amount": 0},
+        inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
+        members={"updated_at": "2026-07-13T20:00:00Z"},
+    )
+
+    assert statuses["returns"] == "stale"
+
+
+def test_return_readiness_uses_latest_overlapping_sync_run():
+    assert "ORDER BY r.started_at DESC, r.id DESC" in RETURN_SYNC_COMPLETE_SQL
+    assert "LIMIT 1" in RETURN_SYNC_COMPLETE_SQL
+    assert "r.status='success'" in RETURN_SYNC_COMPLETE_SQL
 
 
 def test_metric_rejects_unknown_status():

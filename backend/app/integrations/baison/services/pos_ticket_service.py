@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from collections import defaultdict
 from typing import Optional
 
@@ -34,7 +35,7 @@ class PosTicketService:
 
     def __init__(self):
         self.client = BaisonClient()
-        self.batch_no = dt.datetime.now().strftime("PT%Y%m%d%H%M%S")
+        self.batch_no = dt.datetime.now().strftime("PT%Y%m%d%H%M%S") + uuid.uuid4().hex[:12]
 
     def _hash(self, raw: dict) -> str:
         s = json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str)
@@ -117,6 +118,35 @@ class PosTicketService:
             """))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_biz_date ON dwd.dwd_pos_ticket(biz_date)"))
             await db.execute(text("CREATE INDEX IF NOT EXISTS idx_dwd_pos_ticket_store_date ON dwd.dwd_pos_ticket(store_code, biz_date)"))
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS ods.ods_baison_pos_ticket_sync_run (
+                    id BIGSERIAL PRIMARY KEY,
+                    batch_no VARCHAR(64) NOT NULL UNIQUE,
+                    biz_start_time TIMESTAMP NOT NULL,
+                    biz_end_time TIMESTAMP NOT NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'running',
+                    expected_pages INTEGER,
+                    completed_pages INTEGER NOT NULL DEFAULT 0,
+                    total_result INTEGER,
+                    error_message TEXT,
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    completed_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """))
+            await db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_baison_pos_ticket_sync_run_coverage
+                ON ods.ods_baison_pos_ticket_sync_run(status, biz_start_time, biz_end_time)
+            """))
+            await db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_baison_pos_ticket_sync_run_latest
+                ON ods.ods_baison_pos_ticket_sync_run(biz_start_time, biz_end_time, started_at DESC)
+            """))
+            await db.execute(text("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_baison_pos_ticket_single_running
+                ON ods.ods_baison_pos_ticket_sync_run(status)
+                WHERE status='running'
+            """))
             # 兼容旧表:补充 actual_pay_amount 列(门店销售实收口径)
             await db.execute(text(
                 "ALTER TABLE dwd.dwd_pos_ticket ADD COLUMN IF NOT EXISTS actual_pay_amount NUMERIC(16,2) DEFAULT 0"
@@ -135,6 +165,59 @@ class PosTicketService:
             """))
             await db.commit()
 
+    async def _start_sync_run(self, start_dt: dt.datetime, end_dt: dt.datetime) -> bool:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("""
+                UPDATE ods.ods_baison_pos_ticket_sync_run
+                SET status='failed',
+                    error_message='同步进程超时，自动关闭',
+                    completed_at=now(),
+                    updated_at=now()
+                WHERE status='running'
+                  AND updated_at < now() - INTERVAL '2 hours'
+            """))
+            result = await db.execute(text("""
+                INSERT INTO ods.ods_baison_pos_ticket_sync_run
+                    (batch_no, biz_start_time, biz_end_time, status, started_at, updated_at)
+                VALUES (:batch_no, :start_dt, :end_dt, 'running', now(), now())
+                ON CONFLICT DO NOTHING
+                RETURNING id
+            """), {"batch_no": self.batch_no, "start_dt": start_dt, "end_dt": end_dt})
+            started = result.scalar_one_or_none() is not None
+            await db.commit()
+            return started
+
+    async def _finish_sync_run(
+        self,
+        *,
+        status: str,
+        completed_pages: int,
+        expected_pages: int | None,
+        total_result: int | None,
+        error_message: str | None = None,
+    ) -> None:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("""
+                UPDATE ods.ods_baison_pos_ticket_sync_run
+                SET status=:status,
+                    completed_pages=:completed_pages,
+                    expected_pages=:expected_pages,
+                    total_result=:total_result,
+                    error_message=:error_message,
+                    completed_at=now(),
+                    updated_at=now()
+                WHERE batch_no=:batch_no
+                  AND status='running'
+            """), {
+                "batch_no": self.batch_no,
+                "status": status,
+                "completed_pages": completed_pages,
+                "expected_pages": expected_pages,
+                "total_result": total_result,
+                "error_message": error_message,
+            })
+            await db.commit()
+
     async def sync_range(self, start_time: str, end_time: str, max_pages: int = 0, page_size: int = 100) -> dict:
         """按时间范围同步小票列表。start/end 格式：YYYY-mm-dd HH:MM:SS。"""
         await self.ensure_tables()
@@ -146,6 +229,15 @@ class PosTicketService:
         total_dwd = 0
         total_result: Optional[int] = None
         page_total = 1
+        completed_pages = 0
+        error_message: str | None = None
+        if not await self._start_sync_run(start_dt, end_dt):
+            return {
+                "ok": False,
+                "method": TICKET_METHOD,
+                "batch_no": self.batch_no,
+                "error": "已有百胜小票同步正在运行，请稍后重试",
+            }
 
         while True:
             params = {
@@ -160,40 +252,105 @@ class PosTicketService:
                 resp = self.client.request(TICKET_METHOD, params, timeout=30)
             except Exception as exc:
                 logger.error("ticket api error page=%s err=%s", page, exc)
+                error_message = f"百胜小票接口第{page}页失败: {exc}"
                 break
 
             if not resp.data or str(resp.data.get("code")) != "1":
                 logger.error("ticket api failed page=%s raw=%s", page, resp.raw_response[:500])
+                error_message = f"百胜小票接口第{page}页返回失败"
                 break
 
-            inner = resp.data.get("data") or "{}"
-            if isinstance(inner, str):
-                inner = json.loads(inner)
-            page_info = inner.get("page") or {}
-            rows = inner.get("orderListGet") or []
-            page_total = int(page_info.get("pageTotal") or 1)
-            total_result = int(page_info.get("totalResult") or len(rows))
+            try:
+                inner = resp.data.get("data") or "{}"
+                if isinstance(inner, str):
+                    inner = json.loads(inner)
+                if not isinstance(inner, dict):
+                    raise TypeError("payload must be an object")
+                page_info = inner.get("page")
+                rows = inner.get("orderListGet")
+                if not isinstance(page_info, dict):
+                    raise TypeError("page metadata is missing")
+                if "pageTotal" not in page_info or "totalResult" not in page_info:
+                    raise ValueError("page metadata is incomplete")
+                if rows is None:
+                    raise ValueError("orderListGet is missing")
+                if not isinstance(rows, list):
+                    raise TypeError("orderListGet must be a list")
+                reported_page_total = int(page_info["pageTotal"])
+                reported_total_result = int(page_info["totalResult"])
+                if reported_total_result < 0 or reported_page_total < 0:
+                    raise ValueError("negative pagination value")
+                reported_page_total = max(reported_page_total, 1)
+                if page == 1:
+                    page_total = reported_page_total
+                    total_result = reported_total_result
+                elif page_total != reported_page_total or total_result != reported_total_result:
+                    raise ValueError("pagination metadata changed between pages")
+            except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                logger.error("ticket api invalid payload page=%s err=%s", page, exc)
+                error_message = f"百胜小票接口第{page}页数据格式异常"
+                break
 
             if not rows:
+                completed_pages += 1
+                if page < page_total:
+                    error_message = f"百胜小票接口第{page}页提前返回空数据"
                 break
 
-            ods_count, dwd_count = await self._save_batch(rows, start_dt, end_dt, fallback_date, page)
+            try:
+                ods_count, dwd_count = await self._save_batch(
+                    rows, start_dt, end_dt, fallback_date, page
+                )
+            except Exception as exc:
+                logger.exception("ticket save failed page=%s", page)
+                error_message = f"百胜小票第{page}页入库失败: {exc}"
+                break
             total_ods += ods_count
             total_dwd += dwd_count
+            completed_pages += 1
 
             if page >= page_total:
                 break
             if max_pages > 0 and page >= max_pages:
+                error_message = "同步页数受限，批次数据不完整"
                 break
             page += 1
             time.sleep(0.15)
+
+        if error_message is None and total_result is not None and total_dwd != total_result:
+            error_message = f"百胜小票返回数量不完整: {total_dwd}/{total_result}"
+        is_complete = (
+            error_message is None
+            and total_result is not None
+            and completed_pages >= page_total
+            and total_dwd == total_result
+        )
+        await self._finish_sync_run(
+            status="success" if is_complete else "failed",
+            completed_pages=completed_pages,
+            expected_pages=page_total,
+            total_result=total_result,
+            error_message=error_message,
+        )
+        if not is_complete:
+            return {
+                "ok": False,
+                "method": TICKET_METHOD,
+                "batch_no": self.batch_no,
+                "pages": completed_pages,
+                "page_total": page_total,
+                "total_result": total_result,
+                "ods": total_ods,
+                "dwd": total_dwd,
+                "error": error_message or "百胜小票同步未完整完成",
+            }
 
         summary = await self.rebuild_dws_summary(start_time, end_time)
         return {
             "ok": True,
             "method": TICKET_METHOD,
             "batch_no": self.batch_no,
-            "pages": page,
+            "pages": completed_pages,
             "page_total": page_total,
             "total_result": total_result,
             "ods": total_ods,
@@ -203,6 +360,19 @@ class PosTicketService:
 
     async def _save_batch(self, rows: list[dict], start_dt: dt.datetime, end_dt: dt.datetime, fallback_date: dt.date, page_no: int) -> tuple[int, int]:
         async with AsyncSessionLocal() as db:
+            status = (await db.execute(text("""
+                SELECT status
+                FROM ods.ods_baison_pos_ticket_sync_run
+                WHERE batch_no=:batch_no
+                FOR UPDATE
+            """), {"batch_no": self.batch_no})).scalar_one_or_none()
+            if status != "running":
+                raise RuntimeError("百胜小票同步批次已失效，拒绝继续写入")
+            await db.execute(text("""
+                UPDATE ods.ods_baison_pos_ticket_sync_run
+                SET updated_at=now()
+                WHERE batch_no=:batch_no AND status='running'
+            """), {"batch_no": self.batch_no})
             ods_count = 0
             dwd_count = 0
             for rec in rows:

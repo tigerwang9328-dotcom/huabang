@@ -51,6 +51,18 @@ def test_dws_rebuild_persists_real_channel_amounts():
     assert "online_sales_amount=0" not in rebuild_source
 
 
+def test_dws_rebuild_persists_baison_refunds_for_store_and_company_metrics():
+    source = (BACKEND / "app" / "services" / "sales_metric_service.py").read_text(
+        encoding="utf-8"
+    )
+    rebuild_source = source[source.index("async def rebuild_confirmed_sales_dws") :]
+
+    assert "pay.refund_amount" in rebuild_source
+    assert "channels.return_amount" in rebuild_source
+    assert "return_amount=x.return_amount" in rebuild_source
+    assert "total_return_amount=x.return_amount" in rebuild_source
+
+
 def test_small_online_share_is_not_rounded_down_to_zero():
     channels = _build_platform_sales(18057, 9)
 

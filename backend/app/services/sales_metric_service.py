@@ -109,9 +109,29 @@ PAY_DETAIL_SQL = f"""
     GROUP BY t.ticket_no
 """
 
+RETURN_SYNC_COMPLETE_SQL = """
+    SELECT COALESCE((
+        SELECT r.status='success'
+               AND r.biz_start_time <= CAST(:stat_date AS date)
+               AND r.biz_end_time >= CAST(:stat_date AS date) + INTERVAL '1 day' - INTERVAL '1 second'
+        FROM ods.ods_baison_pos_ticket_sync_run r
+        WHERE r.biz_start_time < CAST(:stat_date AS date) + INTERVAL '1 day'
+          AND r.biz_end_time >= CAST(:stat_date AS date)
+        ORDER BY r.started_at DESC, r.id DESC
+        LIMIT 1
+    ), false)
+"""
+
+
+async def has_complete_pos_ticket_sync(db: AsyncSession, stat_date: date) -> bool:
+    result = await db.execute(text(RETURN_SYNC_COMPLETE_SQL), {"stat_date": stat_date})
+    return bool(result.scalar())
+
 
 async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None:
     """Recalculate DWS sales fields with the confirmed Baison payment formula."""
+    if not await has_complete_pos_ticket_sync(db, stat_date):
+        return
     params = {
         "sd": stat_date,
         "ed": stat_date,
@@ -123,7 +143,8 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None
             SELECT UNNEST(CAST(:store_codes AS text[])) AS store_code
         ), ticket_daily AS (
             SELECT t.store_code,
-                   COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount
+                   COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount,
+                   COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS return_amount
             FROM dwd.dwd_pos_ticket t
             LEFT JOIN pay ON pay.ticket_no=t.ticket_no
             WHERE t.biz_date=:stat_date
@@ -132,12 +153,14 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None
               AND COALESCE(t.is_pending,false)=false
             GROUP BY t.store_code
         ), daily AS (
-            SELECT s.store_code, COALESCE(t.sales_amount, 0) AS sales_amount
+            SELECT s.store_code, COALESCE(t.sales_amount, 0) AS sales_amount,
+                   COALESCE(t.return_amount, 0) AS return_amount
             FROM stores s LEFT JOIN ticket_daily t USING (store_code)
         )
         UPDATE dws.dws_store_daily d
         SET sales_amount=x.sales_amount,
-            net_sales_amount=x.sales_amount-COALESCE(d.return_amount,0),
+            return_amount=x.return_amount,
+            net_sales_amount=x.sales_amount-x.return_amount,
             avg_order_value=CASE WHEN d.order_count>0 THEN x.sales_amount/d.order_count ELSE 0 END,
             gross_profit=x.sales_amount-COALESCE(d.cost_amount,0),
             gross_margin=CASE
@@ -154,7 +177,9 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None
             SELECT COALESCE(SUM(COALESCE(pay.offline_sales_amount, t.sales_amount)), 0)
                        AS offline_sales_amount,
                    COALESCE(SUM(COALESCE(pay.online_sales_amount, 0)), 0)
-                       AS online_sales_amount
+                       AS online_sales_amount,
+                   COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0)
+                       AS return_amount
             FROM dwd.dwd_pos_ticket t
             LEFT JOIN pay ON pay.ticket_no=t.ticket_no
             WHERE t.biz_date=:stat_date
@@ -171,7 +196,8 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None
             FROM dws.dws_store_daily
             WHERE stat_date=:stat_date AND store_code=ANY(:store_codes) AND channel='offline'
         ), company_with_channels AS (
-            SELECT company.*, channels.offline_sales_amount, channels.online_sales_amount
+            SELECT company.*, channels.offline_sales_amount, channels.online_sales_amount,
+                   channels.return_amount
             FROM company CROSS JOIN channels
         )
         UPDATE dws.dws_company_daily d
@@ -180,6 +206,7 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None
             online_sales_amount=x.online_sales_amount,
             online_ratio=CASE WHEN x.sales_amount<>0
                 THEN x.online_sales_amount/x.sales_amount ELSE NULL END,
+            total_return_amount=x.return_amount,
             net_sales_amount=x.net_sales_amount,
             total_cost_amount=x.cost_amount,
             gross_profit=x.sales_amount-x.cost_amount,

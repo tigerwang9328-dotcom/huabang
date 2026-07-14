@@ -334,7 +334,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
   {
     label: "财务利润",
     icon: Money,
-    permission: "finance:overview:view",
     items: [
       { path: "/app/fin/overview", icon: Money, label: "财务首页", permission: "finance:overview:view" },
       { path: "/app/finance", icon: TrendCharts, label: "利润分析", permission: "finance:profit:view" },

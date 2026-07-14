@@ -320,6 +320,7 @@ class DwsToDm:
     async def _finance_profit(self, stat_date: str, db: AsyncSession, etl_log) -> int:
         run_id = etl_log.start_task("dws_to_dm_finance_profit", stat_date)
         try:
+            await db.execute(text("DELETE FROM dm.dm_finance_profit_daily WHERE stat_date=:d"), {"d": date.fromisoformat(stat_date)})
             result = await db.execute(text("""
                 INSERT INTO dm.dm_finance_profit_daily(
                   stat_date,store_code,net_sales,cost_of_goods,gross_profit,gross_margin,total_expense,
@@ -356,4 +357,4 @@ class DwsToDm:
             await db.rollback()
             etl_log.fail_task(run_id, str(exc))
             print(f"[DwsToDm] finance_profit 失败: {exc}")
-            return 0
+            raise

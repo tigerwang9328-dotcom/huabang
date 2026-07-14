@@ -16,6 +16,7 @@ REQUIRED_EXPENSE_TYPES = (
     "marketing",
     "other",
 )
+LEGACY_EXPENSE_TYPE_MAP = {"labor": "wages", "admin": "other"}
 
 
 def _decimal(value) -> Decimal:
@@ -33,9 +34,11 @@ class ExpenseAllocation:
     allocation_start: date
     allocation_end: date
     data_type: str = "estimate"
+    store_code: str | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "amount", _decimal(self.amount))
+        object.__setattr__(self, "store_code", (self.store_code or "ALL").strip().upper())
         if self.allocation_end < self.allocation_start:
             raise ValueError("allocation_end must be on or after allocation_start")
 
@@ -75,6 +78,7 @@ def calculate_profit(
     cost_of_goods,
     is_cost_complete: bool,
     expenses: Iterable[ExpenseAllocation],
+    expense_scope: str = "ALL",
 ) -> ProfitResult:
     """Calculate profit while preserving incomplete-data states.
 
@@ -98,8 +102,12 @@ def calculate_profit(
     covered_dates = {expense_type: set() for expense_type in REQUIRED_EXPENSE_TYPES}
     allocated_expenses = []
 
+    normalized_scope = (expense_scope or "ALL").strip().upper()
     for expense in expenses:
-        if expense.expense_type not in expense_by_type:
+        if expense.store_code != normalized_scope:
+            continue
+        expense_type = LEGACY_EXPENSE_TYPE_MAP.get(expense.expense_type, expense.expense_type)
+        if expense_type not in expense_by_type:
             continue
         overlap_start = max(period_start, expense.allocation_start)
         overlap_end = min(period_end, expense.allocation_end)
@@ -108,14 +116,14 @@ def calculate_profit(
 
         allocation_days = (expense.allocation_end - expense.allocation_start).days + 1
         overlap_days = (overlap_end - overlap_start).days + 1
-        expense_by_type[expense.expense_type] += (
+        expense_by_type[expense_type] += (
             expense.amount * Decimal(overlap_days) / Decimal(allocation_days)
         )
         allocated_expenses.append(expense)
 
         current_date = overlap_start
         while current_date <= overlap_end:
-            covered_dates[expense.expense_type].add(current_date)
+            covered_dates[expense_type].add(current_date)
             current_date += timedelta(days=1)
 
     period_days = (period_end - period_start).days + 1
@@ -125,7 +133,7 @@ def calculate_profit(
     missing_expense_types = tuple(
         expense_type
         for expense_type in REQUIRED_EXPENSE_TYPES
-        if not covered_dates[expense_type]
+        if len(covered_dates[expense_type]) < period_days
     )
     total_expense = sum(expense_by_type.values(), Decimal("0"))
     finance_approved = bool(allocated_expenses) and all(
