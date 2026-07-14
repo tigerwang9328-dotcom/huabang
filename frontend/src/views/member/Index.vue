@@ -71,6 +71,42 @@
 
     <section class="table-panel">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <el-tab-pane label="VIP销售" name="sales">
+          <div class="vip-sales-grid" v-loading="salesLoading">
+            <div class="sales-metric" v-for="card in vipSalesCards" :key="card.label">
+              <span>{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.sub }}</small>
+            </div>
+          </div>
+          <div class="sales-analysis-layout">
+            <div class="analysis-block">
+              <div class="block-title"><h3>VIP门店排行</h3><span>{{ vipSales.date_range?.start_date || "-" }} 至 {{ vipSales.date_range?.end_date || "-" }}</span></div>
+              <el-table :data="vipSales.stores || []" border stripe size="small" v-loading="salesLoading">
+                <el-table-column type="index" label="排名" width="62" align="center" />
+                <el-table-column prop="store_name" label="门店" min-width="170"><template #default="{ row }"><span>{{ row.store_name }}</span><span class="muted-code">{{ row.store_code }}</span></template></el-table-column>
+                <el-table-column label="VIP销售额" width="120" align="right"><template #default="{ row }">{{ formatMoney(row.vip_sales) }}</template></el-table-column>
+                <el-table-column prop="vip_orders" label="订单" width="72" align="right" />
+                <el-table-column label="客单价" width="100" align="right"><template #default="{ row }">{{ formatMoney(row.avg_order_value) }}</template></el-table-column>
+                <el-table-column prop="attachment_rate" label="连带率" width="82" align="right" />
+                <el-table-column label="平均折扣" width="92" align="right"><template #default="{ row }">{{ formatPercent(row.avg_discount_rate) }}</template></el-table-column>
+                <el-table-column label="退货率" width="82" align="right"><template #default="{ row }">{{ formatPercent(row.return_rate) }}</template></el-table-column>
+              </el-table>
+            </div>
+            <div class="analysis-block compact-trend">
+              <div class="block-title"><h3>VIP销售趋势</h3><span>按日</span></div>
+              <el-table :data="vipSales.trend || []" border stripe size="small" max-height="360" v-loading="salesLoading">
+                <el-table-column prop="biz_date" label="日期" width="104" />
+                <el-table-column label="销售额" min-width="100" align="right"><template #default="{ row }">{{ formatMoney(row.vip_sales) }}</template></el-table-column>
+                <el-table-column prop="vip_orders" label="订单" width="68" align="right" />
+                <el-table-column prop="attachment_rate" label="连带率" width="76" align="right" />
+              </el-table>
+            </div>
+          </div>
+          <div class="pending-strip">
+            <span><b>VIP毛利</b><el-tag size="small" type="info">待接入</el-tag> 小票与商品成本尚无可靠逐单关联</span>
+            <span><b>品类/款式</b><el-tag size="small" type="info">待接入</el-tag> 商品明细暂不能可靠关联VIP小票</span>
+          </div>
+        </el-tab-pane>
+
         <el-tab-pane label="VIP资产" name="assets">
           <el-table :data="assetRows" v-loading="assetLoading" border stripe size="small">
             <el-table-column prop="member_no" label="会员编号" min-width="130" />
@@ -196,7 +232,7 @@ import { Refresh, Search } from "@element-plus/icons-vue";
 import { memberApi } from "@/api/member";
 
 type Preset = "latest" | "last7" | "last30" | "custom";
-type TabName = "assets" | "transactions" | "pos" | "profile" | "visits";
+type TabName = "sales" | "assets" | "transactions" | "pos" | "profile" | "visits";
 
 const overviewLoading = ref(false);
 const posLoading = ref(false);
@@ -204,6 +240,7 @@ const profileLoading = ref(false);
 const visitLoading = ref(false);
 const assetLoading = ref(false);
 const transactionLoading = ref(false);
+const salesLoading = ref(false);
 const activeTab = ref<TabName>("assets");
 const preset = ref<Preset>("latest");
 const keyword = ref("");
@@ -222,6 +259,7 @@ const visitRows = ref<any[]>([]);
 const assetOverview = ref<any>({});
 const assetRows = ref<any[]>([]); const assetTotal = ref(0); const assetPage = ref(1); const assetPageSize = ref(20);
 const transactionRows = ref<any[]>([]); const transactionTotal = ref(0); const transactionPage = ref(1); const transactionPageSize = ref(20);
+const vipSales = ref<any>({ summary: {}, stores: [], trend: [] });
 
 function parseDate(value: string) {
   const d = new Date(`${value}T00:00:00`);
@@ -264,6 +302,7 @@ const statusText = computed(() => (dataStatus.value.member_profile_synced ? "会
 const statusTagType = computed(() => (dataStatus.value.member_profile_synced ? "success" : "warning"));
 const activeLoading = computed(() => {
   if (activeTab.value === "assets") return assetLoading.value;
+  if (activeTab.value === "sales") return salesLoading.value;
   if (activeTab.value === "transactions") return transactionLoading.value;
   if (activeTab.value === "profile") return profileLoading.value;
   if (activeTab.value === "visits") return visitLoading.value;
@@ -277,6 +316,21 @@ const metricCards = computed(() => [
   { label: "近30天充值", value: formatMoney(assetOverview.value.recharge_30d), sub: `${assetOverview.value.recharge_member_30d || 0} 位充值会员` },
   { label: "会员档案数", value: Number(summary.value.profile_members || 0).toLocaleString("zh-CN"), sub: "dim_member" },
   { label: "会员销售额", value: formatMoney(summary.value.member_sales), sub: `占比 ${formatPercent(summary.value.member_sales_ratio)}` },
+]);
+
+function metricValue(key: string) { return vipSales.value.summary?.[key]?.value; }
+function metricStatus(key: string) { return vipSales.value.summary?.[key]?.status || "pending_data"; }
+const vipSalesCards = computed(() => [
+  { label: "VIP销售额", value: formatMoney(metricValue("vip_sales_amount")), sub: `占比 ${formatPercent(metricValue("vip_sales_ratio"))}` },
+  { label: "VIP实收", value: formatMoney(metricValue("vip_actual_amount")), sub: "百胜小票" },
+  { label: "订单 / 件数", value: `${metricValue("order_count") || 0} / ${formatQty(metricValue("sales_quantity"))}`, sub: "有效VIP小票" },
+  { label: "客单价", value: formatMoney(metricValue("avg_order_value")), sub: "销售额 / 订单" },
+  { label: "连带率", value: Number(metricValue("attachment_rate") || 0).toFixed(2), sub: "件数 / 订单" },
+  { label: "复购率", value: formatPercent(metricValue("repurchase_rate")), sub: `${metricValue("repurchase_member_count") || 0} 位复购会员` },
+  { label: "平均折扣", value: formatPercent(metricValue("avg_discount_rate")), sub: "销售额 / 吊牌额" },
+  { label: "退货率", value: formatPercent(metricValue("return_rate")), sub: `${formatMoney(metricValue("return_amount"))} 退货` },
+  { label: "充值消费转化", value: formatPercent(metricValue("recharge_consume_conversion_rate")), sub: `${metricValue("recharge_consume_member_count") || 0} / ${metricValue("recharge_member_count") || 0} 人` },
+  { label: "VIP毛利", value: metricStatus("gross_profit") === "pending_data" ? "待接入" : formatMoney(metricValue("gross_profit")), sub: "成本逐单关联" },
 ]);
 
 async function fetchOverview() {
@@ -320,6 +374,19 @@ async function fetchTransactions() {
   } finally { transactionLoading.value = false; }
 }
 
+async function fetchSalesAnalysis() {
+  salesLoading.value = true;
+  try {
+    const params: any = {};
+    if (dateRange.value[0]) params.start_date = dateRange.value[0];
+    if (dateRange.value[1]) params.end_date = dateRange.value[1];
+    const { data } = await memberApi.getSalesAnalysis(params);
+    if (!data?.success) return ElMessage.error(data?.message || "VIP销售分析加载失败");
+    vipSales.value = data.data || { summary: {}, stores: [], trend: [] };
+  } catch (e: any) { ElMessage.error(e?.message || "VIP销售分析加载失败"); }
+  finally { salesLoading.value = false; }
+}
+
 function resetAssetPage() { assetPage.value = 1; fetchAssets(); }
 function resetTransactionPage() { transactionPage.value = 1; fetchTransactions(); }
 function assetStatusName(value: string) { return ({ negative: "负余额", dormant: "沉睡", high: "高余额", normal: "正常" } as any)[value] || value; }
@@ -331,11 +398,17 @@ function applyPreset() {
   if (preset.value === "latest") dateRange.value = [anchor, anchor];
   if (preset.value === "last7") dateRange.value = [shiftDate(anchor, -6), anchor];
   if (preset.value === "last30") dateRange.value = [shiftDate(anchor, -29), anchor];
-  if (preset.value !== "custom") fetchPosMembers();
+  if (preset.value !== "custom") fetchDateSensitiveTab();
 }
 
 function handleDateChange() {
-  if (preset.value === "custom") fetchPosMembers();
+  if (preset.value === "custom") fetchDateSensitiveTab();
+}
+
+function fetchDateSensitiveTab() {
+  if (activeTab.value === "sales") return fetchSalesAnalysis();
+  if (activeTab.value === "transactions") return fetchTransactions();
+  if (activeTab.value === "pos") return fetchPosMembers();
 }
 
 async function fetchPosMembers() {
@@ -391,6 +464,7 @@ async function fetchVisits() {
 }
 
 function fetchActiveTab() {
+  if (activeTab.value === "sales") return fetchSalesAnalysis();
   if (activeTab.value === "assets") return fetchAssets();
   if (activeTab.value === "transactions") return fetchTransactions();
   if (activeTab.value === "profile") return fetchProfiles();
@@ -569,11 +643,24 @@ onMounted(async () => {
 }
 .negative { color:#DC2626; }
 .positive { color:#059669; }
+.vip-sales-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+.sales-metric { min-width:0; min-height:82px; padding:11px 12px; border:1px solid #E5E7EB; border-radius:8px; background:#F8FAFC; display:flex; flex-direction:column; gap:5px; }
+.sales-metric span,.sales-metric small { color:#64748B; font-size:12px; }
+.sales-metric strong { color:#0F172A; font-size:18px; line-height:1.2; overflow-wrap:anywhere; }
+.sales-analysis-layout { display:grid; grid-template-columns:minmax(0,2fr) minmax(340px,1fr); gap:12px; }
+.analysis-block { min-width:0; border:1px solid #E5E7EB; border-radius:8px; padding:10px; }
+.block-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.block-title h3 { margin:0; font-size:14px; }
+.block-title span { color:#94A3B8; font-size:12px; }
+.pending-strip { display:flex; gap:18px; flex-wrap:wrap; margin-top:10px; padding:10px 12px; background:#F8FAFC; border:1px solid #E5E7EB; border-radius:8px; color:#64748B; font-size:12px; }
+.pending-strip span { display:flex; align-items:center; gap:7px; }
 
 @media (max-width: 1280px) {
   .summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .vip-sales-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .sales-analysis-layout { grid-template-columns:1fr; }
 }
 
 @media (max-width: 900px) {
@@ -590,5 +677,6 @@ onMounted(async () => {
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .vip-sales-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 </style>

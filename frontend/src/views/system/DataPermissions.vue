@@ -1,3 +1,213 @@
-<template><div class="system-page"><div class="page-head"><div><h1>数据权限管理</h1><p>控制不同岗位、用户能看到哪些门店、仓库、部门和个人数据。</p></div><el-button @click="load">刷新</el-button></div><div class="card"><h3>角色数据范围</h3><el-table :data="roles"><el-table-column prop="name" label="角色"/><el-table-column prop="code" label="编码"/><el-table-column prop="data_scope_name" label="默认数据范围"/><el-table-column prop="user_count" label="用户数"/><el-table-column label="操作"><template #default="{row}"><el-select v-model="row.data_scope" @change="v=>saveRoleScope(row,v)"><el-option label="全部数据" value="all"/><el-option label="公司数据" value="company"/><el-option label="部门数据" value="dept"/><el-option label="门店数据" value="store"/><el-option label="个人数据" value="self"/></el-select></template></el-table-column></el-table></div><div class="card"><h3>用户数据绑定风险</h3><el-table :data="users"><el-table-column label="用户"><template #default="{row}">{{row.real_name||row.username}}<div class="muted">{{row.username}}</div></template></el-table-column><el-table-column prop="dept_id" label="部门"/><el-table-column prop="store_code" label="主门店"/><el-table-column label="风险"><template #default="{row}"><el-tag :type="row.risk==='正常'?'success':'danger'">{{row.risk}}</el-tag></template></el-table-column><el-table-column label="操作"><template #default="{row}"><el-button link type="primary" @click="openBind(row)">绑定</el-button><el-button link @click="preview(row)">预览</el-button></template></el-table-column></el-table></div><el-dialog v-model="bindVisible" title="用户数据绑定"><el-form label-width="100px"><el-form-item label="部门ID"><el-input-number v-model="bindForm.dept_id"/></el-form-item><el-form-item label="主门店"><el-input v-model="bindForm.store_code"/></el-form-item><el-form-item label="可管理门店"><el-select v-model="bindForm.store_codes" multiple filterable allow-create style="width:100%"/></el-form-item></el-form><template #footer><el-button @click="bindVisible=false">取消</el-button><el-button type="primary" @click="saveBind">保存</el-button></template></el-dialog><el-dialog v-model="previewVisible" title="数据权限预览"><pre class="jsonbox">{{JSON.stringify(previewData,null,2)}}</pre></el-dialog></div></template><script setup lang="ts">import{onMounted,ref,reactive}from'vue';import{ElMessage}from'element-plus';import{systemApi}from'@/api/system';const roles=ref<any[]>([]),users=ref<any[]>([]),current=ref<any>(),bindVisible=ref(false),previewVisible=ref(false),previewData=ref<any>({});const bindForm=reactive<any>({dept_id:null,store_code:'',store_codes:[]});async function load(){const r=await systemApi.getDataScopes();roles.value=r.data.data.roles||[];users.value=r.data.data.users||[]}async function saveRoleScope(row:any,v:string){await systemApi.updateRoleDataScope(row.id,{data_scope:v});ElMessage.success('角色数据范围已保存');load()}function openBind(row:any){current.value=row;Object.assign(bindForm,{dept_id:row.dept_id,store_code:row.store_code||'',store_codes:row.store_codes||[]});bindVisible.value=true}async function saveBind(){await systemApi.updateUserDataScope(current.value.id,bindForm);ElMessage.success('用户数据权限已保存');bindVisible.value=false;load()}async function preview(row:any){const r=await systemApi.getUserDataScopePreview(row.id);previewData.value=r.data.data;previewVisible.value=true}onMounted(load)</script>
-<style scoped>.system-page{padding:24px;background:#f6f8fb;min-height:100%}.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}.page-head h1{margin:0;color:#0f172a;font-size:26px}.page-head p{margin:8px 0 0;color:#64748b}.card{background:#fff;border:1px solid #e5eaf2;border-radius:8px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(15,23,42,.035)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.stat{background:#fff;border:1px solid #e5eaf2;border-radius:8px;padding:18px}.stat b{font-size:28px;color:#0f172a}.stat span{display:block;color:#64748b;margin-top:6px}.layout2{display:grid;grid-template-columns:360px 1fr;gap:16px}.muted{color:#94a3b8;font-size:12px}.jsonbox{max-height:280px;overflow:auto;background:#f8fafc;color:#334155;border:1px solid #e5eaf2;padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap}@media(max-width:1100px){.layout2{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+<template>
+  <div class="system-page">
+    <div class="page-head">
+      <div>
+        <h1>数据权限管理</h1>
+        <p>控制不同岗位、用户能看到哪些门店、仓库、部门和个人数据。</p>
+      </div>
+      <el-button @click="load">刷新</el-button>
+    </div>
+    <div class="card">
+      <h3>角色数据范围</h3>
+      <el-table :data="roles"
+        ><el-table-column prop="name" label="角色" /><el-table-column
+          prop="code"
+          label="编码" /><el-table-column
+          prop="data_scope_name"
+          label="默认数据范围" /><el-table-column
+          prop="user_count"
+          label="用户数" /><el-table-column label="操作"
+          ><template #default="{ row }"
+            ><el-select
+              v-model="row.data_scope"
+              @change="(v: string) => saveRoleScope(row, v)"
+              ><el-option label="全部数据" value="all" /><el-option
+                label="公司数据"
+                value="company" /><el-option
+                label="部门数据"
+                value="dept" /><el-option
+                label="门店数据"
+                value="store" /><el-option
+                label="个人数据"
+                value="self" /></el-select></template></el-table-column
+      ></el-table>
+    </div>
+    <div class="card">
+      <h3>用户数据绑定风险</h3>
+      <el-table :data="users"
+        ><el-table-column label="用户"
+          ><template #default="{ row }"
+            >{{ row.real_name || row.username }}
+            <div class="muted">{{ row.username }}</div></template
+          ></el-table-column
+        ><el-table-column prop="dept_id" label="部门" /><el-table-column
+          prop="store_code"
+          label="主门店"
+        /><el-table-column label="风险"
+          ><template #default="{ row }"
+            ><el-tag :type="row.risk === '正常' ? 'success' : 'danger'">{{
+              row.risk
+            }}</el-tag></template
+          ></el-table-column
+        ><el-table-column label="操作"
+          ><template #default="{ row }"
+            ><el-button link type="primary" @click="openBind(row)"
+              >绑定</el-button
+            ><el-button link @click="preview(row)">预览</el-button></template
+          ></el-table-column
+        ></el-table
+      >
+    </div>
+    <el-dialog v-model="bindVisible" title="用户数据绑定"
+      ><el-form label-width="100px"
+        ><el-form-item label="部门ID"
+          ><el-input-number v-model="bindForm.dept_id" /></el-form-item
+        ><el-form-item label="主门店"
+          ><el-input v-model="bindForm.store_code" /></el-form-item
+        ><el-form-item label="可管理门店"
+          ><el-select
+            v-model="bindForm.store_codes"
+            multiple
+            filterable
+            allow-create
+            style="width: 100%" /></el-form-item></el-form
+      ><template #footer
+        ><el-button @click="bindVisible = false">取消</el-button
+        ><el-button type="primary" @click="saveBind">保存</el-button></template
+      ></el-dialog
+    ><el-dialog v-model="previewVisible" title="数据权限预览">
+      <pre class="jsonbox">{{ JSON.stringify(previewData, null, 2) }}</pre>
+    </el-dialog>
+  </div>
+</template>
+<script setup lang="ts">
+import { onMounted, ref, reactive } from "vue";
+import { ElMessage } from "element-plus";
+import { systemApi } from "@/api/system";
+const roles = ref<any[]>([]),
+  users = ref<any[]>([]),
+  current = ref<any>(),
+  bindVisible = ref(false),
+  previewVisible = ref(false),
+  previewData = ref<any>({});
+const bindForm = reactive<any>({
+  dept_id: null,
+  store_code: "",
+  store_codes: [],
+});
+async function load() {
+  const r = await systemApi.getDataScopes();
+  roles.value = r.data.data.roles || [];
+  users.value = r.data.data.users || [];
+}
+async function saveRoleScope(row: any, v: string) {
+  await systemApi.updateRoleDataScope(row.id, { data_scope: v });
+  ElMessage.success("角色数据范围已保存");
+  load();
+}
+function openBind(row: any) {
+  current.value = row;
+  Object.assign(bindForm, {
+    dept_id: row.dept_id,
+    store_code: row.store_code || "",
+    store_codes: row.store_codes || [],
+  });
+  bindVisible.value = true;
+}
+async function saveBind() {
+  await systemApi.updateUserDataScope(current.value.id, bindForm);
+  ElMessage.success("用户数据权限已保存");
+  bindVisible.value = false;
+  load();
+}
+async function preview(row: any) {
+  const r = await systemApi.getUserDataScopePreview(row.id);
+  previewData.value = r.data.data;
+  previewVisible.value = true;
+}
+onMounted(load);
+</script>
+<style scoped>
+.system-page {
+  padding: 24px;
+  background: #f6f8fb;
+  min-height: 100%;
+}
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.page-head h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 26px;
+}
+.page-head p {
+  margin: 8px 0 0;
+  color: #64748b;
+}
+.card {
+  background: #fff;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+}
+.toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.stat {
+  background: #fff;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  padding: 18px;
+}
+.stat b {
+  font-size: 28px;
+  color: #0f172a;
+}
+.stat span {
+  display: block;
+  color: #64748b;
+  margin-top: 6px;
+}
+.layout2 {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 16px;
+}
+.muted {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.jsonbox {
+  max-height: 280px;
+  overflow: auto;
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #e5eaf2;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+@media (max-width: 1100px) {
+  .layout2 {
+    grid-template-columns: 1fr;
+  }
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 </style>

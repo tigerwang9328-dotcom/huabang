@@ -17,6 +17,7 @@ from app.services.sales_metric_service import PAY_DETAIL_SQL, rebuild_confirmed_
 
 
 ZERO = Decimal("0")
+VALID_METRIC_STATUSES = {"ready", "estimated", "pending_data", "stale"}
 
 
 def inventory_warning_source_id(
@@ -42,6 +43,10 @@ def _decimal(value: Any) -> Decimal:
         return ZERO
 
 
+def _optional_decimal(value: Any) -> Decimal | None:
+    return None if value is None else _decimal(value)
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, Decimal):
         return float(value)
@@ -59,6 +64,8 @@ def build_metric(
     reason: str | None = None,
     decimals: int = 2,
 ) -> dict[str, Any]:
+    if status is not None and status not in VALID_METRIC_STATUSES:
+        raise ValueError(f"unknown metric status: {status}")
     if value is None:
         return {
             "value": None,
@@ -80,6 +87,32 @@ def build_metric(
         "as_of": _json_value(as_of),
         "reason": reason,
     }
+
+
+def derive_metric_statuses(
+    *,
+    sales: dict[str, Any],
+    ticket: dict[str, Any],
+    inventory: dict[str, Any],
+    members: dict[str, Any],
+) -> dict[str, str]:
+    sales_status = "ready" if ticket.get("synced_at") else "stale"
+    return {
+        "sales": sales_status,
+        "sales_detail": "ready" if sales.get("etl_at") else "stale",
+        "actual_pay": sales_status,
+        "gross_profit": "ready" if bool(sales.get("is_cost_complete")) else "estimated",
+        "online_sales": sales_status,
+        "inventory": "ready" if inventory.get("updated_at") else "stale",
+        "inventory_age": "estimated" if _decimal(inventory.get("age_unknown_qty")) > 0 else "ready",
+        "vip_balance": "ready" if members.get("updated_at") else "stale",
+        "operating_profit": "pending_data",
+    }
+
+
+def preserve_trusted_value(current: Any, *, source_ready: bool, previous: Any) -> Any:
+    """Keep the last trusted value when a source is temporarily unavailable."""
+    return current if source_ready else previous
 
 
 def allocate_fifo_inventory(
@@ -114,14 +147,17 @@ def allocate_fifo_inventory(
 
 def build_template_summary(
     *,
-    sales: Decimal,
+    sales: Decimal | None,
     gross_profit: Decimal | None,
     gross_margin: Decimal | None,
     finance_complete: bool,
     risk_count: int,
     pending_task_count: int,
 ) -> str:
-    parts = [f"昨日销售{float(_decimal(sales)):,.0f}元"]
+    parts = (
+        ["昨日销售数据未就绪"]
+        if sales is None else [f"昨日销售{float(_decimal(sales)):,.0f}元"]
+    )
     if gross_profit is not None and gross_margin is not None:
         parts.append(
             f"已接成本口径毛利{float(_decimal(gross_profit)):,.0f}元、毛利率{float(_decimal(gross_margin)) * 100:.1f}%"
@@ -240,7 +276,41 @@ async def rebuild_inventory_age(db: AsyncSession, snapshot_date: date) -> dict[s
     return {"snapshot_date": str(snapshot_date), "rows": len(payload), "unknown_qty": float(unknown_qty)}
 
 
+async def _inventory_warning_thresholds(db: AsyncSession) -> dict[str, dict[str, Any]]:
+    defaults = {
+        "R007": {"max_ratio": 0.30},
+        "R008": {"max_amount": 30000},
+        "R016": {"min_inventory": 10, "max_product_year_age": 1},
+        "R017": {"max_available_sizes": 1, "min_inventory": 3},
+        "R018": {"min_inventory": 30, "sales_days": 30},
+        "R019": {"max_sellable_days": 7},
+        "R020": {"high_inventory": 12, "low_inventory": 1},
+        "R021": {"min_age_days": 180, "risk_amount": 30000},
+    }
+    rows = (await db.execute(text("""
+        SELECT rule_id, thresholds
+        FROM app.app_business_rule_config
+        WHERE enabled=true AND rule_id BETWEEN 'R006' AND 'R021'
+    """))).mappings().all()
+    for row in rows:
+        defaults.setdefault(row["rule_id"], {}).update(row["thresholds"] or {})
+    return defaults
+
+
 async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> dict[str, Any]:
+    rule_thresholds = await _inventory_warning_thresholds(db)
+    age_90_ratio = float(rule_thresholds["R007"].get("max_ratio", 0.30))
+    age_180_risk = float(rule_thresholds["R008"].get("max_amount", 30000))
+    clearance_risk = float(rule_thresholds["R021"].get("risk_amount", 30000))
+    max_sellable_days = int(rule_thresholds["R019"].get("max_sellable_days", 7))
+    min_high_inventory = int(rule_thresholds["R018"].get("min_inventory", 30))
+    max_available_sizes = int(rule_thresholds["R017"].get("max_available_sizes", 1))
+    min_size_inventory = int(rule_thresholds["R017"].get("min_inventory", 3))
+    max_product_year_age = int(rule_thresholds["R016"].get("max_product_year_age", 1))
+    low_motion_sales_days = int(rule_thresholds["R018"].get("sales_days", 30))
+    transfer_high = int(rule_thresholds["R020"].get("high_inventory", 12))
+    transfer_low = int(rule_thresholds["R020"].get("low_inventory", 1))
+    seasonal_min_inventory = int(rule_thresholds["R016"].get("min_inventory", 10))
     await db.execute(
         text("DELETE FROM dm.dm_inventory_warning WHERE warning_date=:snapshot_date"),
         {"snapshot_date": snapshot_date},
@@ -248,29 +318,48 @@ async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> d
     await db.execute(text("""
         INSERT INTO dm.dm_inventory_warning (
             warning_date, store_code, product_code, warning_type, warning_level,
-            current_quantity, current_cost_amount, age_days, description, generated_at
+            current_quantity, current_cost_amount, age_days, description,
+            rule_id, thresholds, evidence, source_name, generated_at
         )
         SELECT snapshot_date, warehouse_code, product_code,
                CASE WHEN qty_180_plus > 0 THEN 'age_180' ELSE 'age_90' END,
-               CASE WHEN qty_180_plus > 0 AND COALESCE(amount_180_plus,0) >= 30000 THEN 'risk' ELSE 'warning' END,
+               CASE WHEN qty_180_plus > 0 AND COALESCE(amount_180_plus,0) >= :age_180_risk THEN 'risk' ELSE 'warning' END,
                ROUND(current_quantity)::int,
                CASE WHEN qty_180_plus > 0 THEN amount_180_plus ELSE amount_91_180 END,
                CASE WHEN qty_180_plus > 0 THEN 181 ELSE 91 END,
                CASE WHEN qty_180_plus > 0
                     THEN product_code || '含180天以上库存，建议清仓或返仓'
                     ELSE product_code || '含90天以上库存，建议复核动销和调拨' END,
+               CASE WHEN qty_180_plus > 0 THEN 'R008' ELSE 'R007' END,
+               CASE WHEN qty_180_plus > 0
+                    THEN jsonb_build_object('max_amount', CAST(:age_180_risk AS numeric))
+                    ELSE jsonb_build_object('max_ratio', CAST(:age_90_ratio AS numeric)) END,
+               jsonb_build_object('qty_91_180', qty_91_180, 'qty_180_plus', qty_180_plus,
+                                  'amount_91_180', amount_91_180, 'amount_180_plus', amount_180_plus),
+               'fifo_inbound',
                now()
         FROM dm.dm_inventory_age_daily
-        WHERE snapshot_date=:snapshot_date AND (qty_91_180 > 0 OR qty_180_plus > 0)
-    """), {"snapshot_date": snapshot_date})
+        WHERE snapshot_date=:snapshot_date
+          AND (qty_180_plus > 0
+               OR (current_quantity > 0
+                   AND qty_91_180/current_quantity>=CAST(:age_90_ratio AS numeric)))
+    """), {
+        "snapshot_date": snapshot_date,
+        "age_90_ratio": age_90_ratio,
+        "age_180_risk": age_180_risk,
+    })
     await db.execute(text("""
         INSERT INTO dm.dm_inventory_warning (
             warning_date, store_code, product_code, sku_code, warning_type,
-            warning_level, current_quantity, description, generated_at
+            warning_level, current_quantity, description,
+            rule_id, thresholds, evidence, source_name, generated_at
         )
         SELECT :snapshot_date, UPPER(warehouse_code), product_code, sku_code,
                'negative', 'critical', ROUND(SUM(qty))::int,
-               product_code || '存在负库存，请核对入库、调拨或销售出库', now()
+               product_code || '存在负库存，请核对入库、调拨或销售出库',
+               'R006', '{}'::jsonb,
+               jsonb_build_object('quantity', ROUND(SUM(qty))::int),
+               'apparel_inventory', now()
         FROM dwd.v_apparel_inventory_balance
         WHERE UPPER(warehouse_code)=ANY(:codes) AND qty < 0
         GROUP BY UPPER(warehouse_code), product_code, sku_code
@@ -278,7 +367,8 @@ async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> d
     await db.execute(text("""
         INSERT INTO dm.dm_inventory_warning (
             warning_date, store_code, product_code, warning_type, warning_level,
-            current_quantity, current_cost_amount, sellable_days, description, generated_at
+            current_quantity, current_cost_amount, sellable_days, description,
+            rule_id, thresholds, evidence, source_name, generated_at
         )
         WITH sales AS (
             SELECT store_code, product_code,
@@ -289,23 +379,231 @@ async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> d
             GROUP BY store_code, product_code
         )
         SELECT a.snapshot_date, a.warehouse_code, a.product_code,
-               CASE WHEN COALESCE(s.qty_7d,0) > 0 THEN 'low_sellable_days' ELSE 'overstock' END,
+               CASE WHEN COALESCE(s.qty_7d,0) > 0 THEN 'low_sellable_days' ELSE 'low_motion_high_stock' END,
                'warning', ROUND(a.current_quantity)::int,
                COALESCE(a.amount_0_90,0)+COALESCE(a.amount_91_180,0)+COALESCE(a.amount_180_plus,0),
                CASE WHEN COALESCE(s.qty_7d,0)>0 THEN CEIL(a.current_quantity/(s.qty_7d/7.0))::int END,
                CASE WHEN COALESCE(s.qty_7d,0)>0
                     THEN a.product_code || '有销量但可售天数不超过7天，建议补货或调拨'
-                    ELSE a.product_code || '库存不少于30件且30天无销量，建议清仓或调拨' END,
+                    ELSE a.product_code || '库存较高且30天无销量，建议清仓或调拨' END,
+               CASE WHEN COALESCE(s.qty_7d,0)>0 THEN 'R019' ELSE 'R018' END,
+               jsonb_build_object('max_sellable_days', CAST(:max_sellable_days AS integer),
+                                  'min_inventory', CAST(:min_high_inventory AS integer)),
+               jsonb_build_object('qty_7d', COALESCE(s.qty_7d,0), 'qty_30d', COALESCE(s.qty_30d,0),
+                                  'inventory_qty', a.current_quantity),
+               'dws_product_daily+fifo_inbound',
                now()
         FROM dm.dm_inventory_age_daily a
         LEFT JOIN sales s ON s.store_code=a.warehouse_code AND s.product_code=a.product_code
         WHERE a.snapshot_date=:snapshot_date
-          AND ((COALESCE(s.qty_7d,0)>0 AND a.current_quantity/(s.qty_7d/7.0)<=7)
-            OR (a.current_quantity>=30 AND COALESCE(s.qty_30d,0)<=0))
+          AND ((COALESCE(s.qty_7d,0)>0 AND a.current_quantity/(s.qty_7d/7.0)<=CAST(:max_sellable_days AS integer))
+            OR (a.current_quantity>=CAST(:min_high_inventory AS integer) AND COALESCE(s.qty_30d,0)<=0))
     """), {
         "snapshot_date": snapshot_date,
         "sales_7_start": snapshot_date - timedelta(days=6),
         "sales_30_start": snapshot_date - timedelta(days=29),
+        "max_sellable_days": max_sellable_days,
+        "min_high_inventory": min_high_inventory,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   TRIM(LEADING '-' FROM COALESCE(color_code,'')) color_code,
+                   ROUND(SUM(GREATEST(COALESCE(qty,0),0)))::int inventory_qty,
+                   COUNT(DISTINCT NULLIF(TRIM(size_code),''))
+                       FILTER (WHERE COALESCE(qty,0)>0) available_sizes
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:codes)
+            GROUP BY UPPER(warehouse_code), product_code,
+                     TRIM(LEADING '-' FROM COALESCE(color_code,''))
+        ), listed AS (
+            SELECT product_code,
+                   TRIM(LEADING '-' FROM COALESCE(color_code,'')) color_code,
+                   COUNT(DISTINCT NULLIF(TRIM(size_code),'')) listed_sizes
+            FROM dim.dim_sku
+            WHERE source_system='baison' AND COALESCE(status,'active')='active'
+              AND NULLIF(TRIM(size_code),'') IS NOT NULL
+            GROUP BY product_code, TRIM(LEADING '-' FROM COALESCE(color_code,''))
+        )
+        SELECT :snapshot_date, i.store_code, i.product_code, 'size_break', 'warning',
+               i.inventory_qty,
+               i.product_code || '仅剩' || i.available_sizes || '个尺码，建议复核断码调拨',
+               'R017',
+               jsonb_build_object('max_available_sizes', CAST(:max_available_sizes AS integer),
+                                  'min_inventory', CAST(:min_size_inventory AS integer)),
+               jsonb_build_object('color_code', i.color_code,
+                                  'available_sizes', i.available_sizes,
+                                  'listed_sizes', l.listed_sizes,
+                                  'inventory_qty', i.inventory_qty),
+               'apparel_inventory+dim_sku', now()
+        FROM inventory i
+        JOIN listed l ON l.product_code=i.product_code AND l.color_code=i.color_code
+        WHERE i.inventory_qty>=CAST(:min_size_inventory AS integer)
+          AND i.available_sizes<=CAST(:max_available_sizes AS integer)
+          AND l.listed_sizes>i.available_sizes
+    """), {
+        "snapshot_date": snapshot_date,
+        "codes": sorted(ALLOWED_INVENTORY_CODES),
+        "max_available_sizes": max_available_sizes,
+        "min_size_inventory": min_size_inventory,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH product_year AS (
+            SELECT product_code, MAX(year) FILTER (WHERE year IS NOT NULL) product_year
+            FROM dim.dim_product
+            WHERE source_system='baison'
+            GROUP BY product_code
+        ), inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   ROUND(SUM(GREATEST(COALESCE(qty,0),0)))::int inventory_qty
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:codes)
+            GROUP BY UPPER(warehouse_code), product_code
+        )
+        SELECT :snapshot_date, i.store_code, i.product_code, 'seasonal', 'warning',
+               i.inventory_qty,
+               i.product_code || '为' || p.product_year || '年旧款且仍有库存，建议评估清仓或返仓',
+               'R016',
+               jsonb_build_object('max_product_year_age', CAST(:max_product_year_age AS integer),
+                                  'min_inventory', CAST(:seasonal_min_inventory AS integer)),
+               jsonb_build_object('product_year', p.product_year,
+                                  'analysis_year', EXTRACT(YEAR FROM CAST(:snapshot_date AS date))::int,
+                                  'inventory_qty', i.inventory_qty),
+               'apparel_inventory+dim_product', now()
+        FROM inventory i
+        JOIN product_year p ON p.product_code=i.product_code
+        WHERE i.inventory_qty>=CAST(:seasonal_min_inventory AS integer)
+          AND p.product_year IS NOT NULL
+          AND EXTRACT(YEAR FROM CAST(:snapshot_date AS date))::int-p.product_year>CAST(:max_product_year_age AS integer)
+    """), {
+        "snapshot_date": snapshot_date,
+        "codes": sorted(ALLOWED_INVENTORY_CODES),
+        "max_product_year_age": max_product_year_age,
+        "seasonal_min_inventory": seasonal_min_inventory,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH recent_sales AS (
+            SELECT store_code, product_code,
+                   ROUND(SUM(GREATEST(COALESCE(net_quantity,0),0)))::int sales_qty
+            FROM dws.dws_product_daily
+            WHERE stat_date BETWEEN :sales_start AND :snapshot_date
+              AND store_code=ANY(:store_codes)
+            GROUP BY store_code, product_code
+            HAVING SUM(GREATEST(COALESCE(net_quantity,0),0))>0
+        ), inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   ROUND(SUM(COALESCE(qty,0)))::int inventory_qty
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:store_codes)
+            GROUP BY UPPER(warehouse_code), product_code
+        )
+        SELECT :snapshot_date, s.store_code, s.product_code, 'stockout', 'warning',
+               COALESCE(i.inventory_qty,0),
+               s.product_code || '近' || CAST(:sales_days AS integer) || '天有销量但当前缺货，建议补货或调拨',
+               'R019', jsonb_build_object('sales_days', CAST(:sales_days AS integer), 'stockout_quantity', 0),
+               jsonb_build_object('sales_qty', s.sales_qty,
+                                  'inventory_qty', COALESCE(i.inventory_qty,0)),
+               'dws_product_daily+apparel_inventory', now()
+        FROM recent_sales s
+        LEFT JOIN inventory i ON i.store_code=s.store_code AND i.product_code=s.product_code
+        WHERE COALESCE(i.inventory_qty,0)<=0
+    """), {
+        "snapshot_date": snapshot_date,
+        "sales_start": snapshot_date - timedelta(days=max(low_motion_sales_days - 1, 0)),
+        "sales_days": low_motion_sales_days,
+        "store_codes": sorted(ALLOWED_STORE_CODES),
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   ROUND(SUM(GREATEST(COALESCE(qty,0),0)))::int inventory_qty
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:store_codes)
+            GROUP BY UPPER(warehouse_code), product_code
+        ), candidates AS (
+            SELECT DISTINCT ON (low.store_code, low.product_code)
+                   low.store_code target_store, low.product_code,
+                   low.inventory_qty target_qty, high.store_code source_store,
+                   high.inventory_qty source_qty
+            FROM inventory low
+            JOIN inventory high ON high.product_code=low.product_code
+                               AND high.store_code<>low.store_code
+            WHERE low.inventory_qty<=CAST(:transfer_low AS integer)
+              AND high.inventory_qty>=CAST(:transfer_high AS integer)
+            ORDER BY low.store_code, low.product_code, high.inventory_qty DESC, high.store_code
+        )
+        SELECT :snapshot_date, c.target_store, c.product_code, kind.warning_type, 'warning',
+               c.target_qty,
+               CASE kind.warning_type
+                    WHEN 'store_imbalance' THEN c.product_code || '门店库存分布不均，建议复核'
+                    ELSE c.product_code || '可从' || c.source_store || '调拨至' || c.target_store END,
+               'R020',
+               jsonb_build_object('high_inventory', CAST(:transfer_high AS integer),
+                                  'low_inventory', CAST(:transfer_low AS integer)),
+               jsonb_build_object('source_store', c.source_store, 'source_qty', c.source_qty,
+                                  'target_store', c.target_store, 'target_qty', c.target_qty,
+                                  'suggested_transfer_qty', GREATEST(LEAST(c.source_qty-CAST(:transfer_high AS integer),
+                                                                         CAST(:transfer_high AS integer)-c.target_qty),1)),
+               'apparel_inventory', now()
+        FROM candidates c
+        CROSS JOIN (VALUES ('store_imbalance'), ('transfer')) kind(warning_type)
+    """), {
+        "snapshot_date": snapshot_date,
+        "store_codes": sorted(ALLOWED_STORE_CODES),
+        "transfer_high": transfer_high,
+        "transfer_low": transfer_low,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, current_cost_amount, age_days, description,
+            rule_id, thresholds, evidence, source_name, generated_at
+        )
+        WITH sales AS (
+            SELECT store_code, product_code, COALESCE(SUM(net_quantity),0) qty_30d
+            FROM dws.dws_product_daily
+            WHERE stat_date BETWEEN :sales_30_start AND :snapshot_date
+            GROUP BY store_code, product_code
+        )
+        SELECT a.snapshot_date, a.warehouse_code, a.product_code,
+               'clearance_return',
+               CASE WHEN COALESCE(a.amount_180_plus,0)>=CAST(:clearance_risk AS numeric) THEN 'risk' ELSE 'warning' END,
+               ROUND(a.qty_180_plus)::int, a.amount_180_plus, 181,
+               a.product_code || '存在180天以上库存，建议清仓或返仓并保留处理记录',
+               'R021',
+               jsonb_build_object('min_age_days', 180, 'risk_amount', CAST(:clearance_risk AS numeric)),
+               jsonb_build_object('qty_180_plus', a.qty_180_plus,
+                                  'amount_180_plus', a.amount_180_plus,
+                                  'qty_30d', COALESCE(s.qty_30d,0)),
+               'fifo_inbound+dws_product_daily', now()
+        FROM dm.dm_inventory_age_daily a
+        LEFT JOIN sales s ON s.store_code=a.warehouse_code AND s.product_code=a.product_code
+        WHERE a.snapshot_date=:snapshot_date AND a.qty_180_plus>0
+          AND (COALESCE(s.qty_30d,0)<=0 OR COALESCE(a.amount_180_plus,0)>=CAST(:clearance_risk AS numeric))
+    """), {
+        "snapshot_date": snapshot_date,
+        "sales_30_start": snapshot_date - timedelta(days=29),
+        "clearance_risk": clearance_risk,
     })
     count = (await db.execute(
         text("SELECT COUNT(*) FROM dm.dm_inventory_warning WHERE warning_date=:snapshot_date"),
@@ -321,7 +619,8 @@ async def create_inventory_warning_task_drafts(
 ) -> list[int]:
     warnings = (await db.execute(text("""
         SELECT id, warning_date, store_code, product_code, sku_code, warning_type,
-               warning_level, current_quantity, current_cost_amount, description
+               warning_level, current_quantity, current_cost_amount, description,
+               rule_id, thresholds, evidence, source_name
         FROM dm.dm_inventory_warning
         WHERE warning_date=:warning_date AND warning_level IN ('critical','risk')
         ORDER BY id
@@ -355,7 +654,14 @@ async def create_inventory_warning_task_drafts(
                 "task_no": task_no,
                 "title": f"【库存预警】{warning.get('product_code') or warning.get('sku_code') or '库存异常'}",
                 "description": warning.get("description") or "请复核库存预警",
-                "evidence": f"库存{warning.get('current_quantity') or 0}件，金额{warning.get('current_cost_amount') or 0}元",
+                "evidence": json.dumps({
+                    "rule_id": warning.get("rule_id"),
+                    "source_name": warning.get("source_name"),
+                    "thresholds": warning.get("thresholds") or {},
+                    "evidence": warning.get("evidence") or {},
+                    "current_quantity": float(warning.get("current_quantity") or 0),
+                    "current_cost_amount": float(warning.get("current_cost_amount") or 0),
+                }, ensure_ascii=False, default=str),
                 "actions": json.dumps(["复核库存、动销和尺码；提交补货、调拨、返仓或清仓处理意见"], ensure_ascii=False),
                 "source_id": source_id,
                 "store_code": warning.get("store_code"),
@@ -406,6 +712,12 @@ async def _persist_rule_results(db: AsyncSession, report_date: date, results: li
 
 
 async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_date: date) -> dict[str, Any]:
+    existing_row = (await db.execute(text("""
+        SELECT * FROM dm.dm_boss_daily_report WHERE report_date=:report_date
+    """), {"report_date": report_date})).mappings().first()
+    existing = dict(existing_row) if existing_row else {}
+    previous_freshness = existing.get("source_freshness") or {}
+
     sales = (await db.execute(text("""
         SELECT total_sales_amount, offline_sales_amount, total_order_count,
                total_item_count, total_return_amount, gross_profit, gross_margin,
@@ -463,6 +775,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
     members = (await db.execute(text("""
         SELECT COALESCE(SUM(GREATEST(COALESCE(current_balance,0),0)),0) vip_balance,
                COUNT(*) FILTER (WHERE current_balance<0) negative_count,
+               COALESCE(SUM(ABS(current_balance)) FILTER (WHERE current_balance<0),0) negative_amount,
                MAX(balance_updated_at) updated_at
         FROM dim.dim_member
         WHERE UPPER(register_store)=ANY(:codes) AND COALESCE(status,'active')='active'
@@ -481,37 +794,67 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "SELECT COUNT(*) FROM dm.dm_inventory_warning WHERE warning_date=:inventory_date"
     ), {"inventory_date": inventory_date})).scalar() or 0
 
-    total_sales = _decimal(ticket.get("sales_amount"))
-    online_sales = _decimal(ticket.get("online_sales_amount"))
-    offline_sales = _decimal(ticket.get("offline_sales_amount"))
-    vip_sales = _decimal(ticket.get("vip_sales_amount"))
-    return_amount = _decimal(sales.get("total_return_amount"))
-    cost_complete = bool(sales.get("is_cost_complete"))
+    ticket_ready = bool(ticket.get("synced_at"))
+    sales_detail_ready = bool(sales.get("etl_at"))
+    inventory_ready = bool(inventory.get("updated_at"))
+    member_ready = bool(members.get("updated_at"))
+
+    total_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("sales_amount"), source_ready=ticket_ready, previous=existing.get("total_sales")
+    ))
+    online_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("online_sales_amount"), source_ready=ticket_ready, previous=existing.get("online_sales")
+    ))
+    offline_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("offline_sales_amount"), source_ready=ticket_ready, previous=existing.get("offline_sales")
+    ))
+    actual_pay_amount = _optional_decimal(preserve_trusted_value(
+        ticket.get("actual_pay_amount"), source_ready=ticket_ready, previous=existing.get("actual_pay_amount")
+    ))
+    vip_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("vip_sales_amount"), source_ready=ticket_ready, previous=existing.get("vip_sales_amount")
+    ))
+    return_amount = _optional_decimal(preserve_trusted_value(
+        sales.get("total_return_amount"), source_ready=sales_detail_ready, previous=existing.get("return_amount")
+    ))
+    gross_profit = preserve_trusted_value(
+        sales.get("gross_profit"), source_ready=sales_detail_ready, previous=existing.get("gross_profit")
+    )
+    cost_complete = (
+        bool(sales.get("is_cost_complete"))
+        if sales_detail_ready else bool(existing.get("is_cost_complete"))
+    )
     source_freshness = {
         "sales": {
             "business_date": str(report_date),
-            "updated_at": _json_value(sales.get("etl_at")),
+            "updated_at": _json_value(sales.get("etl_at") or previous_freshness.get("sales", {}).get("updated_at")),
             "cost_coverage_rate": _json_value(sales.get("cost_coverage_rate")),
         },
-        "inventory": {"snapshot_date": str(inventory_date), "updated_at": _json_value(inventory.get("updated_at"))},
-        "member": {"scope": sorted(ALLOWED_INVENTORY_CODES), "updated_at": _json_value(members.get("updated_at"))},
-        "online": {"status": "ready", "source": "baison_payment.011", "business_date": str(report_date)},
+        "inventory": {
+            "snapshot_date": str(inventory_date),
+            "updated_at": _json_value(inventory.get("updated_at") or previous_freshness.get("inventory", {}).get("updated_at")),
+        },
+        "member": {
+            "scope": sorted(ALLOWED_INVENTORY_CODES),
+            "updated_at": _json_value(members.get("updated_at") or previous_freshness.get("member", {}).get("updated_at")),
+        },
+        "online": {
+            "status": "ready" if ticket_ready else "stale",
+            "source": "baison_payment.011",
+            "business_date": str(report_date),
+        },
         "finance": {"status": "pending_data", "reason": "费用未完整接入"},
     }
-    metric_status = {
-        "sales": "ready" if sales else "stale",
-        "actual_pay": "ready" if ticket.get("synced_at") else "stale",
-        "gross_profit": "ready" if cost_complete else "estimated",
-        "online_sales": "ready",
-        "inventory": "ready" if inventory.get("updated_at") else "stale",
-        "inventory_age": "estimated" if _decimal(inventory.get("age_unknown_qty")) > 0 else "ready",
-        "vip_balance": "ready" if members.get("updated_at") else "stale",
-        "operating_profit": "pending_data",
-    }
+    metric_status = derive_metric_statuses(
+        sales=dict(sales), ticket=dict(ticket), inventory=dict(inventory), members=dict(members)
+    )
     summary = build_template_summary(
         sales=total_sales,
-        gross_profit=_decimal(sales.get("gross_profit")) if sales.get("gross_profit") is not None else None,
-        gross_margin=_decimal(sales.get("gross_margin")) if sales.get("gross_margin") is not None else None,
+        gross_profit=_optional_decimal(gross_profit),
+        gross_margin=(
+            _optional_decimal(gross_profit) / total_sales
+            if gross_profit is not None and total_sales else None
+        ),
         finance_complete=False,
         risk_count=int(risks.get("major") or 0),
         pending_task_count=int(tasks.get("pending") or 0),
@@ -521,27 +864,67 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "total_sales": total_sales,
         "offline_sales": offline_sales,
         "online_sales": online_sales,
-        "actual_pay_amount": _decimal(ticket.get("actual_pay_amount")),
-        "net_sales": total_sales - return_amount,
-        "order_count": int(sales.get("total_order_count") or 0),
-        "item_count": int(sales.get("total_item_count") or 0),
-        "avg_order_value": total_sales / int(sales.get("total_order_count") or 1),
-        "items_per_order": _decimal(sales.get("items_per_order")),
-        "avg_discount_rate": _decimal(sales.get("avg_discount_rate")),
+        "actual_pay_amount": actual_pay_amount,
+        "net_sales": total_sales - return_amount if total_sales is not None and return_amount is not None else existing.get("net_sales"),
+        "order_count": preserve_trusted_value(
+            int(sales.get("total_order_count") or 0), source_ready=sales_detail_ready, previous=existing.get("order_count")
+        ),
+        "item_count": preserve_trusted_value(
+            int(sales.get("total_item_count") or 0), source_ready=sales_detail_ready, previous=existing.get("item_count")
+        ),
+        "avg_order_value": preserve_trusted_value(
+            sales.get("avg_order_value"), source_ready=sales_detail_ready, previous=existing.get("avg_order_value")
+        ),
+        "items_per_order": preserve_trusted_value(
+            sales.get("items_per_order"), source_ready=sales_detail_ready, previous=existing.get("items_per_order")
+        ),
+        "avg_discount_rate": preserve_trusted_value(
+            sales.get("avg_discount_rate"), source_ready=sales_detail_ready, previous=existing.get("avg_discount_rate")
+        ),
         "return_amount": return_amount,
-        "return_rate": return_amount / total_sales if total_sales else ZERO,
-        "gross_profit": sales.get("gross_profit"),
-        "gross_margin": _decimal(sales.get("gross_profit")) / total_sales if total_sales else None,
-        "total_inventory_amount": _decimal(inventory.get("total_amount")),
-        "inventory_total_qty": _decimal(inventory.get("total_qty")),
-        "inventory_age_unknown_qty": _decimal(inventory.get("age_unknown_qty")),
-        "inventory_age_unknown_amount": _decimal(inventory.get("age_unknown_amount")),
-        "age_90_plus_amount": _decimal(inventory.get("age_91_180_amount")) + _decimal(inventory.get("age_180_plus_amount")),
-        "age_180_plus_amount": _decimal(inventory.get("age_180_plus_amount")),
-        "vip_balance": _decimal(members.get("vip_balance")),
-        "vip_negative_balance_count": int(members.get("negative_count") or 0),
+        "return_rate": (
+            return_amount / total_sales
+            if total_sales and return_amount is not None else existing.get("return_rate")
+        ),
+        "gross_profit": gross_profit,
+        "gross_margin": (
+            _optional_decimal(gross_profit) / total_sales
+            if gross_profit is not None and total_sales else existing.get("gross_margin")
+        ),
+        "total_inventory_amount": preserve_trusted_value(
+            _decimal(inventory.get("total_amount")), source_ready=inventory_ready, previous=existing.get("total_inventory_amount")
+        ),
+        "inventory_total_qty": preserve_trusted_value(
+            _decimal(inventory.get("total_qty")), source_ready=inventory_ready, previous=existing.get("inventory_total_qty")
+        ),
+        "inventory_age_unknown_qty": preserve_trusted_value(
+            _decimal(inventory.get("age_unknown_qty")), source_ready=inventory_ready, previous=existing.get("inventory_age_unknown_qty")
+        ),
+        "inventory_age_unknown_amount": preserve_trusted_value(
+            _decimal(inventory.get("age_unknown_amount")), source_ready=inventory_ready, previous=existing.get("inventory_age_unknown_amount")
+        ),
+        "age_90_plus_amount": preserve_trusted_value(
+            _decimal(inventory.get("age_91_180_amount")) + _decimal(inventory.get("age_180_plus_amount")),
+            source_ready=inventory_ready,
+            previous=existing.get("age_90_plus_amount"),
+        ),
+        "age_180_plus_amount": preserve_trusted_value(
+            _decimal(inventory.get("age_180_plus_amount")), source_ready=inventory_ready, previous=existing.get("age_180_plus_amount")
+        ),
+        "vip_balance": preserve_trusted_value(
+            _decimal(members.get("vip_balance")), source_ready=member_ready, previous=existing.get("vip_balance")
+        ),
+        "vip_negative_balance_count": preserve_trusted_value(
+            int(members.get("negative_count") or 0), source_ready=member_ready, previous=existing.get("vip_negative_balance_count")
+        ),
+        "vip_negative_balance_amount": preserve_trusted_value(
+            _decimal(members.get("negative_amount")), source_ready=member_ready, previous=existing.get("vip_negative_balance_amount")
+        ),
         "vip_sales_amount": vip_sales,
-        "vip_sales_ratio": vip_sales / total_sales if total_sales else ZERO,
+        "vip_sales_ratio": (
+            vip_sales / total_sales
+            if vip_sales is not None and total_sales else existing.get("vip_sales_ratio")
+        ),
         "pending_task_count": int(tasks.get("pending") or 0),
         "overdue_task_count": int(tasks.get("overdue") or 0),
         "exception_count": int(risks.get("total") or 0) + int(warning_count),
@@ -559,7 +942,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             actual_pay_amount, return_amount, return_rate, gross_profit, gross_margin,
             total_inventory_amount, inventory_total_qty, age_90_plus_amount, age_180_plus_amount,
             inventory_age_unknown_qty, inventory_age_unknown_amount,
-            vip_balance, vip_negative_balance_count, vip_sales_amount, vip_sales_ratio,
+            vip_balance, vip_negative_balance_count, vip_negative_balance_amount, vip_sales_amount, vip_sales_ratio,
             pending_task_count, overdue_task_count, exception_count, major_exception_count,
             ai_summary, ai_model_used, is_cost_complete, is_finance_complete,
             data_quality_status, source_freshness, metric_status, generated_at, updated_at
@@ -569,7 +952,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             :actual_pay_amount, :return_amount, :return_rate, :gross_profit, :gross_margin,
             :total_inventory_amount, :inventory_total_qty, :age_90_plus_amount, :age_180_plus_amount,
             :inventory_age_unknown_qty, :inventory_age_unknown_amount,
-            :vip_balance, :vip_negative_balance_count, :vip_sales_amount, :vip_sales_ratio,
+            :vip_balance, :vip_negative_balance_count, :vip_negative_balance_amount, :vip_sales_amount, :vip_sales_ratio,
             :pending_task_count, :overdue_task_count, :exception_count, :major_exception_count,
             :ai_summary, 'template', :is_cost_complete, false,
             :data_quality_status, CAST(:source_freshness AS jsonb), CAST(:metric_status AS jsonb), now(), now()
@@ -586,6 +969,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             inventory_age_unknown_amount=EXCLUDED.inventory_age_unknown_amount,
             age_180_plus_amount=EXCLUDED.age_180_plus_amount, vip_balance=EXCLUDED.vip_balance,
             vip_negative_balance_count=EXCLUDED.vip_negative_balance_count,
+            vip_negative_balance_amount=EXCLUDED.vip_negative_balance_amount,
             vip_sales_amount=EXCLUDED.vip_sales_amount, vip_sales_ratio=EXCLUDED.vip_sales_ratio,
             pending_task_count=EXCLUDED.pending_task_count, overdue_task_count=EXCLUDED.overdue_task_count,
             exception_count=EXCLUDED.exception_count, major_exception_count=EXCLUDED.major_exception_count,
@@ -613,17 +997,22 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "sales": build_metric(data.get("total_sales"), source="baison_pos", as_of=report_date, status=statuses.get("sales")),
         "offline_sales": build_metric(data.get("offline_sales"), source="baison_payment", as_of=report_date, status=statuses.get("sales")),
         "actual_pay": build_metric(data.get("actual_pay_amount"), source="baison_payment", as_of=report_date, status=statuses.get("actual_pay")),
-        "orders": build_metric(data.get("order_count"), source="baison_pos", as_of=report_date, decimals=0),
-        "items": build_metric(data.get("item_count"), source="baison_pos", as_of=report_date, decimals=0),
-        "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date),
-        "items_per_order": build_metric(data.get("items_per_order"), source="baison_pos", as_of=report_date),
+        "orders": build_metric(data.get("order_count"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=0),
+        "items": build_metric(data.get("item_count"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=0),
+        "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
+        "items_per_order": build_metric(data.get("items_per_order"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
+        "avg_discount_rate": build_metric(data.get("avg_discount_rate"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=4),
+        "return_amount": build_metric(data.get("return_amount"), source="baison_return", as_of=report_date, status=statuses.get("sales_detail")),
+        "return_rate": build_metric(data.get("return_rate"), source="baison_return", as_of=report_date, status=statuses.get("sales_detail"), decimals=4),
         "gross_profit": build_metric(data.get("gross_profit"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason),
         "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason, decimals=4),
         "inventory_amount": build_metric(data.get("total_inventory_amount"), source="apparel_inventory", as_of=source_freshness.get("inventory", {}).get("updated_at"), status=statuses.get("inventory")),
         "age_90_amount": build_metric(data.get("age_90_plus_amount"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory")),
+        "age_180_amount": build_metric(data.get("age_180_plus_amount"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory")),
         "inventory_age_unknown_qty": build_metric(data.get("inventory_age_unknown_qty"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory_age"), decimals=0),
         "vip_balance": build_metric(data.get("vip_balance"), source="baison_member.CZ_DQJE", as_of=source_freshness.get("member", {}).get("updated_at"), status=statuses.get("vip_balance")),
-        "vip_sales": build_metric(data.get("vip_sales_amount"), source="baison_pos", as_of=report_date),
+        "vip_negative_balance_amount": build_metric(data.get("vip_negative_balance_amount"), source="baison_member.CZ_DQJE", as_of=source_freshness.get("member", {}).get("updated_at"), status=statuses.get("vip_balance")),
+        "vip_sales": build_metric(data.get("vip_sales_amount"), source="baison_pos", as_of=report_date, status=statuses.get("sales")),
         "online_sales": build_metric(data.get("online_sales"), source="baison_payment.011", as_of=report_date, status=statuses.get("online_sales")),
         "operating_profit": build_metric(None, source="finance", reason="费用未完整接入，不判断净利润"),
     }

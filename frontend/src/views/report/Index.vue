@@ -57,10 +57,13 @@
         <el-table-column label="件数" width="68" align="right" header-align="right"><template #default="{ row }">{{ historyNumber(row.item_count) }}</template></el-table-column>
         <el-table-column label="客单价" width="94" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.avg_order_value, 0) }}</template></el-table-column>
         <el-table-column label="连带率" width="80" align="right" header-align="right"><template #default="{ row }">{{ historyDecimal(row.items_per_order) }}</template></el-table-column>
+        <el-table-column label="折扣率" width="80" align="right" header-align="right"><template #default="{ row }">{{ historyPercent(row.avg_discount_rate) }}</template></el-table-column>
+        <el-table-column label="退货率" width="80" align="right" header-align="right"><template #default="{ row }">{{ historyPercent(row.return_rate) }}</template></el-table-column>
         <el-table-column label="毛利额" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.gross_profit) }}</template></el-table-column>
         <el-table-column label="毛利率" width="80" align="right" header-align="right"><template #default="{ row }">{{ historyPercent(row.gross_margin) }}</template></el-table-column>
         <el-table-column label="VIP销售" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.vip_sales_amount) }}</template></el-table-column>
         <el-table-column label="成本状态" width="100"><template #default="{ row }"><el-tag :type="row.is_cost_complete ? 'success' : 'warning'" size="small">{{ row.is_cost_complete ? "已就绪" : "预估" }}</el-tag></template></el-table-column>
+        <el-table-column label="数据状态" width="100"><template #default="{ row }"><el-tag :type="dataStatusType(row.data_quality_status)" size="small">{{ dataStatusLabel(row.data_quality_status) }}</el-tag></template></el-table-column>
       </el-table>
     </section>
   </div>
@@ -91,6 +94,8 @@ function historyPercent(value: any) { return hasValue(value) ? `${(Number(value)
 function shortTime(value: any) { return value ? String(value).replace("T", " ").slice(0, 16) : "待同步"; }
 function statusLabel(value: string) { return ({ ready: "已就绪", estimated: "预估", pending_data: "待接入", stale: "数据陈旧" } as any)[value] || value; }
 function tagType(value: string) { return ({ ready: "success", estimated: "warning", pending_data: "info", stale: "danger" } as any)[value] || "info"; }
+function dataStatusLabel(value: string) { return ({ normal: "完整", warning: "需关注" } as any)[value] || "需关注"; }
+function dataStatusType(value: string) { return value === "normal" ? "success" : "warning"; }
 function statusName(key: string) { return ({ sales: "销售", actual_pay: "实收", gross_profit: "毛利", online_sales: "线上销售", inventory: "库存", vip_balance: "VIP余额", operating_profit: "经营利润" } as any)[key] || key; }
 
 const metrics = computed(() => [

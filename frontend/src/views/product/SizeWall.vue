@@ -136,8 +136,8 @@
         <el-table-column prop="product_year" label="年份" width="70" />
         <el-table-column prop="category_name" label="品类" width="100" show-overflow-tooltip />
         <el-table-column prop="price_band" label="价格段" width="105" />
-        <el-table-column label="库存" width="75" align="right"><template #default="{ row }">{{ formatQty(row.inventory_qty) }}</template></el-table-column>
-        <el-table-column label="30日销量" width="90" align="right"><template #default="{ row }">{{ formatQty(row.sales_qty_30d) }}</template></el-table-column>
+        <el-table-column prop="inventory_qty" label="库存" width="75" align="right" sortable><template #default="{ row }">{{ formatQty(row.inventory_qty) }}</template></el-table-column>
+        <el-table-column prop="sales_qty_30d" label="30日销量" width="90" align="right" sortable><template #default="{ row }">{{ formatQty(row.sales_qty_30d) }}</template></el-table-column>
         <el-table-column label="剩余全部码数" min-width="180">
           <template #default="{ row }">
             <div class="remaining-sizes">
@@ -174,8 +174,8 @@
         <el-table-column prop="product_code" label="款号" width="115" />
         <el-table-column prop="product_name" label="商品" min-width="150" show-overflow-tooltip />
         <el-table-column prop="color_name" label="颜色" width="85" />
-        <el-table-column label="库存" width="65" align="right"><template #default="{ row }">{{ formatQty(row.inventory_qty) }}</template></el-table-column>
-        <el-table-column label="30日销量" width="82" align="right"><template #default="{ row }">{{ formatQty(row.sales_qty_30d) }}</template></el-table-column>
+        <el-table-column prop="inventory_qty" label="库存" width="65" align="right" sortable><template #default="{ row }">{{ formatQty(row.inventory_qty) }}</template></el-table-column>
+        <el-table-column prop="sales_qty_30d" label="30日销量" width="82" align="right" sortable><template #default="{ row }">{{ formatQty(row.sales_qty_30d) }}</template></el-table-column>
         <el-table-column label="评分" width="65" align="center"><template #default="{ row }"><el-tag :type="row.score >= 75 ? 'danger' : 'warning'">{{ row.score }}</el-tag></template></el-table-column>
         <el-table-column prop="suggested_action" label="处理建议" width="105" />
       </el-table>

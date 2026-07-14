@@ -18,13 +18,13 @@
         <el-table-column prop="title" label="任务标题" min-width="200" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="120">
           <template #default="{row}">
-            <el-tag :type="statusType[row.status] || info" size="small">{{ statusLabels[row.status] || row.status }}</el-tag>
+            <el-tag :type="statusType[row.status] || 'info'" size="small">{{ statusLabels[row.status] || row.status }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="priority" label="优先级" width="80" />
         <el-table-column prop="risk_level" label="风险" width="80">
           <template #default="{row}">
-            <el-tag :type="riskType[row.risk_level] || info" size="small">{{ row.risk_level }}</el-tag>
+            <el-tag :type="riskType[row.risk_level] || 'info'" size="small">{{ row.risk_level }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="assignee_name" label="责任人" width="100" />
@@ -33,8 +33,8 @@
         <el-table-column label="操作" width="200">
           <template #default="{row}">
             <el-button size="small" @click="viewDetail(row.id)">详情</el-button>
-            <el-button size="small" type="success" v-if="row.status===draft" @click="confirmTask(row.id)">确认派发</el-button>
-            <el-button size="small" type="primary" v-if="row.status===pending||row.status===processing" @click="openFeedback(row)">反馈</el-button>
+            <el-button size="small" type="success" v-if="row.status==='draft'" @click="confirmTask(row.id)">确认派发</el-button>
+            <el-button size="small" type="primary" v-if="row.status==='pending'||row.status==='processing'" @click="openFeedback(row)">反馈</el-button>
           </template>
         </el-table-column>
       </el-table>

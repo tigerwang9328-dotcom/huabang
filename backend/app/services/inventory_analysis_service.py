@@ -56,7 +56,7 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     total_inv_qty = int(inv_qty_r.scalar() or 0)
 
     amount_r = await db.execute(text(f"""
-        WITH inv_spec AS (
+        WITH inv_spec AS MATERIALIZED (
             SELECT product_code,
                    COALESCE(BTRIM(color_code::text), '') AS color_code,
                    COALESCE(BTRIM(size_code::text), '') AS size_code,
@@ -66,8 +66,10 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
             GROUP BY product_code, COALESCE(BTRIM(color_code::text), ''), COALESCE(BTRIM(size_code::text), '')
         ), priced AS (
             SELECT i.product_code,
+                   i.color_code,
+                   i.size_code,
                    i.qty,
-                   s.cost_price AS unit_price
+                   MAX(s.cost_price) AS unit_price
             FROM inv_spec i
             JOIN dim.dim_sku s
               ON s.source_system = 'baison'
@@ -76,6 +78,7 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
              AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
             WHERE s.cost_price IS NOT NULL
               AND s.cost_price > 0
+            GROUP BY i.product_code, i.color_code, i.size_code, i.qty
         ), sales_window AS (
             SELECT MAX(biz_date) AS end_date, MAX(biz_date) - INTERVAL '6 days' AS start_date
             FROM dwd.dwd_pos_sale_goods
@@ -100,7 +103,13 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
                     THEN MAX(age_snapshot.age_90_plus_amount)
                     ELSE COALESCE(SUM(CASE WHEN priced.qty > 0 AND COALESCE(recent_sales.sales_qty, 0) <= 0
                                            THEN priced.qty * priced.unit_price ELSE 0 END), 0)
-                END AS age_90_plus_amount
+                END AS age_90_plus_amount,
+               (SELECT COUNT(*) FROM inv_spec WHERE qty<>0) AS inventory_sku_count,
+               COUNT(*) FILTER (WHERE priced.qty<>0) AS costed_sku_count,
+               CASE WHEN (SELECT COUNT(*) FROM inv_spec WHERE qty<>0) > 0
+                    THEN COUNT(*) FILTER (WHERE priced.qty<>0)::numeric
+                         / (SELECT COUNT(*) FROM inv_spec WHERE qty<>0)
+                    ELSE 0 END AS cost_coverage_rate
         FROM priced
         LEFT JOIN recent_sales ON recent_sales.product_code = priced.product_code
         CROSS JOIN age_snapshot
@@ -108,17 +117,22 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     amount_row = amount_r.mappings().first()
     inventory_amount = float(amount_row["inventory_amount"] or 0) if amount_row else 0
     age_90_plus_amount = float(amount_row["age_90_plus_amount"] or 0) if amount_row else 0
+    inventory_sku_count = int(amount_row["inventory_sku_count"] or 0) if amount_row else 0
+    costed_sku_count = int(amount_row["costed_sku_count"] or 0) if amount_row else 0
+    cost_coverage_rate = float(amount_row["cost_coverage_rate"] or 0) if amount_row else 0
 
-    # 缺货(库存=0)和低库存
-    zero_r = await db.execute(
-        text(f"""
-            SELECT COUNT(*)
-            FROM dwd.v_apparel_inventory_balance
-            WHERE UPPER(COALESCE(warehouse_code, '')::text) IN {inventory_in}
-              AND (qty = 0 OR available_qty = 0)
-        """)
-    )
-    out_of_stock = zero_r.scalar() or 0
+    warning_counts_r = await db.execute(text("""
+        SELECT COUNT(DISTINCT (store_code, COALESCE(sku_code, product_code)))
+                   FILTER (WHERE warning_type='stockout') AS out_of_stock,
+               COUNT(DISTINCT (store_code, COALESCE(sku_code, product_code)))
+                   FILTER (WHERE warning_type IN ('low_motion_high_stock','seasonal','age_180','clearance_return'))
+                   AS high_stock
+        FROM dm.dm_inventory_warning
+        WHERE warning_date=(SELECT MAX(warning_date) FROM dm.dm_inventory_warning)
+    """))
+    warning_counts = warning_counts_r.mappings().first() or {}
+    out_of_stock = int(warning_counts.get("out_of_stock") or 0)
+    high_stock = int(warning_counts.get("high_stock") or 0)
 
     synced_r = await db.execute(text(f"""
         SELECT MAX(synced_at)
@@ -136,13 +150,14 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
             "inventory_records": _value(inv_records),
             "total_inventory_qty": _value(total_inv_qty),
             "inventory_amount": _value(round(inventory_amount, 2), 2),
+            "cost_coverage_rate": _value(round(cost_coverage_rate * 100, 1), 1),
+            "costed_sku_count": _value(costed_sku_count),
+            "inventory_sku_count": _value(inventory_sku_count),
             "age_90_plus_amount": _value(round(age_90_plus_amount, 2), 2),
             "out_of_stock_sku_count": _value(out_of_stock),
-            "high_stock_sku_count": _pending("库存预警规则待配置"),
+            "high_stock_sku_count": _value(high_stock),
         },
-        "pending_fields": [
-            {"field": "high_stock_sku_count", "reason": "库存预警规则待配置"},
-        ],
+        "pending_fields": [],
     }
 
 

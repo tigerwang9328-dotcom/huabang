@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission
-from app.core.store_whitelist import ALLOWED_STORE_CODES
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
 from app.core.database import get_db
 from app.core.data_scope import get_data_scope
 from app.models.dim import DimStore
@@ -33,6 +33,16 @@ def _parse_date(value: Optional[str], fallback: date) -> date:
     if not value:
         return fallback
     return date.fromisoformat(value[:10])
+
+
+def _growth_rate(current, previous):
+    if previous is None or float(previous) == 0:
+        return None
+    return round((float(current or 0) - float(previous)) / float(previous), 4)
+
+
+def _pending_metric(source: str, reason: str) -> dict:
+    return {"value": None, "status": "pending_data", "source": source, "reason": reason}
 
 
 @router.get("/list")
@@ -114,6 +124,8 @@ async def store_sales_analysis(
         period_days = (ed - sd).days + 1
         prev_ed = sd - timedelta(days=1)
         prev_sd = prev_ed - timedelta(days=period_days - 1)
+        week_sd = sd - timedelta(days=7)
+        week_ed = ed - timedelta(days=7)
         kw = f"%{keyword.strip()}%" if keyword and keyword.strip() else ""
         params = {"sd": sd, "ed": ed, "store_codes": allowed_store_codes, "kw": kw}
         await db.execute(text("""
@@ -258,6 +270,33 @@ async def store_sales_analysis(
             item["sku_count"] = int(item["sku_count"])
             stores.append(item)
 
+        week_rows = (await db.execute(text(f"""
+            SELECT t.store_code,
+                   COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount
+            FROM dwd.dwd_pos_ticket t
+            LEFT JOIN ({PAY_DETAIL_SQL}) pay ON pay.ticket_no=t.ticket_no
+            WHERE t.biz_date BETWEEN :week_sd AND :week_ed
+              AND t.store_code=ANY(:store_codes)
+              AND COALESCE(t.is_void,false)=false
+              AND COALESCE(t.is_pending,false)=false
+            GROUP BY t.store_code
+        """), {
+            "sd": week_sd,
+            "ed": week_ed,
+            "week_sd": week_sd,
+            "week_ed": week_ed,
+            "store_codes": allowed_store_codes,
+        })).mappings().all()
+        week_sales = {row["store_code"]: float(row["sales_amount"] or 0) for row in week_rows}
+        for item in stores:
+            item["day_over_day_growth"] = (
+                item.get("period_growth") if period_days == 1
+                else _growth_rate(item.get("sales_amount"), item.get("previous_sales_amount"))
+            )
+            item["week_over_week_growth"] = _growth_rate(
+                item.get("sales_amount"), week_sales.get(item["store_code"])
+            )
+
         trend_rows = (await db.execute(text(f"""
             WITH ticket AS (
                 SELECT biz_date,
@@ -301,6 +340,75 @@ async def store_sales_analysis(
             r["orders"] = int(r["orders"] or 0)
             r["sales_qty"] = float(r["sales_qty"] or 0)
 
+        product_rows = (await db.execute(text("""
+            WITH inventory AS (
+                SELECT UPPER(warehouse_code::text) AS store_code, product_code,
+                       MAX(goods_name) AS product_name,
+                       COALESCE(SUM(qty),0) AS inventory_qty
+                FROM dwd.v_apparel_inventory_balance
+                WHERE UPPER(warehouse_code::text)=ANY(:store_codes)
+                  AND product_code IS NOT NULL
+                GROUP BY UPPER(warehouse_code::text), product_code
+            ), sales AS (
+                SELECT store_code, product_code, MAX(product_name) AS product_name,
+                       COALESCE(SUM(sales_qty),0) AS sales_qty,
+                       COALESCE(SUM(sales_amount),0) AS sales_amount
+                FROM dwd.dwd_pos_sale_goods
+                WHERE biz_date BETWEEN :sd AND :ed
+                  AND store_code=ANY(:store_codes)
+                  AND product_code IS NOT NULL
+                GROUP BY store_code, product_code
+            )
+            SELECT COALESCE(i.store_code,s.store_code) store_code,
+                   COALESCE(i.product_code,s.product_code) product_code,
+                   COALESCE(NULLIF(s.product_name,''),i.product_name) product_name,
+                   COALESCE(s.sales_qty,0) sales_qty,
+                   COALESCE(s.sales_amount,0) sales_amount,
+                   COALESCE(i.inventory_qty,0) inventory_qty
+            FROM inventory i FULL OUTER JOIN sales s
+              ON s.store_code=i.store_code AND s.product_code=i.product_code
+        """), {"sd": sd, "ed": ed, "store_codes": allowed_store_codes})).mappings().all()
+        products = [{
+            "store_code": row["store_code"],
+            "product_code": row["product_code"],
+            "product_name": row["product_name"],
+            "sales_qty": float(row["sales_qty"] or 0),
+            "sales_amount": float(row["sales_amount"] or 0),
+            "inventory_qty": float(row["inventory_qty"] or 0),
+        } for row in product_rows]
+        top_products = sorted(products, key=lambda item: (item["sales_qty"], item["sales_amount"]), reverse=True)[:8]
+        slow_products = sorted(
+            (item for item in products if item["inventory_qty"] > 0),
+            key=lambda item: (item["sales_qty"], -item["inventory_qty"]),
+        )[:8]
+
+        exceptions = [dict(row) for row in (await db.execute(text("""
+            SELECT id, exception_type, severity, store_code, product_code, sku_code,
+                   description, is_converted_to_task, task_id, generated_at
+            FROM dm.dm_exception_audit
+            WHERE audit_date=:audit_date
+              AND (store_code IS NULL OR store_code=ANY(:store_codes))
+            ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'risk' THEN 2 ELSE 3 END,
+                     id DESC
+            LIMIT 12
+        """), {"audit_date": ed, "store_codes": allowed_store_codes})).mappings().all()]
+
+        inventory_freshness = (await db.execute(text("""
+            SELECT MAX(synced_at) updated_at
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code::text)=ANY(:inventory_codes)
+        """), {"inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).mappings().first()
+        inventory_date = (await db.execute(text("""
+            SELECT MAX(stat_date) snapshot_date, MAX(etl_at) updated_at
+            FROM dws.dws_inventory_daily
+            WHERE UPPER(store_code)=ANY(:inventory_codes)
+        """), {"inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).mappings().first()
+        member_freshness = (await db.execute(text("""
+            SELECT MAX(balance_updated_at) updated_at
+            FROM dim.dim_member
+            WHERE UPPER(COALESCE(register_store,''))=ANY(:inventory_codes)
+        """), {"inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).mappings().first()
+
         total_sales = sum(float(x["sales_amount"] or 0) for x in stores)
         total_actual = sum(float(x["actual_pay_amount"] or 0) for x in stores)
         total_recharge = sum(float(x["recharge_amount"] or 0) for x in stores)
@@ -338,9 +446,27 @@ async def store_sales_analysis(
                 "comparison_range": {"start_date": str(prev_sd), "end_date": str(prev_ed)},
                 "latest_sales_date": str(latest_date),
                 "updated_at": str(updated_at) if updated_at else None,
+                "source_freshness": {
+                    "sales": {"business_date": str(ed), "updated_at": str(updated_at) if updated_at else None},
+                    "inventory": {
+                        "snapshot_date": str(inventory_date["snapshot_date"]) if inventory_date and inventory_date["snapshot_date"] else None,
+                        "updated_at": str((inventory_date and inventory_date["updated_at"]) or (inventory_freshness and inventory_freshness["updated_at"])) if ((inventory_date and inventory_date["updated_at"]) or (inventory_freshness and inventory_freshness["updated_at"])) else None,
+                    },
+                    "member": {"updated_at": str(member_freshness["updated_at"]) if member_freshness and member_freshness["updated_at"] else None},
+                },
+                "pending_metrics": {
+                    "footfall": _pending_metric("footfall", "客流数据源未接入"),
+                    "conversion_count": _pending_metric("crm", "成交人数缺少可靠来源"),
+                    "fitting_rate": _pending_metric("fitting", "试穿数据源未接入"),
+                    "new_returning_customer": _pending_metric("crm", "新老客识别字段未接入"),
+                    "guide_sales": _pending_metric("baison_pos", "导购业绩归属字段未校准"),
+                },
                 "summary": summary,
                 "stores": stores,
                 "trend": trend,
+                "top_products": top_products,
+                "slow_products": slow_products,
+                "exceptions": exceptions,
             },
         }
     except Exception:

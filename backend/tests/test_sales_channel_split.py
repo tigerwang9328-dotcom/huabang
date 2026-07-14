@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.services.business_overview_service import _build_platform_sales
-from app.services.sales_metric_service import PAY_DETAIL_SQL
+from app.services.sales_metric_service import PAY_DETAIL_SQL, summarize_payment_rows
 
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -56,3 +56,48 @@ def test_small_online_share_is_not_rounded_down_to_zero():
 
     assert channels[0]["pct"] == 99.95
     assert channels[1]["pct"] == 0.05
+
+
+def test_confirmed_payment_formula_matches_july_12_baison_breakdown():
+    summary = summarize_payment_rows(
+        [
+            ("000", 1553),
+            ("001", 160),
+            ("004", 7290),
+            ("005", 334),
+            ("011", 9),
+            ("666", 8460),
+            ("971", 754),
+        ],
+        recharge_amount=8500,
+    )
+
+    assert summary == {
+        "sales_amount": 18066,
+        "offline_sales_amount": 18057,
+        "online_sales_amount": 9,
+        "actual_pay_amount": 19276,
+        "refund_amount": 0,
+    }
+
+
+def test_actual_receipts_subtract_refunds_without_reducing_sales_amount():
+    summary = summarize_payment_rows(
+        [
+            ("000", 3715),
+            ("003", 240),
+            ("004", 2159),
+            ("666", 7116),
+            ("666", -54),
+            ("971", 199),
+            ("001", 130),
+            ("005", 10),
+        ],
+        recharge_amount=2000,
+    )
+
+    assert summary["sales_amount"] == 13429
+    assert summary["offline_sales_amount"] == 13429
+    assert summary["online_sales_amount"] == 0
+    assert summary["refund_amount"] == 54
+    assert summary["actual_pay_amount"] == 12976

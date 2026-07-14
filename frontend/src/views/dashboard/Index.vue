@@ -119,20 +119,21 @@
         </div>
       </div>
 
-      <div class="module-card hr-panel">
+      <div class="module-card vip-panel">
         <div class="module-head compact">
           <div>
-            <p class="module-kicker">任务与人效</p>
-            <h2>人力资源</h2>
+            <p class="module-kicker">会员经营</p>
+            <h2>VIP资产</h2>
           </div>
+          <el-button text type="primary" @click="router.push('/app/member')">查看会员</el-button>
         </div>
         <div class="hr-grid">
-          <div class="hr-card"><span>今日待处理任务</span><strong>{{ taskCards[0]?.value ?? 0 }}</strong><small>来自任务闭环</small></div>
-          <div class="hr-card"><span>逾期任务</span><strong class="danger">{{ taskCards[1]?.value ?? 0 }}</strong><small>需主管复查</small></div>
-          <div class="hr-card pending"><span>在岗人数</span><strong>待接入</strong><small>需钉钉组织/考勤口径</small></div>
-          <div class="hr-card pending"><span>人效分析</span><strong>规划中</strong><small>销售额 / 工时 / 人员</small></div>
+          <div class="hr-card"><span>VIP正余额</span><strong>{{ ccDisplay('vip_balance', 'money') }}</strong><small>CZ_DQJE主档</small></div>
+          <div class="hr-card"><span>VIP销售</span><strong>{{ ccDisplay('vip_sales', 'money') }}</strong><small>昨日会员小票</small></div>
+          <div class="hr-card"><span>VIP负余额</span><strong class="danger">{{ ccDisplay('vip_negative_balance_amount', 'money') }}</strong><small>单列异常，不抵消正余额</small></div>
+          <div class="hr-card pending"><span>充值消费转化</span><strong>待接入</strong><small>需完整充值与消费周期</small></div>
         </div>
-        <div class="module-tip">补充建议：人力资源模块后续应接入“员工档案、考勤、排班、导购归属、人效排行”，才能支撑单店人效判断。</div>
+        <div class="module-tip">会员资产按已确认10个编码汇总，明细可进入会员运营下钻。</div>
       </div>
     </section>
 
@@ -263,10 +264,14 @@ const apiCards = computed(() => [
   { label: "销售件数", value: ccDisplay("items"), note: metricNote("items", "百胜小票"), tone: "slate" },
   { label: "客单价", value: ccDisplay("avg_order_value", "money"), note: metricNote("avg_order_value", "百胜小票"), tone: "gold" },
   { label: "连带率", value: ccDisplay("items_per_order"), note: metricNote("items_per_order", "百胜小票"), tone: "slate" },
+  { label: "折扣率", value: ccDisplay("avg_discount_rate", "percent"), note: metricNote("avg_discount_rate", "百胜小票"), tone: "slate" },
+  { label: "退货金额", value: ccDisplay("return_amount", "money"), note: metricNote("return_amount", "百胜退货"), tone: "muted" },
+  { label: "退货率", value: ccDisplay("return_rate", "percent"), note: metricNote("return_rate", "百胜退货"), tone: "muted" },
   { label: "毛利额", value: ccDisplay("gross_profit", "money"), note: metricNote("gross_profit", "百胜成本"), tone: "orange" },
   { label: "毛利率", value: ccDisplay("gross_margin", "percent"), note: metricNote("gross_margin", "百胜成本"), tone: "gold" },
   { label: "库存金额", value: ccDisplay("inventory_amount", "money"), note: metricNote("inventory_amount", "外穿衣物库存"), tone: "blue" },
   { label: "90天以上库存", value: ccDisplay("age_90_amount", "money"), note: metricNote("age_90_amount", "FIFO库龄"), tone: "muted" },
+  { label: "180天以上库存", value: ccDisplay("age_180_amount", "money"), note: metricNote("age_180_amount", "FIFO库龄"), tone: "muted" },
   { label: "VIP余额", value: ccDisplay("vip_balance", "money"), note: metricNote("vip_balance", "CZ_DQJE"), tone: "green" },
   { label: "VIP销售", value: ccDisplay("vip_sales", "money"), note: metricNote("vip_sales", "百胜会员小票"), tone: "slate" },
 ]);
@@ -313,15 +318,6 @@ const inventoryCategories = computed(() => {
   const rows = rawOverview.value?.inventory_by_category || [];
   const max = Math.max(...rows.map((r: any) => Math.abs(Number(r.qty || 0))), 1);
   return rows.map((r: any) => ({ ...r, percent: Math.min(100, Math.round(Math.abs(Number(r.qty || 0)) / max * 100)) }));
-});
-
-const taskCards = computed(() => {
-  const m = rawOverview.value?.task_execution || {};
-  return [
-    { label: "待处理", value: m.pending_task_count?.value ?? 0 },
-    { label: "已逾期", value: m.overdue_task_count?.value ?? 0 },
-    { label: "已完成", value: m.completed_task_count?.value ?? 0 },
-  ];
 });
 
 const trendOption = computed(() => ({

@@ -52,6 +52,7 @@ class DmBossDailyReport(Base):
     # VIP资产
     vip_balance = Column(Numeric(16, 2))
     vip_negative_balance_count = Column(Integer, default=0)
+    vip_negative_balance_amount = Column(Numeric(16, 2), default=0, comment="负余额绝对金额")
     vip_sales_amount = Column(Numeric(14, 2))
     vip_sales_ratio = Column(Numeric(8, 4))
 
@@ -138,6 +139,10 @@ class DmInventoryWarning(Base):
     age_days = Column(Integer)
     sellable_days = Column(Integer)
     description = Column(Text)
+    rule_id = Column(String(16))
+    thresholds = Column(JSON, default=dict)
+    evidence = Column(JSON, default=dict)
+    source_name = Column(String(64))
     is_converted_to_task = Column(Boolean, default=False)
     task_id = Column(BigInteger, comment="转化为的任务ID")
     generated_at = Column(DateTime(timezone=True), server_default=func.now())

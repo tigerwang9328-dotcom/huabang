@@ -394,7 +394,7 @@ Expected: 全部通过，产物生成到现有部署目录。
 ## Task 9: 建立统一异常证据模型
 
 **Files:**
-- Create: `backend/alembic/versions/0a8b9c0d1e2f_business_exception_evidence.py`
+- Create: `backend/alembic/versions/0b8c9d0e1f2a_business_exception_evidence.py`
 - Create: `backend/app/services/exception_rule_service.py`
 - Create: `backend/app/api/v1/audit.py`
 - Modify: `backend/app/api/v1/router.py`
