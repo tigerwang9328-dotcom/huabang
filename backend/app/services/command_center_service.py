@@ -101,9 +101,7 @@ def derive_metric_statuses(
     sales_detail_status = "ready" if sales.get("etl_at") else "stale"
     returns_status = (
         "ready"
-        if sales_detail_status == "ready" and sales.get("total_return_amount") is not None
-        else "pending_data"
-        if sales_detail_status == "ready"
+        if ticket.get("return_sync_completed_at") and ticket.get("return_amount") is not None
         else "stale"
     )
     return {
@@ -725,16 +723,30 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             SELECT COALESCE(SUM(recharge_amount),0) recharge_amount
             FROM dwd.dwd_store_recharge_daily
             WHERE biz_date=:report_date AND store_code=ANY(:store_codes)
+        ), return_sync AS (
+            SELECT CASE
+                     WHEN r.status='success'
+                      AND r.biz_start_time <= CAST(:report_date AS date)
+                      AND r.biz_end_time >= CAST(:report_date AS date) + INTERVAL '1 day' - INTERVAL '1 second'
+                     THEN r.completed_at
+                   END AS completed_at
+            FROM ods.ods_baison_pos_ticket_sync_run r
+            WHERE r.biz_start_time < CAST(:report_date AS date) + INTERVAL '1 day'
+              AND r.biz_end_time >= CAST(:report_date AS date)
+            ORDER BY r.started_at DESC, r.id DESC
+            LIMIT 1
         )
         SELECT COALESCE(SUM(COALESCE(pay.sales_amount,t.sales_amount)),0) sales_amount,
                COALESCE(SUM(COALESCE(pay.online_sales_amount,0)),0) online_sales_amount,
                COALESCE(SUM(COALESCE(pay.offline_sales_amount,t.sales_amount)),0) offline_sales_amount,
                COALESCE(SUM(COALESCE(pay.actual_pay_amount,t.actual_pay_amount)),0)+(SELECT recharge_amount FROM recharge) actual_pay_amount,
+               COALESCE(SUM(COALESCE(pay.refund_amount,0)),0) return_amount,
                COALESCE(SUM(COALESCE(pay.sales_amount,t.sales_amount)) FILTER (
                    WHERE COALESCE(NULLIF(BTRIM(t.vip_code::text), ''),
                                   NULLIF(BTRIM(t.customer_code::text), '')) IS NOT NULL
                ),0) vip_sales_amount,
-               MAX(t.synced_at) synced_at
+               MAX(t.synced_at) synced_at,
+               (SELECT completed_at FROM return_sync) return_sync_completed_at
         FROM dwd.dwd_pos_ticket t
         LEFT JOIN pay ON pay.ticket_no=t.ticket_no
         WHERE t.biz_date=:report_date AND t.store_code=ANY(:store_codes)
@@ -781,6 +793,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
     ), {"inventory_date": inventory_date})).scalar() or 0
 
     ticket_ready = bool(ticket.get("synced_at"))
+    return_source_ready = bool(ticket.get("return_sync_completed_at"))
     sales_detail_ready = bool(sales.get("etl_at"))
     inventory_ready = bool(inventory.get("updated_at"))
     member_ready = bool(members.get("updated_at"))
@@ -801,7 +814,9 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         ticket.get("vip_sales_amount"), source_ready=ticket_ready, previous=existing.get("vip_sales_amount")
     ))
     return_amount = _optional_decimal(preserve_trusted_value(
-        sales.get("total_return_amount"), source_ready=sales_detail_ready, previous=existing.get("return_amount")
+        ticket.get("return_amount"),
+        source_ready=return_source_ready,
+        previous=existing.get("return_amount"),
     ))
     gross_profit = preserve_trusted_value(
         sales.get("gross_profit"), source_ready=sales_detail_ready, previous=existing.get("gross_profit")
@@ -828,6 +843,12 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             "status": "ready" if ticket_ready else "stale",
             "source": "baison_payment.011",
             "business_date": str(report_date),
+        },
+        "returns": {
+            "status": "ready" if return_source_ready else "stale",
+            "source": "baison_pos.refund_amount",
+            "business_date": str(report_date),
+            "updated_at": _json_value(ticket.get("return_sync_completed_at")),
         },
         "finance": {"status": "pending_data", "reason": "费用未完整接入"},
     }
@@ -997,8 +1018,8 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
         "items_per_order": build_metric(data.get("items_per_order"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
         "avg_discount_rate": build_metric(data.get("avg_discount_rate"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=4),
-        "return_amount": build_metric(data.get("return_amount"), source="baison_return", as_of=report_date, status=statuses.get("returns")),
-        "return_rate": build_metric(data.get("return_rate"), source="baison_return", as_of=report_date, status=statuses.get("returns"), decimals=4),
+        "return_amount": build_metric(data.get("return_amount"), source="baison_pos.refund_amount", as_of=report_date, status=statuses.get("returns")),
+        "return_rate": build_metric(data.get("return_rate"), source="baison_pos.refund_amount", as_of=report_date, status=statuses.get("returns"), decimals=4),
         "gross_profit": build_metric(data.get("gross_profit"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason),
         "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason, decimals=4),
         "inventory_amount": build_metric(data.get("total_inventory_amount"), source="apparel_inventory", as_of=source_freshness.get("inventory", {}).get("updated_at"), status=statuses.get("inventory")),

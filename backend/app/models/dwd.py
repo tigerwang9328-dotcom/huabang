@@ -104,6 +104,8 @@ class DwdFinanceExpense(Base):
     source = Column(String(16), default="manual", comment="manual=手工 api=金蝶")
     month_year = Column(String(7), comment="格式YYYY-MM，月度费用归属")
     created_by = Column(BigInteger, comment="录入人user_id")
+    approved_by = Column(BigInteger, comment="财务核准人user_id")
+    approved_at = Column(DateTime(timezone=True), comment="财务核准时间")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

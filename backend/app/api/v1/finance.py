@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from pydantic import BaseModel
 from app.core.database import get_db
@@ -80,8 +80,11 @@ async def create_manual_expense(
         return ApiResponse.fail("费用类型无效，支持: " + ", ".join(EXPENSE_TYPES))
     if body.expense_amount < 0:
         return ApiResponse.fail("费用金额不能小于0")
-    if body.data_type not in ["estimate", "actual"]:
-        return ApiResponse.fail("data_type只能是 estimate（预估）或 actual（财务核准）")
+    if body.data_type != "estimate":
+        return ApiResponse.fail("费用录入不能直接标记财务核准，请录入后由财务负责人核准")
+    normalized_store = (body.store_code or "").strip().upper()
+    if normalized_store and normalized_store != "ALL" and normalized_store not in ALLOWED_STORE_CODES:
+        return ApiResponse.fail("门店编码不在7家销售门店范围内")
 
     expense_date = date.fromisoformat(body.expense_date)
     allocation_start = date.fromisoformat(body.allocation_start) if body.allocation_start else expense_date
@@ -91,11 +94,11 @@ async def create_manual_expense(
 
     expense = DwdFinanceExpense(
         expense_date=expense_date,
-        store_code=body.store_code,
+        store_code=None if normalized_store in ("", "ALL") else normalized_store,
         expense_type=body.expense_type,
         expense_amount=body.expense_amount,
         description=body.description,
-        data_type=body.data_type,
+        data_type="estimate",
         month_year=body.month_year or body.expense_date[:7],
         allocation_start=allocation_start,
         allocation_end=allocation_end,
@@ -106,8 +109,25 @@ async def create_manual_expense(
     await db.flush()
     return ApiResponse.ok(
         data={"id": expense.id},
-        message=f"费用录入成功（{'财务核准' if body.data_type == 'actual' else '预估值'}）",
+        message="费用录入成功（待财务核准）",
     )
+
+
+@router.post("/expenses/{expense_id}/approve", response_model=ApiResponse)
+async def approve_manual_expense(
+    expense_id: int,
+    current_user: SysUser = Depends(require_permission("finance:expense:approve")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve one expense with an independent finance permission and audit trail."""
+    expense = await db.get(DwdFinanceExpense, expense_id)
+    if expense is None:
+        return ApiResponse.fail("费用记录不存在")
+    expense.data_type = "actual"
+    expense.approved_by = current_user.id
+    expense.approved_at = datetime.now(timezone.utc)
+    await db.flush()
+    return ApiResponse.ok(data={"id": expense.id}, message="费用已财务核准")
 
 
 @router.post("/manual-cash", response_model=ApiResponse)
@@ -205,14 +225,17 @@ async def get_profit_analysis(
     query_start = date.fromisoformat(start_date) if start_date else query_end
     if query_end < query_start:
         return ApiResponse.fail("结束日期不能早于开始日期")
+    if store_code and store_code.upper() not in ALLOWED_STORE_CODES:
+        return ApiResponse.fail("门店编码不在7家销售门店范围内")
     selected_codes = [store_code.upper()] if store_code else sorted(ALLOWED_STORE_CODES)
 
     store_rows = (await db.execute(text("""
-        SELECT store_code, COALESCE(MAX(ds.store_name), store_code) store_name,
+        SELECT s.store_code, COALESCE(MAX(ds.store_name), s.store_code) store_name,
                COALESCE(SUM(net_sales_amount),0) net_sales,
                COALESCE(SUM(cost_amount),0) cost_of_goods,
                COALESCE(SUM(gross_profit),0) gross_profit,
                COALESCE(SUM(tag_amount),0) tag_amount,
+               COALESCE(SUM(sales_amount),0) sales_amount,
                COALESCE(SUM(return_amount),0) return_amount,
                BOOL_AND(COALESCE(is_cost_complete,false)) is_cost_complete,
                MAX(etl_at) source_updated_at
@@ -239,6 +262,7 @@ async def get_profit_analysis(
             expense_type=str(row["expense_type"]), amount=row["expense_amount"],
             allocation_start=row["allocation_start"], allocation_end=row["allocation_end"],
             data_type=str(row["data_type"] or "estimate"),
+            store_code=row["store_code"],
         ) for row in rows]
 
     total_sales = sum((row["net_sales"] for row in store_rows), 0)
@@ -256,10 +280,15 @@ async def get_profit_analysis(
             period_start=query_start, period_end=query_end,
             net_sales=row["net_sales"], cost_of_goods=row["cost_of_goods"],
             is_cost_complete=bool(row["is_cost_complete"]), expenses=allocations(direct_expenses),
+            expense_scope=row["store_code"],
         )
+        store_payload = _profit_payload(profit)
+        # Headquarters expenses have no accepted store-allocation policy yet.
+        store_payload.update({"operating_profit": None, "operating_margin": None,
+                              "operating_profit_status": "pending_data"})
         stores.append({
             "store_code": row["store_code"], "store_name": row["store_name"],
-            **_profit_payload(profit),
+            **store_payload,
         })
 
     products = (await db.execute(text("""
@@ -288,17 +317,27 @@ async def get_profit_analysis(
           AND UPPER(store_code)=ANY(:inventory_codes)
     """), {"end_date": query_end, "inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).scalar()
     tag_amount = sum((row["tag_amount"] for row in store_rows), 0)
+    sales_amount = sum((row["sales_amount"] for row in store_rows), 0)
     expense_by_type = company_profit.expense_by_type
+    summary_payload = _profit_payload(company_profit)
+    if store_code:
+        summary_payload.update({
+            "operating_profit": None,
+            "operating_margin": None,
+            "operating_profit_status": "pending_data",
+            "finance_approved": False,
+            "reasons": [*summary_payload["reasons"], "headquarters_allocation_pending"],
+        })
     source_updated_at = max((row["source_updated_at"] for row in store_rows if row["source_updated_at"]), default=None)
     return ApiResponse.ok(data={
         "period": {"start_date": str(query_start), "end_date": str(query_end)},
-        "status": company_profit.operating_profit_status,
-        "status_label": "已核准" if company_profit.operating_profit_status == "ready" else "待接入完整费用并核准",
+        "status": summary_payload["operating_profit_status"],
+        "status_label": "已核准" if summary_payload["operating_profit_status"] == "ready" else "待接入完整费用并核准",
         "summary": {
-            **_profit_payload(company_profit),
+            **summary_payload,
             "cost_coverage_rate": 1.0 if cost_complete else 0.0,
             "inventory_amount": _money(inventory_amount),
-            "discount_loss": _money(max(tag_amount - total_sales, 0)),
+            "discount_loss": _money(max(tag_amount - sales_amount, 0)),
             "return_loss": None,
             "clearance_loss": None,
         },
@@ -311,10 +350,13 @@ async def get_profit_analysis(
         "missing_expense_types": list(company_profit.missing_expense_types),
         "stores": stores,
         "products": product_items,
+        "salespersons": {"status": "pending_data", "items": [], "reason": "业绩归属来源待接入"},
+        "vip_profit": {"status": "pending_data", "items": [], "reason": "会员级销售成本与费用归属待接入"},
         "data_quality": {
             "warnings": [
                 "退货损失缺少可靠退货明细，暂不计算",
                 "清仓损失缺少清仓标识，暂不计算",
+                "门店经营利润等待总部费用分摊规则",
             ] + (["费用或成本不完整，不输出经营盈亏结论"] if company_profit.operating_profit is None else []),
             "source_updated_at": source_updated_at.isoformat() if source_updated_at else None,
         },

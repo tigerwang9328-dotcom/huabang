@@ -16,7 +16,7 @@ from app.services.rule_engine import RuleEngine
 
 
 RULE_SOURCES: dict[str, dict[str, str]] = {
-    "return": {"status": "pending_data", "source": "baison_return", "reason": "可靠退货明细待接入"},
+    "return": {"status": "ready", "source": "dwd.dwd_pos_ticket", "reason": "百胜小票负向结算已接入"},
     "amendment": {"status": "pending_data", "source": "baison_ticket_change", "reason": "改单前后值待接入"},
     "discount": {"status": "ready", "source": "dws.dws_store_daily", "reason": "按已同步销售折扣判断"},
     "member": {"status": "ready", "source": "dim.dim_member", "reason": "会员主档已接入"},
@@ -33,7 +33,7 @@ RULE_SOURCE_BY_CODE = {
     "R001": ("dws.dws_store_daily", "/app/store"),
     "R002": ("dws.dws_store_daily", "/app/store"),
     "R003": ("dws.dws_store_daily", "/app/dashboard"),
-    "R004": ("baison_return", "/app/store"),
+    "R004": ("dws.dws_store_daily", "/app/store"),
     "R005": ("dws.dws_store_daily", "/app/store"),
     "R006": ("dws.dws_inventory_daily", "/app/inventory"),
     "R007": ("dws.dws_inventory_daily", "/app/inventory"),
@@ -45,6 +45,8 @@ RULE_SOURCE_BY_CODE = {
     "R013": ("app.app_action_task", "/app/task"),
     "R014": ("app.app_action_task", "/app/task"),
     "R015": ("dm.dm_boss_daily_report", "/app/report"),
+    "R022": ("dm.dm_finance_profit_daily", "/app/finance"),
+    "R023": ("dwd.dwd_pos_ticket", "/app/member"),
     "VIP_NEGATIVE_BALANCE": ("dim.dim_member", "/app/member"),
 }
 
@@ -187,6 +189,7 @@ async def _load_source_timestamps(db: AsyncSession, business_date: date) -> dict
           (SELECT MAX(updated_at) FROM dwd.dwd_store_recharge_daily WHERE biz_date=:business_date) recharge_updated_at,
           (SELECT MAX(synced_at) FROM dwd.dwd_baison_transfer_inbound WHERE record_date<=:business_date) transfer_updated_at,
           (SELECT MAX(updated_at) FROM app.app_action_task WHERE is_deleted=false) task_updated_at,
+          (SELECT MAX(synced_at) FROM dwd.dwd_pos_ticket WHERE biz_date=:business_date) pos_ticket_updated_at,
           (SELECT MAX(generated_at) FROM dm.dm_boss_daily_report WHERE report_date=:business_date) report_updated_at
     """), {
         "business_date": business_date,
@@ -201,6 +204,7 @@ async def _load_source_timestamps(db: AsyncSession, business_date: date) -> dict
         "dwd.dwd_store_recharge_daily": row["recharge_updated_at"],
         "dwd.dwd_baison_transfer_inbound": row["transfer_updated_at"],
         "app.app_action_task": row["task_updated_at"],
+        "dwd.dwd_pos_ticket": row["pos_ticket_updated_at"],
         "dm.dm_boss_daily_report": row["report_updated_at"],
     }
 

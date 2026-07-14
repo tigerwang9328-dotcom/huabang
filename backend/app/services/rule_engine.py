@@ -1,4 +1,4 @@
-"""规则引擎：15条业务规则，结构化输出，不修改数据"""
+"""规则引擎：确定性业务规则，结构化输出，不修改数据。"""
 import json
 import hashlib
 from datetime import date, timedelta
@@ -23,6 +23,8 @@ RULE_DEFS = [
     ("R013", "待处理任务积压", "task", "warning"),
     ("R014", "任务逾期预警", "task", "risk"),
     ("R015", "数据完整性检查", "data", "info"),
+    ("R022", "高销售低利润预警", "finance", "warning"),
+    ("R023", "VIP折扣过高预警", "member", "warning"),
 ]
 
 
@@ -328,6 +330,67 @@ class RuleEngine:
                      "suggestion": "请确认ERP系统成本数据是否已导入",
                      "severity": "info"}]
         return []
+
+    async def _rule_r022(self, stat_date, d, db, store_code):
+        min_sales = float(self._threshold("R022", "min_sales", 5000))
+        max_margin = float(self._threshold("R022", "max_operating_margin", 0.05))
+        rows = (await db.execute(text("""
+            SELECT store_code, net_sales, operating_profit, operating_margin
+            FROM dm.dm_finance_profit_daily
+            WHERE stat_date=:d AND store_code='ALL'
+              AND operating_profit_status='ready' AND finance_approved=true
+              AND net_sales>=:min_sales AND operating_margin<:max_margin
+        """), {"d": d, "min_sales": min_sales, "max_margin": max_margin})).fetchall()
+        return [{
+            "title": f"公司销售额{float(row[1]):.0f}元但经营利润率仅{float(row[3])*100:.1f}%",
+            "evidence": {"net_sales": float(row[1]), "operating_profit": float(row[2]),
+                         "operating_margin": float(row[3]), "finance_approved": True},
+            "suggestion": "复核折扣、商品毛利和费用结构，制定提升利润方案",
+        } for row in rows]
+
+    async def _rule_r023(self, stat_date, d, db, store_code):
+        min_vip_sales = float(self._threshold("R023", "min_vip_sales", 1000))
+        min_discount_rate = float(self._threshold("R023", "min_discount_rate", 0.4))
+        rows = (await db.execute(text("""
+            WITH vip_sales AS (
+                SELECT UPPER(store_code) store_code,
+                       COALESCE(NULLIF(BTRIM(vip_code::text),''),
+                                NULLIF(BTRIM(customer_code::text),'')) member_no,
+                       SUM(sales_amount) vip_sales,
+                       SUM(standard_amount) vip_standard
+                FROM dwd.dwd_pos_ticket
+                WHERE biz_date=:d
+                  AND COALESCE(is_void,false)=false AND COALESCE(is_pending,false)=false
+                  AND sales_amount>0 AND standard_amount>0
+                  AND COALESCE(NULLIF(BTRIM(vip_code::text),''),
+                               NULLIF(BTRIM(customer_code::text),'')) IS NOT NULL
+                  AND (:store_code IS NULL OR UPPER(store_code)=UPPER(:store_code))
+                GROUP BY UPPER(store_code),
+                         COALESCE(NULLIF(BTRIM(vip_code::text),''),
+                                  NULLIF(BTRIM(customer_code::text),''))
+            ), scored AS (
+                SELECT store_code, member_no, vip_sales, vip_standard,
+                       vip_sales/NULLIF(vip_standard,0) discount_rate
+                FROM vip_sales
+            )
+            SELECT store_code, member_no, vip_sales, vip_standard, discount_rate
+            FROM scored
+            WHERE vip_sales>=:min_vip_sales AND discount_rate<:min_discount_rate
+            ORDER BY discount_rate, vip_sales DESC
+        """), {
+            "d": d,
+            "store_code": store_code,
+            "min_vip_sales": min_vip_sales,
+            "min_discount_rate": min_discount_rate,
+        })).fetchall()
+        return [{
+            "store_code": row[0],
+            "member_no": row[1],
+            "title": f"会员{row[1]}当日消费折扣率仅{float(row[4])*100:.1f}%",
+            "evidence": {"vip_sales": float(row[2]), "vip_standard": float(row[3]),
+                         "discount_rate": float(row[4]), "threshold": min_discount_rate},
+            "suggestion": "复核会员折扣授权、促销依据及对应商品毛利",
+        } for row in rows]
 
     async def create_task_drafts(self, rule_results: list[dict], stat_date: str, db,
                                  creator_id: int = 1, commit: bool = True) -> list[dict]:

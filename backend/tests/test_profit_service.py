@@ -136,9 +136,39 @@ def test_partial_date_coverage_is_reported_even_when_all_categories_exist():
     )
 
     assert result.expense_coverage_rate == Decimal("0.5")
-    assert result.missing_expense_types == ()
+    assert result.missing_expense_types == REQUIRED_EXPENSE_TYPES
     assert result.operating_profit is None
     assert "expense_coverage_incomplete" in result.reasons
+
+
+def test_legacy_labor_and_admin_categories_are_mapped_without_losing_amounts():
+    expenses = _expenses()
+    expenses[1] = ExpenseAllocation("labor", Decimal("100"), REPORT_DATE, REPORT_DATE, "actual")
+    expenses[-1] = ExpenseAllocation("admin", Decimal("50"), REPORT_DATE, REPORT_DATE, "actual")
+
+    result = _calculate(expenses)
+
+    assert result.expense_by_type["wages"] == Decimal("100")
+    assert result.expense_by_type["other"] == Decimal("50")
+    assert result.expense_coverage_rate == Decimal("1")
+
+
+def test_store_specific_expense_cannot_complete_company_expense_scope():
+    expenses = [item for item in _expenses() if item.expense_type != "rent"]
+    expenses.append(ExpenseAllocation(
+        expense_type="rent",
+        amount=Decimal("100"),
+        allocation_start=REPORT_DATE,
+        allocation_end=REPORT_DATE,
+        data_type="actual",
+        store_code="285204",
+    ))
+
+    result = _calculate(expenses)
+
+    assert "rent" in result.missing_expense_types
+    assert result.expense_coverage_rate == Decimal("0.875")
+    assert result.operating_profit is None
 
 
 @pytest.mark.parametrize(
@@ -186,7 +216,9 @@ def test_gross_profit_has_an_independent_estimated_or_ready_status():
 
 
 def test_profit_foundation_model_columns_are_available():
-    assert {"allocation_start", "allocation_end"} <= set(DwdFinanceExpense.__table__.columns.keys())
+    assert {"allocation_start", "allocation_end", "approved_by", "approved_at"} <= set(
+        DwdFinanceExpense.__table__.columns.keys()
+    )
 
     required_rollup_columns = {
         "rent_expense",

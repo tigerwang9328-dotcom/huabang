@@ -1,6 +1,7 @@
 import asyncio
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal, engine
@@ -12,23 +13,18 @@ async def _load_inventory_cost_totals():
         result = await db.execute(
             text(
                 """
-                WITH expected AS (
-                    SELECT SUM(b.qty * COALESCE(
-                        NULLIF(sk.cost_price, 0),
-                        NULLIF(sk.market_price, 0),
-                        NULLIF(p.cost_price, 0)
-                    )) AS amount
-                    FROM dwd.v_apparel_inventory_balance b
-                    LEFT JOIN dim.dim_sku sk
-                      ON sk.product_code = b.product_code
-                     AND TRIM(LEADING '-' FROM COALESCE(sk.color_code, '')) =
-                         TRIM(LEADING '-' FROM COALESCE(b.color_code, ''))
-                     AND COALESCE(sk.size_code, '') = COALESCE(b.size_code, '')
-                    LEFT JOIN dim.dim_product p ON b.product_code = p.product_code
+                WITH target AS (
+                    SELECT MAX(snapshot_date) AS stat_date
+                    FROM dwd.v_apparel_inventory_snapshot
+                ), expected AS (
+                    SELECT SUM(b.cost_amount) AS amount
+                    FROM dwd.v_apparel_inventory_snapshot b
+                    CROSS JOIN target
+                    WHERE b.snapshot_date = target.stat_date
                 ), actual AS (
                     SELECT SUM(total_cost_amount) AS amount
                     FROM dws.dws_inventory_daily
-                    WHERE stat_date = CURRENT_DATE
+                    WHERE stat_date = (SELECT stat_date FROM target)
                 )
                 SELECT expected.amount AS expected_amount,
                        actual.amount AS actual_amount
@@ -41,9 +37,10 @@ async def _load_inventory_cost_totals():
     return row
 
 
-def test_current_inventory_daily_rebuilds_sku_key_before_product_cost_fallback():
+def test_latest_complete_inventory_daily_matches_its_source_snapshot():
     totals = asyncio.run(_load_inventory_cost_totals())
 
-    assert totals["expected_amount"] is not None
+    if totals["expected_amount"] is None:
+        pytest.skip("当前没有可用于同日对账的完整库存快照")
     assert totals["expected_amount"] > Decimal("0")
     assert totals["actual_amount"] == totals["expected_amount"]

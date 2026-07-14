@@ -32,6 +32,7 @@ INIT_PERMISSIONS = [
     # 财务（敏感）
     {"code": "finance:profit:view", "name": "查看利润数据", "module": "finance"},
     {"code": "finance:expense:create", "name": "录入费用", "module": "finance"},
+    {"code": "finance:expense:approve", "name": "核准费用", "module": "finance"},
     {"code": "finance:cash:view", "name": "查看现金余额", "module": "finance"},
     {"code": "finance:cash:create", "name": "录入现金余额", "module": "finance"},
     # 数据同步
