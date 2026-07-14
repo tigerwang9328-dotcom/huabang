@@ -291,6 +291,14 @@ class DmFinanceProfitDaily(Base):
     gross_profit = Column(Numeric(14, 2))
     gross_margin = Column(Numeric(6, 4))
     total_expense = Column(Numeric(14, 2))
+    rent_expense = Column(Numeric(14, 2), default=0)
+    wages_expense = Column(Numeric(14, 2), default=0)
+    social_security_expense = Column(Numeric(14, 2), default=0)
+    platform_fee_expense = Column(Numeric(14, 2), default=0)
+    utilities_expense = Column(Numeric(14, 2), default=0)
+    logistics_expense = Column(Numeric(14, 2), default=0)
+    marketing_expense = Column(Numeric(14, 2), default=0)
+    other_expense = Column(Numeric(14, 2), default=0)
     operating_profit = Column(Numeric(14, 2), comment="经营利润=毛利-费用")
     operating_margin = Column(Numeric(6, 4))
 
@@ -299,6 +307,12 @@ class DmFinanceProfitDaily(Base):
                        comment="estimate=预估 actual=财务核准")
     is_cost_complete = Column(Boolean, default=False)
     is_expense_complete = Column(Boolean, default=False)
+    expense_coverage_rate = Column(Numeric(6, 4), default=0)
+    missing_expense_types = Column(JSON, default=list)
+    finance_approved = Column(Boolean, default=False)
+    gross_profit_status = Column(String(16), default="estimated")
+    operating_profit_status = Column(String(16), default="pending_data")
+    profit_reasons = Column(JSON, default=list)
     completeness_note = Column(String(256), comment="不完整原因说明")
 
     # 核准数据（如有）

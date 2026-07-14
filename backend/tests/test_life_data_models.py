@@ -128,8 +128,8 @@ def test_life_data_migration_has_one_resolvable_head():
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["0b8c9d0e1f2a"]
-    assert script.get_current_head() == "0b8c9d0e1f2a"
+    assert script.get_heads() == ["1c9d0e1f2a3b"]
+    assert script.get_current_head() == "1c9d0e1f2a3b"
 
 
 def test_group_health_migration_follows_life_data_collector():

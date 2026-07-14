@@ -1,7 +1,42 @@
 <template>
   <div class="page-container">
     <div class="page-header"><h2>利润分析</h2></div>
-    <el-tabs v-model="activeTab">
+    <el-tabs v-model="activeTab" class="profit-analysis-page">
+      <el-tab-pane label="利润分析" name="profit">
+        <div class="profit-head">
+          <div><b>经营利润</b><el-tag size="small" :type="profit?.status==='ready'?'success':'warning'">{{ profit?.status_label || '待接入' }}</el-tag></div>
+          <el-button size="small" :loading="profitLoading" @click="loadProfit">刷新</el-button>
+        </div>
+        <div class="metric-grid" v-loading="profitLoading">
+          <div class="metric"><span>销售额</span><b>{{ money(profit?.summary?.net_sales) }}</b></div>
+          <div class="metric"><span>毛利额</span><b>{{ money(profit?.summary?.gross_profit) }}</b></div>
+          <div class="metric"><span>费用覆盖</span><b>{{ pct(profit?.summary?.expense_coverage_rate) }}</b></div>
+          <div class="metric"><span>成本覆盖</span><b>{{ pct(profit?.summary?.cost_coverage_rate) }}</b></div>
+          <div class="metric"><span>经营利润</span><b>{{ profit?.summary?.operating_profit == null ? '待接入' : money(profit.summary.operating_profit) }}</b></div>
+        </div>
+        <div v-if="profit?.missing_expense_types?.length" class="pending-line">待接入：{{ profit.missing_expense_types.join('、') }}</div>
+        <h3>损失及库存资金</h3>
+        <div class="metric-grid loss-grid">
+          <div class="metric"><span>折扣损失</span><b>{{ money(profit?.summary?.discount_loss) }}</b></div>
+          <div class="metric"><span>退货损失</span><b>{{ valueOrPending(profit?.summary?.return_loss) }}</b></div>
+          <div class="metric"><span>清仓损失</span><b>{{ valueOrPending(profit?.summary?.clearance_loss) }}</b></div>
+          <div class="metric"><span>库存资金</span><b>{{ money(profit?.summary?.inventory_amount) }}</b></div>
+        </div>
+        <h3>门店利润</h3>
+        <el-table :data="profit?.stores || []" size="small" stripe>
+          <el-table-column prop="store_name" label="门店" min-width="180" />
+          <el-table-column label="销售额"><template #default="{row}">{{ money(row.net_sales) }}</template></el-table-column>
+          <el-table-column label="毛利"><template #default="{row}">{{ money(row.gross_profit) }}</template></el-table-column>
+          <el-table-column label="经营利润"><template #default="{row}">{{ row.operating_profit == null ? '待接入' : money(row.operating_profit) }}</template></el-table-column>
+        </el-table>
+        <h3>单款利润</h3>
+        <el-table :data="profit?.products || []" size="small" stripe max-height="360">
+          <el-table-column prop="product_code" label="款号" width="130" /><el-table-column prop="product_name" label="商品" min-width="180" />
+          <el-table-column label="销售额"><template #default="{row}">{{ money(row.net_sales) }}</template></el-table-column>
+          <el-table-column label="毛利"><template #default="{row}">{{ money(row.gross_profit) }}</template></el-table-column>
+          <el-table-column label="经营利润"><template #default>待接入费用分摊</template></el-table-column>
+        </el-table>
+      </el-tab-pane>
       <el-tab-pane label="费用补录" name="expense">
         <el-card>
           <el-form :model="expenseForm" label-width="110px" style="max-width:560px">
@@ -65,7 +100,7 @@
               <el-input-number v-model="cashForm.balance" :precision="2" style="width:100%" />
             </el-form-item>
             <el-form-item label="是否核准">
-              <el-switch v-model="cashForm.is_verified" active-text="已财务核准" inactive-text="待核准" />
+              <el-switch v-model="cashForm.data_type" active-value="actual" inactive-value="estimate" active-text="已财务核准" inactive-text="待核准" />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="submitCash" :loading="submitting">提交录入</el-button>
@@ -136,20 +171,26 @@ import { ref, reactive, onMounted } from 'vue'
 import { financeApi } from '@/api/finance'
 import { ElMessage } from 'element-plus'
 
-const activeTab = ref('expense')
+const activeTab = ref('profit')
 const submitting = ref(false)
 const loadingCash = ref(false)
 const loadingComparison = ref(false)
 const cashSafety = ref<any>(null)
 const comparison = ref<any>(null)
+const profit = ref<any>(null)
+const profitLoading = ref(false)
 
 const expenseForm = reactive({
   expense_date: '', store_code: '', expense_type: '', expense_amount: 0,
   data_type: 'estimate', description: ''
 })
 const cashForm = reactive({
-  record_date: '', account_type: 'bank', account_name: '', balance: 0, is_verified: false
+  record_date: '', account_type: 'bank', account_name: '', balance: 0, data_type: 'actual'
 })
+const money = (v: any) => v == null ? '待接入' : `¥${Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+const valueOrPending = (v: any) => v == null ? '待接入' : money(v)
+const pct = (v: any) => v == null ? '待接入' : `${(Number(v) * 100).toFixed(1)}%`
+const loadProfit = async () => { profitLoading.value = true; try { const res = await financeApi.getProfitAnalysis(); profit.value = res.data.data || null } finally { profitLoading.value = false } }
 
 const fmtMoney = (row: any) => row.estimated_profit != null ? `¥${Number(row.estimated_profit).toFixed(0)}` : '--'
 const fmtActual = (row: any) => row.actual_profit != null ? `¥${Number(row.actual_profit).toFixed(0)}` : '--'
@@ -199,7 +240,7 @@ const loadComparison = async () => {
   loadingComparison.value = true
   try {
     const res = await financeApi.getProfitComparison()
-    comparison.value = res.data.data
+    comparison.value = res.data.data?.items || []
   } catch {} finally {
     loadingComparison.value = false
   }
@@ -208,6 +249,7 @@ const loadComparison = async () => {
 onMounted(() => {
   loadCashSafety()
   loadComparison()
+  loadProfit()
 })
 </script>
 
@@ -215,4 +257,13 @@ onMounted(() => {
 .page-container { padding: 0; }
 .page-header { margin-bottom: 16px; }
 .page-header h2 { font-size: 18px; color: #333; }
+.profit-analysis-page { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:16px; }
+.profit-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.profit-head b { margin-right:8px; }
+.metric-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+.metric { border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#fff; display:flex; flex-direction:column; gap:6px; }
+.metric span { color:#6b7280; font-size:12px; }.metric b { color:#111827; font-size:20px; }
+.pending-line { margin:10px 0; padding:9px 12px; border-radius:6px; background:#fff7ed; color:#9a5b13; }
+h3 { font-size:14px; margin:18px 0 10px; }.loss-grid { grid-template-columns:repeat(4,1fr); }
+@media(max-width:768px){.loss-grid{grid-template-columns:repeat(2,1fr)}}
 </style>

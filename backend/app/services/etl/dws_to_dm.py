@@ -320,52 +320,35 @@ class DwsToDm:
     async def _finance_profit(self, stat_date: str, db: AsyncSession, etl_log) -> int:
         run_id = etl_log.start_task("dws_to_dm_finance_profit", stat_date)
         try:
-            r = await db.execute(text("""
-                SELECT
-                    fd.store_code, fd.net_sales_amount, fd.cost_amount, fd.gross_profit,
-                    fd.gross_margin, fd.total_expense, fd.operating_profit_estimate,
-                    fd.data_type, fd.is_profit_complete
-                FROM dws.dws_finance_daily fd
-                WHERE fd.stat_date = :d
+            result = await db.execute(text("""
+                INSERT INTO dm.dm_finance_profit_daily(
+                  stat_date,store_code,net_sales,cost_of_goods,gross_profit,gross_margin,total_expense,
+                  rent_expense,wages_expense,social_security_expense,platform_fee_expense,utilities_expense,
+                  logistics_expense,marketing_expense,other_expense,operating_profit,operating_margin,data_type,
+                  is_cost_complete,is_expense_complete,expense_coverage_rate,missing_expense_types,finance_approved,
+                  gross_profit_status,operating_profit_status,profit_reasons,completeness_note,generated_at)
+                SELECT stat_date,store_code,net_sales_amount,cost_amount,gross_profit,gross_margin,total_expense,
+                  rent_expense,wages_expense,social_security_expense,platform_fee_expense,utilities_expense,
+                  logistics_expense,marketing_expense,other_expense,operating_profit,operating_margin,data_type,
+                  gross_profit_status='ready',expense_coverage_rate=1,expense_coverage_rate,missing_expense_types,
+                  finance_approved,gross_profit_status,operating_profit_status,profit_reasons,
+                  CASE WHEN operating_profit_status='ready' THEN NULL ELSE '费用、成本或财务核准未完成' END,NOW()
+                FROM dws.dws_finance_daily WHERE stat_date=:d
+                ON CONFLICT(stat_date,store_code) DO UPDATE SET
+                  net_sales=EXCLUDED.net_sales,cost_of_goods=EXCLUDED.cost_of_goods,gross_profit=EXCLUDED.gross_profit,
+                  gross_margin=EXCLUDED.gross_margin,total_expense=EXCLUDED.total_expense,rent_expense=EXCLUDED.rent_expense,
+                  wages_expense=EXCLUDED.wages_expense,social_security_expense=EXCLUDED.social_security_expense,
+                  platform_fee_expense=EXCLUDED.platform_fee_expense,utilities_expense=EXCLUDED.utilities_expense,
+                  logistics_expense=EXCLUDED.logistics_expense,marketing_expense=EXCLUDED.marketing_expense,
+                  other_expense=EXCLUDED.other_expense,operating_profit=EXCLUDED.operating_profit,
+                  operating_margin=EXCLUDED.operating_margin,data_type=EXCLUDED.data_type,
+                  is_cost_complete=EXCLUDED.is_cost_complete,is_expense_complete=EXCLUDED.is_expense_complete,
+                  expense_coverage_rate=EXCLUDED.expense_coverage_rate,missing_expense_types=EXCLUDED.missing_expense_types,
+                  finance_approved=EXCLUDED.finance_approved,gross_profit_status=EXCLUDED.gross_profit_status,
+                  operating_profit_status=EXCLUDED.operating_profit_status,profit_reasons=EXCLUDED.profit_reasons,
+                  completeness_note=EXCLUDED.completeness_note,generated_at=NOW()
             """), {"d": date.fromisoformat(stat_date)})
-            rows = r.fetchall()
-            if not rows:
-                etl_log.finish_task(run_id, output_rows=0)
-                return 0
-
-            count = 0
-            for row in rows:
-                sc = row[0]
-                await db.execute(text("""
-                    INSERT INTO dm.dm_finance_profit_daily (
-                        stat_date, store_code, net_sales, cost_of_goods, gross_profit, gross_margin,
-                        total_expense, operating_profit, data_type,
-                        is_cost_complete, is_expense_complete, generated_at
-                    ) VALUES (
-                        :d,:sc,:net,:cog,:gp,:gm,:exp,:op,:dt,:cost,:exp_ok,NOW()
-                    )
-                    ON CONFLICT (stat_date, store_code) DO UPDATE SET
-                        net_sales       = EXCLUDED.net_sales,
-                        cost_of_goods   = EXCLUDED.cost_of_goods,
-                        gross_profit    = EXCLUDED.gross_profit,
-                        operating_profit = EXCLUDED.operating_profit,
-                        gross_margin     = EXCLUDED.gross_margin,
-                        is_cost_complete = EXCLUDED.is_cost_complete,
-                        data_type        = EXCLUDED.data_type,
-                        generated_at     = NOW()
-                """), {
-                    "d": date.fromisoformat(stat_date), "sc": sc,
-                    "net": float(row[1] or 0),
-                    "cog": float(row[2] or 0),
-                    "gp": float(row[3] or 0),
-                    "gm": float(row[4] or 0),
-                    "exp": float(row[5] or 0),
-                    "op": float(row[6] or 0),
-                    "dt": row[7] or "estimate",
-                    "cost": True,
-                    "exp_ok": bool(row[8]),
-                })
-                count += 1
+            count = max(result.rowcount, 0)
             await db.commit()
             etl_log.finish_task(run_id, output_rows=count)
             return count

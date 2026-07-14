@@ -92,9 +92,11 @@ class DwdFinanceExpense(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     expense_date = Column(Date, nullable=False)
+    allocation_start = Column(Date, comment="费用分摊开始日（含）")
+    allocation_end = Column(Date, comment="费用分摊结束日（含）")
     store_code = Column(String(32), comment="为空表示公司级费用")
     expense_type = Column(String(32), nullable=False,
-                          comment="rent/labor/utilities/logistics/admin/other")
+                          comment="rent/wages/social_security/platform_fee/utilities/logistics/marketing/other")
     expense_amount = Column(Numeric(14, 2), nullable=False)
     description = Column(String(256))
     data_type = Column(String(16), default="estimate",

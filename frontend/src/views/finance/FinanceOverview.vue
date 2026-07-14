@@ -11,6 +11,7 @@
         <div class="c-val" :class="c.cls">{{ c.money ? fmtMoney(c.value) : c.value }}</div>
       </div>
     </div>
+    <div class="coverage-line">费用覆盖 {{ coverage == null ? '待接入' : (coverage * 100).toFixed(1) + '%' }} · 经营利润 {{ operatingProfit == null ? '待接入完整费用并核准' : fmtMoney(operatingProfit) }}</div>
 
     <div class="sec">
       <div class="sec-title">最近费用记录</div>
@@ -46,6 +47,7 @@ const loading = ref(true);
 const data = ref<any>({});
 const recent = ref<any[]>([]);
 const deptRank = ref<any[]>([]);
+const coverage = ref<number|null>(null); const operatingProfit = ref<number|null>(null);
 
 const cards = computed(() => {
   const t = data.value.today || {}, m = data.value.month || {};
@@ -71,6 +73,9 @@ const load = async () => {
     data.value = res.data.data || {};
     recent.value = data.value.recent_records || [];
     deptRank.value = data.value.department_rank || [];
+    const profitRes = await financeApi.getProfitAnalysis();
+    coverage.value = profitRes.data.data?.summary?.expense_coverage_rate ?? null;
+    operatingProfit.value = profitRes.data.data?.summary?.operating_profit ?? null;
   } catch (e) { console.error("财务概览加载失败", e); }
   finally { loading.value = false; }
 };
@@ -89,4 +94,5 @@ onMounted(load);
 .c-val.warn { color: #D97706; }
 .sec { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
 .sec-title { font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 14px; }
+.coverage-line { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:12px 16px; color:#6b7280; }
 </style>
