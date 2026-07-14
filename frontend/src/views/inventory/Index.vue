@@ -114,12 +114,17 @@
       <el-tab-pane label="库存预警" name="warning">
         <div class="toolbar">
           <div class="filters">
+            <el-date-picker v-model="warningFilters.warning_date" type="date" value-format="YYYY-MM-DD" placeholder="预警日期" clearable style="width:140px" @change="fetchWarnings" />
             <el-select v-model="warningFilters.warning_level" placeholder="等级" clearable style="width:110px" @change="fetchWarnings">
               <el-option label="紧急" value="critical" /><el-option label="风险" value="risk" /><el-option label="预警" value="warning" />
             </el-select>
             <el-select v-model="warningFilters.warning_type" placeholder="类型" clearable style="width:150px" @change="fetchWarnings">
               <el-option label="负库存" value="negative" /><el-option label="90天库龄" value="age_90" /><el-option label="180天库龄" value="age_180" />
-              <el-option label="低可售天数" value="low_sellable_days" /><el-option label="高库存" value="overstock" />
+              <el-option label="过季库存" value="seasonal" /><el-option label="断码" value="size_break" />
+              <el-option label="低动销高库存" value="low_motion_high_stock" /><el-option label="低可售天数" value="low_sellable_days" />
+              <el-option label="缺货" value="stockout" /><el-option label="门店不均衡" value="store_imbalance" />
+              <el-option label="可调拨" value="transfer" /><el-option label="清仓/返仓" value="clearance_return" />
+              <el-option label="高库存（旧口径）" value="overstock" />
             </el-select>
             <el-input v-model="warningFilters.store_code" placeholder="门店/仓库编码" clearable style="width:140px" @keyup.enter="fetchWarnings" />
             <el-select v-model="warningFilters.task_status" placeholder="任务状态" clearable style="width:120px" @change="fetchWarnings">
@@ -140,6 +145,10 @@
           <el-table-column label="金额" width="105" align="right"><template #default="{ row }">{{ formatMoney(row.current_cost_amount) }}</template></el-table-column>
           <el-table-column prop="age_days" label="库龄" width="76" align="right" />
           <el-table-column prop="sellable_days" label="可售天数" width="88" align="right" />
+          <el-table-column prop="rule_id" label="规则" width="72" />
+          <el-table-column label="证据" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ evidenceText(row.evidence) }}</template></el-table-column>
+          <el-table-column prop="source_name" label="数据来源" min-width="170" show-overflow-tooltip />
+          <el-table-column label="生成时间" width="152"><template #default="{ row }">{{ fmtTs(row.generated_at) }}</template></el-table-column>
           <el-table-column prop="description" label="建议" min-width="230" show-overflow-tooltip />
           <el-table-column label="任务" width="112" fixed="right">
             <template #default="{ row }">
@@ -170,7 +179,8 @@ const summaryCards = ref([
   { label: "库存总件数", value: "—", isPending: false },
   { label: "库存金额", value: "—", isPending: false },
   { label: "缺货SKU", value: "—", isPending: false },
-  { label: "高库存SKU", value: "待配置", isPending: true },
+  { label: "成本覆盖率", value: "—", isPending: false },
+  { label: "当前预警", value: "—", isPending: false },
 ]);
 
 // Tab 1: 库存总览
@@ -189,6 +199,7 @@ async function fetchOverview() {
     summaryCards.value[3].value = summary.total_inventory_qty?.display || "0";
     summaryCards.value[4].value = formatMoney(summary.inventory_amount?.value || 0);
     summaryCards.value[5].value = summary.out_of_stock_sku_count?.display || "0";
+    summaryCards.value[6].value = `${Number(summary.cost_coverage_rate?.value || 0).toFixed(1)}%`;
     whSummary.value = overviewRes?.data?.by_warehouse || [];
   } catch (_) { ElMessage.error("库存总览查询失败"); }
   finally { ovLoading.value = false; }
@@ -258,7 +269,7 @@ function onWSize(s: number) { wSize.value = s; wPage.value = 1; fetchWarehouses(
 
 const warningLoading = ref(false); const warningRows = ref<any[]>([]); const warningTotal = ref(0);
 const warningPage = ref(1); const warningSize = ref(20); const warningDate = ref("");
-const warningFilters = reactive({ warning_level: "", warning_type: "", store_code: "", task_status: "" });
+const warningFilters = reactive({ warning_date: "", warning_level: "", warning_type: "", store_code: "", task_status: "" });
 async function fetchWarnings() {
   warningLoading.value = true;
   try {
@@ -268,7 +279,7 @@ async function fetchWarnings() {
     warningRows.value = data?.data?.items || [];
     warningTotal.value = data?.data?.total || 0;
     warningDate.value = data?.data?.warning_date || "";
-    summaryCards.value[6] = { label: "当前预警", value: String(warningTotal.value), isPending: false };
+    summaryCards.value[7] = { label: "当前预警", value: String(warningTotal.value), isPending: false };
   } catch (_) { ElMessage.error("库存预警加载失败"); }
   finally { warningLoading.value = false; }
 }
@@ -284,7 +295,17 @@ function openTask(taskId: number) { if (taskId) router.push(`/app/task/${taskId}
 function onWarningSize() { warningPage.value = 1; fetchWarnings(); }
 function warningTag(level: string) { return ({ critical: "danger", risk: "warning", warning: "warning" } as any)[level] || "info"; }
 function warningLevel(level: string) { return ({ critical: "紧急", risk: "风险", warning: "预警", info: "提示" } as any)[level] || level; }
-function warningType(kind: string) { return ({ negative: "负库存", age_90: "90天库龄", age_180: "180天库龄", low_sellable_days: "低可售天数", overstock: "高库存" } as any)[kind] || kind; }
+function warningType(kind: string) { return ({
+  negative: "负库存", age_90: "90天库龄", age_180: "180天库龄", seasonal: "过季库存",
+  size_break: "断码", low_motion_high_stock: "低动销高库存", low_sellable_days: "低可售天数",
+  stockout: "缺货", store_imbalance: "门店不均衡", transfer: "可调拨",
+  clearance_return: "清仓/返仓", overstock: "高库存（旧口径）",
+} as any)[kind] || kind; }
+
+function evidenceText(evidence: Record<string, any> | null | undefined) {
+  if (!evidence || Object.keys(evidence).length === 0) return "-";
+  return Object.entries(evidence).map(([key, value]) => `${key}: ${value ?? "-"}`).join("；");
+}
 
 function fmtTs(t: any) { if (!t) return "-"; return String(t).replace("T", " ").slice(0, 19); }
 function formatMoney(v: any) {
@@ -306,7 +327,7 @@ onMounted(() => {
 .page-header { display: flex; align-items: baseline; gap: 10px; }
 .page-title { font-size: 20px; font-weight: 700; color: #111827; margin: 0; }
 .page-desc { font-size: 12px; color: #9CA3AF; }
-.summary-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+.summary-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; }
 .summary-card {
   background: #FFFFFF; border-radius: 10px; padding: 14px; text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-top: 3px solid #F59E0B;

@@ -276,7 +276,41 @@ async def rebuild_inventory_age(db: AsyncSession, snapshot_date: date) -> dict[s
     return {"snapshot_date": str(snapshot_date), "rows": len(payload), "unknown_qty": float(unknown_qty)}
 
 
+async def _inventory_warning_thresholds(db: AsyncSession) -> dict[str, dict[str, Any]]:
+    defaults = {
+        "R007": {"max_ratio": 0.30},
+        "R008": {"max_amount": 30000},
+        "R016": {"min_inventory": 10, "max_product_year_age": 1},
+        "R017": {"max_available_sizes": 1, "min_inventory": 3},
+        "R018": {"min_inventory": 30, "sales_days": 30},
+        "R019": {"max_sellable_days": 7},
+        "R020": {"high_inventory": 12, "low_inventory": 1},
+        "R021": {"min_age_days": 180, "risk_amount": 30000},
+    }
+    rows = (await db.execute(text("""
+        SELECT rule_id, thresholds
+        FROM app.app_business_rule_config
+        WHERE enabled=true AND rule_id BETWEEN 'R006' AND 'R021'
+    """))).mappings().all()
+    for row in rows:
+        defaults.setdefault(row["rule_id"], {}).update(row["thresholds"] or {})
+    return defaults
+
+
 async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> dict[str, Any]:
+    rule_thresholds = await _inventory_warning_thresholds(db)
+    age_90_ratio = float(rule_thresholds["R007"].get("max_ratio", 0.30))
+    age_180_risk = float(rule_thresholds["R008"].get("max_amount", 30000))
+    clearance_risk = float(rule_thresholds["R021"].get("risk_amount", 30000))
+    max_sellable_days = int(rule_thresholds["R019"].get("max_sellable_days", 7))
+    min_high_inventory = int(rule_thresholds["R018"].get("min_inventory", 30))
+    max_available_sizes = int(rule_thresholds["R017"].get("max_available_sizes", 1))
+    min_size_inventory = int(rule_thresholds["R017"].get("min_inventory", 3))
+    max_product_year_age = int(rule_thresholds["R016"].get("max_product_year_age", 1))
+    low_motion_sales_days = int(rule_thresholds["R018"].get("sales_days", 30))
+    transfer_high = int(rule_thresholds["R020"].get("high_inventory", 12))
+    transfer_low = int(rule_thresholds["R020"].get("low_inventory", 1))
+    seasonal_min_inventory = int(rule_thresholds["R016"].get("min_inventory", 10))
     await db.execute(
         text("DELETE FROM dm.dm_inventory_warning WHERE warning_date=:snapshot_date"),
         {"snapshot_date": snapshot_date},
@@ -284,29 +318,48 @@ async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> d
     await db.execute(text("""
         INSERT INTO dm.dm_inventory_warning (
             warning_date, store_code, product_code, warning_type, warning_level,
-            current_quantity, current_cost_amount, age_days, description, generated_at
+            current_quantity, current_cost_amount, age_days, description,
+            rule_id, thresholds, evidence, source_name, generated_at
         )
         SELECT snapshot_date, warehouse_code, product_code,
                CASE WHEN qty_180_plus > 0 THEN 'age_180' ELSE 'age_90' END,
-               CASE WHEN qty_180_plus > 0 AND COALESCE(amount_180_plus,0) >= 30000 THEN 'risk' ELSE 'warning' END,
+               CASE WHEN qty_180_plus > 0 AND COALESCE(amount_180_plus,0) >= :age_180_risk THEN 'risk' ELSE 'warning' END,
                ROUND(current_quantity)::int,
                CASE WHEN qty_180_plus > 0 THEN amount_180_plus ELSE amount_91_180 END,
                CASE WHEN qty_180_plus > 0 THEN 181 ELSE 91 END,
                CASE WHEN qty_180_plus > 0
                     THEN product_code || '含180天以上库存，建议清仓或返仓'
                     ELSE product_code || '含90天以上库存，建议复核动销和调拨' END,
+               CASE WHEN qty_180_plus > 0 THEN 'R008' ELSE 'R007' END,
+               CASE WHEN qty_180_plus > 0
+                    THEN jsonb_build_object('max_amount', CAST(:age_180_risk AS numeric))
+                    ELSE jsonb_build_object('max_ratio', CAST(:age_90_ratio AS numeric)) END,
+               jsonb_build_object('qty_91_180', qty_91_180, 'qty_180_plus', qty_180_plus,
+                                  'amount_91_180', amount_91_180, 'amount_180_plus', amount_180_plus),
+               'fifo_inbound',
                now()
         FROM dm.dm_inventory_age_daily
-        WHERE snapshot_date=:snapshot_date AND (qty_91_180 > 0 OR qty_180_plus > 0)
-    """), {"snapshot_date": snapshot_date})
+        WHERE snapshot_date=:snapshot_date
+          AND (qty_180_plus > 0
+               OR (current_quantity > 0
+                   AND qty_91_180/current_quantity>=CAST(:age_90_ratio AS numeric)))
+    """), {
+        "snapshot_date": snapshot_date,
+        "age_90_ratio": age_90_ratio,
+        "age_180_risk": age_180_risk,
+    })
     await db.execute(text("""
         INSERT INTO dm.dm_inventory_warning (
             warning_date, store_code, product_code, sku_code, warning_type,
-            warning_level, current_quantity, description, generated_at
+            warning_level, current_quantity, description,
+            rule_id, thresholds, evidence, source_name, generated_at
         )
         SELECT :snapshot_date, UPPER(warehouse_code), product_code, sku_code,
                'negative', 'critical', ROUND(SUM(qty))::int,
-               product_code || '存在负库存，请核对入库、调拨或销售出库', now()
+               product_code || '存在负库存，请核对入库、调拨或销售出库',
+               'R006', '{}'::jsonb,
+               jsonb_build_object('quantity', ROUND(SUM(qty))::int),
+               'apparel_inventory', now()
         FROM dwd.v_apparel_inventory_balance
         WHERE UPPER(warehouse_code)=ANY(:codes) AND qty < 0
         GROUP BY UPPER(warehouse_code), product_code, sku_code
@@ -314,7 +367,8 @@ async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> d
     await db.execute(text("""
         INSERT INTO dm.dm_inventory_warning (
             warning_date, store_code, product_code, warning_type, warning_level,
-            current_quantity, current_cost_amount, sellable_days, description, generated_at
+            current_quantity, current_cost_amount, sellable_days, description,
+            rule_id, thresholds, evidence, source_name, generated_at
         )
         WITH sales AS (
             SELECT store_code, product_code,
@@ -325,23 +379,231 @@ async def rebuild_inventory_warnings(db: AsyncSession, snapshot_date: date) -> d
             GROUP BY store_code, product_code
         )
         SELECT a.snapshot_date, a.warehouse_code, a.product_code,
-               CASE WHEN COALESCE(s.qty_7d,0) > 0 THEN 'low_sellable_days' ELSE 'overstock' END,
+               CASE WHEN COALESCE(s.qty_7d,0) > 0 THEN 'low_sellable_days' ELSE 'low_motion_high_stock' END,
                'warning', ROUND(a.current_quantity)::int,
                COALESCE(a.amount_0_90,0)+COALESCE(a.amount_91_180,0)+COALESCE(a.amount_180_plus,0),
                CASE WHEN COALESCE(s.qty_7d,0)>0 THEN CEIL(a.current_quantity/(s.qty_7d/7.0))::int END,
                CASE WHEN COALESCE(s.qty_7d,0)>0
                     THEN a.product_code || '有销量但可售天数不超过7天，建议补货或调拨'
-                    ELSE a.product_code || '库存不少于30件且30天无销量，建议清仓或调拨' END,
+                    ELSE a.product_code || '库存较高且30天无销量，建议清仓或调拨' END,
+               CASE WHEN COALESCE(s.qty_7d,0)>0 THEN 'R019' ELSE 'R018' END,
+               jsonb_build_object('max_sellable_days', CAST(:max_sellable_days AS integer),
+                                  'min_inventory', CAST(:min_high_inventory AS integer)),
+               jsonb_build_object('qty_7d', COALESCE(s.qty_7d,0), 'qty_30d', COALESCE(s.qty_30d,0),
+                                  'inventory_qty', a.current_quantity),
+               'dws_product_daily+fifo_inbound',
                now()
         FROM dm.dm_inventory_age_daily a
         LEFT JOIN sales s ON s.store_code=a.warehouse_code AND s.product_code=a.product_code
         WHERE a.snapshot_date=:snapshot_date
-          AND ((COALESCE(s.qty_7d,0)>0 AND a.current_quantity/(s.qty_7d/7.0)<=7)
-            OR (a.current_quantity>=30 AND COALESCE(s.qty_30d,0)<=0))
+          AND ((COALESCE(s.qty_7d,0)>0 AND a.current_quantity/(s.qty_7d/7.0)<=CAST(:max_sellable_days AS integer))
+            OR (a.current_quantity>=CAST(:min_high_inventory AS integer) AND COALESCE(s.qty_30d,0)<=0))
     """), {
         "snapshot_date": snapshot_date,
         "sales_7_start": snapshot_date - timedelta(days=6),
         "sales_30_start": snapshot_date - timedelta(days=29),
+        "max_sellable_days": max_sellable_days,
+        "min_high_inventory": min_high_inventory,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   TRIM(LEADING '-' FROM COALESCE(color_code,'')) color_code,
+                   ROUND(SUM(GREATEST(COALESCE(qty,0),0)))::int inventory_qty,
+                   COUNT(DISTINCT NULLIF(TRIM(size_code),''))
+                       FILTER (WHERE COALESCE(qty,0)>0) available_sizes
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:codes)
+            GROUP BY UPPER(warehouse_code), product_code,
+                     TRIM(LEADING '-' FROM COALESCE(color_code,''))
+        ), listed AS (
+            SELECT product_code,
+                   TRIM(LEADING '-' FROM COALESCE(color_code,'')) color_code,
+                   COUNT(DISTINCT NULLIF(TRIM(size_code),'')) listed_sizes
+            FROM dim.dim_sku
+            WHERE source_system='baison' AND COALESCE(status,'active')='active'
+              AND NULLIF(TRIM(size_code),'') IS NOT NULL
+            GROUP BY product_code, TRIM(LEADING '-' FROM COALESCE(color_code,''))
+        )
+        SELECT :snapshot_date, i.store_code, i.product_code, 'size_break', 'warning',
+               i.inventory_qty,
+               i.product_code || '仅剩' || i.available_sizes || '个尺码，建议复核断码调拨',
+               'R017',
+               jsonb_build_object('max_available_sizes', CAST(:max_available_sizes AS integer),
+                                  'min_inventory', CAST(:min_size_inventory AS integer)),
+               jsonb_build_object('color_code', i.color_code,
+                                  'available_sizes', i.available_sizes,
+                                  'listed_sizes', l.listed_sizes,
+                                  'inventory_qty', i.inventory_qty),
+               'apparel_inventory+dim_sku', now()
+        FROM inventory i
+        JOIN listed l ON l.product_code=i.product_code AND l.color_code=i.color_code
+        WHERE i.inventory_qty>=CAST(:min_size_inventory AS integer)
+          AND i.available_sizes<=CAST(:max_available_sizes AS integer)
+          AND l.listed_sizes>i.available_sizes
+    """), {
+        "snapshot_date": snapshot_date,
+        "codes": sorted(ALLOWED_INVENTORY_CODES),
+        "max_available_sizes": max_available_sizes,
+        "min_size_inventory": min_size_inventory,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH product_year AS (
+            SELECT product_code, MAX(year) FILTER (WHERE year IS NOT NULL) product_year
+            FROM dim.dim_product
+            WHERE source_system='baison'
+            GROUP BY product_code
+        ), inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   ROUND(SUM(GREATEST(COALESCE(qty,0),0)))::int inventory_qty
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:codes)
+            GROUP BY UPPER(warehouse_code), product_code
+        )
+        SELECT :snapshot_date, i.store_code, i.product_code, 'seasonal', 'warning',
+               i.inventory_qty,
+               i.product_code || '为' || p.product_year || '年旧款且仍有库存，建议评估清仓或返仓',
+               'R016',
+               jsonb_build_object('max_product_year_age', CAST(:max_product_year_age AS integer),
+                                  'min_inventory', CAST(:seasonal_min_inventory AS integer)),
+               jsonb_build_object('product_year', p.product_year,
+                                  'analysis_year', EXTRACT(YEAR FROM CAST(:snapshot_date AS date))::int,
+                                  'inventory_qty', i.inventory_qty),
+               'apparel_inventory+dim_product', now()
+        FROM inventory i
+        JOIN product_year p ON p.product_code=i.product_code
+        WHERE i.inventory_qty>=CAST(:seasonal_min_inventory AS integer)
+          AND p.product_year IS NOT NULL
+          AND EXTRACT(YEAR FROM CAST(:snapshot_date AS date))::int-p.product_year>CAST(:max_product_year_age AS integer)
+    """), {
+        "snapshot_date": snapshot_date,
+        "codes": sorted(ALLOWED_INVENTORY_CODES),
+        "max_product_year_age": max_product_year_age,
+        "seasonal_min_inventory": seasonal_min_inventory,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH recent_sales AS (
+            SELECT store_code, product_code,
+                   ROUND(SUM(GREATEST(COALESCE(net_quantity,0),0)))::int sales_qty
+            FROM dws.dws_product_daily
+            WHERE stat_date BETWEEN :sales_start AND :snapshot_date
+              AND store_code=ANY(:store_codes)
+            GROUP BY store_code, product_code
+            HAVING SUM(GREATEST(COALESCE(net_quantity,0),0))>0
+        ), inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   ROUND(SUM(COALESCE(qty,0)))::int inventory_qty
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:store_codes)
+            GROUP BY UPPER(warehouse_code), product_code
+        )
+        SELECT :snapshot_date, s.store_code, s.product_code, 'stockout', 'warning',
+               COALESCE(i.inventory_qty,0),
+               s.product_code || '近' || CAST(:sales_days AS integer) || '天有销量但当前缺货，建议补货或调拨',
+               'R019', jsonb_build_object('sales_days', CAST(:sales_days AS integer), 'stockout_quantity', 0),
+               jsonb_build_object('sales_qty', s.sales_qty,
+                                  'inventory_qty', COALESCE(i.inventory_qty,0)),
+               'dws_product_daily+apparel_inventory', now()
+        FROM recent_sales s
+        LEFT JOIN inventory i ON i.store_code=s.store_code AND i.product_code=s.product_code
+        WHERE COALESCE(i.inventory_qty,0)<=0
+    """), {
+        "snapshot_date": snapshot_date,
+        "sales_start": snapshot_date - timedelta(days=max(low_motion_sales_days - 1, 0)),
+        "sales_days": low_motion_sales_days,
+        "store_codes": sorted(ALLOWED_STORE_CODES),
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, description, rule_id, thresholds, evidence,
+            source_name, generated_at
+        )
+        WITH inventory AS (
+            SELECT UPPER(warehouse_code) store_code, product_code,
+                   ROUND(SUM(GREATEST(COALESCE(qty,0),0)))::int inventory_qty
+            FROM dwd.v_apparel_inventory_balance
+            WHERE UPPER(warehouse_code)=ANY(:store_codes)
+            GROUP BY UPPER(warehouse_code), product_code
+        ), candidates AS (
+            SELECT DISTINCT ON (low.store_code, low.product_code)
+                   low.store_code target_store, low.product_code,
+                   low.inventory_qty target_qty, high.store_code source_store,
+                   high.inventory_qty source_qty
+            FROM inventory low
+            JOIN inventory high ON high.product_code=low.product_code
+                               AND high.store_code<>low.store_code
+            WHERE low.inventory_qty<=CAST(:transfer_low AS integer)
+              AND high.inventory_qty>=CAST(:transfer_high AS integer)
+            ORDER BY low.store_code, low.product_code, high.inventory_qty DESC, high.store_code
+        )
+        SELECT :snapshot_date, c.target_store, c.product_code, kind.warning_type, 'warning',
+               c.target_qty,
+               CASE kind.warning_type
+                    WHEN 'store_imbalance' THEN c.product_code || '门店库存分布不均，建议复核'
+                    ELSE c.product_code || '可从' || c.source_store || '调拨至' || c.target_store END,
+               'R020',
+               jsonb_build_object('high_inventory', CAST(:transfer_high AS integer),
+                                  'low_inventory', CAST(:transfer_low AS integer)),
+               jsonb_build_object('source_store', c.source_store, 'source_qty', c.source_qty,
+                                  'target_store', c.target_store, 'target_qty', c.target_qty,
+                                  'suggested_transfer_qty', GREATEST(LEAST(c.source_qty-CAST(:transfer_high AS integer),
+                                                                         CAST(:transfer_high AS integer)-c.target_qty),1)),
+               'apparel_inventory', now()
+        FROM candidates c
+        CROSS JOIN (VALUES ('store_imbalance'), ('transfer')) kind(warning_type)
+    """), {
+        "snapshot_date": snapshot_date,
+        "store_codes": sorted(ALLOWED_STORE_CODES),
+        "transfer_high": transfer_high,
+        "transfer_low": transfer_low,
+    })
+    await db.execute(text("""
+        INSERT INTO dm.dm_inventory_warning (
+            warning_date, store_code, product_code, warning_type, warning_level,
+            current_quantity, current_cost_amount, age_days, description,
+            rule_id, thresholds, evidence, source_name, generated_at
+        )
+        WITH sales AS (
+            SELECT store_code, product_code, COALESCE(SUM(net_quantity),0) qty_30d
+            FROM dws.dws_product_daily
+            WHERE stat_date BETWEEN :sales_30_start AND :snapshot_date
+            GROUP BY store_code, product_code
+        )
+        SELECT a.snapshot_date, a.warehouse_code, a.product_code,
+               'clearance_return',
+               CASE WHEN COALESCE(a.amount_180_plus,0)>=CAST(:clearance_risk AS numeric) THEN 'risk' ELSE 'warning' END,
+               ROUND(a.qty_180_plus)::int, a.amount_180_plus, 181,
+               a.product_code || '存在180天以上库存，建议清仓或返仓并保留处理记录',
+               'R021',
+               jsonb_build_object('min_age_days', 180, 'risk_amount', CAST(:clearance_risk AS numeric)),
+               jsonb_build_object('qty_180_plus', a.qty_180_plus,
+                                  'amount_180_plus', a.amount_180_plus,
+                                  'qty_30d', COALESCE(s.qty_30d,0)),
+               'fifo_inbound+dws_product_daily', now()
+        FROM dm.dm_inventory_age_daily a
+        LEFT JOIN sales s ON s.store_code=a.warehouse_code AND s.product_code=a.product_code
+        WHERE a.snapshot_date=:snapshot_date AND a.qty_180_plus>0
+          AND (COALESCE(s.qty_30d,0)<=0 OR COALESCE(a.amount_180_plus,0)>=CAST(:clearance_risk AS numeric))
+    """), {
+        "snapshot_date": snapshot_date,
+        "sales_30_start": snapshot_date - timedelta(days=29),
+        "clearance_risk": clearance_risk,
     })
     count = (await db.execute(
         text("SELECT COUNT(*) FROM dm.dm_inventory_warning WHERE warning_date=:snapshot_date"),
@@ -357,7 +619,8 @@ async def create_inventory_warning_task_drafts(
 ) -> list[int]:
     warnings = (await db.execute(text("""
         SELECT id, warning_date, store_code, product_code, sku_code, warning_type,
-               warning_level, current_quantity, current_cost_amount, description
+               warning_level, current_quantity, current_cost_amount, description,
+               rule_id, thresholds, evidence, source_name
         FROM dm.dm_inventory_warning
         WHERE warning_date=:warning_date AND warning_level IN ('critical','risk')
         ORDER BY id
@@ -391,7 +654,14 @@ async def create_inventory_warning_task_drafts(
                 "task_no": task_no,
                 "title": f"【库存预警】{warning.get('product_code') or warning.get('sku_code') or '库存异常'}",
                 "description": warning.get("description") or "请复核库存预警",
-                "evidence": f"库存{warning.get('current_quantity') or 0}件，金额{warning.get('current_cost_amount') or 0}元",
+                "evidence": json.dumps({
+                    "rule_id": warning.get("rule_id"),
+                    "source_name": warning.get("source_name"),
+                    "thresholds": warning.get("thresholds") or {},
+                    "evidence": warning.get("evidence") or {},
+                    "current_quantity": float(warning.get("current_quantity") or 0),
+                    "current_cost_amount": float(warning.get("current_cost_amount") or 0),
+                }, ensure_ascii=False, default=str),
                 "actions": json.dumps(["复核库存、动销和尺码；提交补货、调拨、返仓或清仓处理意见"], ensure_ascii=False),
                 "source_id": source_id,
                 "store_code": warning.get("store_code"),

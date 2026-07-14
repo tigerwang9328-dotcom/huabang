@@ -172,7 +172,7 @@ async def inventory_overview(
 
 @router.get("/inventory/warnings")
 async def list_inventory_warnings(
-    warning_date: Optional[str] = None,
+    warning_date: Optional[date] = None,
     store_code: Optional[str] = None,
     warning_type: Optional[str] = None,
     warning_level: Optional[str] = None,
@@ -183,7 +183,7 @@ async def list_inventory_warnings(
     db: AsyncSession = Depends(get_db),
 ):
     """真实库存预警明细，支持按日期、仓店、类型、等级和任务状态下钻。"""
-    query_date = date.fromisoformat(warning_date) if warning_date else (
+    query_date = warning_date or (
         await db.execute(text("SELECT MAX(warning_date) FROM dm.dm_inventory_warning"))
     ).scalar()
     if not query_date:
@@ -210,11 +210,12 @@ async def list_inventory_warnings(
                w.product_code, COALESCE(p.product_name, w.product_code) product_name, w.sku_code,
                w.warning_type, w.warning_level, w.current_quantity, w.current_cost_amount,
                w.age_days, w.sellable_days, w.description, w.is_converted_to_task,
-               w.task_id, w.generated_at
+               w.task_id, w.rule_id, w.thresholds, w.evidence, w.source_name,
+               w.generated_at
         FROM dm.dm_inventory_warning w
-        LEFT JOIN dim.dim_store s ON s.store_code=w.store_code
-        LEFT JOIN dim.dim_warehouse wh ON wh.warehouse_code=w.store_code
-        LEFT JOIN dim.dim_product p ON p.product_code=w.product_code
+        LEFT JOIN dim.dim_store s ON s.store_code=w.store_code AND s.source_system='baison'
+        LEFT JOIN dim.dim_warehouse wh ON wh.warehouse_code=w.store_code AND wh.source_system='baison'
+        LEFT JOIN dim.dim_product p ON p.product_code=w.product_code AND p.source_system='baison'
         WHERE {where_sql}
         ORDER BY CASE w.warning_level WHEN 'critical' THEN 1 WHEN 'risk' THEN 2 ELSE 3 END,
                  COALESCE(w.current_cost_amount,0) DESC, w.id DESC
@@ -226,6 +227,8 @@ async def list_inventory_warnings(
         item["warning_date"] = str(item["warning_date"])
         item["current_quantity"] = float(item.get("current_quantity") or 0)
         item["current_cost_amount"] = float(item.get("current_cost_amount") or 0)
+        item["thresholds"] = item.get("thresholds") or {}
+        item["evidence"] = item.get("evidence") or {}
         item["generated_at"] = str(item["generated_at"]) if item.get("generated_at") else None
         items.append(item)
     return {"success": True, "data": {"items": items, "total": int(total), "page": page, "page_size": page_size, "warning_date": str(query_date)}}
@@ -270,7 +273,14 @@ async def create_inventory_warning_task_draft(
         "task_no": task_no,
         "title": f"【库存预警】{warning.get('product_code') or warning.get('sku_code') or '库存异常'}",
         "description": warning.get("description") or "请复核库存预警",
-        "evidence": f"库存{warning.get('current_quantity') or 0}件，金额{warning.get('current_cost_amount') or 0}元",
+        "evidence": json.dumps({
+            "rule_id": warning.get("rule_id"),
+            "source_name": warning.get("source_name"),
+            "thresholds": warning.get("thresholds") or {},
+            "evidence": warning.get("evidence") or {},
+            "current_quantity": float(warning.get("current_quantity") or 0),
+            "current_cost_amount": float(warning.get("current_cost_amount") or 0),
+        }, ensure_ascii=False, default=str),
         "actions": json.dumps(["复核库存、动销和尺码；提交补货、调拨、返仓或清仓处理意见"], ensure_ascii=False),
         "source_id": source_id,
         "store_code": warning.get("store_code"),
