@@ -2,6 +2,7 @@ import request from "./request";
 
 export const taskApi = {
   getList: (params?: any) => request.get("/task/list", { params }),
+  listAssignees: (params?: any) => request.get("/task/assignees", { params }),
   getDetail: (id: number) => request.get(`/task/${id}`),
   create: (data: any) => request.post("/task/create", data),
   confirm: (id: number, data: any = {}) => request.post(`/task/${id}/confirm`, data),

@@ -27,6 +27,11 @@ from app.services.member_segment_service import (
     rebuild_member_segments,
 )
 from app.services.member_sales_service import get_vip_sales_analysis
+from app.services.member_action_service import (
+    generate_member_action_drafts,
+    get_member_action_overview,
+    list_member_actions,
+)
 
 logger = logging.getLogger("member.api")
 
@@ -860,3 +865,60 @@ async def list_member_asset_transactions(
     if show_sensitive: await _audit_sensitive_phone_view(db,current_user,"member/assets/transactions")
     await _audit_sensitive_data_access(db,current_user,"sensitive_transaction.view","member/assets/transactions",["money_before","money_change","money_after"])
     return {"success":True,"data":{"items":items,"total":int(total),"page":page,"page_size":page_size,"date_range":{"start_date":str(start),"end_date":str(end)},"phone_masked":not show_sensitive}}
+
+
+@router.get("/actions/overview")
+async def member_action_overview(
+    days: int = Query(30, ge=1, le=365),
+    current_user: SysUser = Depends(require_permission("member:sensitive:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _allowed_member_codes(db, current_user)
+    data = await get_member_action_overview(db, store_codes=codes, days=days)
+    await _audit_sensitive_data_access(
+        db, current_user, "member_action.view", "member/actions/overview",
+        ["member_no", "followup_result", "conversion_amount"],
+    )
+    return {"success": True, "data": data}
+
+
+@router.get("/actions/list")
+async def member_action_list(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None, pattern="^(draft|pending|processing|feedback_submitted|review_passed|overdue|closed|cancelled)$"),
+    keyword: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("member:sensitive:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _allowed_member_codes(db, current_user)
+    data = await list_member_actions(
+        db, store_codes=codes, page=page, page_size=page_size, status=status, keyword=keyword,
+    )
+    await _audit_sensitive_data_access(
+        db, current_user, "member_action.view", "member/actions/list",
+        ["member_no", "contact_reason", "recommended_products"],
+    )
+    return {"success": True, "data": data}
+
+
+@router.post("/actions/rebuild")
+async def rebuild_member_actions(
+    calc_date: Optional[date] = None,
+    current_user: SysUser = Depends(require_permission("member:segment:rebuild")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _allowed_member_codes(db, current_user)
+    result = await generate_member_action_drafts(
+        db, store_codes=codes, calc_date=calc_date, creator_id=int(current_user.id),
+    )
+    db.add(SysOperationLog(
+        user_id=current_user.id,
+        username=current_user.username,
+        module="member",
+        action="member_action.rebuild",
+        target_type="member_action",
+        target_id=result.get("calc_date"),
+        after_data=result,
+    ))
+    return {"success": True, "data": result}

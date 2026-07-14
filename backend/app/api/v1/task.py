@@ -5,8 +5,8 @@ from typing import Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, desc, func, or_, select
+from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import and_, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,6 +56,29 @@ class TaskConfirmRequest(BaseModel):
     assignee_role: Optional[str] = None
     due_date: Optional[date] = None
     feedback_requirement: Optional[str] = None
+    member_contact_script: Optional[str] = Field(default=None, min_length=8, max_length=2000)
+
+
+class MemberFollowupResult(BaseModel):
+    contacted: bool
+    arrived: bool = False
+    converted: bool = False
+    conversion_amount: float = Field(default=0, ge=0, le=100_000_000)
+    linked_ticket_no: Optional[str] = Field(default=None, max_length=128)
+    no_conversion_reason: Optional[str] = Field(default=None, max_length=500)
+    next_followup_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_progression(self):
+        if self.arrived and not self.contacted:
+            raise ValueError("未联系不能标记到店")
+        if self.converted and not self.contacted:
+            raise ValueError("未联系不能标记成交")
+        if self.converted and (self.conversion_amount <= 0 or not str(self.linked_ticket_no or "").strip()):
+            raise ValueError("成交必须填写成交金额和关联百胜小票")
+        if self.contacted and not self.converted and not str(self.no_conversion_reason or "").strip():
+            raise ValueError("未成交时必须填写原因")
+        return self
 
 
 class TaskFeedbackRequest(BaseModel):
@@ -64,6 +87,7 @@ class TaskFeedbackRequest(BaseModel):
     action_taken: Optional[str] = None
     result_description: Optional[str] = None
     metrics_after: Optional[dict] = None
+    member_followup: Optional[MemberFollowupResult] = None
     attachment_urls: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("attachment_urls")
@@ -366,6 +390,35 @@ async def get_task_list(
     })
 
 
+@router.get("/assignees", response_model=ApiResponse)
+async def list_task_assignees(
+    store_code: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("task:approve")),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_manager(db, current_user)
+    scope = await get_data_scope(db, current_user)
+    requested_store = str(store_code or "").strip().upper()
+    allowed_codes = {str(code).upper() for code in scope.store_codes}
+    if requested_store and requested_store not in allowed_codes:
+        raise PermissionDeniedException("不能查看数据范围外门店的责任人")
+    target_codes = [requested_store] if requested_store else sorted(allowed_codes)
+    if not target_codes:
+        return ApiResponse.ok(data={"items": []})
+    rows = (await db.execute(text("""
+        SELECT u.id,u.real_name,u.employee_no,u.position,
+               ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(us.store_code,u.store_code)),NULL) store_codes
+        FROM sys.sys_user u
+        LEFT JOIN sys.sys_user_store us ON us.user_id=u.id
+        WHERE u.status=1 AND u.is_deleted=false
+          AND NULLIF(BTRIM(COALESCE(u.employee_no,'')),'') IS NOT NULL
+          AND (UPPER(COALESCE(u.store_code,''))=ANY(:store_codes) OR UPPER(COALESCE(us.store_code,''))=ANY(:store_codes))
+        GROUP BY u.id,u.real_name,u.employee_no,u.position
+        ORDER BY COALESCE(u.real_name,u.employee_no)
+    """), {"store_codes": target_codes})).mappings().all()
+    return ApiResponse.ok(data={"items": [dict(row) for row in rows]})
+
+
 @router.post("/create", response_model=ApiResponse)
 async def create_task(
     body: TaskCreateRequest,
@@ -559,6 +612,47 @@ async def confirm_task(
     if not (task.data_evidence or task.data_evidence_text):
         return ApiResponse.fail("确认派发前必须保留数据证据")
 
+    if task.source_type == "member_action":
+        if task.assignee_id is None:
+            return ApiResponse.fail("VIP会员行动必须指定到具体责任人")
+        if not str(body.member_contact_script or "").strip():
+            return ApiResponse.fail("联系会员前必须由主管确认联系话术")
+        assignee = await db.scalar(select(SysUser).where(
+            SysUser.id == task.assignee_id,
+            SysUser.status == 1,
+            SysUser.is_deleted.is_(False),
+        ))
+        if not assignee or not str(assignee.employee_no or "").strip():
+            return ApiResponse.fail("VIP会员行动责任人必须维护员工编号")
+        assignee_store_codes = {str(code).upper() for code in (await db.execute(
+            select(SysUserStore.store_code).where(SysUserStore.user_id == assignee.id)
+        )).scalars().all()}
+        if assignee.store_code:
+            assignee_store_codes.add(str(assignee.store_code).upper())
+        if str(task.related_store_code or "").upper() not in assignee_store_codes:
+            return ApiResponse.fail("VIP会员行动责任人必须属于会员归属门店")
+        task.assignee_name = str(assignee.real_name or assignee.employee_no)
+        evidence = dict(task.data_evidence or {})
+        member_action = dict(evidence.get("member_action") or {})
+        member_action.update({
+            "confirmed_script": str(body.member_contact_script).strip(),
+            "responsibility_status": "confirmed",
+            "responsible_user_id": int(assignee.id),
+            "responsible_employee_no": str(assignee.employee_no),
+            "confirmed_by": int(current_user.id),
+            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        })
+        evidence["member_action"] = member_action
+        task.data_evidence = evidence
+        await db.execute(text("""
+            UPDATE dm.dm_member_segment_snapshot
+            SET responsibility_status='confirmed',responsible_employee_no=:employee_no
+            WHERE id=:snapshot_id
+        """), {
+            "snapshot_id": task.source_id,
+            "employee_no": str(assignee.employee_no),
+        })
+
     task.status = next_task_status(task.status, "confirm")
     task.confirmed_by = current_user.id
     task.confirmed_at = datetime.now(timezone.utc)
@@ -613,6 +707,11 @@ async def submit_feedback(
         new_status = next_task_status(task.status, "feedback")
     except TaskTransitionError as exc:
         return ApiResponse.fail(str(exc))
+    metrics_after = dict(body.metrics_after or {})
+    if task.source_type == "member_action":
+        if body.member_followup is None:
+            return ApiResponse.fail("VIP会员行动反馈必须记录联系、到店和成交结果")
+        metrics_after["member_followup"] = body.member_followup.model_dump(mode="json")
     feedback = AppTaskFeedback(
         task_id=task_id,
         request_id=body.request_id,
@@ -621,7 +720,7 @@ async def submit_feedback(
         attachment_urls=body.attachment_urls,
         action_taken=body.action_taken,
         result_description=body.result_description,
-        metrics_after=body.metrics_after,
+        metrics_after=metrics_after or None,
     )
     db.add(feedback)
     task.status = new_status
