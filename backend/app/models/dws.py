@@ -1,5 +1,5 @@
 """dws schema: 汇总层"""
-from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric
+from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, JSON
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -132,12 +132,24 @@ class DwsFinanceDaily(Base):
     gross_margin = Column(Numeric(6, 4))
     total_expense = Column(Numeric(14, 2), default=0, comment="已归集费用合计")
     rent_expense = Column(Numeric(14, 2), default=0)
+    wages_expense = Column(Numeric(14, 2), default=0)
+    social_security_expense = Column(Numeric(14, 2), default=0)
+    platform_fee_expense = Column(Numeric(14, 2), default=0)
     labor_expense = Column(Numeric(14, 2), default=0)
     utilities_expense = Column(Numeric(14, 2), default=0)
     logistics_expense = Column(Numeric(14, 2), default=0)
+    marketing_expense = Column(Numeric(14, 2), default=0)
     admin_expense = Column(Numeric(14, 2), default=0)
     other_expense = Column(Numeric(14, 2), default=0)
     operating_profit_estimate = Column(Numeric(14, 2), comment="预估经营利润")
+    operating_profit = Column(Numeric(14, 2), comment="完整核准后的经营利润")
+    operating_margin = Column(Numeric(6, 4))
+    expense_coverage_rate = Column(Numeric(6, 4), default=0)
+    missing_expense_types = Column(JSON, default=list)
+    finance_approved = Column(Boolean, default=False)
+    gross_profit_status = Column(String(16), default="estimated")
+    operating_profit_status = Column(String(16), default="pending_data")
+    profit_reasons = Column(JSON, default=list)
     data_type = Column(String(16), default="estimate",
                        comment="estimate=预估 actual=财务核准")
     is_profit_complete = Column(Boolean, default=False)

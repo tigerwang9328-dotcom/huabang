@@ -30,6 +30,15 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _can_assert_operating_profit(row: dict[str, Any] | None) -> bool:
+    """Only approved, fully covered profit data may support a profit/loss claim."""
+    if not row or row.get("operating_profit") is None:
+        return False
+    return all(bool(row.get(key)) for key in (
+        "is_cost_complete", "is_expense_complete", "finance_approved",
+    ))
+
+
 def _int(value: Any, default: int = 0) -> int:
     try:
         return int(_num(value, default))
@@ -727,6 +736,7 @@ class AIDiagnosisService:
                    coalesce(sum(gross_profit),0) gross_profit, avg(gross_margin) gross_margin,
                    coalesce(sum(total_expense),0) total_expense, coalesce(sum(operating_profit),0) operating_profit,
                    bool_and(is_cost_complete) is_cost_complete, bool_and(is_expense_complete) is_expense_complete,
+                   bool_and(coalesce(finance_approved,false)) finance_approved,
                    'dm_finance_profit_daily' as source_table
             from dm.dm_finance_profit_daily
             where stat_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
@@ -743,7 +753,7 @@ class AIDiagnosisService:
                        coalesce(sum(total_expense),0) total_expense,
                        coalesce(sum(operating_profit_estimate),0) operating_profit,
                        bool_and(is_profit_complete) is_cost_complete,
-                       false as is_expense_complete,
+                       false as is_expense_complete, false as finance_approved,
                        'dws_finance_daily' as source_table
                 from dws.dws_finance_daily
                 where stat_date=:dt and (:store_code = '' or store_code=:store_code or store_code='ALL')
@@ -814,7 +824,7 @@ class AIDiagnosisService:
                        coalesce(nullif(store_sales.store_gross_profit,0), nullif(sales.company_gross_profit,0), nullif(product_cost.gross_profit,0), 0) - expense.total_expense operating_profit,
                        (coalesce(product_cost.is_cost_complete,false)
                         and coalesce(nullif(store_sales.store_cost,0), nullif(sales.company_cost,0), nullif(product_cost.cost_amount,0), 0) > 0) is_cost_complete,
-                       (expense.total_expense > 0) is_expense_complete,
+                       false is_expense_complete, false as finance_approved,
                        'dws_company_daily/dws_store_daily/dws_product_daily' as source_table
                 from sales cross join store_sales cross join product_cost cross join expense
                 """,
@@ -826,7 +836,8 @@ class AIDiagnosisService:
         if not row or _num(row.get("net_sales")) == 0:
             missing.append("销售/财务基础数据")
         cost_complete = bool(row.get("is_cost_complete")) and bool(cost_source.get("is_cost_complete")) and _num(row.get("cost_of_goods")) > 0
-        expense_complete = bool(row.get("is_expense_complete")) or _is_expense_sync_covered(expense_source.get("last_sync_at"), dt)
+        expense_complete = bool(row.get("is_expense_complete"))
+        finance_approved = bool(row.get("finance_approved"))
         if row and _num(row.get("net_sales")) > 0 and not cost_complete:
             warnings.append("成本字段未完整接入，财务诊断按销售额与现有毛利字段兜底。")
             diagnoses.append(self._diag("finance", "medium", "成本口径未完整", "当前销售已接入，但成本金额为0或不完整，毛利和利润只能作为预估参考。", [f"净销售：{_money(row.get('net_sales'))}", f"成本：{_money(row.get('cost_of_goods'))}"], "商品成本未完整同步或DWS成本汇总未生成。", "财务与商品部核对成本价、商品成本汇总和缺失成本款。", "财务经理 / 商品经理", "本周内", "成本完整率、毛利率可用性", row.get("source_table") or "finance fallback"))
@@ -840,7 +851,13 @@ class AIDiagnosisService:
             gm = _num(row.get("gross_profit")) / _num(row.get("net_sales"))
         if gm > 0 and gm < 0.45:
             diagnoses.append(self._diag("finance", "high", "毛利率偏低风险", f"当前毛利率 {_pct(gm)}，低于经营预警线。", [f"毛利：{_money(row.get('gross_profit'))}", f"销售成本：{_money(row.get('cost_of_goods'))}"], "折扣、商品结构或成本归集可能拉低利润。", "商品与财务复核高折扣订单、低毛利款和成本完整性。", "财务经理 / 商品经理", "今日下班前", "毛利率、异常折扣订单数、低毛利款销售占比", row.get("source_table") or "finance"))
-        if _num(row.get("operating_profit")) < 0:
+        can_assert_operating_profit = _can_assert_operating_profit({
+            **row,
+            "is_cost_complete": cost_complete,
+            "is_expense_complete": expense_complete,
+            "finance_approved": finance_approved,
+        })
+        if can_assert_operating_profit and _num(row.get("operating_profit")) < 0:
             diagnoses.append(self._diag("finance", "high", "经营利润为负", f"当前预估经营利润 {_money(row.get('operating_profit'))}。", [f"净销售：{_money(row.get('net_sales'))}", f"费用：{_money(row.get('total_expense'))}"], "销售毛利无法覆盖费用，或费用一次性集中入账。", "财务拆解费用结构，运营复盘低效门店和低毛利商品。", "财务经理 / 运营经理", "今日18:00前", "经营利润、费用率、毛利率", row.get("source_table") or "finance"))
         high_risks = sum(1 for d in diagnoses if d.get("level") == "high")
         medium_risks = sum(1 for d in diagnoses if d.get("level") == "medium")
@@ -855,7 +872,8 @@ class AIDiagnosisService:
                 "gross_profit": _num(row.get("gross_profit")),
                 "gross_margin": gm,
                 "total_expense": _num(row.get("total_expense")),
-                "operating_profit": _num(row.get("operating_profit")),
+                "operating_profit": _num(row.get("operating_profit")) if can_assert_operating_profit else None,
+                "operating_profit_status": "ready" if can_assert_operating_profit else "pending_data",
                 "expense_last_synced_at": str(expense_source.get("last_sync_at") or ""),
                 "expense_complete": expense_complete,
                 "finance_risk_count": len(diagnoses),

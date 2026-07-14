@@ -1,8 +1,11 @@
 """DWD → DWS 汇总聚合"""
 from datetime import date
+import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from sqlalchemy import text
+from app.core.store_whitelist import ALLOWED_STORE_CODES
+from app.services.profit_service import ExpenseAllocation, calculate_profit
 
 
 class DwdToDws:
@@ -272,54 +275,72 @@ class DwdToDws:
     async def _agg_finance_daily(self, stat_date: str, db: AsyncSession, etl_log) -> int:
         run_id = etl_log.start_task("dwd_to_dws_finance_daily", stat_date)
         try:
-            sql = text("""
-                INSERT INTO dws.dws_finance_daily (
-                    stat_date, store_code,
-                    net_sales_amount, cost_amount, gross_profit, gross_margin,
-                    total_expense, rent_expense, labor_expense, utilities_expense,
-                    logistics_expense, admin_expense, other_expense,
-                    operating_profit_estimate, data_type, is_profit_complete
+            target_date = date.fromisoformat(stat_date)
+            sales = (await db.execute(text("""
+                SELECT store_code, SUM(net_sales_amount) net_sales, SUM(cost_amount) cost,
+                       BOOL_AND(COALESCE(is_cost_complete,false)) cost_complete
+                FROM dws.dws_store_daily
+                WHERE stat_date=:stat_date AND store_code=ANY(:store_codes)
+                GROUP BY store_code
+            """), {"stat_date": target_date, "store_codes": sorted(ALLOWED_STORE_CODES)})).mappings().all()
+            expenses = (await db.execute(text("""
+                SELECT store_code, expense_type, expense_amount, data_type,
+                       COALESCE(allocation_start,expense_date) allocation_start,
+                       COALESCE(allocation_end,expense_date) allocation_end
+                FROM dwd.dwd_finance_expense
+                WHERE COALESCE(allocation_start,expense_date)<=:stat_date
+                  AND COALESCE(allocation_end,expense_date)>=:stat_date
+            """), {"stat_date": target_date})).mappings().all()
+            targets = [("ALL", sales, expenses)] + [
+                (row["store_code"], [row], [e for e in expenses if str(e["store_code"] or "").upper()==row["store_code"].upper()])
+                for row in sales
+            ]
+            count = 0
+            for code, scoped_sales, scoped_expenses in targets:
+                result = calculate_profit(
+                    period_start=target_date, period_end=target_date,
+                    net_sales=sum((r["net_sales"] for r in scoped_sales), 0),
+                    cost_of_goods=sum((r["cost"] for r in scoped_sales), 0),
+                    is_cost_complete=bool(scoped_sales) and all(bool(r["cost_complete"]) for r in scoped_sales),
+                    expenses=[ExpenseAllocation(
+                        expense_type=e["expense_type"], amount=e["expense_amount"],
+                        allocation_start=e["allocation_start"], allocation_end=e["allocation_end"],
+                        data_type=e["data_type"] or "estimate",
+                    ) for e in scoped_expenses],
                 )
-                SELECT
-                    CAST(:stat_date AS DATE),
-                    COALESCE(e.store_code, 'ALL') AS store_code,
-                    COALESCE(sd.net_sales_amount, 0) AS net_sales_amount,
-                    COALESCE(sd.cost_amount, 0) AS cost_amount,
-                    COALESCE(sd.gross_profit, 0) AS gross_profit,
-                    sd.gross_margin,
-                    COALESCE(SUM(e.expense_amount), 0) AS total_expense,
-                    SUM(CASE WHEN e.expense_type = 'rent'      THEN e.expense_amount ELSE 0 END),
-                    SUM(CASE WHEN e.expense_type = 'labor'     THEN e.expense_amount ELSE 0 END),
-                    SUM(CASE WHEN e.expense_type = 'utilities' THEN e.expense_amount ELSE 0 END),
-                    SUM(CASE WHEN e.expense_type = 'logistics' THEN e.expense_amount ELSE 0 END),
-                    SUM(CASE WHEN e.expense_type = 'admin'     THEN e.expense_amount ELSE 0 END),
-                    SUM(CASE WHEN e.expense_type NOT IN ('rent','labor','utilities','logistics','admin') THEN e.expense_amount ELSE 0 END),
-                    COALESCE(sd.gross_profit, 0) - COALESCE(SUM(e.expense_amount), 0) AS operating_profit_estimate,
-                    COALESCE(MAX(e.data_type), 'estimate') AS data_type,
-                    CASE WHEN COUNT(e.id) > 0 THEN TRUE ELSE FALSE END AS is_profit_complete
-                FROM dwd.dwd_finance_expense e
-                LEFT JOIN (
-                    SELECT SUM(net_sales_amount) AS net_sales_amount,
-                           SUM(cost_amount) AS cost_amount,
-                           SUM(gross_profit) AS gross_profit,
-                           CASE WHEN SUM(sales_amount) = 0 THEN NULL
-                                ELSE SUM(gross_profit) / SUM(sales_amount) END AS gross_margin
-                    FROM dws.dws_store_daily
-                    WHERE stat_date = :stat_date
-                ) sd ON TRUE
-                WHERE e.expense_date = :stat_date
-                GROUP BY e.store_code, sd.net_sales_amount, sd.cost_amount, sd.gross_profit, sd.gross_margin
-                ON CONFLICT (stat_date, store_code) DO UPDATE SET
-                    total_expense               = EXCLUDED.total_expense,
-                    operating_profit_estimate   = EXCLUDED.operating_profit_estimate,
-                    data_type                   = EXCLUDED.data_type,
-                    etl_at                      = NOW()
-            """)
-            result = await db.execute(sql, {"stat_date": date.fromisoformat(stat_date)})
+                params = {"d": target_date, "sc": code, "net": result.net_sales,
+                    "cost": result.cost_of_goods, "gp": result.gross_profit, "gm": result.gross_margin,
+                    "expense": result.total_expense, "op": result.operating_profit,
+                    "om": result.operating_margin, "coverage": result.expense_coverage_rate,
+                    "missing": json.dumps(result.missing_expense_types), "approved": result.finance_approved,
+                    "gp_status": result.gross_profit_status, "op_status": result.operating_profit_status,
+                    "reasons": json.dumps(result.reasons), "dtype": "actual" if result.finance_approved else "estimate",
+                    **{f"e_{k}": v for k,v in result.expense_by_type.items()}}
+                await db.execute(text("""
+                    INSERT INTO dws.dws_finance_daily(stat_date,store_code,net_sales_amount,cost_amount,gross_profit,gross_margin,
+                      total_expense,rent_expense,wages_expense,social_security_expense,platform_fee_expense,utilities_expense,
+                      logistics_expense,marketing_expense,other_expense,operating_profit,operating_margin,expense_coverage_rate,
+                      missing_expense_types,finance_approved,gross_profit_status,operating_profit_status,profit_reasons,
+                      data_type,is_profit_complete,etl_at)
+                    VALUES(:d,:sc,:net,:cost,:gp,:gm,:expense,:e_rent,:e_wages,:e_social_security,:e_platform_fee,
+                      :e_utilities,:e_logistics,:e_marketing,:e_other,:op,:om,:coverage,CAST(:missing AS jsonb),:approved,
+                      :gp_status,:op_status,CAST(:reasons AS jsonb),:dtype,:approved,NOW())
+                    ON CONFLICT(stat_date,store_code) DO UPDATE SET net_sales_amount=EXCLUDED.net_sales_amount,
+                      cost_amount=EXCLUDED.cost_amount,gross_profit=EXCLUDED.gross_profit,gross_margin=EXCLUDED.gross_margin,
+                      total_expense=EXCLUDED.total_expense,rent_expense=EXCLUDED.rent_expense,wages_expense=EXCLUDED.wages_expense,
+                      social_security_expense=EXCLUDED.social_security_expense,platform_fee_expense=EXCLUDED.platform_fee_expense,
+                      utilities_expense=EXCLUDED.utilities_expense,logistics_expense=EXCLUDED.logistics_expense,
+                      marketing_expense=EXCLUDED.marketing_expense,other_expense=EXCLUDED.other_expense,
+                      operating_profit=EXCLUDED.operating_profit,operating_margin=EXCLUDED.operating_margin,
+                      expense_coverage_rate=EXCLUDED.expense_coverage_rate,missing_expense_types=EXCLUDED.missing_expense_types,
+                      finance_approved=EXCLUDED.finance_approved,gross_profit_status=EXCLUDED.gross_profit_status,
+                      operating_profit_status=EXCLUDED.operating_profit_status,profit_reasons=EXCLUDED.profit_reasons,
+                      data_type=EXCLUDED.data_type,is_profit_complete=EXCLUDED.is_profit_complete,etl_at=NOW()
+                """), params)
+                count += 1
             await db.commit()
-            n = result.rowcount if result.rowcount >= 0 else 0
-            etl_log.finish_task(run_id, output_rows=n)
-            return n
+            etl_log.finish_task(run_id, output_rows=count)
+            return count
         except Exception as exc:
             await db.rollback()
             etl_log.fail_task(run_id, str(exc))
