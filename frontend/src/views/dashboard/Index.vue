@@ -243,6 +243,7 @@ function formatDecimal(v: any): string {
 }
 
 function ccMetric(key: string) { return commandCenter.value?.core_metrics?.[key]; }
+const statusLabels: Record<string, string> = { ready: "已就绪", estimated: "预估", pending_data: "待接入", stale: "数据陈旧" };
 function ccDisplay(key: string, type: "money" | "count" | "percent" = "count") {
   const item = ccMetric(key);
   if (!item || item.value === null || item.status === "pending_data") return "待接入";
@@ -252,8 +253,37 @@ function ccDisplay(key: string, type: "money" | "count" | "percent" = "count") {
 }
 function metricNote(key: string, fallback: string) {
   const item = ccMetric(key);
-  const labels: Record<string, string> = { ready: "已就绪", estimated: "预估", pending_data: "待接入", stale: "数据陈旧" };
-  return item ? `${labels[item.status] || item.status} · ${item.source}` : fallback;
+  return item ? `${statusLabels[item.status] || item.status} · ${item.source}` : fallback;
+}
+function confirmedOverviewMetric(key: string) {
+  const item = metric("business_metrics", key);
+  if (!item || item.value === null || item.value === undefined || item.status !== "ready") return null;
+  return item;
+}
+function refundMetric(key: "return_amount" | "return_rate") {
+  const overviewKey = key === "return_amount" ? "yesterday_refund_amount" : "yesterday_refund_rate";
+  const overviewMetric = metric("business_metrics", overviewKey);
+  if (overviewMetric && overviewMetric.status !== "ready") return overviewMetric;
+  const confirmed = confirmedOverviewMetric(overviewKey);
+  const snapshotReady = commandCenter.value?.data_quality?.metric_status?.returns === "ready";
+  const snapshot = ccMetric(key);
+  if (snapshotReady && snapshot && snapshot.value !== null && snapshot.value !== undefined && snapshot.status === "ready") {
+    return snapshot;
+  }
+  return confirmed ? { ...confirmed, source: "baison_pos.refund_amount" } : null;
+}
+function refundDisplay(key: "return_amount" | "return_rate") {
+  const item = refundMetric(key);
+  if (!item || item.value === null || item.value === undefined || item.status !== "ready") {
+    return item?.status === "stale" ? "数据陈旧" : "待接入";
+  }
+  if (key === "return_amount") return fmtMoney(item.value);
+  return `${(Number(item.value) * 100).toFixed(1)}%`;
+}
+function refundNote(key: "return_amount" | "return_rate") {
+  const item = refundMetric(key);
+  if (!item) return "待接入 · baison_pos.refund_amount";
+  return `${statusLabels[item.status] || item.status} · ${item.source || "baison_pos.refund_amount"}`;
 }
 const apiCards = computed(() => [
   { label: "销售额", value: ccDisplay("sales", "money"), note: metricNote("sales", "百胜小票"), tone: "orange" },
@@ -265,8 +295,8 @@ const apiCards = computed(() => [
   { label: "客单价", value: ccDisplay("avg_order_value", "money"), note: metricNote("avg_order_value", "百胜小票"), tone: "gold" },
   { label: "连带率", value: ccDisplay("items_per_order"), note: metricNote("items_per_order", "百胜小票"), tone: "slate" },
   { label: "折扣率", value: ccDisplay("avg_discount_rate", "percent"), note: metricNote("avg_discount_rate", "百胜小票"), tone: "slate" },
-  { label: "退货金额", value: ccDisplay("return_amount", "money"), note: metricNote("return_amount", "百胜退货"), tone: "muted" },
-  { label: "退货率", value: ccDisplay("return_rate", "percent"), note: metricNote("return_rate", "百胜退货"), tone: "muted" },
+  { label: "退货金额", value: refundDisplay("return_amount"), note: refundNote("return_amount"), tone: "muted" },
+  { label: "退货率", value: refundDisplay("return_rate"), note: refundNote("return_rate"), tone: "muted" },
   { label: "毛利额", value: ccDisplay("gross_profit", "money"), note: metricNote("gross_profit", "百胜成本"), tone: "orange" },
   { label: "毛利率", value: ccDisplay("gross_margin", "percent"), note: metricNote("gross_margin", "百胜成本"), tone: "gold" },
   { label: "库存金额", value: ccDisplay("inventory_amount", "money"), note: metricNote("inventory_amount", "外穿衣物库存"), tone: "blue" },
