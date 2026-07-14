@@ -7,6 +7,7 @@ from app.services.command_center_service import (
     build_template_summary,
     derive_metric_statuses,
     inventory_warning_source_id,
+    preserve_trusted_value,
 )
 from app.services.rule_engine import RuleEngine
 
@@ -79,6 +80,12 @@ def test_metric_rejects_unknown_status():
         raise AssertionError("invalid metric status must be rejected")
 
 
+def test_stale_source_preserves_previous_trusted_value():
+    assert preserve_trusted_value(0, source_ready=False, previous=18100) == 18100
+    assert preserve_trusted_value(0, source_ready=True, previous=18100) == 0
+    assert preserve_trusted_value(0, source_ready=False, previous=None) is None
+
+
 def test_template_summary_avoids_profit_claim_when_finance_is_incomplete():
     summary = build_template_summary(
         sales=Decimal("26566"),
@@ -94,6 +101,20 @@ def test_template_summary_avoids_profit_claim_when_finance_is_incomplete():
     assert "净利润" not in summary
     assert "赚钱" not in summary
     assert "费用未完整接入" in summary
+
+
+def test_template_summary_does_not_describe_missing_sales_as_zero():
+    summary = build_template_summary(
+        sales=None,
+        gross_profit=None,
+        gross_margin=None,
+        finance_complete=False,
+        risk_count=0,
+        pending_task_count=0,
+    )
+
+    assert "销售数据未就绪" in summary
+    assert "昨日销售0元" not in summary
 
 
 def test_rule_thresholds_are_read_from_business_config():

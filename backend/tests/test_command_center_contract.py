@@ -57,6 +57,20 @@ def test_daily_command_center_rebuilds_dws_before_running_rules():
     assert command_source.index("await rebuild_confirmed_sales_dws") < command_source.index("engine = RuleEngine()")
 
 
+def test_daily_command_wrapper_forwards_manual_rebuild_arguments():
+    wrapper = (BACKEND.parent / "scripts" / "generate_boss_command_center_daily.sh").read_text(
+        encoding="utf-8"
+    )
+    runner = (BACKEND / "scripts" / "generate_boss_command_center.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'scripts/generate_boss_command_center.py "$@"' in wrapper
+    assert 'ZoneInfo("Asia/Shanghai")' in runner
+    assert 'parser.add_argument("--date"' in runner
+    assert 'parser.add_argument("--inventory-date"' in runner
+
+
 def test_boss_daily_history_exposes_operating_detail_metrics():
     report_api = (BACKEND / "app" / "api" / "v1" / "report.py").read_text(encoding="utf-8")
 

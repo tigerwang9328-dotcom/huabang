@@ -43,6 +43,10 @@ def _decimal(value: Any) -> Decimal:
         return ZERO
 
 
+def _optional_decimal(value: Any) -> Decimal | None:
+    return None if value is None else _decimal(value)
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, Decimal):
         return float(value)
@@ -106,6 +110,11 @@ def derive_metric_statuses(
     }
 
 
+def preserve_trusted_value(current: Any, *, source_ready: bool, previous: Any) -> Any:
+    """Keep the last trusted value when a source is temporarily unavailable."""
+    return current if source_ready else previous
+
+
 def allocate_fifo_inventory(
     current_qty: Decimal,
     batches: Iterable[tuple[date, Decimal]],
@@ -138,14 +147,17 @@ def allocate_fifo_inventory(
 
 def build_template_summary(
     *,
-    sales: Decimal,
+    sales: Decimal | None,
     gross_profit: Decimal | None,
     gross_margin: Decimal | None,
     finance_complete: bool,
     risk_count: int,
     pending_task_count: int,
 ) -> str:
-    parts = [f"昨日销售{float(_decimal(sales)):,.0f}元"]
+    parts = (
+        ["昨日销售数据未就绪"]
+        if sales is None else [f"昨日销售{float(_decimal(sales)):,.0f}元"]
+    )
     if gross_profit is not None and gross_margin is not None:
         parts.append(
             f"已接成本口径毛利{float(_decimal(gross_profit)):,.0f}元、毛利率{float(_decimal(gross_margin)) * 100:.1f}%"
@@ -430,6 +442,12 @@ async def _persist_rule_results(db: AsyncSession, report_date: date, results: li
 
 
 async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_date: date) -> dict[str, Any]:
+    existing_row = (await db.execute(text("""
+        SELECT * FROM dm.dm_boss_daily_report WHERE report_date=:report_date
+    """), {"report_date": report_date})).mappings().first()
+    existing = dict(existing_row) if existing_row else {}
+    previous_freshness = existing.get("source_freshness") or {}
+
     sales = (await db.execute(text("""
         SELECT total_sales_amount, offline_sales_amount, total_order_count,
                total_item_count, total_return_amount, gross_profit, gross_margin,
@@ -506,21 +524,55 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "SELECT COUNT(*) FROM dm.dm_inventory_warning WHERE warning_date=:inventory_date"
     ), {"inventory_date": inventory_date})).scalar() or 0
 
-    total_sales = _decimal(ticket.get("sales_amount"))
-    online_sales = _decimal(ticket.get("online_sales_amount"))
-    offline_sales = _decimal(ticket.get("offline_sales_amount"))
-    vip_sales = _decimal(ticket.get("vip_sales_amount"))
-    return_amount = _decimal(sales.get("total_return_amount"))
-    cost_complete = bool(sales.get("is_cost_complete"))
+    ticket_ready = bool(ticket.get("synced_at"))
+    sales_detail_ready = bool(sales.get("etl_at"))
+    inventory_ready = bool(inventory.get("updated_at"))
+    member_ready = bool(members.get("updated_at"))
+
+    total_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("sales_amount"), source_ready=ticket_ready, previous=existing.get("total_sales")
+    ))
+    online_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("online_sales_amount"), source_ready=ticket_ready, previous=existing.get("online_sales")
+    ))
+    offline_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("offline_sales_amount"), source_ready=ticket_ready, previous=existing.get("offline_sales")
+    ))
+    actual_pay_amount = _optional_decimal(preserve_trusted_value(
+        ticket.get("actual_pay_amount"), source_ready=ticket_ready, previous=existing.get("actual_pay_amount")
+    ))
+    vip_sales = _optional_decimal(preserve_trusted_value(
+        ticket.get("vip_sales_amount"), source_ready=ticket_ready, previous=existing.get("vip_sales_amount")
+    ))
+    return_amount = _optional_decimal(preserve_trusted_value(
+        sales.get("total_return_amount"), source_ready=sales_detail_ready, previous=existing.get("return_amount")
+    ))
+    gross_profit = preserve_trusted_value(
+        sales.get("gross_profit"), source_ready=sales_detail_ready, previous=existing.get("gross_profit")
+    )
+    cost_complete = (
+        bool(sales.get("is_cost_complete"))
+        if sales_detail_ready else bool(existing.get("is_cost_complete"))
+    )
     source_freshness = {
         "sales": {
             "business_date": str(report_date),
-            "updated_at": _json_value(sales.get("etl_at")),
+            "updated_at": _json_value(sales.get("etl_at") or previous_freshness.get("sales", {}).get("updated_at")),
             "cost_coverage_rate": _json_value(sales.get("cost_coverage_rate")),
         },
-        "inventory": {"snapshot_date": str(inventory_date), "updated_at": _json_value(inventory.get("updated_at"))},
-        "member": {"scope": sorted(ALLOWED_INVENTORY_CODES), "updated_at": _json_value(members.get("updated_at"))},
-        "online": {"status": "ready", "source": "baison_payment.011", "business_date": str(report_date)},
+        "inventory": {
+            "snapshot_date": str(inventory_date),
+            "updated_at": _json_value(inventory.get("updated_at") or previous_freshness.get("inventory", {}).get("updated_at")),
+        },
+        "member": {
+            "scope": sorted(ALLOWED_INVENTORY_CODES),
+            "updated_at": _json_value(members.get("updated_at") or previous_freshness.get("member", {}).get("updated_at")),
+        },
+        "online": {
+            "status": "ready" if ticket_ready else "stale",
+            "source": "baison_payment.011",
+            "business_date": str(report_date),
+        },
         "finance": {"status": "pending_data", "reason": "费用未完整接入"},
     }
     metric_status = derive_metric_statuses(
@@ -528,8 +580,11 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
     )
     summary = build_template_summary(
         sales=total_sales,
-        gross_profit=_decimal(sales.get("gross_profit")) if sales.get("gross_profit") is not None else None,
-        gross_margin=_decimal(sales.get("gross_margin")) if sales.get("gross_margin") is not None else None,
+        gross_profit=_optional_decimal(gross_profit),
+        gross_margin=(
+            _optional_decimal(gross_profit) / total_sales
+            if gross_profit is not None and total_sales else None
+        ),
         finance_complete=False,
         risk_count=int(risks.get("major") or 0),
         pending_task_count=int(tasks.get("pending") or 0),
@@ -539,28 +594,67 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "total_sales": total_sales,
         "offline_sales": offline_sales,
         "online_sales": online_sales,
-        "actual_pay_amount": _decimal(ticket.get("actual_pay_amount")),
-        "net_sales": total_sales - return_amount,
-        "order_count": int(sales.get("total_order_count") or 0),
-        "item_count": int(sales.get("total_item_count") or 0),
-        "avg_order_value": total_sales / int(sales.get("total_order_count") or 1),
-        "items_per_order": _decimal(sales.get("items_per_order")),
-        "avg_discount_rate": _decimal(sales.get("avg_discount_rate")),
+        "actual_pay_amount": actual_pay_amount,
+        "net_sales": total_sales - return_amount if total_sales is not None and return_amount is not None else existing.get("net_sales"),
+        "order_count": preserve_trusted_value(
+            int(sales.get("total_order_count") or 0), source_ready=sales_detail_ready, previous=existing.get("order_count")
+        ),
+        "item_count": preserve_trusted_value(
+            int(sales.get("total_item_count") or 0), source_ready=sales_detail_ready, previous=existing.get("item_count")
+        ),
+        "avg_order_value": preserve_trusted_value(
+            sales.get("avg_order_value"), source_ready=sales_detail_ready, previous=existing.get("avg_order_value")
+        ),
+        "items_per_order": preserve_trusted_value(
+            sales.get("items_per_order"), source_ready=sales_detail_ready, previous=existing.get("items_per_order")
+        ),
+        "avg_discount_rate": preserve_trusted_value(
+            sales.get("avg_discount_rate"), source_ready=sales_detail_ready, previous=existing.get("avg_discount_rate")
+        ),
         "return_amount": return_amount,
-        "return_rate": return_amount / total_sales if total_sales else ZERO,
-        "gross_profit": sales.get("gross_profit"),
-        "gross_margin": _decimal(sales.get("gross_profit")) / total_sales if total_sales else None,
-        "total_inventory_amount": _decimal(inventory.get("total_amount")),
-        "inventory_total_qty": _decimal(inventory.get("total_qty")),
-        "inventory_age_unknown_qty": _decimal(inventory.get("age_unknown_qty")),
-        "inventory_age_unknown_amount": _decimal(inventory.get("age_unknown_amount")),
-        "age_90_plus_amount": _decimal(inventory.get("age_91_180_amount")) + _decimal(inventory.get("age_180_plus_amount")),
-        "age_180_plus_amount": _decimal(inventory.get("age_180_plus_amount")),
-        "vip_balance": _decimal(members.get("vip_balance")),
-        "vip_negative_balance_count": int(members.get("negative_count") or 0),
-        "vip_negative_balance_amount": _decimal(members.get("negative_amount")),
+        "return_rate": (
+            return_amount / total_sales
+            if total_sales and return_amount is not None else existing.get("return_rate")
+        ),
+        "gross_profit": gross_profit,
+        "gross_margin": (
+            _optional_decimal(gross_profit) / total_sales
+            if gross_profit is not None and total_sales else existing.get("gross_margin")
+        ),
+        "total_inventory_amount": preserve_trusted_value(
+            _decimal(inventory.get("total_amount")), source_ready=inventory_ready, previous=existing.get("total_inventory_amount")
+        ),
+        "inventory_total_qty": preserve_trusted_value(
+            _decimal(inventory.get("total_qty")), source_ready=inventory_ready, previous=existing.get("inventory_total_qty")
+        ),
+        "inventory_age_unknown_qty": preserve_trusted_value(
+            _decimal(inventory.get("age_unknown_qty")), source_ready=inventory_ready, previous=existing.get("inventory_age_unknown_qty")
+        ),
+        "inventory_age_unknown_amount": preserve_trusted_value(
+            _decimal(inventory.get("age_unknown_amount")), source_ready=inventory_ready, previous=existing.get("inventory_age_unknown_amount")
+        ),
+        "age_90_plus_amount": preserve_trusted_value(
+            _decimal(inventory.get("age_91_180_amount")) + _decimal(inventory.get("age_180_plus_amount")),
+            source_ready=inventory_ready,
+            previous=existing.get("age_90_plus_amount"),
+        ),
+        "age_180_plus_amount": preserve_trusted_value(
+            _decimal(inventory.get("age_180_plus_amount")), source_ready=inventory_ready, previous=existing.get("age_180_plus_amount")
+        ),
+        "vip_balance": preserve_trusted_value(
+            _decimal(members.get("vip_balance")), source_ready=member_ready, previous=existing.get("vip_balance")
+        ),
+        "vip_negative_balance_count": preserve_trusted_value(
+            int(members.get("negative_count") or 0), source_ready=member_ready, previous=existing.get("vip_negative_balance_count")
+        ),
+        "vip_negative_balance_amount": preserve_trusted_value(
+            _decimal(members.get("negative_amount")), source_ready=member_ready, previous=existing.get("vip_negative_balance_amount")
+        ),
         "vip_sales_amount": vip_sales,
-        "vip_sales_ratio": vip_sales / total_sales if total_sales else ZERO,
+        "vip_sales_ratio": (
+            vip_sales / total_sales
+            if vip_sales is not None and total_sales else existing.get("vip_sales_ratio")
+        ),
         "pending_task_count": int(tasks.get("pending") or 0),
         "overdue_task_count": int(tasks.get("overdue") or 0),
         "exception_count": int(risks.get("total") or 0) + int(warning_count),
