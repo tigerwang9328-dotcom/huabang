@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal, engine
 from app.integrations.baison.services.product_inbound_service import sync_product_inbound
+from app.integrations.baison.services.product_transfer_inbound_service import sync_product_transfer_inbound
 
 
 def parse_args():
@@ -28,6 +29,11 @@ async def main(days: int) -> None:
                 end_date=end_date,
                 history_start_date=start_date,
             )
+            transfer_result = await sync_product_transfer_inbound(
+                db,
+                start_date=start_date,
+                end_date=end_date,
+            )
             await db.commit()
             counts = (await db.execute(text("""
                 SELECT
@@ -36,8 +42,13 @@ async def main(days: int) -> None:
                   (SELECT min(record_date) FROM dwd.dwd_baison_purchase_inbound) first_date,
                   (SELECT max(record_date) FROM dwd.dwd_baison_purchase_inbound) last_date
             """))).mappings().one()
+            transfer_count = (await db.execute(text(
+                "SELECT count(*) FROM dwd.dwd_baison_transfer_inbound"
+            ))).scalar_one()
             print(json.dumps({
                 **result,
+                "transfer_line_count": transfer_result["line_count"],
+                "transfer_detail_count": int(transfer_count),
                 "detail_count": int(counts["detail_count"]),
                 "product_count": int(counts["product_count"]),
                 "first_date": str(counts["first_date"] or ""),

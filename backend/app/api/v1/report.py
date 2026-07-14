@@ -48,7 +48,9 @@ async def list_boss_daily(
     end_date = date.today() - timedelta(days=1)
     start_date = end_date - timedelta(days=days - 1)
     r = await db.execute(text("""
-        SELECT report_date, total_sales, order_count, gross_margin,
+        SELECT report_date, total_sales, actual_pay_amount, order_count,
+               item_count, avg_order_value, items_per_order,
+               gross_profit, gross_margin, vip_sales_amount,
                is_cost_complete, ai_summary, generated_at
         FROM dm.dm_boss_daily_report
         WHERE report_date BETWEEN :start AND :end
@@ -57,10 +59,16 @@ async def list_boss_daily(
     items = [{
         "report_date": str(row[0]),
         "total_sales": float(row[1] or 0),
-        "order_count": int(row[2] or 0),
-        "gross_margin": float(row[3] or 0),
-        "is_cost_complete": bool(row[4]),
-        "has_ai_summary": bool(row[5]),
-        "generated_at": str(row[6]) if row[6] else None,
+        "actual_pay_amount": float(row[2]) if row[2] is not None else None,
+        "order_count": int(row[3] or 0),
+        "item_count": int(row[4]) if row[4] is not None else None,
+        "avg_order_value": float(row[5]) if row[5] is not None else None,
+        "items_per_order": float(row[6]) if row[6] is not None else None,
+        "gross_profit": float(row[7]) if row[7] is not None else None,
+        "gross_margin": float(row[8]) if row[8] is not None else None,
+        "vip_sales_amount": float(row[9]) if row[9] is not None else None,
+        "is_cost_complete": bool(row[10]),
+        "has_ai_summary": bool(row[11]),
+        "generated_at": str(row[12]) if row[12] else None,
     } for row in r.fetchall()]
     return ApiResponse.ok(data={"items": items, "total": len(items)})

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import require_permission
 from app.core.data_scope import get_data_scope
 from app.core.database import get_db
-from app.core.store_whitelist import ALLOWED_STORE_CODES
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
 from app.models.sys import SysUser
 
 logger = logging.getLogger("member.api")
@@ -374,3 +374,140 @@ async def list_member_visits(
     except Exception:
         logger.exception("member visits error")
         return {"success": False, "message": "会员回访查询失败，请查看服务日志"}
+
+
+@router.get("/assets/overview")
+async def member_asset_overview(
+    current_user: SysUser = Depends(require_permission("sales:store:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """VIP储值资产概览；当前余额以百胜会员主档CZ_DQJE为准。"""
+    codes = sorted(ALLOWED_INVENTORY_CODES)
+    summary = (await db.execute(text("""
+        SELECT COUNT(*) member_count,
+               COUNT(*) FILTER (WHERE current_balance>0) balance_member_count,
+               COALESCE(SUM(GREATEST(COALESCE(current_balance,0),0)),0) total_balance,
+               COUNT(*) FILTER (WHERE current_balance<0) negative_balance_count,
+               COALESCE(SUM(ABS(current_balance)) FILTER (WHERE current_balance<0),0) negative_balance_amount,
+               COALESCE(SUM(GREATEST(COALESCE(current_balance,0),0)) FILTER (
+                   WHERE last_consume_date<CURRENT_DATE-90
+               ),0) dormant_balance_90d,
+               COUNT(*) FILTER (WHERE current_balance>0 AND last_consume_date<CURRENT_DATE-90) dormant_member_90d,
+               MAX(balance_updated_at) updated_at
+        FROM dim.dim_member
+        WHERE UPPER(register_store)=ANY(:codes) AND COALESCE(status,'active')='active'
+    """), {"codes": codes})).mappings().one()
+    stores = (await db.execute(text("""
+        SELECT UPPER(m.register_store) store_code,
+               COALESCE(s.store_name,w.warehouse_name,m.register_store) store_name,
+               COUNT(*) FILTER (WHERE m.current_balance>0) member_count,
+               COALESCE(SUM(GREATEST(COALESCE(m.current_balance,0),0)),0) balance
+        FROM dim.dim_member m
+        LEFT JOIN dim.dim_store s ON s.store_code=m.register_store
+        LEFT JOIN dim.dim_warehouse w ON w.warehouse_code=UPPER(m.register_store)
+        WHERE UPPER(m.register_store)=ANY(:codes) AND COALESCE(m.status,'active')='active'
+        GROUP BY UPPER(m.register_store),s.store_name,w.warehouse_name,m.register_store
+        ORDER BY balance DESC
+    """), {"codes": codes})).mappings().all()
+    deposits = (await db.execute(text("""
+        SELECT COALESCE(SUM(money_change) FILTER (WHERE business_type='recharge'),0) recharge_30d,
+               COALESCE(SUM(ABS(money_change)) FILTER (WHERE business_type='consume'),0) consume_30d,
+               COUNT(DISTINCT member_no) FILTER (WHERE business_type='recharge') recharge_member_30d,
+               MAX(synced_at) updated_at
+        FROM dwd.dwd_baison_member_deposit_log
+        WHERE biz_date BETWEEN CURRENT_DATE-29 AND CURRENT_DATE AND UPPER(store_code)=ANY(:codes)
+    """), {"codes": codes})).mappings().one()
+    data = dict(summary)
+    for key in ("total_balance", "negative_balance_amount", "dormant_balance_90d"):
+        data[key] = round(_num(data.get(key)), 2)
+    data["updated_at"] = _time_str(data.get("updated_at"))
+    data["recharge_30d"] = round(_num(deposits.get("recharge_30d")), 2)
+    data["consume_30d"] = round(_num(deposits.get("consume_30d")), 2)
+    data["recharge_member_30d"] = int(deposits.get("recharge_member_30d") or 0)
+    data["transaction_updated_at"] = _time_str(deposits.get("updated_at"))
+    return {"success": True, "data": {"summary": data, "stores": [
+        {**dict(row), "member_count": int(row["member_count"] or 0), "balance": round(_num(row["balance"]),2)} for row in stores
+    ], "scope_codes": codes, "balance_source": "百胜会员主档 CZ_DQJE"}}
+
+
+@router.get("/assets/list")
+async def list_member_assets(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    keyword: Optional[str] = None,
+    store_code: Optional[str] = None,
+    balance_status: Optional[str] = None,
+    min_balance: float = Query(0, ge=0),
+    current_user: SysUser = Depends(require_permission("sales:store:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = sorted(ALLOWED_INVENTORY_CODES)
+    conditions = ["UPPER(m.register_store)=ANY(:codes)", "COALESCE(m.status,'active')='active'"]
+    params: dict[str, Any] = {"codes": codes, "min_balance": min_balance, "limit": page_size, "offset": (page-1)*page_size}
+    if keyword and keyword.strip():
+        conditions.append("(m.member_no ILIKE :kw OR m.member_name ILIKE :kw OR m.phone ILIKE :kw)")
+        params["kw"] = f"%{keyword.strip()}%"
+    if store_code:
+        if store_code.upper() not in ALLOWED_INVENTORY_CODES:
+            return {"success": False, "message": "门店不在VIP统计范围"}
+        conditions.append("UPPER(m.register_store)=:store_code")
+        params["store_code"] = store_code.upper()
+    if balance_status == "positive":
+        conditions.append("m.current_balance>=GREATEST(:min_balance,0.01)")
+    elif balance_status == "negative":
+        conditions.append("m.current_balance<0")
+    elif balance_status == "dormant":
+        conditions.extend(["m.current_balance>0", "m.last_consume_date<CURRENT_DATE-90"])
+    elif balance_status == "high":
+        conditions.append("m.current_balance>=5000")
+    else:
+        conditions.append("COALESCE(m.current_balance,0)>=:min_balance")
+    where_sql = " AND ".join(conditions)
+    total = (await db.execute(text(f"SELECT COUNT(*) FROM dim.dim_member m WHERE {where_sql}"), params)).scalar() or 0
+    rows = (await db.execute(text(f"""
+        SELECT m.member_no,m.member_name,m.phone,m.register_store,
+               COALESCE(s.store_name,w.warehouse_name,m.register_store) register_store_name,
+               m.member_level,m.current_balance,m.total_amount,m.total_count,
+               m.last_consume_date,m.balance_updated_at,
+               CASE WHEN m.current_balance<0 THEN 'negative'
+                    WHEN m.current_balance>0 AND m.last_consume_date<CURRENT_DATE-90 THEN 'dormant'
+                    WHEN m.current_balance>=5000 THEN 'high' ELSE 'normal' END balance_status
+        FROM dim.dim_member m
+        LEFT JOIN dim.dim_store s ON s.store_code=m.register_store
+        LEFT JOIN dim.dim_warehouse w ON w.warehouse_code=UPPER(m.register_store)
+        WHERE {where_sql}
+        ORDER BY m.current_balance DESC NULLS LAST,m.last_consume_date NULLS FIRST,m.member_no
+        LIMIT :limit OFFSET :offset
+    """), params)).mappings().all()
+    items=[]
+    for row in rows:
+        item=dict(row); item["phone"]=_mask_member_key(item.get("phone")); item["current_balance"]=round(_num(item.get("current_balance")),2)
+        item["total_amount"]=round(_num(item.get("total_amount")),2); item["last_consume_date"]=_date_str(item.get("last_consume_date")); item["balance_updated_at"]=_time_str(item.get("balance_updated_at")); items.append(item)
+    return {"success": True, "data": {"items": items,"total": int(total),"page": page,"page_size": page_size}}
+
+
+@router.get("/assets/transactions")
+async def list_member_asset_transactions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    store_code: Optional[str] = None,
+    business_type: Optional[str] = None,
+    keyword: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("sales:store:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes=sorted(ALLOWED_INVENTORY_CODES); end=date.fromisoformat(end_date) if end_date else date.today(); start=date.fromisoformat(start_date) if start_date else end.replace(day=1)
+    conditions=["l.biz_date BETWEEN :start AND :end","UPPER(l.store_code)=ANY(:codes)"]; params:dict[str,Any]={"start":start,"end":end,"codes":codes,"limit":page_size,"offset":(page-1)*page_size}
+    if store_code: conditions.append("UPPER(l.store_code)=:store_code"); params["store_code"]=store_code.upper()
+    if business_type: conditions.append("l.business_type=:business_type"); params["business_type"]=business_type
+    if keyword and keyword.strip(): conditions.append("(l.member_no ILIKE :kw OR m.member_name ILIKE :kw OR l.customer_phone ILIKE :kw)"); params["kw"]=f"%{keyword.strip()}%"
+    where_sql=" AND ".join(conditions); total=(await db.execute(text(f"SELECT COUNT(*) FROM dwd.dwd_baison_member_deposit_log l LEFT JOIN dim.dim_member m ON m.member_no=l.member_no WHERE {where_sql}"),params)).scalar() or 0
+    rows=(await db.execute(text(f"""SELECT l.source_log_id,l.member_no,m.member_name,COALESCE(m.phone,l.customer_phone) phone,l.store_code,l.store_name,l.business_type,l.money_before,l.money_change,l.money_after,l.occurred_at,l.biz_date,l.remark FROM dwd.dwd_baison_member_deposit_log l LEFT JOIN dim.dim_member m ON m.member_no=l.member_no WHERE {where_sql} ORDER BY l.occurred_at DESC,l.id DESC LIMIT :limit OFFSET :offset"""),params)).mappings().all()
+    items=[]
+    for row in rows:
+        item=dict(row); item["phone"]=_mask_member_key(item.get("phone")); item["biz_date"]=_date_str(item.get("biz_date")); item["occurred_at"]=_time_str(item.get("occurred_at"))
+        for key in ("money_before","money_change","money_after"): item[key]=round(_num(item.get(key)),2)
+        items.append(item)
+    return {"success":True,"data":{"items":items,"total":int(total),"page":page,"page_size":page_size,"date_range":{"start_date":str(start),"end_date":str(end)}}}

@@ -149,6 +149,8 @@ class DimMember(Base):
     member_level = Column(String(32))
     total_amount = Column(Numeric(14, 2))
     total_count = Column(Integer)
+    current_balance = Column(Numeric(14, 2), comment="百胜CZ_DQJE当前储值余额")
+    balance_updated_at = Column(DateTime(timezone=True))
     last_consume_date = Column(Date)
     last_consume_store = Column(String(32))
     rfm_score = Column(Numeric(4, 2), comment="RFM综合评分")

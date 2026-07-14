@@ -1,5 +1,5 @@
 <template>
-  <div class="member-page">
+  <div class="member-page command-light-page">
     <section class="member-header">
       <div>
         <div class="eyebrow">协同 / 会员运营</div>
@@ -58,7 +58,7 @@
           clearable
           size="small"
           class="keyword-input"
-          :placeholder="activeTab === 'profile' ? '搜索会员编号/姓名/手机' : '搜索会员线索/门店'"
+          :placeholder="['profile','assets','transactions'].includes(activeTab) ? '搜索会员编号/姓名/手机' : '搜索会员线索/门店'"
           @keyup.enter="handleSearch"
           @clear="handleSearch"
         />
@@ -71,6 +71,36 @@
 
     <section class="table-panel">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <el-tab-pane label="VIP资产" name="assets">
+          <el-table :data="assetRows" v-loading="assetLoading" border stripe size="small">
+            <el-table-column prop="member_no" label="会员编号" min-width="130" />
+            <el-table-column prop="member_name" label="会员" min-width="100" />
+            <el-table-column prop="phone" label="手机号" width="125" />
+            <el-table-column prop="register_store_name" label="注册门店" min-width="170" show-overflow-tooltip />
+            <el-table-column prop="member_level" label="等级" width="90" />
+            <el-table-column label="当前余额" width="125" sortable align="right"><template #default="{ row }"><strong :class="{ negative: row.current_balance < 0 }">{{ formatMoney(row.current_balance) }}</strong></template></el-table-column>
+            <el-table-column label="累计消费" width="125" align="right"><template #default="{ row }">{{ formatMoney(row.total_amount) }}</template></el-table-column>
+            <el-table-column prop="last_consume_date" label="最近消费" width="110" />
+            <el-table-column label="状态" width="96"><template #default="{ row }"><el-tag :type="assetStatusType(row.balance_status)" size="small">{{ assetStatusName(row.balance_status) }}</el-tag></template></el-table-column>
+          </el-table>
+          <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="assetTotal" v-model:current-page="assetPage" v-model:page-size="assetPageSize" :page-sizes="[20,50,100,200]" @current-change="fetchAssets" @size-change="resetAssetPage" /></div>
+        </el-tab-pane>
+
+        <el-tab-pane label="余额变动" name="transactions">
+          <el-table :data="transactionRows" v-loading="transactionLoading" border stripe size="small">
+            <el-table-column prop="occurred_at" label="发生时间" width="160" />
+            <el-table-column prop="member_no" label="会员编号" min-width="125" />
+            <el-table-column prop="member_name" label="会员" min-width="100" />
+            <el-table-column prop="store_name" label="门店" min-width="160" show-overflow-tooltip />
+            <el-table-column label="类型" width="90"><template #default="{ row }">{{ transactionType(row.business_type) }}</template></el-table-column>
+            <el-table-column label="变动前" width="110" align="right"><template #default="{ row }">{{ formatMoney(row.money_before) }}</template></el-table-column>
+            <el-table-column label="变动金额" width="110" align="right"><template #default="{ row }"><strong :class="row.money_change < 0 ? 'negative' : 'positive'">{{ formatMoney(row.money_change) }}</strong></template></el-table-column>
+            <el-table-column label="变动后" width="110" align="right"><template #default="{ row }">{{ formatMoney(row.money_after) }}</template></el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
+          </el-table>
+          <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="transactionTotal" v-model:current-page="transactionPage" v-model:page-size="transactionPageSize" :page-sizes="[20,50,100,200]" @current-change="fetchTransactions" @size-change="resetTransactionPage" /></div>
+        </el-tab-pane>
+
         <el-tab-pane label="小票会员线索" name="pos">
           <el-table :data="posRows" v-loading="posLoading" border stripe size="small">
             <el-table-column type="index" label="排名" width="68" align="center" />
@@ -166,13 +196,15 @@ import { Refresh, Search } from "@element-plus/icons-vue";
 import { memberApi } from "@/api/member";
 
 type Preset = "latest" | "last7" | "last30" | "custom";
-type TabName = "pos" | "profile" | "visits";
+type TabName = "assets" | "transactions" | "pos" | "profile" | "visits";
 
 const overviewLoading = ref(false);
 const posLoading = ref(false);
 const profileLoading = ref(false);
 const visitLoading = ref(false);
-const activeTab = ref<TabName>("pos");
+const assetLoading = ref(false);
+const transactionLoading = ref(false);
+const activeTab = ref<TabName>("assets");
 const preset = ref<Preset>("latest");
 const keyword = ref("");
 const dateRange = ref<[string, string]>(["", ""]);
@@ -187,6 +219,9 @@ const dataStatus = ref<any>({});
 const posRows = ref<any[]>([]);
 const profileRows = ref<any[]>([]);
 const visitRows = ref<any[]>([]);
+const assetOverview = ref<any>({});
+const assetRows = ref<any[]>([]); const assetTotal = ref(0); const assetPage = ref(1); const assetPageSize = ref(20);
+const transactionRows = ref<any[]>([]); const transactionTotal = ref(0); const transactionPage = ref(1); const transactionPageSize = ref(20);
 
 function parseDate(value: string) {
   const d = new Date(`${value}T00:00:00`);
@@ -228,30 +263,33 @@ function formatTime(value: any) {
 const statusText = computed(() => (dataStatus.value.member_profile_synced ? "会员档案已同步" : "展示小票会员线索"));
 const statusTagType = computed(() => (dataStatus.value.member_profile_synced ? "success" : "warning"));
 const activeLoading = computed(() => {
+  if (activeTab.value === "assets") return assetLoading.value;
+  if (activeTab.value === "transactions") return transactionLoading.value;
   if (activeTab.value === "profile") return profileLoading.value;
   if (activeTab.value === "visits") return visitLoading.value;
   return posLoading.value;
 });
 
 const metricCards = computed(() => [
+  { label: "VIP正余额", value: formatMoney(assetOverview.value.total_balance), sub: "百胜会员主档 CZ_DQJE" },
+  { label: "有余额会员", value: Number(assetOverview.value.balance_member_count || 0).toLocaleString("zh-CN"), sub: `${assetOverview.value.negative_balance_count || 0} 人负余额单列` },
+  { label: "90天沉睡余额", value: formatMoney(assetOverview.value.dormant_balance_90d), sub: `${assetOverview.value.dormant_member_90d || 0} 位会员` },
+  { label: "近30天充值", value: formatMoney(assetOverview.value.recharge_30d), sub: `${assetOverview.value.recharge_member_30d || 0} 位充值会员` },
   { label: "会员档案数", value: Number(summary.value.profile_members || 0).toLocaleString("zh-CN"), sub: "dim_member" },
-  { label: "小票会员线索", value: Number(summary.value.member_clues || 0).toLocaleString("zh-CN"), sub: `${summary.value.member_tickets || 0} 张会员小票` },
   { label: "会员销售额", value: formatMoney(summary.value.member_sales), sub: `占比 ${formatPercent(summary.value.member_sales_ratio)}` },
-  { label: "会员实收金额", value: formatMoney(summary.value.member_actual), sub: "按小票会员标识聚合" },
-  { label: "今日回访", value: Number(summary.value.today_visits || 0).toLocaleString("zh-CN"), sub: `${summary.value.pending_visits || 0} 待跟进` },
-  { label: "会员小票占比", value: formatPercent(summary.value.member_ticket_ratio), sub: `${summary.value.total_tickets || 0} 张总小票` },
 ]);
 
 async function fetchOverview() {
   overviewLoading.value = true;
   try {
-    const { data } = await memberApi.getOverview();
+    const [{ data }, { data: assetData }] = await Promise.all([memberApi.getOverview(), memberApi.getAssetOverview()]);
     if (!data?.success) {
       ElMessage.error(data?.message || "会员概览加载失败");
       return;
     }
     summary.value = data.data?.summary || {};
     dataStatus.value = data.data?.data_status || {};
+    assetOverview.value = assetData?.data?.summary || {};
     if (!dateRange.value[0] && summary.value.latest_ticket_date) applyPreset();
   } catch (e: any) {
     ElMessage.error(e?.message || "会员概览加载失败");
@@ -259,6 +297,34 @@ async function fetchOverview() {
     overviewLoading.value = false;
   }
 }
+
+async function fetchAssets() {
+  assetLoading.value = true;
+  try {
+    const params: any = { page: assetPage.value, page_size: assetPageSize.value };
+    if (keyword.value.trim()) params.keyword = keyword.value.trim();
+    const { data } = await memberApi.listAssets(params);
+    assetRows.value = data?.data?.items || []; assetTotal.value = data?.data?.total || 0;
+  } finally { assetLoading.value = false; }
+}
+
+async function fetchTransactions() {
+  transactionLoading.value = true;
+  try {
+    const params: any = { page: transactionPage.value, page_size: transactionPageSize.value };
+    if (dateRange.value[0]) params.start_date = dateRange.value[0];
+    if (dateRange.value[1]) params.end_date = dateRange.value[1];
+    if (keyword.value.trim()) params.keyword = keyword.value.trim();
+    const { data } = await memberApi.listAssetTransactions(params);
+    transactionRows.value = data?.data?.items || []; transactionTotal.value = data?.data?.total || 0;
+  } finally { transactionLoading.value = false; }
+}
+
+function resetAssetPage() { assetPage.value = 1; fetchAssets(); }
+function resetTransactionPage() { transactionPage.value = 1; fetchTransactions(); }
+function assetStatusName(value: string) { return ({ negative: "负余额", dormant: "沉睡", high: "高余额", normal: "正常" } as any)[value] || value; }
+function assetStatusType(value: string) { return ({ negative: "danger", dormant: "warning", high: "success", normal: "info" } as any)[value] || "info"; }
+function transactionType(value: string) { return ({ recharge: "充值", consume: "消费", refund: "退款" } as any)[value] || value; }
 
 function applyPreset() {
   const anchor = summary.value.latest_ticket_date || toDateString(new Date());
@@ -325,6 +391,8 @@ async function fetchVisits() {
 }
 
 function fetchActiveTab() {
+  if (activeTab.value === "assets") return fetchAssets();
+  if (activeTab.value === "transactions") return fetchTransactions();
   if (activeTab.value === "profile") return fetchProfiles();
   if (activeTab.value === "visits") return fetchVisits();
   return fetchPosMembers();
@@ -340,6 +408,8 @@ function handleTabChange() {
 }
 
 function handleSearch() {
+  if (activeTab.value === "assets") assetPage.value = 1;
+  if (activeTab.value === "transactions") transactionPage.value = 1;
   if (activeTab.value === "profile") profilePage.value = 1;
   if (activeTab.value === "pos") posPage.value = 1;
   fetchActiveTab();
@@ -357,7 +427,7 @@ function handleProfilePageSizeChange() {
 
 onMounted(async () => {
   await fetchOverview();
-  await fetchPosMembers();
+  await fetchAssets();
 });
 </script>
 
@@ -497,6 +567,8 @@ onMounted(async () => {
   justify-content: flex-end;
   padding-top: 12px;
 }
+.negative { color:#DC2626; }
+.positive { color:#059669; }
 
 @media (max-width: 1280px) {
   .summary-grid {

@@ -1,5 +1,5 @@
 <template>
-  <div class="analysis-page">
+  <div class="analysis-page command-light-page">
     <div class="page-header">
       <h2 class="page-title">商品分析</h2>
       <span class="page-desc">动销分析、商品主档、SKU档案、条码质量</span>
@@ -64,9 +64,23 @@
           <el-table-column prop="sales_amount" label="7天销售额" width="96" align="right" sortable="custom">
             <template #default="{ row }">{{ formatAmount(row.sales_amount) }}</template>
           </el-table-column>
-          <el-table-column label="AI建议" width="90">
+          <el-table-column prop="inventory_amount" label="库存金额" width="105" align="right">
+            <template #default="{ row }">{{ formatAmount(row.inventory_amount) }}</template>
+          </el-table-column>
+          <el-table-column prop="gross_profit" label="7天毛利" width="96" align="right">
+            <template #default="{ row }">{{ row.gross_profit == null ? '-' : formatAmount(row.gross_profit) }}</template>
+          </el-table-column>
+          <el-table-column prop="gross_margin" label="毛利率" width="86" align="right">
+            <template #default="{ row }">{{ row.gross_margin == null ? '-' : formatRate(row.gross_margin) }}</template>
+          </el-table-column>
+          <el-table-column prop="sell_through_rate" label="售罄率" width="86" align="right">
+            <template #default="{ row }">{{ formatRate(row.sell_through_rate) }}</template>
+          </el-table-column>
+          <el-table-column label="经营建议" width="100">
             <template #default="{ row }">
-              <el-tag :type="suggestionType(row.ai_suggestion)" size="small">{{ row.ai_suggestion || "-" }}</el-tag>
+              <el-tooltip :content="row.decision?.reason || '-'" placement="top">
+                <el-tag :type="decisionType(row.decision?.action)" size="small">{{ row.decision?.action || "-" }}</el-tag>
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column prop="source_system" label="来源" width="70" />
@@ -200,6 +214,10 @@ function formatNum(v: any) { return Number(v || 0).toLocaleString("zh-CN"); }
 function formatAmount(v: any) {
   return Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+function formatRate(v: any) { return `${(Number(v || 0) * 100).toFixed(1)}%`; }
+function decisionType(text: string) {
+  return ({ "补货": "success", "调拨": "warning", "清仓": "danger", "继续销售": "info" } as any)[text] || "info";
+}
 function suggestionType(text: string) {
   if (text === "正常") return "success";
   if (text === "持续跟进") return "primary";
@@ -330,7 +348,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.analysis-page { display: flex; flex-direction: column; gap: 14px; }
+.analysis-page { display: flex; flex-direction: column; gap: 14px; width: 100%; min-width: 0; overflow: hidden; }
 .page-header { display: flex; align-items: baseline; gap: 10px; }
 .page-title { font-size: 20px; font-weight: 700; color: #111827; margin: 0; }
 .page-desc { font-size: 12px; color: #9CA3AF; }
@@ -361,4 +379,11 @@ onMounted(() => {
 .barcode-card.info .bc-num { color: #1E5EFF; }
 .bc-label { font-size: 13px; color: #6B7280; margin-top: 4px; }
 @media (max-width: 1200px) { .summary-row { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 760px) {
+  .page-header { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .summary-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .summary-card { min-width: 0; padding: 12px 8px; }
+  .s-num { font-size: 18px; overflow-wrap: anywhere; }
+  .analysis-tabs { padding: 12px; overflow: hidden; }
+}
 </style>

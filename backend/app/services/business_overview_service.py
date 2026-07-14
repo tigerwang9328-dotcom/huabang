@@ -13,6 +13,7 @@ from app.core.store_whitelist import (
     allowed_inventory_sql_in,
     allowed_store_sql_in,
 )
+from app.services.sales_metric_service import PAY_DETAIL_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,8 @@ def _build_platform_sales(offline_sales, online_sales) -> list[dict]:
     if total <= 0:
         return []
     return [
-        {"name": "线下门店", "amount": round(offline, 2), "pct": round(offline / total * 100, 1)},
-        {"name": "线上渠道", "amount": round(online, 2), "pct": round(online / total * 100, 1)},
+        {"name": "线下门店", "amount": round(offline, 2), "pct": round(offline / total * 100, 2)},
+        {"name": "线上渠道", "amount": round(online, 2), "pct": round(online / total * 100, 2)},
     ]
 
 
@@ -116,6 +117,9 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
     store_in = sql_in(scoped_store_codes) if scoped_store_codes is not None else allowed_store_sql_in()
     inventory_in = sql_in(scoped_inventory_codes) if scoped_inventory_codes is not None else allowed_inventory_sql_in()
     scoped_to_store = bool(data_scope and data_scope.is_limited_store)
+    sales_store_codes = sorted(
+        scoped_store_codes if scoped_store_codes is not None else ALLOWED_STORE_CODES
+    )
     if scoped_to_store:
         counts["store_count"] = len(scoped_store_codes or [])
         counts["inventory_scope_count"] = len(scoped_inventory_codes or [])
@@ -158,6 +162,8 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
         # 经营指标（销售/毛利等 — 暂无真实数据）
         "business_metrics": {
             "yesterday_sales": _pending("销售明细尚未接入"),
+            "yesterday_offline_sales": _pending("销售渠道尚未拆分"),
+            "yesterday_online_sales": _pending("销售渠道尚未拆分"),
             "yesterday_sales_e3": _pending("E3销售额尚未接入"),
             "yesterday_sales_pinke": _pending("品氪销售额尚未接入"),
             "yesterday_actual_pay_amount": _pending("实收金额尚未接入"),
@@ -316,6 +322,12 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             total_items = int(dws_row["total_item_count"] or 0)
             bm["yesterday_sales_pinke"] = _value(round(pinke_sales, 2), 2)
             bm["yesterday_sales"] = bm["yesterday_sales_pinke"]
+            bm["yesterday_offline_sales"] = _value(
+                round(float(dws_row.get("offline_sales_amount") or 0), 2), 2
+            )
+            bm["yesterday_online_sales"] = _value(
+                round(float(dws_row.get("online_sales_amount") or 0), 2), 2
+            )
             data["platform_sales"] = _build_platform_sales(
                 dws_row.get("offline_sales_amount"),
                 dws_row.get("online_sales_amount"),
@@ -355,14 +367,17 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             )
         """))
         e3_result = await db.execute(text(f"""
-            WITH ticket AS (
-                SELECT COALESCE(SUM(sales_amount), 0) AS e3_sales,
-                       COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount
-                FROM dwd.dwd_pos_ticket
-                WHERE biz_date = :sd
-                  AND COALESCE(is_void, false) = false
-                  AND COALESCE(is_pending, false) = false
-                  AND COALESCE(store_code, '') IN {store_in}
+            WITH pay AS ({PAY_DETAIL_SQL}), ticket AS (
+                SELECT COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS e3_sales,
+                       COALESCE(SUM(COALESCE(pay.offline_sales_amount, t.sales_amount)), 0) AS offline_sales_amount,
+                       COALESCE(SUM(COALESCE(pay.online_sales_amount, 0)), 0) AS online_sales_amount,
+                       COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount
+                FROM dwd.dwd_pos_ticket t
+                LEFT JOIN pay ON pay.ticket_no = t.ticket_no
+                WHERE t.biz_date = :sd
+                  AND COALESCE(t.is_void, false) = false
+                  AND COALESCE(t.is_pending, false) = false
+                  AND COALESCE(t.store_code, '') IN {store_in}
             ), recharge AS (
                 SELECT COALESCE(SUM(recharge_amount), 0) AS recharge_amount
                 FROM dwd.dwd_store_recharge_daily
@@ -370,14 +385,25 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                   AND COALESCE(store_code, '') IN {store_in}
             )
             SELECT ticket.e3_sales,
+                   ticket.offline_sales_amount,
+                   ticket.online_sales_amount,
                    ticket.actual_pay_amount + recharge.recharge_amount AS actual_pay_amount
             FROM ticket CROSS JOIN recharge
-        """), {"sd": query_date})
+        """), {
+            "sd": query_date,
+            "ed": query_date,
+            "store_codes": sales_store_codes,
+        })
         e3_row = e3_result.mappings().first()
         e3_sales = float(e3_row["e3_sales"] or 0) if e3_row else 0
+        offline_sales = float(e3_row["offline_sales_amount"] or 0) if e3_row else 0
+        online_sales = float(e3_row["online_sales_amount"] or 0) if e3_row else 0
         actual_pay_amount = float(e3_row["actual_pay_amount"] or 0) if e3_row else 0
+        bm = data["business_metrics"]
+        bm["yesterday_offline_sales"] = _value(round(offline_sales, 2), 2)
+        bm["yesterday_online_sales"] = _value(round(online_sales, 2), 2)
+        data["platform_sales"] = _build_platform_sales(offline_sales, online_sales)
         if e3_sales > 0:
-            bm = data["business_metrics"]
             bm["yesterday_sales_e3"] = _value(round(e3_sales, 2), 2)
             bm["yesterday_sales"] = bm["yesterday_sales_e3"]
         if actual_pay_amount > 0:
@@ -540,9 +566,13 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
         except Exception:
             logger.exception("获取 DWD 销售/小票数据失败，使用待接入占位")
 
-    # 门店权限或旧日期缺少 DWS 渠道汇总时，当前 POS 数据均属于线下门店。
+    # 旧日期缺少结算明细时回退现有小票销售额，并明确归入线下。
     if not data["platform_sales"]:
         sales_value = data["business_metrics"]["yesterday_sales"].get("value")
+        data["business_metrics"]["yesterday_offline_sales"] = _value(
+            round(float(sales_value or 0), 2), 2
+        )
+        data["business_metrics"]["yesterday_online_sales"] = _value(0, 2)
         data["platform_sales"] = _build_platform_sales(sales_value, 0)
 
     # 尝试获取任务汇总

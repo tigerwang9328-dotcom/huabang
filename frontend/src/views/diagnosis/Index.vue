@@ -1,8 +1,8 @@
 <template>
-  <div class="ai-diagnosis-page">
+  <div class="ai-diagnosis-page command-light-page">
     <section class="hero">
       <div>
-        <p>AI BUSINESS DIAGNOSIS</p>
+        <p>AI经营诊断 / 风险与行动</p>
         <h1>{{ currentModule.label }}</h1>
         <span>不是普通报表，而是回答：哪里出问题、谁处理、几点前处理、明天怎么复查。</span>
       </div>
@@ -44,7 +44,7 @@
     <section class="summary-card">
       <div class="section-title">
         <div>
-          <p>AI DIAGNOSIS SUMMARY</p>
+          <p>诊断结论</p>
           <h2>AI诊断摘要</h2>
         </div>
         <el-tag :type="dataQuality.is_complete ? 'success' : 'warning'">{{ dataQuality.is_complete ? "数据完整" : "数据需补齐" }}</el-tag>
@@ -55,7 +55,7 @@
 
     <section v-if="moduleKey === 'overview'" class="focus-grid">
       <div class="panel">
-        <div class="section-title"><div><p>TOP 3 ACTIONS</p><h2>今日最应该抓的三件事</h2></div></div>
+        <div class="section-title"><div><p>今日行动</p><h2>今日最应该抓的三件事</h2></div></div>
         <div v-if="diagnoses.length" class="focus-list">
           <article v-for="d in diagnoses.slice(0, 3)" :key="d.id" class="focus-item" :class="d.level">
             <el-tag :type="levelType(d.level)">{{ d.level_label }}风险</el-tag>
@@ -73,7 +73,7 @@
         <el-empty v-else description="暂无高优先级诊断，或数据尚未同步" />
       </div>
       <div class="panel">
-        <div class="section-title"><div><p>RISK RADAR</p><h2>风险雷达</h2></div></div>
+        <div class="section-title"><div><p>风险概览</p><h2>风险雷达</h2></div></div>
         <div class="risk-radar">
           <div v-for="r in risks" :key="r.name" class="risk-pill" :class="r.level">
             <span>{{ r.name }}</span>
@@ -305,10 +305,10 @@ onMounted(loadData);
 .score-card small { display: block; color: #64748b; font-weight: 800; margin-bottom: 10px; }
 .score-card strong { display: block; font-size: 25px; line-height: 1.15; letter-spacing: -.03em; }
 .score-card span { display: block; margin-top: 9px; color: #94a3b8; font-size: 12px; line-height: 1.5; }
-.main-score { background: linear-gradient(135deg, #0f172a, #1e293b); color: #fff; border-color: transparent; }
-.main-score small, .main-score span { color: rgba(255,255,255,.72); }
-.main-score strong { font-size: 42px; color: #f8d36d; }
-.summary-card, .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 20px; padding: 22px; box-shadow: 0 12px 32px rgba(15,23,42,.05); margin-bottom: 18px; }
+.main-score { background: #FFFBEB; color: #78350F; border-color: #FDE7B2; }
+.main-score small, .main-score span { color: #92704A; }
+.main-score strong { font-size: 42px; color: #B45309; }
+.summary-card, .panel { background: #fff; border: 1px solid #e5eaf2; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(15,23,42,.035); margin-bottom: 18px; }
 .section-title { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 16px; }
 .section-title h2 { margin: 0; font-size: 21px; }
 .summary-text { color: #334155; line-height: 1.9; font-size: 15px; margin: 0; }

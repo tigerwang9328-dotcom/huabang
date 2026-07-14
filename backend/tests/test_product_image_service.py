@@ -54,3 +54,18 @@ async def test_upsert_matches_prefixed_api_color_to_normalized_pair():
     )
     assert urls[("P001", "50")].endswith("p001-50.jpg")
     assert db.params[0]["color_code"] == "50"
+
+
+@pytest.mark.asyncio
+async def test_upsert_uses_stable_pair_order_to_avoid_concurrent_deadlocks():
+    db = FakeDb()
+    await _upsert_image_rows(
+        db,
+        [("P002", "20"), ("P001", "50")],
+        [],
+        datetime.now(timezone.utc),
+    )
+    assert [(row["product_code"], row["color_code"]) for row in db.params] == [
+        ("P001", "50"),
+        ("P002", "20"),
+    ]

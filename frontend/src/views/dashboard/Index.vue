@@ -1,8 +1,8 @@
 <template>
-  <div class="ops-dashboard" :class="{ ready: !loading }">
+  <div class="ops-dashboard command-light-page" :class="{ ready: !loading }">
     <section class="ops-hero">
       <div>
-        <p class="eyebrow">HUABANG BUSINESS COMMAND CENTER</p>
+        <p class="eyebrow">经营管理 / 公司经营总览</p>
         <h1>经营总览</h1>
         <p class="hero-sub">销售、库存、人力与AI诊断统一看板。所有已接入数据保持原接口口径，未接入项明确标识。</p>
       </div>
@@ -23,11 +23,22 @@
       </div>
     </section>
 
+    <section class="decision-strip" v-if="commandCenter.available">
+      <div>
+        <p class="module-kicker">昨日经营结论</p>
+        <strong>{{ commandCenter.decision_summary }}</strong>
+        <div class="freshness-line">
+          <span v-for="item in freshnessItems" :key="item.label">{{ item.label }} {{ item.value }}</span>
+        </div>
+      </div>
+      <el-button type="primary" plain @click="router.push('/app/report')">查看经营日报</el-button>
+    </section>
+
     <section class="module-card api-panel">
       <div class="module-head">
         <div>
-          <p class="module-kicker">API METRICS</p>
-          <h2>公司经营核心 API 卡片</h2>
+          <p class="module-kicker">核心指标</p>
+          <h2>公司经营核心指标</h2>
         </div>
         <span class="module-note">固定成本未接入前，纯利润按“待财务成本接入”处理</span>
       </div>
@@ -43,8 +54,8 @@
     <section class="module-card sales-panel">
       <div class="module-head">
         <div>
-          <p class="module-kicker">SALES</p>
-          <h2>销售模块</h2>
+          <p class="module-kicker">销售经营</p>
+          <h2>销售分析</h2>
         </div>
         <span class="module-note">按线上 / 线下 / 门店三个维度看昨日经营</span>
       </div>
@@ -88,8 +99,8 @@
       <div class="module-card inventory-panel">
         <div class="module-head compact">
           <div>
-            <p class="module-kicker">INVENTORY</p>
-            <h2>库存模块</h2>
+            <p class="module-kicker">库存经营</p>
+            <h2>库存分析</h2>
           </div>
         </div>
         <div class="inventory-kpis">
@@ -111,7 +122,7 @@
       <div class="module-card hr-panel">
         <div class="module-head compact">
           <div>
-            <p class="module-kicker">HUMAN RESOURCE</p>
+            <p class="module-kicker">任务与人效</p>
             <h2>人力资源</h2>
           </div>
         </div>
@@ -137,11 +148,41 @@
         <div v-else class="empty-row">当前经营概览核心字段已接入</div>
       </details>
     </section>
+
+    <section class="decision-grid" v-if="commandCenter.available">
+      <div class="module-card risk-panel">
+        <div class="module-head compact">
+          <div><p class="module-kicker">经营风险</p><h2>重大异常</h2></div>
+          <el-tag type="danger" effect="plain">{{ commandCenter.major_risks?.length || 0 }} 项</el-tag>
+        </div>
+        <div v-if="commandCenter.major_risks?.length" class="decision-list">
+          <button v-for="risk in commandCenter.major_risks" :key="`${risk.exception_type}-${risk.id}`" class="decision-item" @click="openRisk(risk)">
+            <el-tag :type="risk.severity === 'critical' ? 'danger' : 'warning'" size="small">{{ risk.severity === 'critical' ? '紧急' : '风险' }}</el-tag>
+            <span><strong>{{ risk.description }}</strong><small>{{ risk.store_code || '公司' }} · {{ risk.product_code || risk.sku_code || risk.exception_type }}</small></span>
+          </button>
+        </div>
+        <el-empty v-else description="当前没有重大异常" :image-size="54" />
+      </div>
+      <div class="module-card action-panel">
+        <div class="module-head compact">
+          <div><p class="module-kicker">任务闭环</p><h2>今日行动清单</h2></div>
+          <el-button text type="primary" @click="router.push('/app/task')">全部任务</el-button>
+        </div>
+        <div v-if="commandCenter.today_actions?.length" class="decision-list">
+          <button v-for="task in commandCenter.today_actions" :key="task.id" class="decision-item" @click="router.push(`/app/task/${task.id}`)">
+            <el-tag :type="task.status === 'overdue' ? 'danger' : 'info'" size="small">{{ taskStatus(task.status) }}</el-tag>
+            <span><strong>{{ task.title }}</strong><small>{{ task.assignee_name || roleName(task.assignee_role) }} · 截止 {{ task.due_date || '待确认' }}</small></span>
+          </button>
+        </div>
+        <el-empty v-else description="今日暂无待办" :image-size="54" />
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { LineChart } from "echarts/charts";
@@ -157,6 +198,8 @@ const pendingFields = ref<any[]>([]);
 const trend = ref<any[]>([]);
 const storeRank = ref<any[]>([]);
 const rawOverview = ref<any>({});
+const commandCenter = ref<any>({});
+const router = useRouter();
 
 const yesterday = new Date();
 yesterday.setDate(yesterday.getDate() - 1);
@@ -198,32 +241,61 @@ function formatDecimal(v: any): string {
   return Number.isFinite(n) ? n.toFixed(2) : "--";
 }
 
-const goodsCost = computed(() => {
-  const sales = numberMetric("business_metrics", "yesterday_sales");
-  const grossProfit = numberMetric("business_metrics", "gross_profit");
-  if (sales === null || grossProfit === null) return null;
-  return Math.max(0, sales - grossProfit);
+function ccMetric(key: string) { return commandCenter.value?.core_metrics?.[key]; }
+function ccDisplay(key: string, type: "money" | "count" | "percent" = "count") {
+  const item = ccMetric(key);
+  if (!item || item.value === null || item.status === "pending_data") return "待接入";
+  if (type === "money") return fmtMoney(item.value);
+  if (type === "percent") return `${(Number(item.value) * 100).toFixed(1)}%`;
+  return Number(item.value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+function metricNote(key: string, fallback: string) {
+  const item = ccMetric(key);
+  const labels: Record<string, string> = { ready: "已就绪", estimated: "预估", pending_data: "待接入", stale: "数据陈旧" };
+  return item ? `${labels[item.status] || item.status} · ${item.source}` : fallback;
+}
+const apiCards = computed(() => [
+  { label: "销售额", value: ccDisplay("sales", "money"), note: metricNote("sales", "百胜小票"), tone: "orange" },
+  { label: "线下销售", value: moneyMetric("business_metrics", "yesterday_offline_sales"), note: "百胜非011结算", tone: "orange" },
+  { label: "线上销售", value: moneyMetric("business_metrics", "yesterday_online_sales"), note: "百胜011线上支付", tone: "blue" },
+  { label: "实收金额", value: ccDisplay("actual_pay", "money"), note: metricNote("actual_pay", "支付明细"), tone: "blue" },
+  { label: "订单数", value: ccDisplay("orders"), note: metricNote("orders", "百胜小票"), tone: "green" },
+  { label: "销售件数", value: ccDisplay("items"), note: metricNote("items", "百胜小票"), tone: "slate" },
+  { label: "客单价", value: ccDisplay("avg_order_value", "money"), note: metricNote("avg_order_value", "百胜小票"), tone: "gold" },
+  { label: "连带率", value: ccDisplay("items_per_order"), note: metricNote("items_per_order", "百胜小票"), tone: "slate" },
+  { label: "毛利额", value: ccDisplay("gross_profit", "money"), note: metricNote("gross_profit", "百胜成本"), tone: "orange" },
+  { label: "毛利率", value: ccDisplay("gross_margin", "percent"), note: metricNote("gross_margin", "百胜成本"), tone: "gold" },
+  { label: "库存金额", value: ccDisplay("inventory_amount", "money"), note: metricNote("inventory_amount", "外穿衣物库存"), tone: "blue" },
+  { label: "90天以上库存", value: ccDisplay("age_90_amount", "money"), note: metricNote("age_90_amount", "FIFO库龄"), tone: "muted" },
+  { label: "VIP余额", value: ccDisplay("vip_balance", "money"), note: metricNote("vip_balance", "CZ_DQJE"), tone: "green" },
+  { label: "VIP销售", value: ccDisplay("vip_sales", "money"), note: metricNote("vip_sales", "百胜会员小票"), tone: "slate" },
+]);
+
+const freshnessItems = computed(() => {
+  const sources = commandCenter.value?.data_quality?.source_freshness || {};
+  return [
+    { label: "销售", value: sources.sales?.business_date || "-" },
+    { label: "库存", value: sources.inventory?.snapshot_date || "-" },
+    { label: "会员", value: String(sources.member?.updated_at || "-").replace("T", " ").slice(0, 16) },
+  ];
 });
 
-const apiCards = computed(() => [
-  { label: "销售额", value: moneyMetric("business_metrics", "yesterday_sales"), note: "公司全渠道当前以百胜小票口径为准", tone: "orange" },
-  { label: "实收金额", value: moneyMetric("business_metrics", "yesterday_actual_pay_amount"), note: "收钱吧/现金/线上/充值-退款口径", tone: "blue" },
-  { label: "销售量", value: metricDisplay("business_metrics", "yesterday_items"), note: "昨日销售件数，按小票商品明细汇总", tone: "green" },
-  { label: "商品成本", value: goodsCost.value === null ? "待接入" : fmtMoney(goodsCost.value), note: "销售额 - 毛利额，成本缺失时为预估", tone: "slate" },
-  { label: "固定成本", value: "待接入", note: "房租 / 水电 / 人员工资需财务接入", tone: "muted" },
-  { label: "利润率", value: metricDisplay("business_metrics", "gross_margin") + "%", note: "当前为毛利率，待固定成本后切净利率", tone: "gold" },
-  { label: "纯利润", value: "待接入", note: "需商品成本 + 固定成本完整接入", tone: "muted" },
-]);
+function taskStatus(status: string) { return ({ draft: "待确认", pending: "待处理", processing: "处理中", overdue: "已逾期" } as any)[status] || status; }
+function roleName(role: string) { return ({ store_manager: "店长", operation: "运营" } as any)[role] || role || "待定责任人"; }
+function openRisk(risk: any) {
+  if (String(risk.exception_type || "").startsWith("inventory_")) router.push("/app/inventory?tab=warning");
+  else router.push("/app/warning");
+}
 
 const currentTrend = computed(() => trend.value[trend.value.length - 1] || {});
 const channelCards = computed(() => {
   const c = currentTrend.value;
-  const total = Number(c.total_sales || 0);
-  const offline = Number(c.offline_sales || 0);
-  const online = Number(c.online_sales || 0);
+  const offline = Number(numberMetric("business_metrics", "yesterday_offline_sales") ?? 0);
+  const online = Number(numberMetric("business_metrics", "yesterday_online_sales") ?? 0);
+  const total = offline + online;
   return [
-    { label: "线下销售", amount: fmtMoney(offline), meta: `${total ? ((offline / total) * 100).toFixed(1) : 0}% · ${c.order_count || 0} 单` },
-    { label: "线上销售", amount: fmtMoney(online), meta: online > 0 ? `${((online / total) * 100).toFixed(1)}%` : "线上平台待接入" },
+    { label: "线下销售", amount: fmtMoney(offline), meta: `${total ? ((offline / total) * 100).toFixed(2) : "0.00"}% · 百胜非011结算` },
+    { label: "线上销售", amount: fmtMoney(online), meta: `${total ? ((online / total) * 100).toFixed(2) : "0.00"}% · 百胜011线上支付` },
     { label: "销售件数", amount: formatBigNum(c.item_count || numberMetric("business_metrics", "yesterday_items")), meta: "昨日销售量" },
   ];
 });
@@ -273,6 +345,7 @@ async function fetchData() {
       dashboardApi.getStoreRank({ stat_date: selectedDate.value, top_n: 20 }),
     ]);
     rawOverview.value = r1.data.data || {};
+    commandCenter.value = rawOverview.value.command_center || {};
     dataDate.value = rawOverview.value.stat_date || "";
     pendingFields.value = rawOverview.value.pending_fields || [];
     trend.value = r2.data.data?.trend || [];
@@ -288,8 +361,7 @@ onMounted(fetchData);
 </script>
 
 <style scoped>
-.ops-dashboard { min-height: 100vh; padding: 0 24px 28px; background: #F6F8FB; color: #0F172A; opacity: 0; transform: translateY(8px); transition: .35s ease; }
-.ops-dashboard.ready { opacity: 1; transform: translateY(0); }
+.ops-dashboard { min-height: 100vh; padding: 0 24px 28px; background: #F6F8FB; color: #0F172A; }
 .ops-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding: 28px 0 22px; border-bottom: 1px solid #E2E8F0; }
 .eyebrow, .module-kicker { margin: 0 0 6px; font-size: 11px; letter-spacing: .16em; color: #C0762A; font-weight: 800; }
 .ops-hero h1 { margin: 0; font-size: 30px; letter-spacing: .08em; }
@@ -301,17 +373,27 @@ onMounted(fetchData);
 .refresh-btn svg { width: 16px; height: 16px; }
 .refresh-btn.spinning svg { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.module-card { background: #fff; border: 1px solid #E2E8F0; border-radius: 16px; padding: 22px; margin-top: 22px; box-shadow: 0 12px 32px rgba(15,23,42,.04); }
+.decision-strip { margin-top:18px; padding:16px 18px; background:#FFFBEB; color:#78350F; border:1px solid #FDE7B2; border-left:4px solid #F59E0B; border-radius:8px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.decision-strip strong { font-size:17px; line-height:1.7; }
+.freshness-line { display:flex; gap:18px; margin-top:8px; color:#92704A; font-size:12px; }
+.module-card { background: #fff; border: 1px solid #E2E8F0; border-radius: 8px; padding: 22px; margin-top: 22px; box-shadow: 0 8px 24px rgba(15,23,42,.04); }
 .module-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
 .module-head.compact { margin-bottom: 14px; }
 .module-head h2 { margin: 0; font-size: 20px; }
 .module-note { color: #94A3B8; font-size: 12px; }
-.api-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; }
-.api-card { border-radius: 14px; padding: 16px; min-height: 112px; background: #F8FAFC; border: 1px solid #EEF2F7; }
+.api-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.api-card { border-radius: 6px; padding: 14px; min-height: 96px; background: #F8FAFC; border: 1px solid #EEF2F7; }
 .api-card span, .channel-card span, .mini-kpi span, .hr-card span { display:block; color:#64748B; font-size:12px; margin-bottom:8px; }
 .api-card strong { display:block; font-size:22px; margin-bottom:8px; }
 .api-card small, .channel-card small, .hr-card small { color:#94A3B8; font-size:11px; line-height:1.45; }
 .api-card.orange { background:#FFF7ED; border-color:#FED7AA; } .api-card.blue { background:#EFF6FF; border-color:#BFDBFE; } .api-card.green { background:#F0FDF4; border-color:#BBF7D0; } .api-card.gold { background:#FEFCE8; border-color:#FDE68A; } .api-card.slate { background:#F8FAFC; } .api-card.muted { opacity:.78; }
+.decision-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+.decision-list { display:grid; gap:8px; }
+.decision-item { width:100%; display:grid; grid-template-columns:58px 1fr; align-items:start; gap:10px; padding:10px 0; background:transparent; border:0; border-bottom:1px solid #EEF2F7; text-align:left; cursor:pointer; }
+.decision-item:last-child { border-bottom:0; }
+.decision-item span { min-width:0; }
+.decision-item strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#0F172A; font-size:13px; }
+.decision-item small { display:block; margin-top:5px; color:#94A3B8; font-size:11px; }
 .sales-layout { display:grid; grid-template-columns: 340px 1fr; gap:18px; }
 .channel-grid { display:grid; gap:12px; }
 .channel-card { border:1px solid #EEF2F7; border-radius:14px; padding:18px; background:#FAFBFD; }
@@ -337,6 +419,6 @@ onMounted(fetchData);
 .governance-panel { margin-bottom:20px; } details summary { cursor:pointer; color:#64748B; font-size:13px; font-weight:700; } .pending-table { margin-top:14px; border-top:1px solid #EEF2F7; } .pending-row { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-bottom:1px solid #F1F5F9; font-size:12px; } code { background:#F1F5F9; padding:2px 6px; border-radius:6px; color:#0F172A; }
 .empty-row { padding:18px; color:#94A3B8; text-align:center; font-size:13px; }
 @media (max-width: 1440px) { .api-grid { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 1280px) { .api-grid { grid-template-columns: repeat(3, 1fr); } .sales-layout, .module-grid.two-col { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .ops-hero, .module-head { flex-direction:column; align-items:flex-start; } .hero-actions { flex-wrap:wrap; } .api-grid, .inventory-kpis, .hr-grid { grid-template-columns:1fr; } .store-row { grid-template-columns: 44px 1fr; } .store-row span:nth-child(n+3) { display:none; } }
+@media (max-width: 1280px) { .api-grid { grid-template-columns: repeat(3, 1fr); } .sales-layout, .module-grid.two-col, .decision-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .ops-dashboard { padding:0 0 20px; } .ops-hero, .module-head, .decision-strip { flex-direction:column; align-items:flex-start; } .hero-actions, .freshness-line { width:100%; flex-wrap:wrap; } .hero-actions .el-date-editor { flex:1; min-width:150px; } .date-pill { max-width:100%; } .api-grid, .inventory-kpis, .hr-grid { grid-template-columns:1fr; } .module-card { padding:16px; } .store-row { grid-template-columns: 44px 1fr; } .store-row span:nth-child(n+3) { display:none; } }
 </style>

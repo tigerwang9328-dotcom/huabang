@@ -13,11 +13,16 @@
   --text-primary: #111827;
   --text-secondary: #6B7280;
   --text-muted: #9CA3AF;
-  --border: #E5E7EB;
+  --border: #E5EAF2;
   --card-bg: #FFFFFF;
-  --card-radius: 12px;
-  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.1);
+  --card-radius: 8px;
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  --card-shadow-hover: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --panel-muted: #F8FAFC;
+  --panel-blue: #EFF6FF;
+  --panel-green: #F0FDF4;
+  --panel-amber: #FFFBEB;
+  --panel-red: #FEF2F2;
   --sidebar-width: 240px;
   --header-height: 56px;
 }
@@ -41,7 +46,6 @@ html, body {
 }
 .hb-card:hover {
   box-shadow: var(--card-shadow-hover);
-  transform: translateY(-1px);
 }
 
 .hb-section-title {
@@ -68,3 +72,70 @@ html, body {
 .status-dot.info    { background: var(--text-muted); }
 
 .value-money { font-variant-numeric: tabular-nums; }
+
+/* Opt-in treatment for the eight reworked command-center pages. */
+.command-light-page {
+  --command-border: #E5EAF2;
+  --command-muted: #F8FAFC;
+  --command-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  min-height: calc(100vh - var(--header-height));
+  color: var(--text-primary);
+  background: var(--primary-bg);
+  font-variant-numeric: tabular-nums;
+}
+
+.command-light-page .el-card,
+.command-light-page .module-card,
+.command-light-page .panel,
+.command-light-page .section-panel,
+.command-light-page .table-panel,
+.command-light-page .filter-panel,
+.command-light-page .chart-panel,
+.command-light-page .metric-card,
+.command-light-page .stat-card,
+.command-light-page .summary-card,
+.command-light-page .score-card,
+.command-light-page .api-card,
+.command-light-page .channel-card,
+.command-light-page .mini-kpi,
+.command-light-page .hr-card {
+  border: 1px solid var(--command-border) !important;
+  border-radius: var(--card-radius) !important;
+  background: var(--card-bg) !important;
+  box-shadow: var(--command-shadow) !important;
+}
+
+.command-light-page .el-card { --el-card-border-color: var(--command-border); }
+.command-light-page .el-card__header { border-bottom-color: #EEF2F7; }
+.command-light-page .el-table {
+  --el-table-border-color: #E9EDF3;
+  --el-table-header-bg-color: #F8FAFC;
+  --el-table-row-hover-bg-color: #F7FAFF;
+  color: #334155;
+}
+.command-light-page .el-table th.el-table__cell {
+  color: #64748B;
+  font-weight: 600;
+}
+.command-light-page .el-input__wrapper,
+.command-light-page .el-select__wrapper,
+.command-light-page .el-textarea__inner,
+.command-light-page .el-date-editor.el-input__wrapper {
+  box-shadow: 0 0 0 1px #DDE3EC inset;
+}
+.command-light-page .el-pagination { justify-content: flex-end; }
+.command-light-page pre,
+.command-light-page code,
+.command-light-page .jsonbox,
+.command-light-page .response-preview,
+.command-light-page .code-panel {
+  background: #F8FAFC !important;
+  color: #334155 !important;
+  border: 1px solid #E5EAF2;
+}
+
+@media (max-width: 760px) {
+  .command-light-page { min-height: calc(100vh - 52px); }
+  .command-light-page .el-pagination { justify-content: flex-start; overflow-x: auto; }
+  .command-light-page .el-card__body { padding: 14px; }
+}

@@ -1,0 +1,101 @@
+from datetime import date
+from decimal import Decimal
+
+from app.services.command_center_service import (
+    allocate_fifo_inventory,
+    build_metric,
+    build_template_summary,
+    inventory_warning_source_id,
+)
+from app.services.rule_engine import RuleEngine
+
+
+def test_fifo_inventory_keeps_newest_batches_after_old_stock_is_sold():
+    allocation = allocate_fifo_inventory(
+        current_qty=Decimal("8"),
+        batches=[
+            (date(2026, 1, 1), Decimal("10")),
+            (date(2026, 6, 1), Decimal("5")),
+            (date(2026, 7, 1), Decimal("4")),
+        ],
+        as_of=date(2026, 7, 13),
+    )
+
+    assert allocation == {
+        "qty_0_90": Decimal("8"),
+        "qty_91_180": Decimal("0"),
+        "qty_180_plus": Decimal("0"),
+        "qty_unknown": Decimal("0"),
+    }
+
+
+def test_fifo_inventory_exposes_quantity_without_inbound_history():
+    allocation = allocate_fifo_inventory(
+        current_qty=Decimal("12"),
+        batches=[(date(2026, 1, 1), Decimal("5"))],
+        as_of=date(2026, 7, 13),
+    )
+
+    assert allocation["qty_180_plus"] == Decimal("5")
+    assert allocation["qty_unknown"] == Decimal("7")
+
+
+def test_metric_does_not_turn_missing_data_into_zero():
+    metric = build_metric(None, source="online_platform", reason="线上平台待接入")
+
+    assert metric["value"] is None
+    assert metric["status"] == "pending_data"
+    assert metric["display"] == "待接入"
+
+
+def test_template_summary_avoids_profit_claim_when_finance_is_incomplete():
+    summary = build_template_summary(
+        sales=Decimal("26566"),
+        gross_profit=Decimal("9000"),
+        gross_margin=Decimal("0.3388"),
+        finance_complete=False,
+        risk_count=3,
+        pending_task_count=2,
+    )
+
+    assert "销售" in summary
+    assert "毛利" in summary
+    assert "净利润" not in summary
+    assert "赚钱" not in summary
+    assert "费用未完整接入" in summary
+
+
+def test_rule_thresholds_are_read_from_business_config():
+    engine = RuleEngine()
+    engine.config = {"R001": {"enabled": True, "thresholds": {"warning": 5200}}}
+
+    assert engine._threshold("R001", "warning", 3000) == 5200
+    assert engine._threshold("R001", "risk", 1000) == 1000
+
+
+def test_rule_task_source_id_is_stable_and_store_specific():
+    engine = RuleEngine()
+
+    first = engine._task_source_id("R006", "2026-07-12", "134681")
+    repeated = engine._task_source_id("R006", "2026-07-12", "134681")
+    other_store = engine._task_source_id("R006", "2026-07-12", "285702")
+
+    assert first == repeated
+    assert first != other_store
+    assert 0 <= first < 2**63
+
+
+def test_inventory_warning_source_id_survives_daily_warning_rebuilds():
+    first = inventory_warning_source_id(
+        date(2026, 7, 13), "134681", "30262T604", None, "negative"
+    )
+    repeated = inventory_warning_source_id(
+        date(2026, 7, 13), "134681", "30262T604", None, "negative"
+    )
+    other_product = inventory_warning_source_id(
+        date(2026, 7, 13), "134681", "31262T613", None, "negative"
+    )
+
+    assert first == repeated
+    assert first != other_product
+    assert 0 <= first < 2**63

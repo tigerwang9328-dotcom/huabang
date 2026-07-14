@@ -14,9 +14,32 @@ test('investment optimization page exposes verified-outcome decision UI', () => 
   }
 })
 
-test('router and menu expose the investment optimization page', () => {
+test('online sales owns investment optimization and business report', () => {
   const router = fs.readFileSync(path.join(root, 'router', 'index.ts'), 'utf8')
   const layout = fs.readFileSync(path.join(root, 'layouts', 'MainLayout.vue'), 'utf8')
+
+  const menuStart = layout.indexOf('const menuGroups')
+  const salesCenterStart = layout.indexOf('label: "销售中心"', menuStart)
+  const onlineSalesStart = layout.indexOf('label: "线上销售"', salesCenterStart)
+  const productStart = layout.indexOf('label: "商品经营"', onlineSalesStart)
+  const topLevelBlock = layout.slice(menuStart, salesCenterStart)
+  const onlineSalesBlock = layout.slice(onlineSalesStart, productStart)
+
   assert.equal(router.includes('marketing/investment'), true)
-  assert.equal(layout.includes('/app/marketing/investment'), true)
+  assert.equal(router.includes('path: "report"'), true)
+  assert.equal(topLevelBlock.includes('/app/marketing/investment'), false)
+  assert.equal(topLevelBlock.includes('/app/report'), false)
+  assert.equal(onlineSalesBlock.includes('/app/marketing/investment'), true)
+  assert.equal(onlineSalesBlock.includes('/app/report'), true)
+  assert.equal(onlineSalesBlock.indexOf('投流优化') < onlineSalesBlock.indexOf('经营日报'), true)
+  assert.equal(onlineSalesBlock.indexOf('经营日报') < onlineSalesBlock.indexOf('线上总览'), true)
+})
+
+test('an active nested route expands its menu hierarchy', () => {
+  const layout = fs.readFileSync(path.join(root, 'layouts', 'MainLayout.vue'), 'utf8')
+
+  assert.equal(layout.includes('const expandActiveMenuPath'), true)
+  assert.equal(layout.includes('next.add(groupKey(group))'), true)
+  assert.equal(layout.includes('next.add(menuKey(item))'), true)
+  assert.match(layout, /watch\(\(\) => route\.path, expandActiveMenuPath, \{ immediate: true \}\)/)
 })

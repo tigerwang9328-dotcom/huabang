@@ -3,7 +3,7 @@
 读取标准业务表 dim_store（不返回百胜原始字段、不暴露任何密钥）。
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.core.data_scope import get_data_scope
 from app.models.dim import DimStore
 from app.models.sys import SysUser
+from app.services.sales_metric_service import PAY_DETAIL_SQL
 
 logger = logging.getLogger("store.api")
 
@@ -32,48 +33,6 @@ def _parse_date(value: Optional[str], fallback: date) -> date:
     if not value:
         return fallback
     return date.fromisoformat(value[:10])
-
-
-PAY_DETAIL_SQL = """
-    SELECT t.ticket_no,
-           SUM(CASE
-                 WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
-                 ELSE 0
-               END) AS sales_amount,
-           SUM(CASE
-                 WHEN p->>'jsdm' IN ('000', '011', '666', '971')
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
-                 ELSE 0
-               END)
-           + SUM(CASE
-                   WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
-                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
-                   THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
-                   ELSE 0
-                 END) AS actual_pay_amount,
-           0::numeric AS recharge_amount,
-           -SUM(CASE
-                  WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
-                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
-                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
-                  ELSE 0
-                END) AS refund_amount
-    FROM dwd.dwd_pos_ticket t
-    CROSS JOIN LATERAL jsonb_array_elements(
-        CASE
-            WHEN jsonb_typeof(t.raw_data->'qtlsdjs_mx') = 'array' THEN t.raw_data->'qtlsdjs_mx'
-            ELSE '[]'::jsonb
-        END
-    ) p
-    WHERE t.biz_date >= CAST(:sd AS date) AND t.biz_date <= CAST(:ed AS date)
-      AND t.store_code = ANY(:store_codes)
-      AND COALESCE(t.is_void, false) = false
-      AND COALESCE(t.is_pending, false) = false
-    GROUP BY t.ticket_no
-"""
 
 
 @router.get("/list")
@@ -152,6 +111,9 @@ async def store_sales_analysis(
 
         sd = _parse_date(start_date, latest_date)
         ed = _parse_date(end_date, latest_date)
+        period_days = (ed - sd).days + 1
+        prev_ed = sd - timedelta(days=1)
+        prev_sd = prev_ed - timedelta(days=period_days - 1)
         kw = f"%{keyword.strip()}%" if keyword and keyword.strip() else ""
         params = {"sd": sd, "ed": ed, "store_codes": allowed_store_codes, "kw": kw}
         await db.execute(text("""
@@ -183,8 +145,11 @@ async def store_sales_analysis(
                        COALESCE(SUM(t.sales_qty), 0) AS sales_qty,
                        COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS sales_amount,
                        COALESCE(SUM(COALESCE(pay.actual_pay_amount, t.actual_pay_amount)), 0) AS actual_pay_amount,
-                       COALESCE(SUM(COALESCE(pay.recharge_amount, 0)), 0) AS recharge_amount,
                        COALESCE(SUM(COALESCE(pay.refund_amount, 0)), 0) AS refund_amount,
+                       COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)) FILTER (
+                           WHERE COALESCE(NULLIF(BTRIM(t.vip_code::text), ''),
+                                          NULLIF(BTRIM(t.customer_code::text), '')) IS NOT NULL
+                       ), 0) AS vip_sales_amount,
                        COALESCE(SUM(t.standard_amount), 0) AS standard_amount,
                        MAX(t.synced_at) AS last_synced_at
                 FROM dwd.dwd_pos_ticket t
@@ -209,6 +174,28 @@ async def store_sales_analysis(
                 WHERE biz_date >= CAST(:sd AS date) AND biz_date <= CAST(:ed AS date)
                   AND store_code = ANY(:store_codes)
                 GROUP BY store_code
+            ), previous AS (
+                SELECT t.store_code,
+                       COALESCE(SUM(COALESCE(pay.sales_amount, t.sales_amount)), 0) AS previous_sales_amount
+                FROM dwd.dwd_pos_ticket t
+                LEFT JOIN ({PAY_DETAIL_SQL}) pay ON pay.ticket_no=t.ticket_no
+                WHERE t.biz_date BETWEEN :prev_sd AND :prev_ed
+                  AND t.store_code=ANY(:store_codes)
+                  AND COALESCE(t.is_void,false)=false AND COALESCE(t.is_pending,false)=false
+                GROUP BY t.store_code
+            ), gross AS (
+                SELECT store_code, COALESCE(SUM(gross_profit),0) gross_profit,
+                       BOOL_AND(COALESCE(is_cost_complete,false)) is_cost_complete
+                FROM dws.dws_store_daily
+                WHERE stat_date BETWEEN :sd AND :ed AND channel='offline'
+                  AND store_code=ANY(:store_codes)
+                GROUP BY store_code
+            ), inventory AS (
+                SELECT store_code, COALESCE(SUM(total_cost_amount),0) inventory_amount
+                FROM dws.dws_inventory_daily
+                WHERE stat_date=(SELECT MAX(stat_date) FROM dws.dws_inventory_daily)
+                  AND UPPER(store_code)=ANY(:store_codes)
+                GROUP BY store_code
             )
             SELECT stores.store_code,
                    stores.store_name,
@@ -221,6 +208,16 @@ async def store_sales_analysis(
                    COALESCE(ticket.actual_pay_amount, 0) + COALESCE(recharge.recharge_amount, 0) AS actual_pay_amount,
                    COALESCE(recharge.recharge_amount, 0) AS recharge_amount,
                    COALESCE(ticket.refund_amount, 0) AS refund_amount,
+                   COALESCE(ticket.vip_sales_amount, 0) AS vip_sales_amount,
+                   COALESCE(previous.previous_sales_amount, 0) AS previous_sales_amount,
+                   CASE WHEN COALESCE(previous.previous_sales_amount,0)>0
+                        THEN ROUND(((ticket.sales_amount-previous.previous_sales_amount)/previous.previous_sales_amount)::numeric,4)
+                        ELSE NULL END AS period_growth,
+                   gross.gross_profit,
+                   CASE WHEN COALESCE(ticket.sales_amount,0)>0 AND gross.gross_profit IS NOT NULL
+                        THEN ROUND((gross.gross_profit/ticket.sales_amount)::numeric,4) END gross_margin,
+                   COALESCE(gross.is_cost_complete,false) is_cost_complete,
+                   COALESCE(inventory.inventory_amount,0) inventory_amount,
                    COALESCE(ticket.standard_amount, 0) AS standard_amount,
                    CASE WHEN COALESCE(ticket.standard_amount, 0) > 0
                         THEN ROUND((ticket.sales_amount / ticket.standard_amount)::numeric, 4)
@@ -238,8 +235,11 @@ async def store_sales_analysis(
             LEFT JOIN ticket ON ticket.store_code = stores.store_code
             LEFT JOIN recharge ON recharge.store_code = stores.store_code
             LEFT JOIN goods ON goods.store_code = stores.store_code
+            LEFT JOIN previous ON previous.store_code=stores.store_code
+            LEFT JOIN gross ON gross.store_code=stores.store_code
+            LEFT JOIN inventory ON inventory.store_code=stores.store_code
             ORDER BY sales_amount DESC, stores.store_code
-        """), params)).mappings().all()
+        """), {**params, "prev_sd": prev_sd, "prev_ed": prev_ed})).mappings().all()
 
         stores = []
         for idx, row in enumerate(rows, 1):
@@ -248,6 +248,8 @@ async def store_sales_analysis(
             for key in (
                 "orders", "sales_qty", "sales_amount", "actual_pay_amount",
                 "recharge_amount", "refund_amount", "standard_amount",
+                "vip_sales_amount", "previous_sales_amount", "period_growth",
+                "gross_profit", "gross_margin", "inventory_amount",
                 "discount_rate", "customer_average_price", "attach_rate", "product_count", "sku_count",
             ):
                 item[key] = float(item[key] or 0)
@@ -320,12 +322,20 @@ async def store_sales_analysis(
             "attach_rate": round(total_qty / total_orders, 2) if total_orders else 0,
             "discount_rate": round(total_sales / total_standard, 4) if total_standard else 0,
             "active_stores_count": len([x for x in stores if float(x["sales_amount"] or 0) > 0]),
+            "vip_sales_amount": round(sum(float(x.get("vip_sales_amount") or 0) for x in stores), 2),
+            "gross_profit": round(sum(float(x.get("gross_profit") or 0) for x in stores), 2),
+            "gross_margin": round(
+                sum(float(x.get("gross_profit") or 0) for x in stores) / total_sales, 4
+            ) if total_sales else 0,
+            "inventory_amount": round(sum(float(x.get("inventory_amount") or 0) for x in stores), 2),
+            "is_cost_complete": all(bool(x.get("is_cost_complete")) for x in stores if float(x["sales_amount"] or 0) > 0),
         }
 
         return {
             "success": True,
             "data": {
             "date_range": {"start_date": str(sd), "end_date": str(ed)},
+                "comparison_range": {"start_date": str(prev_sd), "end_date": str(prev_ed)},
                 "latest_sales_date": str(latest_date),
                 "updated_at": str(updated_at) if updated_at else None,
                 "summary": summary,

@@ -154,7 +154,9 @@ async def _upsert_image_rows(
             selected[key] = row
 
     urls: dict[tuple[str, str], Optional[str]] = {}
-    for product_code, color_code in pairs:
+    # Concurrent page requests may cache overlapping products. A stable lock
+    # order prevents PostgreSQL upserts from deadlocking across transactions.
+    for product_code, color_code in sorted(pairs):
         row = selected.get((product_code, color_code))
         image_url = _trim(row.get("ImageUrl")) if row else None
         is_main_pic = str(row.get("IsMainPic")) in ("1", "true", "True") if row else False

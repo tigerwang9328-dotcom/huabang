@@ -1,8 +1,8 @@
 <template>
-  <div class="size-wall-page">
+  <div class="size-wall-page command-light-page">
     <header class="page-head">
       <div>
-        <p class="eyebrow">SIZE WALL OPERATIONS</p>
+        <p class="eyebrow">商品经营 / 断码尺码分析</p>
         <h1>断码尺码墙</h1>
         <span>分析日期 {{ overview.analysis_date || "--" }} · 销售覆盖 {{ coverageText }}</span>
       </div>
@@ -58,16 +58,25 @@
 
     <section class="data-section matrix-section">
       <div class="section-head">
-        <div><p>STORE × SIZE</p><h2>门店尺码矩阵</h2></div>
-        <span>显示可进入尺码墙的候选库存</span>
+        <div><p>门店 / 尺码</p><h2>尺码墙候选矩阵</h2></div>
+        <span>对照门店服装总库存，点击有货尺码查看具体商品</span>
       </div>
       <el-table :data="matrixRows" border stripe size="small" empty-text="暂无候选库存">
-        <el-table-column prop="store_name" label="门店" min-width="210" fixed />
+        <el-table-column label="门店库存概况" width="270" fixed>
+          <template #default="{ row }">
+            <div class="store-summary">
+              <strong>{{ row.store_name }}</strong>
+              <span>服装库存 {{ formatQty(row.apparel_inventory_qty) }}件 · 候选 {{ formatQty(row.candidate_qty) }}件</span>
+              <span>候选占比 {{ percent(row.candidate_ratio) }} · {{ formatQty(row.candidate_style_colors) }}个款色</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column v-for="size in selectedGroupSizes" :key="size" :label="displaySize(size)" min-width="125" align="center">
           <template #default="{ row }">
-            <div class="matrix-cell">
+            <div class="matrix-cell" :class="{ clickable: matrixQty(row, size) > 0 }" @click="openMatrixDetail(row, size)">
               <strong>{{ formatQty(row.sizes[size]?.qty) }}件</strong>
-              <el-tag size="small" :type="statusType(row.sizes[size]?.status)" effect="plain">{{ row.sizes[size]?.status || "断货" }}</el-tag>
+              <el-tag size="small" :type="statusType(row.sizes[size]?.status)" effect="plain">{{ row.sizes[size]?.status || "无候选" }}</el-tag>
+              <span v-if="matrixQty(row, size) > 0" class="detail-link">查看商品</span>
             </div>
           </template>
         </el-table-column>
@@ -129,7 +138,14 @@
         <el-table-column prop="price_band" label="价格段" width="105" />
         <el-table-column label="库存" width="75" align="right"><template #default="{ row }">{{ formatQty(row.inventory_qty) }}</template></el-table-column>
         <el-table-column label="30日销量" width="90" align="right"><template #default="{ row }">{{ formatQty(row.sales_qty_30d) }}</template></el-table-column>
-        <el-table-column label="尺码结构" width="110"><template #default="{ row }">{{ row.remaining_size_count }}/{{ row.listed_size_count }}</template></el-table-column>
+        <el-table-column label="剩余全部码数" min-width="180">
+          <template #default="{ row }">
+            <div class="remaining-sizes">
+              <strong>{{ row.remaining_size_count }}/{{ row.listed_size_count }}</strong>
+              <span>{{ (row.remaining_size_codes || []).map(displaySize).join("、") || "--" }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="评分" width="76" align="center"><template #default="{ row }"><el-tag :type="row.score >= 75 ? 'danger' : 'warning'">{{ row.score }}</el-tag></template></el-table-column>
         <el-table-column label="入选原因" min-width="230"><template #default="{ row }"><div class="reason-list"><span v-for="x in row.score_reasons || []" :key="x">{{ x }}</span></div></template></el-table-column>
         <el-table-column prop="suggested_action" label="处理建议" width="120"><template #default="{ row }"><el-tag effect="plain">{{ row.suggested_action }}</el-tag></template></el-table-column>
@@ -139,6 +155,31 @@
           :page-sizes="[20, 50, 100]" @current-change="changePage" @size-change="changePageSize" />
       </div>
     </section>
+
+    <el-drawer v-model="matrixDrawer.visible" :title="`${matrixDrawer.store_name} · ${displaySize(matrixDrawer.size_code)}码候选商品`"
+      direction="rtl" size="min(760px, 94vw)" destroy-on-close>
+      <div class="drawer-summary">
+        <span>候选库存 {{ formatQty(matrixDrawer.qty) }}件</span>
+        <span>共 {{ matrixDrawer.total }} 条位置库存记录</span>
+      </div>
+      <el-table :data="matrixDrawer.items" v-loading="matrixDrawer.loading" border size="small" empty-text="该尺码暂无候选商品">
+        <el-table-column label="图片" width="64" align="center">
+          <template #default="{ row }">
+            <div class="candidate-thumb-cell">
+              <el-image v-if="row.image_url" class="candidate-thumb" :src="row.image_url"
+                :preview-src-list="[row.image_url]" fit="cover" preview-teleported hide-on-click-modal loading="lazy" />
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="product_code" label="款号" width="115" />
+        <el-table-column prop="product_name" label="商品" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="color_name" label="颜色" width="85" />
+        <el-table-column label="库存" width="65" align="right"><template #default="{ row }">{{ formatQty(row.inventory_qty) }}</template></el-table-column>
+        <el-table-column label="30日销量" width="82" align="right"><template #default="{ row }">{{ formatQty(row.sales_qty_30d) }}</template></el-table-column>
+        <el-table-column label="评分" width="65" align="center"><template #default="{ row }"><el-tag :type="row.score >= 75 ? 'danger' : 'warning'">{{ row.score }}</el-tag></template></el-table-column>
+        <el-table-column prop="suggested_action" label="处理建议" width="105" />
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 
@@ -156,6 +197,7 @@ const candidates = ref<any[]>([]); const candidateTotal = ref(0);
 const page = ref(1); const pageSize = ref(20);
 const activeSizeGroup = ref("");
 const filters = reactive<any>({ store_code: "", year: null, size_group: "", normalized_size_code: "", category_name: "", price_band: "", min_score: 60, suggested_action: "" });
+const matrixDrawer = reactive<any>({ visible: false, loading: false, store_code: "", store_name: "", size_code: "", qty: 0, items: [], total: 0 });
 const coverage = computed(() => overview.value.data_coverage || {});
 const coverageText = computed(() => coverage.value.coverage_start ? `${coverage.value.coverage_start} 至 ${coverage.value.coverage_end}（${coverage.value.coverage_days}天）` : "--");
 const matrixRows = computed(() => overview.value.store_matrix || []);
@@ -175,7 +217,9 @@ const locationOptions = computed(() => (overview.value.location_options || []).m
 
 const formatQty = (value: any) => Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const money = (value: any) => `¥${Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`;
-const statusType = (status: string) => status === "断货" ? "danger" : status === "偏少" ? "warning" : status === "偏多" ? "primary" : "success";
+const percent = (value: any) => `${(Number(value || 0) * 100).toFixed(1)}%`;
+const matrixQty = (row: any, size: string) => Number(row?.sizes?.[size]?.qty || 0);
+const statusType = (status: string) => status === "无候选" ? "info" : status === "少量候选" ? "success" : status === "候选积压" ? "danger" : "warning";
 const statusClass = (status: string) => `status-${status || "normal"}`;
 const displaySize = (size: any) => String(size || "").replace(/Y$/, "");
 
@@ -205,6 +249,16 @@ async function fetchCandidates() {
   finally { candidateLoading.value = false; }
 }
 async function loadAll() { await Promise.all([fetchOverview(), fetchCandidates()]); }
+async function openMatrixDetail(row: any, size: string) {
+  const qty = matrixQty(row, size);
+  if (qty <= 0) return;
+  Object.assign(matrixDrawer, { visible: true, loading: true, store_code: row.store_code, store_name: row.store_name, size_code: size, qty, items: [], total: 0 });
+  try {
+    const { data } = await productApi.getSizeWallCandidates({ store_code: row.store_code, normalized_size_code: size, min_score: 60, page: 1, page_size: 100 });
+    if (data?.success) { matrixDrawer.items = data.data.items || []; matrixDrawer.total = data.data.total || 0; }
+  } catch (e: any) { ElMessage.error(e?.response?.data?.detail || "候选商品加载失败"); }
+  finally { matrixDrawer.loading = false; }
+}
 async function applyFilters() { page.value = 1; await loadAll(); }
 async function applyCandidateFilters() { page.value = 1; await fetchCandidates(); }
 function handleOverviewGroupChange() { /* 只切换概览与矩阵，不改变候选筛选 */ }
@@ -236,13 +290,16 @@ onMounted(loadAll);
 .data-section { margin-top: 18px; padding: 18px 20px; border: 1px solid #dfe4ea; background: white; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 15px; }
 .section-head h2 { margin: 0; font-size: 18px; }
-.matrix-cell { display: flex; justify-content: center; align-items: center; gap: 10px; }.matrix-cell strong { min-width: 46px; text-align: right; }
+.store-summary { display: flex; flex-direction: column; gap: 4px; line-height: 1.35; }.store-summary strong { color: #172033; }.store-summary span { color: #697386; font-size: 12px; }
+.matrix-cell { min-height: 58px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; }.matrix-cell strong { text-align: center; }.matrix-cell.clickable { margin: -8px -12px; padding: 8px 12px; cursor: pointer; transition: background-color .15s ease; }.matrix-cell.clickable:hover { background: #eef5ff; }.detail-link { color: #2878d0; font-size: 11px; }
+.drawer-summary { display: flex; justify-content: space-between; gap: 16px; margin: -4px 0 14px; padding: 10px 12px; background: #f3f6fa; color: #526078; font-size: 13px; }
 .insight-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }.compact-section { margin-top: 14px; }
 .compact-section ol { margin: 0; padding-left: 20px; color: #3f4a5d; font-size: 13px; line-height: 1.8; }
 .baseline-metrics { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid #edf0f3; }
 .baseline-metrics div { padding: 16px 14px 4px; border-right: 1px solid #edf0f3; }.baseline-metrics div:last-child { border-right: 0; }
 .baseline-metrics span { display: block; margin-bottom: 7px; color: #788397; font-size: 12px; }.baseline-metrics strong { font-size: 20px; }
 .reason-list { display: flex; flex-wrap: wrap; gap: 4px; }.reason-list span { padding: 2px 6px; background: #f0f3f7; color: #46536a; font-size: 11px; }
+.remaining-sizes { display: flex; flex-direction: column; gap: 4px; }.remaining-sizes strong { color: #172033; }.remaining-sizes span { color: #526078; line-height: 1.4; }
 .candidate-thumb-cell { width: 48px; height: 48px; margin: 0 auto; background: #f2f4f7; }
 .candidate-thumb { width: 48px; height: 48px; cursor: zoom-in; }
 .pager { display: flex; justify-content: flex-end; padding-top: 16px; }

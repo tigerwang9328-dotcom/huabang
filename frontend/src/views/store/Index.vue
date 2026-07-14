@@ -1,5 +1,5 @@
 <template>
-  <div class="store-sales-page">
+  <div class="store-sales-page command-light-page">
     <section class="store-header">
       <div>
         <div class="eyebrow">门店管理 / 独立门店销售数据</div>
@@ -92,6 +92,21 @@
           </el-table-column>
           <el-table-column prop="actual_pay_amount" label="实收金额" width="118" sortable align="right">
             <template #default="{ row }">{{ formatMoney(row.actual_pay_amount) }}</template>
+          </el-table-column>
+          <el-table-column prop="period_growth" label="环比" width="88" sortable align="right">
+            <template #default="{ row }"><span :class="row.period_growth < 0 ? 'down' : 'up'">{{ formatSignedPercent(row.period_growth) }}</span></template>
+          </el-table-column>
+          <el-table-column prop="vip_sales_amount" label="VIP销售" width="112" sortable align="right">
+            <template #default="{ row }">{{ formatMoney(row.vip_sales_amount) }}</template>
+          </el-table-column>
+          <el-table-column prop="gross_profit" label="毛利额" width="110" sortable align="right">
+            <template #default="{ row }">{{ formatMoney(row.gross_profit) }}<small v-if="!row.is_cost_complete" class="estimated">预估</small></template>
+          </el-table-column>
+          <el-table-column prop="gross_margin" label="毛利率" width="90" sortable align="right">
+            <template #default="{ row }">{{ formatPercent(row.gross_margin) }}</template>
+          </el-table-column>
+          <el-table-column prop="inventory_amount" label="库存金额" width="118" sortable align="right">
+            <template #default="{ row }">{{ formatMoney(row.inventory_amount) }}</template>
           </el-table-column>
           <el-table-column prop="recharge_amount" label="充值金额" width="118" sortable align="right">
             <template #default="{ row }">{{ formatMoney(row.recharge_amount) }}</template>
@@ -261,7 +276,17 @@ const metricCards = computed(() => [
   { label: "销售件数", value: formatQty(summary.value.total_sales_qty), sub: `连带率 ${formatDecimal(summary.value.attach_rate)}` },
   { label: "客单价", value: formatMoney(summary.value.customer_average_price), sub: `平均折扣 ${formatPercent(summary.value.discount_rate)}` },
   { label: "活跃门店", value: `${summary.value.active_stores_count || 0}`, sub: "白名单销售门店" },
+  { label: "毛利额", value: formatMoney(summary.value.gross_profit), sub: summary.value.is_cost_complete ? "成本完整" : "成本覆盖不完整，预估" },
+  { label: "毛利率", value: formatPercent(summary.value.gross_margin), sub: summary.value.is_cost_complete ? "已就绪" : "预估" },
+  { label: "VIP销售", value: formatMoney(summary.value.vip_sales_amount), sub: "有会员标识小票" },
+  { label: "门店库存金额", value: formatMoney(summary.value.inventory_amount), sub: "外穿衣物口径" },
 ]);
+
+function formatSignedPercent(value: any) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "--";
+  return `${n > 0 ? "+" : ""}${(n * 100).toFixed(1)}%`;
+}
 
 const barOption = computed(() => {
   const rows = [...filteredStores.value].sort((a, b) => Number(b.sales_amount) - Number(a.sales_amount)).slice(0, 10).reverse();
@@ -431,6 +456,7 @@ onMounted(async () => {
   color: #94a3b8;
   font-size: 12px;
 }
+.up { color:#059669; }.down { color:#DC2626; }.estimated { display:block; color:#D97706; font-size:10px; }
 
 .content-grid {
   display: grid;

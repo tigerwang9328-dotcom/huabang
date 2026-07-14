@@ -23,6 +23,9 @@ class DmBossDailyReport(Base):
     avg_order_value = Column(Numeric(12, 2), comment="客单价")
     items_per_order = Column(Numeric(6, 2), comment="连带率")
     avg_discount_rate = Column(Numeric(6, 4), comment="折扣率")
+    actual_pay_amount = Column(Numeric(14, 2), comment="实收金额")
+    return_amount = Column(Numeric(14, 2))
+    return_rate = Column(Numeric(8, 4))
 
     # 对比（昨日/上周同日/上月同日）
     wow_sales_growth = Column(Numeric(8, 4), comment="周同比增长率")
@@ -40,13 +43,23 @@ class DmBossDailyReport(Base):
 
     # 库存摘要
     total_inventory_amount = Column(Numeric(14, 2))
+    inventory_total_qty = Column(Numeric(16, 4))
+    inventory_age_unknown_qty = Column(Numeric(16, 4))
+    inventory_age_unknown_amount = Column(Numeric(16, 2))
     age_90_plus_amount = Column(Numeric(14, 2), comment="90天以上库存")
     age_180_plus_amount = Column(Numeric(14, 2), comment="180天以上库存")
+
+    # VIP资产
+    vip_balance = Column(Numeric(16, 2))
+    vip_negative_balance_count = Column(Integer, default=0)
+    vip_sales_amount = Column(Numeric(14, 2))
+    vip_sales_ratio = Column(Numeric(8, 4))
 
     # 任务摘要
     pending_task_count = Column(Integer, default=0)
     overdue_task_count = Column(Integer, default=0)
     exception_count = Column(Integer, default=0)
+    major_exception_count = Column(Integer, default=0)
 
     # AI生成内容
     ai_summary = Column(Text, comment="AI经营摘要")
@@ -61,6 +74,8 @@ class DmBossDailyReport(Base):
     is_finance_complete = Column(Boolean, default=False)
     data_quality_status = Column(String(16), default="normal",
                                  comment="normal/warning/critical/blocking")
+    source_freshness = Column(JSON, comment="销售/库存/会员各自数据时间")
+    metric_status = Column(JSON, comment="指标ready/estimated/pending_data/stale状态")
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

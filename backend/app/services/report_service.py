@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.core.config import settings
+from app.services.command_center_service import build_template_summary
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,20 @@ class ReportService:
                     "data_completeness": "", "model_used": "none"}
 
         cost_note = "（成本数据完整）" if data.get("is_cost_complete") else "（⚠️ 成本数据不完整，毛利为预估值）"
+        fallback = {
+            "summary": build_template_summary(
+                sales=data.get("total_sales", 0),
+                gross_profit=data.get("gross_profit"),
+                gross_margin=data.get("gross_margin"),
+                finance_complete=False,
+                risk_count=data.get("exception_count", 0),
+                pending_task_count=0,
+            ),
+            "today_focus": "优先处理重大异常和逾期任务。",
+            "risk_summary": "以规则引擎结构化结果为准。",
+            "data_completeness": "费用未完整接入，暂不判断最终盈亏。",
+            "model_used": "template",
+        }
 
         prompt = f"""你是华邦服饰的经营分析AI。请根据以下{data['stat_date']}的实际经营数据，生成简洁的老板日报摘要。
 
@@ -237,9 +252,7 @@ class ReportService:
         try:
             api_key = settings.DEEPSEEK_API_KEY
             if not api_key:
-                return {"summary": "AI摘要未配置（缺少DeepSeek API Key）",
-                        "today_focus": "", "risk_summary": "", "data_completeness": "",
-                        "model_used": "none"}
+                return fallback
 
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(
@@ -273,13 +286,7 @@ class ReportService:
 
         except Exception as e:
             logger.error(f"AI摘要生成失败: {e}")
-            return {
-                "summary": f"AI摘要生成失败: {str(e)[:100]}",
-                "today_focus": "",
-                "risk_summary": "",
-                "data_completeness": "",
-                "model_used": "error",
-            }
+            return fallback
 
     async def _get_existing_report(self, stat_date: str, db: AsyncSession) -> dict:
         d = date.fromisoformat(stat_date)
@@ -293,7 +300,12 @@ class ReportService:
                    pending_task_count, overdue_task_count, exception_count,
                    ai_summary, ai_today_focus, ai_risk_summary,
                    ai_data_completeness, ai_model_used, ai_generated_at,
-                   is_cost_complete, is_finance_complete, generated_at
+                   is_cost_complete, is_finance_complete, generated_at,
+                   actual_pay_amount, return_amount, return_rate,
+                   inventory_total_qty, vip_balance, vip_negative_balance_count,
+                   vip_sales_amount, vip_sales_ratio, major_exception_count,
+                   source_freshness, metric_status
+                   , inventory_age_unknown_qty, inventory_age_unknown_amount
             FROM dm.dm_boss_daily_report WHERE report_date = :d
         """), {"d": d})
         row = r.fetchone()
@@ -333,6 +345,19 @@ class ReportService:
             "is_cost_complete": bool(row[29]),
             "is_finance_complete": bool(row[30]) if row[30] is not None else False,
             "generated_at": str(row[31]) if row[31] else None,
+            "actual_pay_amount": float(row[32] or 0),
+            "return_amount": float(row[33] or 0),
+            "return_rate": float(row[34] or 0),
+            "inventory_total_qty": float(row[35] or 0),
+            "vip_balance": float(row[36] or 0),
+            "vip_negative_balance_count": int(row[37] or 0),
+            "vip_sales_amount": float(row[38] or 0),
+            "vip_sales_ratio": float(row[39] or 0),
+            "major_exception_count": int(row[40] or 0),
+            "source_freshness": row[41] or {},
+            "metric_status": row[42] or {},
+            "inventory_age_unknown_qty": float(row[43] or 0),
+            "inventory_age_unknown_amount": float(row[44] or 0),
             "data_completeness_label": "成本缺失，利润不可准确计算。" if not row[29] else "",
         }
 

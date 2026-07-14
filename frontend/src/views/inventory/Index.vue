@@ -1,5 +1,5 @@
 <template>
-  <div class="analysis-page">
+  <div class="analysis-page command-light-page">
     <div class="page-header">
       <h2 class="page-title">库存预警</h2>
       <span class="page-desc">库存总览、库存余额、仓库档案、预警监控</span>
@@ -112,10 +112,43 @@
 
       <!-- Tab 4: 库存预警 -->
       <el-tab-pane label="库存预警" name="warning">
-        <div class="empty-block">
-          <el-icon size="28"><Warning /></el-icon>
-          <span>库存预警规则待配置。低库存阈值、高库存阈值、库龄预警等规则配置后启用自动监控。</span>
+        <div class="toolbar">
+          <div class="filters">
+            <el-select v-model="warningFilters.warning_level" placeholder="等级" clearable style="width:110px" @change="fetchWarnings">
+              <el-option label="紧急" value="critical" /><el-option label="风险" value="risk" /><el-option label="预警" value="warning" />
+            </el-select>
+            <el-select v-model="warningFilters.warning_type" placeholder="类型" clearable style="width:150px" @change="fetchWarnings">
+              <el-option label="负库存" value="negative" /><el-option label="90天库龄" value="age_90" /><el-option label="180天库龄" value="age_180" />
+              <el-option label="低可售天数" value="low_sellable_days" /><el-option label="高库存" value="overstock" />
+            </el-select>
+            <el-input v-model="warningFilters.store_code" placeholder="门店/仓库编码" clearable style="width:140px" @keyup.enter="fetchWarnings" />
+            <el-select v-model="warningFilters.task_status" placeholder="任务状态" clearable style="width:120px" @change="fetchWarnings">
+              <el-option label="未转任务" value="unconverted" /><el-option label="已转任务" value="converted" />
+            </el-select>
+            <el-button type="primary" @click="fetchWarnings">查询</el-button>
+          </div>
+          <span class="sync-info">预警日期：{{ warningDate || "-" }}</span>
         </div>
+        <el-table :data="warningRows" v-loading="warningLoading" border stripe size="small">
+          <el-table-column label="等级" width="82"><template #default="{ row }"><el-tag :type="warningTag(row.warning_level)" size="small">{{ warningLevel(row.warning_level) }}</el-tag></template></el-table-column>
+          <el-table-column prop="store_code" label="仓店" width="90" />
+          <el-table-column prop="store_name" label="仓店名称" min-width="145" show-overflow-tooltip />
+          <el-table-column prop="product_code" label="款号" width="110" />
+          <el-table-column prop="product_name" label="商品" min-width="150" show-overflow-tooltip />
+          <el-table-column label="类型" width="105"><template #default="{ row }">{{ warningType(row.warning_type) }}</template></el-table-column>
+          <el-table-column prop="current_quantity" label="库存" width="78" align="right" />
+          <el-table-column label="金额" width="105" align="right"><template #default="{ row }">{{ formatMoney(row.current_cost_amount) }}</template></el-table-column>
+          <el-table-column prop="age_days" label="库龄" width="76" align="right" />
+          <el-table-column prop="sellable_days" label="可售天数" width="88" align="right" />
+          <el-table-column prop="description" label="建议" min-width="230" show-overflow-tooltip />
+          <el-table-column label="任务" width="112" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="!row.is_converted_to_task" text type="primary" size="small" @click="createWarningTask(row)">转任务</el-button>
+              <el-button v-else text type="success" size="small" @click="openTask(row.task_id)">查看任务</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="pager"><el-pagination background layout="total, sizes, prev, pager, next" :total="warningTotal" v-model:current-page="warningPage" v-model:page-size="warningSize" :page-sizes="[20,50,100]" @current-change="fetchWarnings" @size-change="onWarningSize" /></div>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -124,9 +157,11 @@
 <script setup lang="ts">
 import { onMounted, ref, reactive } from "vue";
 import { ElMessage } from "element-plus";
+import { useRouter } from "vue-router";
 import { inventoryApi } from "@/api/inventory";
 
 const activeTab = ref("overview");
+const router = useRouter();
 
 const summaryCards = ref([
   { label: "仓库数量", value: "—", isPending: false },
@@ -221,6 +256,36 @@ function resetWarehouses() { Object.keys(wf).forEach(k => (wf as any)[k] = ""); 
 function onWPage(p: number) { wPage.value = p; fetchWarehouses(); }
 function onWSize(s: number) { wSize.value = s; wPage.value = 1; fetchWarehouses(); }
 
+const warningLoading = ref(false); const warningRows = ref<any[]>([]); const warningTotal = ref(0);
+const warningPage = ref(1); const warningSize = ref(20); const warningDate = ref("");
+const warningFilters = reactive({ warning_level: "", warning_type: "", store_code: "", task_status: "" });
+async function fetchWarnings() {
+  warningLoading.value = true;
+  try {
+    const params: any = { page: warningPage.value, page_size: warningSize.value };
+    Object.entries(warningFilters).forEach(([k, v]) => { if (v) params[k] = v; });
+    const { data } = await inventoryApi.listWarnings(params);
+    warningRows.value = data?.data?.items || [];
+    warningTotal.value = data?.data?.total || 0;
+    warningDate.value = data?.data?.warning_date || "";
+    summaryCards.value[6] = { label: "当前预警", value: String(warningTotal.value), isPending: false };
+  } catch (_) { ElMessage.error("库存预警加载失败"); }
+  finally { warningLoading.value = false; }
+}
+async function createWarningTask(row: any) {
+  try {
+    const { data } = await inventoryApi.createWarningTask(row.id);
+    if (!data?.success) return ElMessage.error(data?.message || "任务草稿创建失败");
+    ElMessage.success(data.message || "任务草稿已创建");
+    await fetchWarnings();
+  } catch (_) { ElMessage.error("任务草稿创建失败"); }
+}
+function openTask(taskId: number) { if (taskId) router.push(`/app/task/${taskId}`); }
+function onWarningSize() { warningPage.value = 1; fetchWarnings(); }
+function warningTag(level: string) { return ({ critical: "danger", risk: "warning", warning: "warning" } as any)[level] || "info"; }
+function warningLevel(level: string) { return ({ critical: "紧急", risk: "风险", warning: "预警", info: "提示" } as any)[level] || level; }
+function warningType(kind: string) { return ({ negative: "负库存", age_90: "90天库龄", age_180: "180天库龄", low_sellable_days: "低可售天数", overstock: "高库存" } as any)[kind] || kind; }
+
 function fmtTs(t: any) { if (!t) return "-"; return String(t).replace("T", " ").slice(0, 19); }
 function formatMoney(v: any) {
   const n = Number(v || 0);
@@ -228,9 +293,11 @@ function formatMoney(v: any) {
 }
 
 onMounted(() => {
+  if (new URLSearchParams(window.location.search).get("tab") === "warning") activeTab.value = "warning";
   fetchOverview();
   loadWOpts(); fetchWarehouses();
   fetchBalance();
+  fetchWarnings();
 });
 </script>
 
@@ -255,4 +322,13 @@ onMounted(() => {
 .empty-block { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 48px 0; color: #D1D5DB; font-size: 13px; }
 .neg { color: #f56c6c; }
 @media (max-width: 1200px) { .summary-row { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 760px) {
+  .inventory-page { gap: 12px; }
+  .summary-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .summary-card { min-width: 0; padding: 12px 8px; }
+  .s-num { font-size: clamp(16px, 5vw, 20px); overflow-wrap: anywhere; }
+  .analysis-tabs { padding: 12px; }
+  .toolbar { align-items: flex-start; }
+  .filters { width: 100%; }
+}
 </style>

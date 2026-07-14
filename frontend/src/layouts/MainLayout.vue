@@ -1,7 +1,8 @@
 <template>
   <div class="hb-layout">
+    <button v-if="mobileSidebarOpen" class="sidebar-scrim" aria-label="关闭导航" @click="mobileSidebarOpen = false"></button>
     <!-- ====== 侧边栏 ====== -->
-    <aside class="hb-sidebar">
+    <aside class="hb-sidebar" :class="{ 'mobile-open': mobileSidebarOpen }">
       <!-- Logo 区域 -->
       <div class="sidebar-brand">
         <div class="sidebar-logo-icon">HB</div>
@@ -107,6 +108,9 @@
     <div class="hb-main-wrap">
       <header class="hb-header">
         <div class="header-left">
+          <button class="mobile-nav-button" aria-label="打开导航" @click="mobileSidebarOpen = true">
+            <el-icon><Menu /></el-icon>
+          </button>
           <span class="header-page-title">{{ currentTitle }}</span>
         </div>
         <div class="header-right">
@@ -154,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { authApi } from "@/api/auth";
@@ -170,6 +174,7 @@ import {
   House,
   Key,
   List,
+  Menu,
   Money,
   Refresh,
   Shop,
@@ -182,6 +187,9 @@ import {
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+const mobileSidebarOpen = ref(false);
+
+watch(() => route.fullPath, () => { mobileSidebarOpen.value = false; });
 
 const currentTitle = computed(() => (route.meta.title as string) || "华邦AI中台");
 const EXPANDED_MENUS_KEY = "hb_sidebar_expanded_menus";
@@ -234,10 +242,9 @@ const menuGroups = computed<MenuGroup[]>(() => [
     permission: "dashboard:overview:view",
   },
   {
-    path: "/app/marketing/investment",
-    label: "投流优化",
-    icon: TrendCharts,
-    permission: "dashboard:overview:view",
+    path: "/app/task",
+    label: "任务管理",
+    icon: Bell,
   },
   {
     label: "AI经营诊断",
@@ -276,6 +283,8 @@ const menuGroups = computed<MenuGroup[]>(() => [
         label: "线上销售",
         key: "sales-online",
         children: [
+          { path: "/app/marketing/investment", label: "投流优化" },
+          { path: "/app/report", label: "经营日报", permission: "dashboard:overview:view" },
           { label: "线上总览", disabled: true, badge: "规划中" },
           { label: "平台销售", disabled: true, badge: "规划中" },
           { label: "退款售后", disabled: true, badge: "规划中" },
@@ -418,6 +427,32 @@ const isAnyChildActive = (children: MenuItem[]): boolean =>
 const isGroupActive = (group: MenuGroup): boolean =>
   Boolean(group.path && isActive(group.path)) ||
   Boolean(group.items?.some((item) => (item.path ? isActive(item.path) : false) || (item.children ? isAnyChildActive(item.children) : false)));
+
+const expandActiveMenuPath = () => {
+  const next = new Set(expandedMenus.value);
+  let changed = false;
+  menuGroups.value.forEach((group) => {
+    if (!group.items?.length || !isGroupActive(group)) return;
+    const groupMenuKey = groupKey(group);
+    if (!next.has(groupMenuKey)) {
+      next.add(groupKey(group));
+      changed = true;
+    }
+    group.items.forEach((item) => {
+      if (!item.children?.length || !isAnyChildActive(item.children)) return;
+      const childMenuKey = menuKey(item);
+      if (!next.has(childMenuKey)) {
+        next.add(menuKey(item));
+        changed = true;
+      }
+    });
+  });
+  if (!changed) return;
+  expandedMenus.value = next;
+  saveExpandedMenus(next);
+};
+
+watch(() => route.path, expandActiveMenuPath, { immediate: true });
 
 
 const passwordDialogVisible = ref(false);
@@ -655,6 +690,8 @@ const handleLogout = async () => {
   overflow: hidden;
   min-width: 0;
 }
+.sidebar-scrim { display: none; }
+.mobile-nav-button { display: none; }
 
 .hb-header {
   height: 56px;
@@ -719,6 +756,46 @@ const handleLogout = async () => {
   overflow-y: auto;
   background: #F5F7FA;
   padding: 24px;
+}
+
+@media (max-width: 760px) {
+  .hb-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 120;
+    transform: translateX(-100%);
+    transition: transform .2s ease;
+    box-shadow: 12px 0 32px rgba(2, 18, 37, .24);
+  }
+  .hb-sidebar.mobile-open { transform: translateX(0); }
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    border: 0;
+    background: rgba(15, 23, 42, .42);
+  }
+  .hb-main-wrap { width: 100%; }
+  .hb-header { height: 52px; padding: 0 12px; }
+  .header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .mobile-nav-button {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    flex: 0 0 auto;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #fff;
+    color: #334155;
+  }
+  .header-page-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .header-right { gap: 6px; }
+  .user-name, .logout-btn { font-size: 0; }
+  .logout-btn { width: 34px; height: 34px; padding: 0; justify-content: center; }
+  .logout-btn .el-icon { font-size: 16px; }
+  .hb-content { padding: 12px; }
 }
 </style>
 

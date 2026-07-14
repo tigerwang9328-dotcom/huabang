@@ -11,8 +11,9 @@ from app.models.dm import DmBossDailyReport
 from app.models.app import AppActionTask
 from app.schemas.common import ApiResponse, safe_div
 from app.services.business_overview_service import get_overview as get_business_overview
-from app.core.store_whitelist import allowed_store_sql_in
-from app.core.data_scope import get_data_scope, sql_in
+from app.core.store_whitelist import ALLOWED_STORE_CODES
+from app.services.sales_metric_service import PAY_DETAIL_SQL
+from app.core.data_scope import get_data_scope
 from sqlalchemy import text
 import logging
 
@@ -28,6 +29,14 @@ async def get_overview(
 ):
     """首页核心指标概览"""
     data = await get_business_overview(db, stat_date, current_user)
+    from app.services.command_center_service import get_command_center_snapshot
+    report_date = date.fromisoformat(stat_date) if stat_date else (
+        await db.execute(text("SELECT MAX(report_date) FROM dm.dm_boss_daily_report"))
+    ).scalar()
+    if report_date:
+        data["command_center"] = await get_command_center_snapshot(db, report_date)
+    else:
+        data["command_center"] = {"available": False}
     return ApiResponse.ok(data=data)
 
 
@@ -51,39 +60,32 @@ async def get_sales_trend(
     start_dt = end_dt - timedelta(days=days - 1)
     data_scope = await get_data_scope(db, current_user)
 
-    if data_scope.is_limited_store:
-        store_in = sql_in(data_scope.store_codes)
-        result = await db.execute(text(f"""
-            SELECT biz_date,
-                   COALESCE(SUM(sales_amount), 0) AS total_sales,
-                   COUNT(*)::int AS order_count,
-                   COALESCE(SUM(sales_qty), 0) AS item_count
-            FROM dwd.dwd_pos_ticket
-            WHERE biz_date BETWEEN :start_date AND :end_date
-              AND COALESCE(store_code, '') IN {store_in}
-              AND COALESCE(is_void, false) = false
-              AND COALESCE(is_pending, false) = false
-            GROUP BY biz_date
-            ORDER BY biz_date
-        """), {"start_date": start_dt, "end_date": end_dt})
-    else:
-        result = await db.execute(text("""
-            SELECT stat_date AS biz_date,
-                   COALESCE(total_sales_amount, 0) AS total_sales,
-                   COALESCE(total_order_count, 0) AS order_count,
-                   COALESCE(total_item_count, 0) AS item_count
-            FROM dws.dws_company_daily
-            WHERE stat_date BETWEEN :start_date AND :end_date
-            ORDER BY stat_date
-        """), {"start_date": start_dt, "end_date": end_dt})
+    store_codes = sorted(data_scope.store_codes) if data_scope.is_limited_store else sorted(ALLOWED_STORE_CODES)
+    result = await db.execute(text(f"""
+        WITH pay AS ({PAY_DETAIL_SQL})
+        SELECT t.biz_date,
+               COALESCE(SUM(COALESCE(pay.sales_amount,t.sales_amount)),0) total_sales,
+               COALESCE(SUM(COALESCE(pay.online_sales_amount,0)),0) online_sales,
+               COALESCE(SUM(COALESCE(pay.offline_sales_amount,t.sales_amount)),0) offline_sales,
+               COUNT(*)::int order_count, COALESCE(SUM(t.sales_qty),0) item_count
+        FROM dwd.dwd_pos_ticket t
+        LEFT JOIN pay ON pay.ticket_no=t.ticket_no
+        WHERE t.biz_date BETWEEN :start_date AND :end_date
+          AND t.store_code=ANY(:store_codes)
+          AND COALESCE(t.is_void,false)=false AND COALESCE(t.is_pending,false)=false
+        GROUP BY t.biz_date ORDER BY t.biz_date
+    """), {
+        "sd": start_dt, "ed": end_dt, "start_date": start_dt, "end_date": end_dt,
+        "store_codes": store_codes,
+    })
     rows = result.mappings().all()
 
     trend = [
         {
             "date": str(r["biz_date"]),
             "total_sales": float(r["total_sales"] or 0),
-            "offline_sales": float(r["total_sales"] or 0),
-            "online_sales": 0,
+            "offline_sales": float(r["offline_sales"] or 0),
+            "online_sales": float(r["online_sales"] or 0),
             "order_count": int(r["order_count"] or 0),
             "item_count": int(float(r["item_count"] or 0)),
             "net_sales": float(r["total_sales"] or 0),
@@ -130,25 +132,26 @@ async def get_store_rank(
         )
     """))
     data_scope = await get_data_scope(db, current_user)
-    store_in = sql_in(data_scope.store_codes) if data_scope.is_limited_store else allowed_store_sql_in()
+    store_codes = sorted(data_scope.store_codes) if data_scope.is_limited_store else sorted(ALLOWED_STORE_CODES)
     result = await db.execute(text(f"""
-        WITH ticket AS (
-            SELECT store_code,
-                   COALESCE(SUM(sales_amount), 0) AS net_sales,
-                   COALESCE(SUM(actual_pay_amount), 0) AS actual_pay_amount,
+        WITH pay AS ({PAY_DETAIL_SQL}), ticket AS (
+            SELECT t.store_code,
+                   COALESCE(SUM(COALESCE(pay.sales_amount,t.sales_amount)), 0) AS net_sales,
+                   COALESCE(SUM(COALESCE(pay.actual_pay_amount,t.actual_pay_amount)), 0) AS actual_pay_amount,
                    COUNT(*)::int AS order_count,
-                   COALESCE(SUM(sales_qty), 0) AS item_count
-            FROM dwd.dwd_pos_ticket
-            WHERE biz_date = :query_date
-              AND COALESCE(store_code, '') IN {store_in}
-              AND COALESCE(is_void, false) = false
-              AND COALESCE(is_pending, false) = false
-            GROUP BY store_code
+                   COALESCE(SUM(t.sales_qty), 0) AS item_count
+            FROM dwd.dwd_pos_ticket t
+            LEFT JOIN pay ON pay.ticket_no=t.ticket_no
+            WHERE t.biz_date = :query_date
+              AND t.store_code=ANY(:store_codes)
+              AND COALESCE(t.is_void, false) = false
+              AND COALESCE(t.is_pending, false) = false
+            GROUP BY t.store_code
         ), recharge AS (
             SELECT store_code, COALESCE(SUM(recharge_amount), 0) AS recharge_amount
             FROM dwd.dwd_store_recharge_daily
             WHERE biz_date = :query_date
-              AND COALESCE(store_code, '') IN {store_in}
+              AND store_code=ANY(:store_codes)
             GROUP BY store_code
         )
         SELECT ticket.store_code,
@@ -172,7 +175,10 @@ async def get_store_rank(
         WHERE ticket.net_sales > 0
         ORDER BY net_sales DESC
         LIMIT :top_n
-    """), {"query_date": query_date, "top_n": top_n})
+    """), {
+        "sd": query_date, "ed": query_date, "query_date": query_date,
+        "top_n": top_n, "store_codes": store_codes,
+    })
     rows = result.mappings().all()
 
     rank = [

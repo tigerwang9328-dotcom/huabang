@@ -15,4 +15,6 @@ export const inventoryApi = {
   // 同步库存余额（逐店全量后台执行，立即返回）
   syncInventory: (payload) =>
     request.post("/sync/baison/inventory", payload || { full_sync: true, page_size: 20 }, { timeout: 120000 }),
+  listWarnings: (params?: any) => request.get("/inventory/warnings", { params }),
+  createWarningTask: (warningId: number) => request.post(`/inventory/warnings/${warningId}/task-draft`),
 };

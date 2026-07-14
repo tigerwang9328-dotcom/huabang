@@ -5,4 +5,6 @@ export const dashboardApi = {
   getSalesTrend: (params?: { days?: number; end_date?: string }) => request.get("/dashboard/sales-trend", { params }),
   getStoreRank: (params?: { stat_date?: string; top_n?: number }) => request.get("/dashboard/store-rank", { params }),
   getTaskSummary: () => request.get("/dashboard/task-summary"),
+  getBossDaily: (reportDate: string) => request.get(`/report/boss-daily/${reportDate}`),
+  listBossDaily: (params?: { days?: number }) => request.get("/report/boss-daily", { params }),
 };

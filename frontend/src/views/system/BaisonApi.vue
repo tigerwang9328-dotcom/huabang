@@ -301,11 +301,10 @@ onMounted(loadCatalog);
   padding: 24px 28px;
   margin-bottom: 16px;
   border-radius: 16px;
-  background:
-    radial-gradient(circle at 90% 20%, rgba(255, 106, 0, 0.12), transparent 32%),
-    linear-gradient(135deg, #0f172a, #172033);
-  color: #fff;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16);
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #e5eaf2;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
 }
 
 .eyebrow {
@@ -324,7 +323,7 @@ onMounted(loadCatalog);
 
 .hero-desc {
   margin: 8px 0 0;
-  color: rgba(255, 255, 255, 0.72);
+  color: #64748b;
 }
 
 .hero-actions {
@@ -377,9 +376,10 @@ onMounted(loadCatalog);
   overflow: auto;
   padding: 14px;
   margin: 0;
-  border-radius: 12px;
-  background: #0f172a;
-  color: #dbeafe;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #e5eaf2;
   font-size: 12px;
   line-height: 1.7;
 }

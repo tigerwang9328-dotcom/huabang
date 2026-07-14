@@ -15,6 +15,7 @@ from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODE
 
 CANDIDATE_SCORE = 60
 DEFAULT_SIZE_WALL_RULES = {"low_max": 4, "high_min": 21}
+EXCLUDED_SIZE_CODES = ("F", "46Y", "58Y")
 
 CLOTHING_CATEGORIES = (
     "保暖内衣", "内裤", "卫衣", "套装", "尼克服", "棉服", "毛衣", "派克服", "皮衣",
@@ -40,7 +41,8 @@ def is_clothing_category(category_name: Optional[str]) -> bool:
 
 
 def is_valid_wall_size(size_code: Optional[str]) -> bool:
-    return bool(str(size_code or "").strip()) and str(size_code).strip().upper() != "F"
+    value = str(size_code or "").strip().upper()
+    return bool(value) and value not in EXCLUDED_SIZE_CODES
 
 
 def normalize_size_code(size_code: Optional[str]) -> str:
@@ -155,12 +157,12 @@ def parse_sale_sku(sku_code: Optional[str]) -> Optional[tuple[str, str, str]]:
 
 def classify_size_status(quantity: float, low_max: int = 4, high_min: int = 21) -> str:
     if quantity <= 0:
-        return "断货"
+        return "无候选"
     if quantity <= low_max:
-        return "偏少"
+        return "少量候选"
     if quantity >= high_min:
-        return "偏多"
-    return "正常"
+        return "候选积压"
+    return "可集中陈列"
 
 
 def price_band(tag_price: float) -> str:
@@ -223,7 +225,8 @@ class SizeWallService:
                and coalesce(s.size_code,'')=coalesce(i.size_code,'')
               join dim.dim_product p on p.product_code=i.product_code
               where upper(i.warehouse_code)=any(:inventory_codes)
-                and upper(trim(coalesce(i.size_code,'')))<>'F' and trim(coalesce(i.size_code,''))<>''
+                and not (upper(trim(coalesce(i.size_code,'')))=any(:excluded_sizes))
+                and trim(coalesce(i.size_code,''))<>''
                 and coalesce(p.category_name,p.category_l2,p.category_l1,'未分类')=any(:clothing_categories)
               group by upper(i.warehouse_code),i.product_code,trim(leading '-' from coalesce(i.color_code,'')),i.size_code
             ), inventory as (
@@ -244,7 +247,8 @@ class SizeWallService:
                      case upper(trim(s.size_code)) when 'XXL' then '2XL' when 'XXXL' then '3XL'
                           else upper(trim(s.size_code)) end normalized_size_code
               from dim.dim_sku s join dim.dim_product p on p.product_code=s.product_code
-              where trim(coalesce(s.size_code,''))<>'' and upper(trim(s.size_code))<>'F'
+              where trim(coalesce(s.size_code,''))<>''
+                and not (upper(trim(s.size_code))=any(:excluded_sizes))
                 and coalesce(p.category_name,p.category_l2,p.category_l1,'未分类')=any(:clothing_categories)
             ), listed_sizes as (
               select product_code,color_code,count(distinct normalized_size_code) listed_size_count
@@ -265,7 +269,7 @@ class SizeWallService:
                      sum(sales_qty) sales_qty_30d,sum(sales_amount) sales_amount_30d
               from dwd.dwd_pos_sale_goods
               where biz_date between :coverage_start and :dt and store_code=any(:store_codes)
-                and upper(trim(split_part(sku_code,'|',3)))<>'F'
+                and not (upper(trim(split_part(sku_code,'|',3)))=any(:excluded_sizes))
               group by 1,2
             ), sale_local as (
               select store_code,product_code,trim(leading '-' from split_part(sku_code,'|',2)) color_code,
@@ -273,7 +277,7 @@ class SizeWallService:
                      sum(sales_qty) sales_qty_30d,sum(sales_amount) sales_amount_30d
               from dwd.dwd_pos_sale_goods
               where biz_date between :coverage_start and :dt and store_code=any(:store_codes)
-                and upper(trim(split_part(sku_code,'|',3)))<>'F'
+                and not (upper(trim(split_part(sku_code,'|',3)))=any(:excluded_sizes))
               group by 1,2,3,4
             ), wall_company as (
               select product_code,color_code,sum(inventory_qty) company_wall_qty
@@ -309,6 +313,7 @@ class SizeWallService:
             "dt": dt, "coverage_start": coverage_start,
             "store_codes": sorted(ALLOWED_STORE_CODES), "inventory_codes": sorted(ALLOWED_INVENTORY_CODES),
             "clothing_categories": list(CLOTHING_CATEGORIES),
+            "excluded_sizes": list(EXCLUDED_SIZE_CODES),
             "min_year": current_year - 3, "max_year": current_year - 1,
         })).mappings().all()
 
@@ -455,6 +460,46 @@ class SizeWallService:
                 ),
             }
 
+        inventory_totals = (await db.execute(text("""
+            with sku_inventory as (
+              select upper(i.warehouse_code) store_code,i.product_code,
+                     trim(leading '-' from coalesce(i.color_code,'')) color_code,i.size_code,
+                     greatest(sum(coalesce(i.qty,0)),0) qty
+              from dwd.v_apparel_inventory_balance i
+              join dim.dim_product p on p.product_code=i.product_code
+              where upper(i.warehouse_code)=any(:matrix_codes)
+                and coalesce(p.category_name,p.category_l2,p.category_l1,'未分类')=any(:clothing_categories)
+                and trim(coalesce(i.size_code,''))<>''
+                and not (upper(trim(i.size_code))=any(:excluded_sizes))
+              group by upper(i.warehouse_code),i.product_code,
+                       trim(leading '-' from coalesce(i.color_code,'')),i.size_code
+            )
+            select store_code,sum(qty) apparel_inventory_qty
+            from sku_inventory group by store_code
+        """), {
+            "matrix_codes": matrix_codes, "clothing_categories": list(CLOTHING_CATEGORIES),
+            "excluded_sizes": list(EXCLUDED_SIZE_CODES),
+        })).mappings().all()
+        actual_by_store = {row["store_code"]: _num(row["apparel_inventory_qty"]) for row in inventory_totals}
+        candidate_totals = (await db.execute(text("""
+            select store_code,sum(inventory_qty) candidate_qty,
+                   count(distinct (product_code,color_code)) candidate_style_colors
+            from dm.dm_size_wall_candidate_daily
+            where analysis_date=:dt and store_code=any(:matrix_codes)
+            group by store_code
+        """), {"dt": dt, "matrix_codes": matrix_codes})).mappings().all()
+        candidate_by_store = {row["store_code"]: dict(row) for row in candidate_totals}
+        for code, item in matrix_map.items():
+            actual_qty = actual_by_store.get(code, 0.0)
+            candidate = candidate_by_store.get(code, {})
+            candidate_qty = _num(candidate.get("candidate_qty"))
+            item.update({
+                "apparel_inventory_qty": actual_qty,
+                "candidate_qty": candidate_qty,
+                "candidate_style_colors": int(candidate.get("candidate_style_colors") or 0),
+                "candidate_ratio": candidate_qty / actual_qty if actual_qty > 0 else 0.0,
+            })
+
         location_options = (await db.execute(text("""
             select store_code,max(coalesce(store_name,store_code)) store_name,max(location_type) location_type
             from dm.dm_size_wall_candidate_daily
@@ -546,4 +591,44 @@ class SizeWallService:
             order by score desc,inventory_amount desc,size_group,size_sort,product_code,color_code,size_code,store_code
             offset :offset limit :limit
         """), params)).mappings().all()
-        return {"items": [dict(x) for x in rows], "total": int(total), "page": page, "page_size": page_size, "analysis_date": str(dt)}
+        items = [dict(x) for x in rows]
+        await self._attach_remaining_size_codes(db, items)
+        return {"items": items, "total": int(total), "page": page, "page_size": page_size, "analysis_date": str(dt)}
+
+    async def _attach_remaining_size_codes(self, db: AsyncSession, items: list[dict[str, Any]]) -> None:
+        pairs = sorted({(str(row["product_code"]), str(row.get("color_code") or "")) for row in items})
+        if not pairs:
+            return
+        rows = (await db.execute(text("""
+            with requested as (
+              select * from unnest(cast(:product_codes as varchar[]),cast(:color_codes as varchar[]))
+                as r(product_code,color_code)
+            ), positive_sizes as (
+              select i.product_code,trim(leading '-' from coalesce(i.color_code,'')) color_code,
+                     case upper(trim(i.size_code)) when 'XXL' then '2XL' when 'XXXL' then '3XL'
+                          else upper(trim(i.size_code)) end size_code
+              from dwd.v_apparel_inventory_balance i
+              join requested r on r.product_code=i.product_code
+               and r.color_code=trim(leading '-' from coalesce(i.color_code,''))
+              join dim.dim_product p on p.product_code=i.product_code
+              where upper(i.warehouse_code)=any(:inventory_codes)
+                and trim(coalesce(i.size_code,''))<>''
+                and not (upper(trim(i.size_code))=any(:excluded_sizes))
+                and coalesce(p.category_name,p.category_l2,p.category_l1,'未分类')=any(:clothing_categories)
+              group by i.product_code,trim(leading '-' from coalesce(i.color_code,'')),i.size_code
+              having sum(coalesce(i.qty,0))>0
+            )
+            select distinct product_code,color_code,size_code from positive_sizes
+        """), {
+            "product_codes": [pair[0] for pair in pairs],
+            "color_codes": [pair[1] for pair in pairs],
+            "inventory_codes": sorted(ALLOWED_INVENTORY_CODES),
+            "excluded_sizes": list(EXCLUDED_SIZE_CODES),
+            "clothing_categories": list(CLOTHING_CATEGORIES),
+        })).mappings().all()
+        grouped: dict[tuple[str, str], set[str]] = {}
+        for row in rows:
+            grouped.setdefault((row["product_code"], row["color_code"]), set()).add(row["size_code"])
+        for item in items:
+            key = (str(item["product_code"]), str(item.get("color_code") or ""))
+            item["remaining_size_codes"] = sorted(grouped.get(key, set()), key=size_sort_value)

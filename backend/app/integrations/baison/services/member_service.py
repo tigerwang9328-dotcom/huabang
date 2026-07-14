@@ -71,6 +71,7 @@ def normalize_member(raw: dict[str, Any]) -> dict[str, Any]:
         "member_level": _text(raw.get("KLDM")) or _text(raw.get("XLDM")),
         "total_amount": _number(raw.get("XFJE")),
         "total_count": _integer(raw.get("XFCS")),
+        "current_balance": _number(raw.get("CZ_DQJE")),
         "last_consume_date": _date(raw.get("ZJRQ")) or _date(raw.get("SCRQ")),
         "last_consume_store": _text(raw.get("ZJSD")) or _text(raw.get("SCSD")),
         "status": "active" if status_code in (None, "1") else "inactive",
@@ -166,12 +167,12 @@ async def sync_members(
         INSERT INTO ods.ods_baison_member (
             batch_no, member_no, member_name, phone, gender, birthday,
             register_date, register_store, member_level, total_amount,
-            total_count, last_consume_date, last_consume_store,
+            total_count, current_balance, last_consume_date, last_consume_store,
             raw_json, source, imported_at, created_at
         ) VALUES (
             :batch_no, :member_no, :member_name, :phone, :gender, :birthday,
             :register_date, :register_store, :member_level, :total_amount,
-            :total_count, :last_consume_date, :last_consume_store,
+            :total_count, :current_balance, :last_consume_date, :last_consume_store,
             :raw_json, 'baison', now(), now()
         )
         ON CONFLICT (member_no, batch_no) DO UPDATE SET
@@ -179,6 +180,7 @@ async def sync_members(
             phone = EXCLUDED.phone,
             total_amount = EXCLUDED.total_amount,
             total_count = EXCLUDED.total_count,
+            current_balance = EXCLUDED.current_balance,
             last_consume_date = EXCLUDED.last_consume_date,
             last_consume_store = EXCLUDED.last_consume_store,
             raw_json = EXCLUDED.raw_json,
@@ -188,13 +190,13 @@ async def sync_members(
         INSERT INTO dim.dim_member (
             member_no, member_name, phone, gender, birthday,
             register_date, register_store, member_level, total_amount,
-            total_count, last_consume_date, last_consume_store,
-            status, updated_at
+            total_count, current_balance, last_consume_date, last_consume_store,
+            status, balance_updated_at, updated_at
         ) VALUES (
             :member_no, :member_name, :phone, :gender, :birthday,
             :register_date, :register_store, :member_level, :total_amount,
-            :total_count, :last_consume_date, :last_consume_store,
-            :status, now()
+            :total_count, :current_balance, :last_consume_date, :last_consume_store,
+            :status, now(), now()
         )
         ON CONFLICT (member_no) DO UPDATE SET
             member_name = EXCLUDED.member_name,
@@ -206,9 +208,11 @@ async def sync_members(
             member_level = EXCLUDED.member_level,
             total_amount = EXCLUDED.total_amount,
             total_count = EXCLUDED.total_count,
+            current_balance = EXCLUDED.current_balance,
             last_consume_date = EXCLUDED.last_consume_date,
             last_consume_store = EXCLUDED.last_consume_store,
             status = EXCLUDED.status,
+            balance_updated_at = now(),
             updated_at = now()
     """)
     for offset in range(0, len(rows), 1000):

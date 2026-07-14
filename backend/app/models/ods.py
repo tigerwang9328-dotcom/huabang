@@ -261,6 +261,7 @@ class OdsBaisonMember(Base):
     member_level = Column(String(32), comment="会员等级")
     total_amount = Column(Numeric(14, 2), comment="累计消费金额")
     total_count = Column(Integer, comment="累计消费次数")
+    current_balance = Column(Numeric(14, 2), comment="百胜CZ_DQJE当前储值余额")
     last_consume_date = Column(Date, comment="最后消费日期")
     last_consume_store = Column(String(32), comment="最后消费门店")
     raw_json = Column(Text)

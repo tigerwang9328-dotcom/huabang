@@ -108,11 +108,11 @@ def test_size_aliases_groups_and_sorting_are_stable():
 
 
 def test_size_status_uses_default_thresholds():
-    assert classify_size_status(0) == "断货"
-    assert classify_size_status(4) == "偏少"
-    assert classify_size_status(5) == "正常"
-    assert classify_size_status(20) == "正常"
-    assert classify_size_status(21) == "偏多"
+    assert classify_size_status(0) == "无候选"
+    assert classify_size_status(4) == "少量候选"
+    assert classify_size_status(5) == "可集中陈列"
+    assert classify_size_status(20) == "可集中陈列"
+    assert classify_size_status(21) == "候选积压"
 
 
 def test_action_priority_is_deterministic():
@@ -179,6 +179,8 @@ def test_live_snapshot_exposes_overview_and_candidates():
     assert all(0 <= row["candidate_ratio"] <= 1 for row in overview["store_matrix"])
     assert candidates["total"] > 0
     assert candidates["items"][0]["score"] >= 60
+    assert candidates["items"][0]["remaining_size_codes"]
+    assert len(candidates["items"][0]["remaining_size_codes"]) == candidates["items"][0]["remaining_size_count"]
     assert 0 < len(filtered["items"]) <= 5
     assert all(row["product_year"] == 2023 and row["normalized_size_code"] == "50Y" for row in filtered["items"])
     assert all(row["raw_size_code"] for row in filtered["items"])

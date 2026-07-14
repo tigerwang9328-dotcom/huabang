@@ -156,8 +156,8 @@ class BaisonProductInboundService:
         total: int | None = None
         while total is None or len(headers) < total:
             response = self.client.request(HEADER_METHOD, {
-                "record_time_start": start_date.isoformat(),
-                "record_time_end": (end_date + timedelta(days=1)).isoformat(),
+                "rq_start": f"{start_date.isoformat()} 00:00:00",
+                "rq_end": f"{end_date.isoformat()} 23:59:59",
                 "page": page,
                 "page_size": self.page_size,
             })

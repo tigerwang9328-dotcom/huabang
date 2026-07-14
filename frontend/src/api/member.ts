@@ -5,4 +5,7 @@ export const memberApi = {
   listPosMembers: (params?: any) => request.get("/member/pos-members", { params }),
   listMembers: (params?: any) => request.get("/member/list", { params }),
   listVisits: (params?: any) => request.get("/member/visits", { params }),
+  getAssetOverview: () => request.get("/member/assets/overview"),
+  listAssets: (params?: any) => request.get("/member/assets/list", { params }),
+  listAssetTransactions: (params?: any) => request.get("/member/assets/transactions", { params }),
 };

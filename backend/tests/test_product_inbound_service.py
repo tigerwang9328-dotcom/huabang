@@ -87,6 +87,19 @@ def test_fetch_inbound_lines_filters_non_whitelist_warehouse():
     assert len(detail_calls) == 1
 
 
+def test_fetch_inbound_lines_uses_baison_business_date_filters():
+    client = FakeClient()
+    service = BaisonProductInboundService(client=client, page_size=100)
+
+    service.fetch_inbound_lines(date(2026, 7, 1), date(2026, 7, 12))
+
+    _, params = client.calls[0]
+    assert params["rq_start"] == "2026-07-01 00:00:00"
+    assert params["rq_end"] == "2026-07-12 23:59:59"
+    assert "record_time_start" not in params
+    assert "record_time_end" not in params
+
+
 def test_merge_inbound_lines_sums_repeated_receipt_sku_rows():
     first = normalize_inbound_line(
         {"record_code": "A", "record_time": "2026-07-10", "store_code": "GZ001"},

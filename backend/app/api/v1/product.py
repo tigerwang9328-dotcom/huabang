@@ -75,6 +75,18 @@ def _product_suggestion(row: dict) -> str:
     return "正常"
 
 
+def _product_decision(row: dict) -> dict:
+    sales_qty = _num(row.get("sales_qty"))
+    inventory_qty = _num(row.get("inventory_qty"))
+    if sales_qty > 0 and inventory_qty <= sales_qty:
+        return {"action": "补货", "reason": "近7天有动销且库存不高于7天销量"}
+    if sales_qty <= 0 and inventory_qty >= 20:
+        return {"action": "清仓", "reason": "近7天无动销且库存不少于20件"}
+    if sales_qty > 0 and inventory_qty > sales_qty * 8:
+        return {"action": "调拨", "reason": "库存超过近7天销量8倍，建议复核门店分布"}
+    return {"action": "继续销售", "reason": "当前动销与库存结构未触发补货或清仓阈值"}
+
+
 def _lifecycle_stage(row: dict) -> str:
     sales_qty = _num(row.get("sales_qty"))
     inventory_qty = _num(row.get("inventory_qty"))
@@ -124,16 +136,22 @@ async def _product_metrics(db: AsyncSession, product_codes: list[str]) -> dict[s
     if not product_codes:
         return {}
     start_date, end_date = await _latest_sales_window(db)
-    metrics = {code: {"inventory_qty": 0.0, "sales_qty": 0.0, "sales_amount": 0.0} for code in product_codes}
+    metrics = {code: {"inventory_qty": 0.0, "inventory_amount": 0.0, "sales_qty": 0.0,
+                      "sales_amount": 0.0, "gross_profit": None, "gross_margin": None,
+                      "is_cost_complete": False} for code in product_codes}
     inv_rows = (await db.execute(text("""
-        SELECT product_code, COALESCE(SUM(qty), 0) AS inventory_qty
-        FROM dwd.v_apparel_inventory_balance
-        WHERE product_code = ANY(:codes)
-          AND UPPER(warehouse_code::text) = ANY(:inventory_codes)
-        GROUP BY product_code
+        SELECT i.product_code, COALESCE(SUM(i.qty), 0) AS inventory_qty,
+               COALESCE(SUM(GREATEST(i.qty,0) * COALESCE(NULLIF(s.cost_price,0), NULLIF(p.cost_price,0), 0)),0) inventory_amount
+        FROM dwd.v_apparel_inventory_balance i
+        LEFT JOIN dim.dim_sku s ON s.sku_code=i.sku_code
+        LEFT JOIN dim.dim_product p ON p.product_code=i.product_code
+        WHERE i.product_code = ANY(:codes)
+          AND UPPER(i.warehouse_code::text) = ANY(:inventory_codes)
+        GROUP BY i.product_code
     """), {"codes": product_codes, "inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})).mappings().all()
     for row in inv_rows:
         metrics[row["product_code"]]["inventory_qty"] = _num(row["inventory_qty"])
+        metrics[row["product_code"]]["inventory_amount"] = _num(row["inventory_amount"])
     if start_date and end_date:
         sales_rows = (await db.execute(text("""
             SELECT product_code,
@@ -154,6 +172,23 @@ async def _product_metrics(db: AsyncSession, product_codes: list[str]) -> dict[s
         for row in sales_rows:
             metrics[row["product_code"]]["sales_qty"] = _num(row["sales_qty"])
             metrics[row["product_code"]]["sales_amount"] = _num(row["sales_amount"])
+        gross_rows = (await db.execute(text("""
+            SELECT product_code, COALESCE(SUM(gross_profit),0) gross_profit,
+                   COALESCE(SUM(net_sales_amount),0) net_sales_amount,
+                   BOOL_AND(COALESCE(is_cost_complete,false)) is_cost_complete
+            FROM dws.dws_product_daily
+            WHERE product_code=ANY(:codes) AND store_code=ANY(:store_codes)
+              AND stat_date BETWEEN :start_date AND :end_date
+            GROUP BY product_code
+        """), {
+            "codes": product_codes, "store_codes": sorted(ALLOWED_STORE_CODES),
+            "start_date": start_date, "end_date": end_date,
+        })).mappings().all()
+        for row in gross_rows:
+            metric = metrics[row["product_code"]]
+            metric["gross_profit"] = _num(row["gross_profit"])
+            metric["gross_margin"] = _num(row["gross_profit"]) / _num(row["net_sales_amount"]) if _num(row["net_sales_amount"]) else None
+            metric["is_cost_complete"] = bool(row["is_cost_complete"])
     return metrics
 
 
@@ -298,8 +333,14 @@ async def list_products(
             item["sales_qty"] = _fmt_qty(item.get("sales_qty"))
             item["sales_amount"] = round(_num(item.get("sales_amount")), 2)
             item["inventory_qty"] = _fmt_qty(item.get("inventory_qty"))
+            item["inventory_amount"] = round(_num(item.get("inventory_amount")), 2)
+            item["gross_profit"] = round(_num(item.get("gross_profit")), 2) if item.get("gross_profit") is not None else None
+            item["gross_margin"] = round(_num(item.get("gross_margin")), 4) if item.get("gross_margin") is not None else None
+            denominator = _num(item.get("sales_qty")) + _num(item.get("inventory_qty"))
+            item["sell_through_rate"] = round(_num(item.get("sales_qty")) / denominator, 4) if denominator else 0
             item["lifecycle_stage"] = _lifecycle_stage(item)
             item["ai_suggestion"] = _product_suggestion(item)
+            item["decision"] = _product_decision(item)
             items.append(item)
         if sort_by in {"inventory_qty", "sales_qty", "sales_amount"}:
             items = _sort_items(items, sort_by, sort_order)
