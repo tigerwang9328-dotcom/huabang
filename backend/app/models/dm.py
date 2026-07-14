@@ -1,5 +1,6 @@
 """dm schema: 数据集市应用层"""
 from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -254,6 +255,35 @@ class DmMemberVisitList(Base):
     is_converted = Column(Boolean, default=False, comment="是否成交")
     conversion_amount = Column(Numeric(12, 2))
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DmMemberSegmentSnapshot(Base):
+    """Daily multi-label member segmentation with auditable evidence."""
+    __tablename__ = "dm_member_segment_snapshot"
+    __table_args__ = (
+        UniqueConstraint("calc_date", "member_no", name="uq_member_segment_snapshot"),
+        {"schema": "dm"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    calc_date = Column(Date, nullable=False)
+    member_no = Column(String(64), ForeignKey("dim.dim_member.member_no", ondelete="CASCADE"), nullable=False)
+    store_code = Column(String(32), nullable=False)
+    labels = Column(JSONB, default=list, nullable=False)
+    risks = Column(JSONB, default=list, nullable=False)
+    metrics = Column(JSONB, default=dict, nullable=False)
+    data_quality = Column(JSONB, default=dict, nullable=False)
+    is_wakeup_candidate = Column(Boolean, default=False, nullable=False)
+    wakeup_priority = Column(Integer)
+    wakeup_reasons = Column(JSONB, default=list, nullable=False)
+    preferences = Column(JSONB, default=list, nullable=False)
+    suggested_products = Column(JSONB, default=list, nullable=False)
+    responsibility_status = Column(String(24), default="unconfirmed", nullable=False)
+    responsible_employee_no = Column(String(64))
+    candidate_guide_ids = Column(JSONB, default=list, nullable=False)
+    rule_version = Column(String(32), nullable=False)
+    source_updated_at = Column(DateTime(timezone=True))
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class DmReplenishmentAdvice(Base):

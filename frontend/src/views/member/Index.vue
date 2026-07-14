@@ -58,12 +58,14 @@
           clearable
           size="small"
           class="keyword-input"
-          :placeholder="['profile','assets','transactions'].includes(activeTab) ? '搜索会员编号/姓名/手机' : '搜索会员线索/门店'"
+          :placeholder="['profile','assets','transactions','segments','risks','wakeups'].includes(activeTab) ? '搜索会员编号/姓名' : '搜索会员线索/门店'"
           @keyup.enter="handleSearch"
           @clear="handleSearch"
         />
       </div>
       <div class="filter-actions">
+        <el-button v-if="isSegmentTab && canExportSensitive" size="small" :icon="Download" @click="exportSegmentData">导出</el-button>
+        <el-button v-if="isSegmentTab && canRebuildSegments" size="small" :loading="segmentRebuilding" @click="rebuildSegments">重算分层</el-button>
         <el-button size="small" :icon="Search" type="primary" @click="fetchActiveTab">查询</el-button>
         <el-button size="small" :icon="Refresh" :loading="activeLoading" @click="refresh">刷新</el-button>
       </div>
@@ -71,6 +73,66 @@
 
     <section class="table-panel">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <el-tab-pane v-if="canViewSegments" label="会员分层" name="segments">
+          <el-alert v-if="segmentError" type="error" :closable="false" show-icon :title="segmentError" class="segment-alert" />
+          <div class="segment-summary-grid" v-loading="segmentOverviewLoading">
+            <div class="segment-summary-item"><span>已分层会员</span><strong>{{ formatCount(segmentOverview.summary?.labelled_members) }}</strong></div>
+            <div class="segment-summary-item"><span>风险会员</span><strong>{{ formatCount(segmentOverview.summary?.risk_members) }}</strong></div>
+            <div class="segment-summary-item"><span>可唤醒</span><strong>{{ formatCount(segmentOverview.summary?.wakeup_members) }}</strong></div>
+            <div class="segment-summary-item"><span>高价值</span><strong>{{ formatCount(segmentOverview.labels?.high_value) }}</strong></div>
+            <div class="segment-summary-item"><span>高余额</span><strong>{{ formatCount(segmentOverview.labels?.high_balance) }}</strong></div>
+            <div class="segment-summary-item"><span>沉睡会员</span><strong>{{ formatCount(segmentOverview.labels?.dormant) }}</strong></div>
+          </div>
+          <el-table :data="segmentRows" v-loading="segmentLoading" border stripe size="small">
+            <el-table-column prop="member_no" label="会员编号" min-width="130" />
+            <el-table-column prop="member_name" label="会员" min-width="100" />
+            <el-table-column prop="store_name" label="归属门店" min-width="165" show-overflow-tooltip />
+            <el-table-column label="当前余额" width="115" align="right"><template #default="{ row }">{{ formatSensitiveMoney(row, "current_balance") }}</template></el-table-column>
+            <el-table-column label="累计消费" width="115" align="right"><template #default="{ row }">{{ formatSensitiveMoney(row, "total_amount") }}</template></el-table-column>
+            <el-table-column label="最近消费" width="106"><template #default="{ row }">{{ row.sensitive_redacted ? "无权限" : (row.last_consume_date || "-") }}</template></el-table-column>
+            <el-table-column label="会员标签" min-width="260">
+              <template #default="{ row }"><div class="tag-list"><el-tag v-for="tag in row.labels" :key="tag.code" size="small" effect="light">{{ tag.name }}</el-tag><span v-if="!row.labels?.length" class="muted">暂无标签</span></div></template>
+            </el-table-column>
+            <el-table-column label="数据证据" width="92" align="center">
+              <template #default="{ row }"><el-popover placement="left" :width="360" trigger="click"><pre class="evidence-text">{{ formatEvidence(row) }}</pre><template #reference><el-button link type="primary">查看</el-button></template></el-popover></template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!segmentLoading && !segmentRows.length" description="暂无会员分层快照" />
+          <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="segmentTotal" v-model:current-page="segmentPage" v-model:page-size="segmentPageSize" :page-sizes="[20,50,100,200]" @current-change="fetchSegments" @size-change="resetSegmentPage" /></div>
+        </el-tab-pane>
+
+        <el-tab-pane v-if="canViewSegments" label="风险名单" name="risks">
+          <el-alert v-if="segmentError" type="error" :closable="false" show-icon :title="segmentError" class="segment-alert" />
+          <el-table :data="riskRows" v-loading="riskLoading" border stripe size="small">
+            <el-table-column prop="member_no" label="会员编号" min-width="130" />
+            <el-table-column prop="member_name" label="会员" min-width="100" />
+            <el-table-column prop="store_name" label="归属门店" min-width="165" show-overflow-tooltip />
+            <el-table-column label="当前余额" width="115" align="right"><template #default="{ row }"><span :class="{ negative: !row.sensitive_redacted && row.current_balance < 0 }">{{ formatSensitiveMoney(row, "current_balance") }}</span></template></el-table-column>
+            <el-table-column label="最近消费" width="106"><template #default="{ row }">{{ row.sensitive_redacted ? "无权限" : (row.last_consume_date || "-") }}</template></el-table-column>
+            <el-table-column label="风险" min-width="300"><template #default="{ row }"><div class="tag-list"><el-tag v-for="risk in row.risks" :key="risk.code" :type="riskTagType(risk.severity)" size="small" effect="light">{{ risk.name }}</el-tag></div></template></el-table-column>
+            <el-table-column label="数据证据" width="92" align="center"><template #default="{ row }"><el-popover placement="left" :width="360" trigger="click"><pre class="evidence-text">{{ formatEvidence(row) }}</pre><template #reference><el-button link type="primary">查看</el-button></template></el-popover></template></el-table-column>
+          </el-table>
+          <el-empty v-if="!riskLoading && !riskRows.length" description="当前没有会员风险" />
+          <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="riskTotal" v-model:current-page="segmentPage" v-model:page-size="segmentPageSize" :page-sizes="[20,50,100,200]" @current-change="fetchRisks" @size-change="resetSegmentPage" /></div>
+        </el-tab-pane>
+
+        <el-tab-pane v-if="canViewSegments" label="唤醒名单" name="wakeups">
+          <el-alert v-if="segmentError" type="error" :closable="false" show-icon :title="segmentError" class="segment-alert" />
+          <el-table :data="wakeupRows" v-loading="wakeupLoading" border stripe size="small">
+            <el-table-column prop="wakeup_priority" label="优先级" width="72" align="center" />
+            <el-table-column prop="member_no" label="会员编号" min-width="125" />
+            <el-table-column prop="member_name" label="会员" min-width="95" />
+            <el-table-column prop="store_name" label="建议门店" min-width="155" show-overflow-tooltip />
+            <el-table-column label="联系理由" min-width="220"><template #default="{ row }">{{ itemNames(row.wakeup_reasons) || "-" }}</template></el-table-column>
+            <el-table-column label="偏好品类/款式" min-width="170"><template #default="{ row }">{{ preferenceNames(row.preferences) || "数据待补充" }}</template></el-table-column>
+            <el-table-column label="建议商品" min-width="170"><template #default="{ row }">{{ productNames(row.suggested_products) || "数据待补充" }}</template></el-table-column>
+            <el-table-column label="责任人" width="118"><template #default="{ row }"><el-tag v-if="row.responsibility_status === 'unconfirmed'" type="warning" size="small">待确认责任人</el-tag><span v-else>{{ row.responsible_employee_no || "未分配" }}</span></template></el-table-column>
+            <el-table-column label="数据证据" width="92" align="center"><template #default="{ row }"><el-popover placement="left" :width="360" trigger="click"><pre class="evidence-text">{{ formatEvidence(row) }}</pre><template #reference><el-button link type="primary">查看</el-button></template></el-popover></template></el-table-column>
+          </el-table>
+          <el-empty v-if="!wakeupLoading && !wakeupRows.length" description="当前没有可唤醒会员" />
+          <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="wakeupTotal" v-model:current-page="segmentPage" v-model:page-size="segmentPageSize" :page-sizes="[20,50,100,200]" @current-change="fetchWakeups" @size-change="resetSegmentPage" /></div>
+        </el-tab-pane>
+
         <el-tab-pane label="VIP销售" name="sales">
           <div class="vip-sales-grid" v-loading="salesLoading">
             <div class="sales-metric" v-for="card in vipSalesCards" :key="card.label">
@@ -107,22 +169,22 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="VIP资产" name="assets">
+        <el-tab-pane v-if="canViewSensitiveMembers" label="VIP资产" name="assets">
           <el-table :data="assetRows" v-loading="assetLoading" border stripe size="small">
             <el-table-column prop="member_no" label="会员编号" min-width="130" />
             <el-table-column prop="member_name" label="会员" min-width="100" />
             <el-table-column prop="phone" label="手机号" width="125" />
             <el-table-column prop="register_store_name" label="注册门店" min-width="170" show-overflow-tooltip />
             <el-table-column prop="member_level" label="等级" width="90" />
-            <el-table-column label="当前余额" width="125" sortable align="right"><template #default="{ row }"><strong :class="{ negative: row.current_balance < 0 }">{{ formatMoney(row.current_balance) }}</strong></template></el-table-column>
-            <el-table-column label="累计消费" width="125" align="right"><template #default="{ row }">{{ formatMoney(row.total_amount) }}</template></el-table-column>
+            <el-table-column label="当前余额" width="125" sortable align="right"><template #default="{ row }"><strong :class="{ negative: !row.sensitive_redacted && row.current_balance < 0 }">{{ formatSensitiveMoney(row, "current_balance") }}</strong></template></el-table-column>
+            <el-table-column label="累计消费" width="125" align="right"><template #default="{ row }">{{ formatSensitiveMoney(row, "total_amount") }}</template></el-table-column>
             <el-table-column prop="last_consume_date" label="最近消费" width="110" />
             <el-table-column label="状态" width="96"><template #default="{ row }"><el-tag :type="assetStatusType(row.balance_status)" size="small">{{ assetStatusName(row.balance_status) }}</el-tag></template></el-table-column>
           </el-table>
           <div class="pagination-row"><el-pagination background layout="total, sizes, prev, pager, next" :total="assetTotal" v-model:current-page="assetPage" v-model:page-size="assetPageSize" :page-sizes="[20,50,100,200]" @current-change="fetchAssets" @size-change="resetAssetPage" /></div>
         </el-tab-pane>
 
-        <el-tab-pane label="余额变动" name="transactions">
+        <el-tab-pane v-if="canViewSensitiveMembers" label="余额变动" name="transactions">
           <el-table :data="transactionRows" v-loading="transactionLoading" border stripe size="small">
             <el-table-column prop="occurred_at" label="发生时间" width="160" />
             <el-table-column prop="member_no" label="会员编号" min-width="125" />
@@ -177,7 +239,7 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="会员档案" name="profile">
+        <el-tab-pane v-if="canViewSensitiveMembers" label="会员档案" name="profile">
           <el-table :data="profileRows" v-loading="profileLoading" border stripe size="small">
             <el-table-column prop="member_no" label="会员编号" min-width="130" />
             <el-table-column prop="member_name" label="会员姓名" min-width="110" />
@@ -206,7 +268,7 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane label="回访名单" name="visits">
+        <el-tab-pane v-if="canViewSensitiveMembers" label="回访名单" name="visits">
           <el-table :data="visitRows" v-loading="visitLoading" border stripe size="small">
             <el-table-column prop="visit_date" label="回访日期" width="112" />
             <el-table-column prop="member_no" label="会员编号" min-width="130" />
@@ -228,11 +290,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Refresh, Search } from "@element-plus/icons-vue";
+import { Download, Refresh, Search } from "@element-plus/icons-vue";
 import { memberApi } from "@/api/member";
+import { useAuthStore } from "@/stores/auth";
 
 type Preset = "latest" | "last7" | "last30" | "custom";
-type TabName = "sales" | "assets" | "transactions" | "pos" | "profile" | "visits";
+type TabName = "segments" | "risks" | "wakeups" | "sales" | "assets" | "transactions" | "pos" | "profile" | "visits";
+
+const authStore = useAuthStore();
 
 const overviewLoading = ref(false);
 const posLoading = ref(false);
@@ -241,7 +306,12 @@ const visitLoading = ref(false);
 const assetLoading = ref(false);
 const transactionLoading = ref(false);
 const salesLoading = ref(false);
-const activeTab = ref<TabName>("assets");
+const segmentOverviewLoading = ref(false);
+const segmentLoading = ref(false);
+const riskLoading = ref(false);
+const wakeupLoading = ref(false);
+const segmentRebuilding = ref(false);
+const activeTab = ref<TabName>(authStore.hasPermission("member:sensitive:view") ? "assets" : "sales");
 const preset = ref<Preset>("latest");
 const keyword = ref("");
 const dateRange = ref<[string, string]>(["", ""]);
@@ -260,6 +330,16 @@ const assetOverview = ref<any>({});
 const assetRows = ref<any[]>([]); const assetTotal = ref(0); const assetPage = ref(1); const assetPageSize = ref(20);
 const transactionRows = ref<any[]>([]); const transactionTotal = ref(0); const transactionPage = ref(1); const transactionPageSize = ref(20);
 const vipSales = ref<any>({ summary: {}, stores: [], trend: [] });
+const segmentOverview = ref<any>({ summary: {}, labels: {}, risks: {} });
+const segmentRows = ref<any[]>([]);
+const riskRows = ref<any[]>([]);
+const wakeupRows = ref<any[]>([]);
+const segmentTotal = ref(0);
+const riskTotal = ref(0);
+const wakeupTotal = ref(0);
+const segmentPage = ref(1);
+const segmentPageSize = ref(20);
+const segmentError = ref("");
 
 function parseDate(value: string) {
   const d = new Date(`${value}T00:00:00`);
@@ -283,6 +363,14 @@ function formatMoney(value: any) {
   return `¥${Math.round(n).toLocaleString("zh-CN")}`;
 }
 
+function formatSensitiveMoney(row: any, key: string) {
+  return row?.sensitive_redacted ? "无权限" : formatMoney(row?.[key]);
+}
+
+function formatOverviewSensitiveMoney(value: any) {
+  return assetOverview.value.sensitive_redacted ? "无权限" : formatMoney(value);
+}
+
 function formatQty(value: any) {
   const n = Number(value || 0);
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
@@ -298,9 +386,24 @@ function formatTime(value: any) {
   return String(value).replace("T", " ").slice(0, 19);
 }
 
+function formatCount(value: any) { return Number(value || 0).toLocaleString("zh-CN"); }
+function itemNames(items: any[]) { return (items || []).map(item => item?.name || item?.code).filter(Boolean).join("、"); }
+function preferenceNames(items: any[]) { return (items || []).map(item => item?.name || item?.product_name).filter(Boolean).join("、"); }
+function productNames(items: any[]) { return (items || []).map(item => item?.product_name || item?.product_code).filter(Boolean).join("、"); }
+function riskTagType(value: string) { return value === "critical" ? "danger" : value === "risk" ? "warning" : "info"; }
+function formatEvidence(row: any) { return JSON.stringify({ labels: row.labels || [], risks: row.risks || [], metrics: row.metrics || {}, data_quality: row.data_quality || {} }, null, 2); }
+
 const statusText = computed(() => (dataStatus.value.member_profile_synced ? "会员档案已同步" : "展示小票会员线索"));
 const statusTagType = computed(() => (dataStatus.value.member_profile_synced ? "success" : "warning"));
+const isSegmentTab = computed(() => ["segments", "risks", "wakeups"].includes(activeTab.value));
+const canViewSegments = computed(() => authStore.hasPermission("member:segment:view"));
+const canViewSensitiveMembers = computed(() => authStore.hasPermission("member:sensitive:view"));
+const canExportSensitive = computed(() => authStore.hasPermission("member:sensitive:export"));
+const canRebuildSegments = computed(() => authStore.hasPermission("member:segment:rebuild"));
 const activeLoading = computed(() => {
+  if (activeTab.value === "segments") return segmentLoading.value;
+  if (activeTab.value === "risks") return riskLoading.value;
+  if (activeTab.value === "wakeups") return wakeupLoading.value;
   if (activeTab.value === "assets") return assetLoading.value;
   if (activeTab.value === "sales") return salesLoading.value;
   if (activeTab.value === "transactions") return transactionLoading.value;
@@ -309,14 +412,22 @@ const activeLoading = computed(() => {
   return posLoading.value;
 });
 
-const metricCards = computed(() => [
-  { label: "VIP正余额", value: formatMoney(assetOverview.value.total_balance), sub: "百胜会员主档 CZ_DQJE" },
-  { label: "有余额会员", value: Number(assetOverview.value.balance_member_count || 0).toLocaleString("zh-CN"), sub: `${assetOverview.value.negative_balance_count || 0} 人负余额单列` },
-  { label: "90天沉睡余额", value: formatMoney(assetOverview.value.dormant_balance_90d), sub: `${assetOverview.value.dormant_member_90d || 0} 位会员` },
-  { label: "近30天充值", value: formatMoney(assetOverview.value.recharge_30d), sub: `${assetOverview.value.recharge_member_30d || 0} 位充值会员` },
-  { label: "会员档案数", value: Number(summary.value.profile_members || 0).toLocaleString("zh-CN"), sub: "dim_member" },
-  { label: "会员销售额", value: formatMoney(summary.value.member_sales), sub: `占比 ${formatPercent(summary.value.member_sales_ratio)}` },
-]);
+const metricCards = computed(() => {
+  const cards = [];
+  if (canViewSensitiveMembers.value) {
+    cards.push(
+      { label: "VIP正余额", value: formatOverviewSensitiveMoney(assetOverview.value.total_balance), sub: "百胜会员主档 CZ_DQJE" },
+      { label: "有余额会员", value: Number(assetOverview.value.balance_member_count || 0).toLocaleString("zh-CN"), sub: `${assetOverview.value.negative_balance_count || 0} 人负余额单列` },
+      { label: "90天沉睡余额", value: formatOverviewSensitiveMoney(assetOverview.value.dormant_balance_90d), sub: `${assetOverview.value.dormant_member_90d || 0} 位会员` },
+      { label: "近30天充值", value: formatOverviewSensitiveMoney(assetOverview.value.recharge_30d), sub: `${assetOverview.value.recharge_member_30d || 0} 位充值会员` },
+    );
+  }
+  cards.push(
+    { label: "会员档案数", value: Number(summary.value.profile_members || 0).toLocaleString("zh-CN"), sub: "dim_member" },
+    { label: "会员销售额", value: formatMoney(summary.value.member_sales), sub: `占比 ${formatPercent(summary.value.member_sales_ratio)}` },
+  );
+  return cards;
+});
 
 function metricValue(key: string) { return vipSales.value.summary?.[key]?.value; }
 function metricStatus(key: string) { return vipSales.value.summary?.[key]?.status || "pending_data"; }
@@ -336,19 +447,101 @@ const vipSalesCards = computed(() => [
 async function fetchOverview() {
   overviewLoading.value = true;
   try {
-    const [{ data }, { data: assetData }] = await Promise.all([memberApi.getOverview(), memberApi.getAssetOverview()]);
+    const { data } = await memberApi.getOverview();
     if (!data?.success) {
       ElMessage.error(data?.message || "会员概览加载失败");
       return;
     }
     summary.value = data.data?.summary || {};
     dataStatus.value = data.data?.data_status || {};
-    assetOverview.value = assetData?.data?.summary || {};
+    if (canViewSensitiveMembers.value) {
+      const { data: assetData } = await memberApi.getAssetOverview();
+      assetOverview.value = {
+        ...(assetData?.data?.summary || {}),
+        sensitive_redacted: Boolean(assetData?.data?.sensitive_redacted || assetData?.data?.summary?.sensitive_redacted),
+      };
+    } else {
+      assetOverview.value = {};
+    }
     if (!dateRange.value[0] && summary.value.latest_ticket_date) applyPreset();
   } catch (e: any) {
     ElMessage.error(e?.message || "会员概览加载失败");
   } finally {
     overviewLoading.value = false;
+  }
+}
+
+async function fetchSegmentOverview() {
+  if (!canViewSegments.value) return;
+  segmentOverviewLoading.value = true;
+  try {
+    const { data } = await memberApi.getSegmentOverview();
+    if (!data?.success) throw new Error(data?.message || "会员分层概览加载失败");
+    segmentOverview.value = data.data || { summary: {}, labels: {}, risks: {} };
+  } catch (e: any) {
+    segmentError.value = e?.message || "会员分层概览加载失败";
+  } finally {
+    segmentOverviewLoading.value = false;
+  }
+}
+
+async function fetchSegmentKind(kind: "segments" | "risks" | "wakeups") {
+  if (!canViewSegments.value) return;
+  const loading = kind === "segments" ? segmentLoading : kind === "risks" ? riskLoading : wakeupLoading;
+  loading.value = true;
+  segmentError.value = "";
+  try {
+    const params: any = { page: segmentPage.value, page_size: segmentPageSize.value };
+    if (keyword.value.trim()) params.keyword = keyword.value.trim();
+    const requestCall = kind === "segments" ? memberApi.listSegments : kind === "risks" ? memberApi.listSegmentRisks : memberApi.listWakeups;
+    const { data } = await requestCall(params);
+    if (!data?.success) throw new Error(data?.message || "会员名单加载失败");
+    const payload = data.data || {};
+    if (kind === "segments") { segmentRows.value = payload.items || []; segmentTotal.value = payload.total || 0; }
+    if (kind === "risks") { riskRows.value = payload.items || []; riskTotal.value = payload.total || 0; }
+    if (kind === "wakeups") { wakeupRows.value = payload.items || []; wakeupTotal.value = payload.total || 0; }
+  } catch (e: any) {
+    segmentError.value = e?.message || "会员名单加载失败";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function fetchSegments() { return fetchSegmentKind("segments"); }
+function fetchRisks() { return fetchSegmentKind("risks"); }
+function fetchWakeups() { return fetchSegmentKind("wakeups"); }
+function resetSegmentPage() { segmentPage.value = 1; fetchActiveTab(); }
+
+async function rebuildSegments() {
+  segmentRebuilding.value = true;
+  try {
+    const { data } = await memberApi.rebuildSegments();
+    if (!data?.success) throw new Error(data?.message || "会员分层重算失败");
+    ElMessage.success(`分层已重算：${data.data?.member_count || 0} 位会员`);
+    await fetchSegmentOverview();
+    await fetchActiveTab();
+  } catch (e: any) {
+    ElMessage.error(e?.message || "会员分层重算失败");
+  } finally {
+    segmentRebuilding.value = false;
+  }
+}
+
+async function exportSegmentData() {
+  const kind = activeTab.value === "risks" ? "risks" : activeTab.value === "wakeups" ? "wakeups" : "segments";
+  try {
+    const response = await memberApi.exportSegments({ kind, keyword: keyword.value.trim() || undefined });
+    const blob = new Blob([response.data], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `member_${kind}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (e: any) {
+    ElMessage.error(e?.message || "会员数据导出失败");
   }
 }
 
@@ -464,6 +657,9 @@ async function fetchVisits() {
 }
 
 function fetchActiveTab() {
+  if (activeTab.value === "segments") return fetchSegments();
+  if (activeTab.value === "risks") return fetchRisks();
+  if (activeTab.value === "wakeups") return fetchWakeups();
   if (activeTab.value === "sales") return fetchSalesAnalysis();
   if (activeTab.value === "assets") return fetchAssets();
   if (activeTab.value === "transactions") return fetchTransactions();
@@ -473,15 +669,19 @@ function fetchActiveTab() {
 }
 
 async function refresh() {
-  await fetchOverview();
+  const overviewRequests = [fetchOverview()];
+  if (canViewSegments.value) overviewRequests.push(fetchSegmentOverview());
+  await Promise.all(overviewRequests);
   await fetchActiveTab();
 }
 
 function handleTabChange() {
+  if (isSegmentTab.value) segmentPage.value = 1;
   fetchActiveTab();
 }
 
 function handleSearch() {
+  if (isSegmentTab.value) segmentPage.value = 1;
   if (activeTab.value === "assets") assetPage.value = 1;
   if (activeTab.value === "transactions") transactionPage.value = 1;
   if (activeTab.value === "profile") profilePage.value = 1;
@@ -500,8 +700,11 @@ function handleProfilePageSizeChange() {
 }
 
 onMounted(async () => {
-  await fetchOverview();
-  await fetchAssets();
+  const overviewRequests = [fetchOverview()];
+  if (canViewSegments.value) overviewRequests.push(fetchSegmentOverview());
+  await Promise.all(overviewRequests);
+  if (canViewSensitiveMembers.value) await fetchAssets();
+  else await fetchSalesAnalysis();
 });
 </script>
 
@@ -641,6 +844,14 @@ onMounted(async () => {
   justify-content: flex-end;
   padding-top: 12px;
 }
+.segment-alert { margin-bottom:10px; }
+.segment-summary-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+.segment-summary-item { min-width:0; min-height:68px; padding:10px 12px; display:flex; flex-direction:column; gap:7px; border:1px solid #E5E7EB; border-radius:8px; background:#F8FAFC; }
+.segment-summary-item span { color:#64748B; font-size:12px; }
+.segment-summary-item strong { color:#0F172A; font-size:20px; line-height:1; }
+.tag-list { display:flex; flex-wrap:wrap; gap:5px; }
+.evidence-text { max-height:360px; margin:0; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#334155; font-size:12px; line-height:1.5; }
+.muted { color:#94A3B8; font-size:12px; }
 .negative { color:#DC2626; }
 .positive { color:#059669; }
 .vip-sales-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
@@ -660,6 +871,7 @@ onMounted(async () => {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .vip-sales-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .segment-summary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .sales-analysis-layout { grid-template-columns:1fr; }
 }
 
@@ -678,5 +890,6 @@ onMounted(async () => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .vip-sales-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .segment-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 </style>

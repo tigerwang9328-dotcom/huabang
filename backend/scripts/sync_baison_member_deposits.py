@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal, engine
 from app.integrations.baison.services.member_deposit_service import sync_member_deposits
+from app.services.member_segment_service import rebuild_member_segments
 
 
 def parse_args():
@@ -41,6 +42,8 @@ async def main(start_date: date, end_date: date) -> None:
                 await db.commit()
                 fetched += result["log_count"]
                 windows += 1
+            segment_result = await rebuild_member_segments(db)
+            await db.commit()
             row = (await db.execute(text("""
               SELECT count(*) detail_count,
                      count(*) FILTER (WHERE change_type='0') recharge_count,
@@ -57,6 +60,9 @@ async def main(start_date: date, end_date: date) -> None:
                 "first_date": str(row["first_date"] or ""),
                 "last_date": str(row["last_date"] or ""),
                 "stores": row["stores"] or [],
+                "segment_member_count": segment_result.get("member_count", 0),
+                "segment_risk_count": segment_result.get("risk_count", 0),
+                "segment_wakeup_count": segment_result.get("wakeup_count", 0),
             }, ensure_ascii=False))
         except Exception:
             await db.rollback()
