@@ -1,9 +1,11 @@
-"""Versioned business exception audit API."""
+"""Versioned business exception and performance-attribution audit API."""
 
-from datetime import date, timedelta
-from typing import Optional
+import json
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,9 +14,51 @@ from app.core.database import get_db
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.exception_rule_service import rebuild_exception_rules, rule_source_statuses
+from app.services.exception_rule_service import persist_rule_findings
+from app.services.performance_attribution_service import (
+    attribution_source_contract,
+    build_adjudication_snapshot,
+    build_attribution_exception_finding,
+    build_rule_version as build_attribution_rule_version,
+    evaluate_attribution,
+)
 
 
 router = APIRouter(prefix="/audit", tags=["异常稽核"])
+
+
+class AttributionEvaluationRequest(BaseModel):
+    business_date: date
+    case: dict[str, Any] = Field(default_factory=dict)
+
+
+class AttributionAdjudicationRequest(BaseModel):
+    selected_owner_id: str = Field(min_length=1, max_length=64)
+    selected_owner_type: str = Field(default="guide", pattern="^(guide|store|team)$")
+    reason: str = Field(min_length=2, max_length=500)
+    decision_evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+async def _attribution_source_statuses(db: AsyncSession, business_date: date) -> dict[str, dict[str, Any]]:
+    row = (await db.execute(text("""
+        SELECT
+          (SELECT MAX(synced_at) FROM dwd.dwd_pos_ticket
+           WHERE biz_date=:business_date) transaction_updated_at,
+          (SELECT completed_at FROM ods.ods_baison_pos_ticket_sync_run
+           WHERE status='success'
+             AND biz_start_time<=CAST(:business_date AS date)
+             AND biz_end_time>=CAST(:business_date AS date)+INTERVAL '1 day'-INTERVAL '1 second'
+           ORDER BY started_at DESC, id DESC LIMIT 1) sync_updated_at,
+          (SELECT MAX(balance_updated_at) FROM dim.dim_member) member_updated_at
+    """), {"business_date": business_date})).mappings().one()
+    transaction_updated_at = (
+        row["transaction_updated_at"] or row["sync_updated_at"]
+    ) if row["sync_updated_at"] else None
+    return attribution_source_contract(
+        transaction_updated_at=transaction_updated_at,
+        refund_updated_at=row["sync_updated_at"],
+        member_updated_at=row["member_updated_at"],
+    )
 
 
 @router.get("/exceptions", response_model=ApiResponse)
@@ -134,6 +178,92 @@ async def get_rule_source_statuses(
     current_user: SysUser = Depends(require_permission("sales:warning:view")),
 ):
     return ApiResponse.ok(data=rule_source_statuses())
+
+
+@router.get("/attribution/status", response_model=ApiResponse)
+async def get_attribution_status(
+    business_date: Optional[date] = None,
+    current_user: SysUser = Depends(require_permission("sales:warning:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    target_date = business_date or (
+        await db.execute(text("SELECT MAX(biz_date) FROM dwd.dwd_pos_ticket"))
+    ).scalar() or (date.today() - timedelta(days=1))
+    sources = await _attribution_source_statuses(db, target_date)
+    return ApiResponse.ok(data={
+        "business_date": str(target_date),
+        "rule_version": build_attribution_rule_version(),
+        "all_sources_ready": all(item["status"] == "ready" for item in sources.values()),
+        "sources": sources,
+    })
+
+
+@router.post("/attribution/evaluate", response_model=ApiResponse)
+async def evaluate_performance_attribution(
+    body: AttributionEvaluationRequest,
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    sources = await _attribution_source_statuses(db, body.business_date)
+    case = {**body.case, "business_date": str(body.business_date)}
+    result = evaluate_attribution(case, sources)
+    finding = build_attribution_exception_finding(case, result)
+    persisted = await persist_rule_findings(db, body.business_date, [finding]) if finding else 0
+    return ApiResponse.ok(data={**result, "exception_persisted": bool(persisted)})
+
+
+@router.post("/exceptions/{exception_id}/adjudicate", response_model=ApiResponse)
+async def adjudicate_performance_attribution(
+    exception_id: int,
+    body: AttributionAdjudicationRequest,
+    current_user: SysUser = Depends(require_permission("diagnosis:overall:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    if not body.decision_evidence:
+        return ApiResponse.fail("人工裁决必须附带证据")
+    row = (await db.execute(text("""
+        SELECT id, exception_type, data_snapshot
+        FROM dm.dm_exception_audit
+        WHERE id=:exception_id
+        FOR UPDATE
+    """), {"exception_id": exception_id})).mappings().first()
+    if not row:
+        return ApiResponse.fail("异常不存在", code=404)
+    if row["exception_type"] != "performance_attribution_conflict":
+        return ApiResponse.fail("只有业绩归属冲突可执行归属裁决")
+
+    decided_at = datetime.now(timezone.utc)
+    snapshot = build_adjudication_snapshot(
+        row["data_snapshot"] or {},
+        selected_owner_id=body.selected_owner_id,
+        selected_owner_type=body.selected_owner_type,
+        reason=body.reason,
+        decision_evidence=body.decision_evidence,
+        decided_by=int(current_user.id),
+        decided_at=decided_at,
+    )
+    await db.execute(text("""
+        UPDATE dm.dm_exception_audit
+        SET data_snapshot=CAST(:snapshot AS jsonb),
+            is_reviewed=true,
+            reviewed_by=:reviewed_by,
+            reviewed_at=:reviewed_at,
+            review_note=:review_note,
+            responsibility_status='adjudicated'
+        WHERE id=:exception_id
+    """), {
+        "exception_id": exception_id,
+        "snapshot": json.dumps(snapshot, ensure_ascii=False, default=str),
+        "reviewed_by": int(current_user.id),
+        "reviewed_at": decided_at,
+        "review_note": body.reason,
+    })
+    return ApiResponse.ok(data={
+        "exception_id": exception_id,
+        "responsibility_status": "adjudicated",
+        "adjudication": snapshot["adjudication"],
+        "history_count": len(snapshot.get("adjudication_history") or []),
+    }, message="归属裁决已保存，原始交易未被修改")
 
 
 @router.post("/rebuild", response_model=ApiResponse)

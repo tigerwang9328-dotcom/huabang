@@ -38,6 +38,30 @@
       </div>
     </section>
 
+    <section class="surface attribution-status">
+      <div class="section-title-row attribution-title-row">
+        <div>
+          <h2>业绩归属数据门禁</h2>
+          <p>抖音来源、交易、会员归属、排班、改单、跨店和退款七类证据全部就绪后，才允许生成归属建议。</p>
+        </div>
+        <el-tag :type="attributionAllReady ? 'success' : 'warning'" effect="light">
+          {{ attributionAllReady ? "来源已齐全" : "来源不足时不自动归责" }}
+        </el-tag>
+      </div>
+      <div class="attribution-source-grid">
+        <div v-for="item in attributionSources" :key="item.key" class="attribution-source-item">
+          <div>
+            <strong>{{ sourceLabel(item.key) }}</strong>
+            <small>{{ item.source || "来源待确认" }}</small>
+          </div>
+          <el-tag :type="item.status === 'ready' ? 'success' : 'info'" effect="plain">
+            {{ item.status === "ready" ? "已就绪" : "待接入" }}
+          </el-tag>
+          <p>{{ item.reason || `更新时间 ${formatTime(item.updated_at)}` }}</p>
+        </div>
+      </div>
+    </section>
+
     <section class="surface">
       <div class="filter-bar">
         <el-date-picker v-model="query.business_date" type="date" value-format="YYYY-MM-DD" placeholder="业务日期" clearable />
@@ -98,7 +122,7 @@
           <el-descriptions-item label="业务日期">{{ detail.audit_date }}</el-descriptions-item>
           <el-descriptions-item label="对象">{{ detail.subject_id }}</el-descriptions-item>
           <el-descriptions-item label="证据哈希"><span class="hash">{{ detail.evidence_hash }}</span></el-descriptions-item>
-          <el-descriptions-item label="责任归属">{{ detail.responsibility_status === "ready" ? "已确认" : "待确认" }}</el-descriptions-item>
+          <el-descriptions-item label="责任归属">{{ responsibilityLabel(detail.responsibility_status) }}</el-descriptions-item>
           <el-descriptions-item label="来源时间">{{ formatTime(detail.source_updated_at) }}</el-descriptions-item>
           <el-descriptions-item label="生成时间">{{ formatTime(detail.generated_at) }}</el-descriptions-item>
           <el-descriptions-item label="规则阈值"><code>{{ compactJson(detail.thresholds) }}</code></el-descriptions-item>
@@ -116,6 +140,45 @@
           </el-table>
         </div>
 
+        <div v-if="detail.data_snapshot?.adjudication" class="drawer-section current-adjudication">
+          <h3>当前人工裁决</h3>
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="归属对象">
+              {{ detail.data_snapshot.adjudication.selected_owner_id }}
+              （{{ ownerTypeLabel(detail.data_snapshot.adjudication.selected_owner_type) }}）
+            </el-descriptions-item>
+            <el-descriptions-item label="裁决理由">{{ detail.data_snapshot.adjudication.reason }}</el-descriptions-item>
+            <el-descriptions-item label="裁决证据"><code>{{ compactJson(detail.data_snapshot.adjudication.decision_evidence) }}</code></el-descriptions-item>
+            <el-descriptions-item label="裁决时间">{{ formatTime(detail.data_snapshot.adjudication.decided_at) }}</el-descriptions-item>
+          </el-descriptions>
+        </div>
+
+        <div v-if="detail.exception_type === 'performance_attribution_conflict'" class="drawer-section adjudication-form">
+          <h3>人工裁决</h3>
+          <p class="form-help">裁决只记录归属结论、操作人和证据，不修改百胜交易、会员或退款原始数据。</p>
+          <el-form label-position="top">
+            <div class="adjudication-fields">
+              <el-form-item label="归属对象编号" required>
+                <el-input v-model="adjudication.selected_owner_id" placeholder="导购、门店或团队编号" />
+              </el-form-item>
+              <el-form-item label="归属对象类型" required>
+                <el-select v-model="adjudication.selected_owner_type">
+                  <el-option label="导购" value="guide" />
+                  <el-option label="门店" value="store" />
+                  <el-option label="团队" value="team" />
+                </el-select>
+              </el-form-item>
+            </div>
+            <el-form-item label="裁决理由" required>
+              <el-input v-model="adjudication.reason" type="textarea" :rows="2" placeholder="说明选择该归属对象的业务依据" />
+            </el-form-item>
+            <el-form-item label="裁决证据（JSON）" required>
+              <el-input v-model="adjudication.decision_evidence" type="textarea" :rows="4" placeholder='例如 {"排班记录":"2026-07-14早班","核对人":"店长"}' />
+            </el-form-item>
+            <el-button type="primary" :loading="adjudicating" @click="submitAdjudication">保存人工裁决</el-button>
+          </el-form>
+        </div>
+
         <div class="drawer-actions">
           <el-button type="primary" :disabled="!detail.drilldown?.route" @click="drilldown(detail)">下钻</el-button>
           <span v-if="detail.responsibility_status === 'pending_data'">责任人来源待接入，不自动归责。</span>
@@ -129,6 +192,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { Refresh, Search } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
 import { auditApi } from "@/api/audit";
 
 const router = useRouter();
@@ -139,29 +203,42 @@ const page = ref(1);
 const pageSize = ref(20);
 const latestDate = ref("");
 const sourceStatuses = ref<Record<string, any>>({});
+const attributionStatus = ref<any>({ sources: {}, all_sources_ready: false });
 const drawerVisible = ref(false);
 const detail = ref<any>(null);
+const adjudicating = ref(false);
+const adjudication = reactive({ selected_owner_id: "", selected_owner_type: "guide", reason: "", decision_evidence: "" });
 const query = reactive({ business_date: "", keyword: "", store_code: "", severity: "", metric_status: "", task_status: "" });
 
 const summary = ref({ major_count: 0, unconverted_count: 0 });
+type AttributionSourceItem = { key: string; status?: string; source?: string; reason?: string; updated_at?: string };
 const criticalCount = computed(() => summary.value.major_count);
 const unconvertedCount = computed(() => summary.value.unconverted_count);
 const pendingSources = computed(() => Object.entries(sourceStatuses.value).filter(([, value]) => value.status === "pending_data").map(([key, value]) => ({ key, ...value })));
+const attributionSources = computed<AttributionSourceItem[]>(() => Object.entries(attributionStatus.value.sources || {}).map(([key, value]) => ({ key, ...(value as Omit<AttributionSourceItem, "key">) })));
+const attributionAllReady = computed(() => Boolean(attributionStatus.value.all_sources_ready));
 
-const sourceNames: Record<string, string> = { return: "退货", amendment: "改单", stocktake: "盘点", responsibility: "责任归属" };
+const sourceNames: Record<string, string> = {
+  return: "退货", amendment: "改单", stocktake: "盘点", responsibility: "责任归属",
+  douyin_source: "抖音订单来源", store_transaction: "门店交易", member_ownership: "会员归属",
+  guide_schedule: "导购排班", amendment_log: "改单日志", cross_store_history: "跨店消费", refund_record: "退款记录",
+};
 const sourceLabel = (key: string) => sourceNames[key] || key;
 const severityLabel = (value: string) => ({ critical: "紧急", risk: "风险", warning: "预警", info: "提示" }[value] || value || "提示");
 const severityType = (value: string) => value === "critical" ? "danger" : value === "risk" ? "warning" : value === "warning" ? "warning" : "info";
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "待接入";
 const compactJson = (value: unknown) => value ? JSON.stringify(value) : "-";
+const responsibilityLabel = (value?: string) => value === "adjudicated" ? "已裁决" : value === "ready" ? "已确认" : "待确认";
+const ownerTypeLabel = (value?: string) => ({ guide: "导购", store: "门店", team: "团队" }[value || ""] || value || "未知");
 
 async function loadData() {
   loading.value = true;
   try {
     const params = Object.fromEntries(Object.entries(query).filter(([, value]) => value));
-    const [listResponse, statusResponse] = await Promise.all([
+    const [listResponse, statusResponse, attributionResponse] = await Promise.all([
       auditApi.listExceptions({ ...params, page: page.value, page_size: pageSize.value }),
       auditApi.getRuleStatuses(),
+      auditApi.getAttributionStatus(query.business_date || undefined),
     ]);
     const data = listResponse.data.data || {};
     items.value = data.items || [];
@@ -169,6 +246,7 @@ async function loadData() {
     summary.value = data.summary || { major_count: 0, unconverted_count: 0 };
     latestDate.value = data.business_date || "";
     sourceStatuses.value = statusResponse.data.data || {};
+    attributionStatus.value = attributionResponse.data.data || { sources: {}, all_sources_ready: false };
   } finally {
     loading.value = false;
   }
@@ -176,7 +254,45 @@ async function loadData() {
 
 function search() { page.value = 1; loadData(); }
 function reset() { Object.assign(query, { business_date: "", keyword: "", store_code: "", severity: "", metric_status: "", task_status: "" }); search(); }
-async function openDetail(id: number) { detail.value = (await auditApi.getException(id)).data.data; drawerVisible.value = true; }
+async function openDetail(id: number) {
+  detail.value = (await auditApi.getException(id)).data.data;
+  const current = detail.value?.data_snapshot?.adjudication;
+  Object.assign(adjudication, {
+    selected_owner_id: current?.selected_owner_id || "",
+    selected_owner_type: current?.selected_owner_type || "guide",
+    reason: current?.reason || "",
+    decision_evidence: current?.decision_evidence ? JSON.stringify(current.decision_evidence, null, 2) : "",
+  });
+  drawerVisible.value = true;
+}
+async function submitAdjudication() {
+  if (!detail.value?.id || !adjudication.selected_owner_id.trim() || adjudication.reason.trim().length < 2 || !adjudication.decision_evidence.trim()) {
+    ElMessage.warning("请完整填写归属对象、裁决理由和裁决证据");
+    return;
+  }
+  let decisionEvidence: Record<string, unknown>;
+  try {
+    decisionEvidence = JSON.parse(adjudication.decision_evidence);
+    if (!decisionEvidence || Array.isArray(decisionEvidence) || typeof decisionEvidence !== "object" || !Object.keys(decisionEvidence).length) throw new Error("empty");
+  } catch {
+    ElMessage.warning("裁决证据必须是非空 JSON 对象");
+    return;
+  }
+  adjudicating.value = true;
+  try {
+    await auditApi.adjudicateAttribution(detail.value.id, {
+      selected_owner_id: adjudication.selected_owner_id.trim(),
+      selected_owner_type: adjudication.selected_owner_type,
+      reason: adjudication.reason.trim(),
+      decision_evidence: decisionEvidence,
+    });
+    ElMessage.success("人工裁决已保存，原始业务数据未修改");
+    await openDetail(detail.value.id);
+    await loadData();
+  } finally {
+    adjudicating.value = false;
+  }
+}
 function drilldown(row: any) { if (row.drilldown?.route) router.push({ path: row.drilldown.route, query: row.drilldown.params || {} }); }
 
 onMounted(loadData);
@@ -196,14 +312,22 @@ onMounted(loadData);
 .surface { padding: 18px 20px; margin-bottom: 14px; }
 .section-title-row h2 { margin: 0; font-size: 18px; }.section-title-row p { font-size: 13px; }
 .status-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }.status-help { margin-left: 5px; font-weight: 700; }
+.attribution-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.attribution-source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.attribution-source-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }
+.attribution-source-item strong, .attribution-source-item small { display: block; }.attribution-source-item small { color: #94a3b8; margin-top: 3px; }
+.attribution-source-item p { grid-column: 1 / -1; margin: 4px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
 .filter-bar { display: grid; grid-template-columns: 150px minmax(180px, 1fr) 150px 130px 130px 130px auto auto; gap: 10px; margin-bottom: 16px; }
 .filter-bar :deep(.el-date-editor.el-input) { width: 100%; }
 .primary-cell { font-weight: 600; color: #1e293b; }.el-table small { display: block; color: #94a3b8; margin-top: 4px; }
 .pagination-row { display: flex; justify-content: space-between; align-items: center; color: #64748b; margin-top: 16px; }
 .detail-heading { margin-bottom: 18px; }.detail-heading h2 { margin: 12px 0 8px; font-size: 20px; }.detail-heading p { color: #64748b; }
 .hash { font-family: Consolas, monospace; overflow-wrap: anywhere; }.drawer-section { margin-top: 24px; }.drawer-section h3 { margin-bottom: 12px; }
+.current-adjudication, .adjudication-form { padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.form-help { color: #64748b; font-size: 13px; margin: -4px 0 16px; }.adjudication-fields { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 12px; }
+.adjudication-fields :deep(.el-select) { width: 100%; }
 .drawer-actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; color: #64748b; font-size: 13px; }
 code { white-space: normal; word-break: break-all; }
-@media (max-width: 1100px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .audit-page { padding: 18px 12px 28px; }.page-heading { align-items: flex-start; }.page-heading h1 { font-size: 26px; }.summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.summary-card { padding: 14px; min-height: 100px; }.filter-bar { grid-template-columns: 1fr 1fr; }.pagination-row { align-items: flex-start; gap: 12px; flex-direction: column; overflow-x: auto; }.surface { padding: 14px; } }
+@media (max-width: 1100px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }.attribution-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .audit-page { padding: 18px 12px 28px; }.page-heading, .attribution-title-row { align-items: flex-start; flex-direction: column; }.page-heading h1 { font-size: 26px; }.summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.summary-card { padding: 14px; min-height: 100px; }.filter-bar, .attribution-source-grid, .adjudication-fields { grid-template-columns: 1fr; }.pagination-row { align-items: flex-start; gap: 12px; flex-direction: column; overflow-x: auto; }.surface { padding: 14px; } }
 </style>
