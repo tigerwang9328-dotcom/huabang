@@ -160,8 +160,9 @@ def test_member_and_task_apis_reuse_the_existing_task_workflow():
     assert "MemberFollowupResult" in task_api
     assert "linked_ticket_no" in task_api
     assert '@router.get("/assignees",' in task_api
+    assert 'row["mapping_pending"] = True' in task_api
     assert "source_type == \"member_action\"" in task_api
     assert "UPDATE dm.dm_member_segment_snapshot" in task_api
-    assert "VIP会员行动责任人必须属于会员归属门店" in task_api
+    assert '"responsibility_mapping_status"' in task_api
     assert "generate_member_action_drafts" in job
     assert "CREATE TABLE" not in member_api + task_api
