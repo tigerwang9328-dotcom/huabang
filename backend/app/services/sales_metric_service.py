@@ -1,6 +1,8 @@
 """Shared Baison POS payment formula for sales and actual receipts."""
 
 from datetime import date
+from decimal import Decimal
+from typing import Iterable
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,40 +10,87 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.store_whitelist import ALLOWED_STORE_CODES
 
 
-PAY_DETAIL_SQL = """
+SALES_PAYMENT_CODES = ("000", "003", "004", "011", "666", "971")
+ACTUAL_RECEIPT_PAYMENT_CODES = ("000", "011", "666", "971")
+ONLINE_PAYMENT_CODE = "011"
+
+
+def summarize_payment_rows(
+    rows: Iterable[tuple[str, Decimal | int | float | str]],
+    *,
+    recharge_amount: Decimal | int | float | str = 0,
+) -> dict[str, Decimal]:
+    """Apply the confirmed sales and receipt formula to payment rows."""
+    sales = Decimal("0")
+    offline = Decimal("0")
+    online = Decimal("0")
+    receipts = Decimal(str(recharge_amount or 0))
+    refunds = Decimal("0")
+
+    for raw_code, raw_amount in rows:
+        code = str(raw_code or "").strip()
+        amount = Decimal(str(raw_amount or 0))
+        if code not in SALES_PAYMENT_CODES:
+            continue
+        if amount > 0:
+            sales += amount
+            if code == ONLINE_PAYMENT_CODE:
+                online += amount
+            else:
+                offline += amount
+            if code in ACTUAL_RECEIPT_PAYMENT_CODES:
+                receipts += amount
+        elif amount < 0:
+            receipts += amount
+            refunds += -amount
+
+    return {
+        "sales_amount": sales,
+        "offline_sales_amount": offline,
+        "online_sales_amount": online,
+        "actual_pay_amount": receipts,
+        "refund_amount": refunds,
+    }
+
+
+def _sql_codes(codes: tuple[str, ...]) -> str:
+    return "(" + ", ".join(f"'{code}'" for code in codes) + ")"
+
+
+PAY_DETAIL_SQL = f"""
     SELECT t.ticket_no,
            SUM(CASE
-                 WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                 WHEN p->>'jsdm' IN {_sql_codes(SALES_PAYMENT_CODES)}
                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                  ELSE 0
                END) AS sales_amount,
            SUM(CASE
-                 WHEN p->>'jsdm' IN ('000', '003', '004', '666', '971')
+                 WHEN p->>'jsdm' IN {_sql_codes(tuple(code for code in SALES_PAYMENT_CODES if code != ONLINE_PAYMENT_CODE))}
                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                  ELSE 0
                END) AS offline_sales_amount,
            SUM(CASE
-                 WHEN p->>'jsdm' = '011'
+                 WHEN p->>'jsdm' = '{ONLINE_PAYMENT_CODE}'
                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                  ELSE 0
                END) AS online_sales_amount,
            SUM(CASE
-                 WHEN p->>'jsdm' IN ('000', '011', '666', '971')
+                 WHEN p->>'jsdm' IN {_sql_codes(ACTUAL_RECEIPT_PAYMENT_CODES)}
                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                  ELSE 0
                END)
            + SUM(CASE
-                   WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                   WHEN p->>'jsdm' IN {_sql_codes(SALES_PAYMENT_CODES)}
                     AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
                    THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                    ELSE 0
                  END) AS actual_pay_amount,
            -SUM(CASE
-                  WHEN p->>'jsdm' IN ('000', '003', '004', '011', '666', '971')
+                  WHEN p->>'jsdm' IN {_sql_codes(SALES_PAYMENT_CODES)}
                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
                   THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
                   ELSE 0

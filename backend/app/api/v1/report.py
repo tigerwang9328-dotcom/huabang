@@ -51,6 +51,7 @@ async def list_boss_daily(
         SELECT report_date, total_sales, actual_pay_amount, order_count,
                item_count, avg_order_value, items_per_order,
                gross_profit, gross_margin, vip_sales_amount,
+               vip_negative_balance_amount,
                is_cost_complete, ai_summary, generated_at
         FROM dm.dm_boss_daily_report
         WHERE report_date BETWEEN :start AND :end
@@ -67,8 +68,9 @@ async def list_boss_daily(
         "gross_profit": float(row[7]) if row[7] is not None else None,
         "gross_margin": float(row[8]) if row[8] is not None else None,
         "vip_sales_amount": float(row[9]) if row[9] is not None else None,
-        "is_cost_complete": bool(row[10]),
-        "has_ai_summary": bool(row[11]),
-        "generated_at": str(row[12]) if row[12] else None,
+        "vip_negative_balance_amount": float(row[10]) if row[10] is not None else None,
+        "is_cost_complete": bool(row[11]),
+        "has_ai_summary": bool(row[12]),
+        "generated_at": str(row[13]) if row[13] else None,
     } for row in r.fetchall()]
     return ApiResponse.ok(data={"items": items, "total": len(items)})

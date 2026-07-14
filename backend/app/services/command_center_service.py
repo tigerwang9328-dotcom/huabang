@@ -17,6 +17,7 @@ from app.services.sales_metric_service import PAY_DETAIL_SQL, rebuild_confirmed_
 
 
 ZERO = Decimal("0")
+VALID_METRIC_STATUSES = {"ready", "estimated", "pending_data", "stale"}
 
 
 def inventory_warning_source_id(
@@ -59,6 +60,8 @@ def build_metric(
     reason: str | None = None,
     decimals: int = 2,
 ) -> dict[str, Any]:
+    if status is not None and status not in VALID_METRIC_STATUSES:
+        raise ValueError(f"unknown metric status: {status}")
     if value is None:
         return {
             "value": None,
@@ -79,6 +82,27 @@ def build_metric(
         "source": source,
         "as_of": _json_value(as_of),
         "reason": reason,
+    }
+
+
+def derive_metric_statuses(
+    *,
+    sales: dict[str, Any],
+    ticket: dict[str, Any],
+    inventory: dict[str, Any],
+    members: dict[str, Any],
+) -> dict[str, str]:
+    sales_status = "ready" if ticket.get("synced_at") else "stale"
+    return {
+        "sales": sales_status,
+        "sales_detail": "ready" if sales.get("etl_at") else "stale",
+        "actual_pay": sales_status,
+        "gross_profit": "ready" if bool(sales.get("is_cost_complete")) else "estimated",
+        "online_sales": sales_status,
+        "inventory": "ready" if inventory.get("updated_at") else "stale",
+        "inventory_age": "estimated" if _decimal(inventory.get("age_unknown_qty")) > 0 else "ready",
+        "vip_balance": "ready" if members.get("updated_at") else "stale",
+        "operating_profit": "pending_data",
     }
 
 
@@ -463,6 +487,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
     members = (await db.execute(text("""
         SELECT COALESCE(SUM(GREATEST(COALESCE(current_balance,0),0)),0) vip_balance,
                COUNT(*) FILTER (WHERE current_balance<0) negative_count,
+               COALESCE(SUM(ABS(current_balance)) FILTER (WHERE current_balance<0),0) negative_amount,
                MAX(balance_updated_at) updated_at
         FROM dim.dim_member
         WHERE UPPER(register_store)=ANY(:codes) AND COALESCE(status,'active')='active'
@@ -498,16 +523,9 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "online": {"status": "ready", "source": "baison_payment.011", "business_date": str(report_date)},
         "finance": {"status": "pending_data", "reason": "费用未完整接入"},
     }
-    metric_status = {
-        "sales": "ready" if sales else "stale",
-        "actual_pay": "ready" if ticket.get("synced_at") else "stale",
-        "gross_profit": "ready" if cost_complete else "estimated",
-        "online_sales": "ready",
-        "inventory": "ready" if inventory.get("updated_at") else "stale",
-        "inventory_age": "estimated" if _decimal(inventory.get("age_unknown_qty")) > 0 else "ready",
-        "vip_balance": "ready" if members.get("updated_at") else "stale",
-        "operating_profit": "pending_data",
-    }
+    metric_status = derive_metric_statuses(
+        sales=dict(sales), ticket=dict(ticket), inventory=dict(inventory), members=dict(members)
+    )
     summary = build_template_summary(
         sales=total_sales,
         gross_profit=_decimal(sales.get("gross_profit")) if sales.get("gross_profit") is not None else None,
@@ -540,6 +558,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "age_180_plus_amount": _decimal(inventory.get("age_180_plus_amount")),
         "vip_balance": _decimal(members.get("vip_balance")),
         "vip_negative_balance_count": int(members.get("negative_count") or 0),
+        "vip_negative_balance_amount": _decimal(members.get("negative_amount")),
         "vip_sales_amount": vip_sales,
         "vip_sales_ratio": vip_sales / total_sales if total_sales else ZERO,
         "pending_task_count": int(tasks.get("pending") or 0),
@@ -559,7 +578,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             actual_pay_amount, return_amount, return_rate, gross_profit, gross_margin,
             total_inventory_amount, inventory_total_qty, age_90_plus_amount, age_180_plus_amount,
             inventory_age_unknown_qty, inventory_age_unknown_amount,
-            vip_balance, vip_negative_balance_count, vip_sales_amount, vip_sales_ratio,
+            vip_balance, vip_negative_balance_count, vip_negative_balance_amount, vip_sales_amount, vip_sales_ratio,
             pending_task_count, overdue_task_count, exception_count, major_exception_count,
             ai_summary, ai_model_used, is_cost_complete, is_finance_complete,
             data_quality_status, source_freshness, metric_status, generated_at, updated_at
@@ -569,7 +588,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             :actual_pay_amount, :return_amount, :return_rate, :gross_profit, :gross_margin,
             :total_inventory_amount, :inventory_total_qty, :age_90_plus_amount, :age_180_plus_amount,
             :inventory_age_unknown_qty, :inventory_age_unknown_amount,
-            :vip_balance, :vip_negative_balance_count, :vip_sales_amount, :vip_sales_ratio,
+            :vip_balance, :vip_negative_balance_count, :vip_negative_balance_amount, :vip_sales_amount, :vip_sales_ratio,
             :pending_task_count, :overdue_task_count, :exception_count, :major_exception_count,
             :ai_summary, 'template', :is_cost_complete, false,
             :data_quality_status, CAST(:source_freshness AS jsonb), CAST(:metric_status AS jsonb), now(), now()
@@ -586,6 +605,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             inventory_age_unknown_amount=EXCLUDED.inventory_age_unknown_amount,
             age_180_plus_amount=EXCLUDED.age_180_plus_amount, vip_balance=EXCLUDED.vip_balance,
             vip_negative_balance_count=EXCLUDED.vip_negative_balance_count,
+            vip_negative_balance_amount=EXCLUDED.vip_negative_balance_amount,
             vip_sales_amount=EXCLUDED.vip_sales_amount, vip_sales_ratio=EXCLUDED.vip_sales_ratio,
             pending_task_count=EXCLUDED.pending_task_count, overdue_task_count=EXCLUDED.overdue_task_count,
             exception_count=EXCLUDED.exception_count, major_exception_count=EXCLUDED.major_exception_count,
@@ -613,17 +633,18 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "sales": build_metric(data.get("total_sales"), source="baison_pos", as_of=report_date, status=statuses.get("sales")),
         "offline_sales": build_metric(data.get("offline_sales"), source="baison_payment", as_of=report_date, status=statuses.get("sales")),
         "actual_pay": build_metric(data.get("actual_pay_amount"), source="baison_payment", as_of=report_date, status=statuses.get("actual_pay")),
-        "orders": build_metric(data.get("order_count"), source="baison_pos", as_of=report_date, decimals=0),
-        "items": build_metric(data.get("item_count"), source="baison_pos", as_of=report_date, decimals=0),
-        "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date),
-        "items_per_order": build_metric(data.get("items_per_order"), source="baison_pos", as_of=report_date),
+        "orders": build_metric(data.get("order_count"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=0),
+        "items": build_metric(data.get("item_count"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=0),
+        "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
+        "items_per_order": build_metric(data.get("items_per_order"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
         "gross_profit": build_metric(data.get("gross_profit"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason),
         "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason, decimals=4),
         "inventory_amount": build_metric(data.get("total_inventory_amount"), source="apparel_inventory", as_of=source_freshness.get("inventory", {}).get("updated_at"), status=statuses.get("inventory")),
         "age_90_amount": build_metric(data.get("age_90_plus_amount"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory")),
         "inventory_age_unknown_qty": build_metric(data.get("inventory_age_unknown_qty"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory_age"), decimals=0),
         "vip_balance": build_metric(data.get("vip_balance"), source="baison_member.CZ_DQJE", as_of=source_freshness.get("member", {}).get("updated_at"), status=statuses.get("vip_balance")),
-        "vip_sales": build_metric(data.get("vip_sales_amount"), source="baison_pos", as_of=report_date),
+        "vip_negative_balance_amount": build_metric(data.get("vip_negative_balance_amount"), source="baison_member.CZ_DQJE", as_of=source_freshness.get("member", {}).get("updated_at"), status=statuses.get("vip_balance")),
+        "vip_sales": build_metric(data.get("vip_sales_amount"), source="baison_pos", as_of=report_date, status=statuses.get("sales")),
         "online_sales": build_metric(data.get("online_sales"), source="baison_payment.011", as_of=report_date, status=statuses.get("online_sales")),
         "operating_profit": build_metric(None, source="finance", reason="费用未完整接入，不判断净利润"),
     }

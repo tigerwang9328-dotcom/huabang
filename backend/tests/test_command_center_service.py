@@ -5,6 +5,7 @@ from app.services.command_center_service import (
     allocate_fifo_inventory,
     build_metric,
     build_template_summary,
+    derive_metric_statuses,
     inventory_warning_source_id,
 )
 from app.services.rule_engine import RuleEngine
@@ -46,6 +47,36 @@ def test_metric_does_not_turn_missing_data_into_zero():
     assert metric["value"] is None
     assert metric["status"] == "pending_data"
     assert metric["display"] == "待接入"
+
+
+def test_metric_statuses_follow_each_source_freshness():
+    statuses = derive_metric_statuses(
+        sales={"etl_at": None, "is_cost_complete": False},
+        ticket={"synced_at": None},
+        inventory={"updated_at": None, "age_unknown_qty": 3},
+        members={"updated_at": None},
+    )
+
+    assert statuses == {
+        "sales": "stale",
+        "sales_detail": "stale",
+        "actual_pay": "stale",
+        "gross_profit": "estimated",
+        "online_sales": "stale",
+        "inventory": "stale",
+        "inventory_age": "estimated",
+        "vip_balance": "stale",
+        "operating_profit": "pending_data",
+    }
+
+
+def test_metric_rejects_unknown_status():
+    try:
+        build_metric(1, source="test", status="unknown")
+    except ValueError as exc:
+        assert "unknown metric status" in str(exc)
+    else:
+        raise AssertionError("invalid metric status must be rejected")
 
 
 def test_template_summary_avoids_profit_claim_when_finance_is_incomplete():
