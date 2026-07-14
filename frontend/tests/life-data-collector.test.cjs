@@ -31,7 +31,7 @@ test('declares the required Tampermonkey metadata', () => {
   const source = fs.readFileSync(scriptPath, 'utf8')
 
   for (const line of [
-    '// @version      1.1.0',
+    '// @version      1.1.1',
     '// @match        https://www.life-data.cn/*',
     '// @run-at       document-start',
     '// @grant        GM_xmlhttpRequest',
@@ -400,4 +400,185 @@ test('validates exact page sizes and unique item ids before publishing', () => {
       ),
     /item_id 重复/,
   )
+})
+
+test('scans canonical fields through arbitrary nested LifeData response structures', () => {
+  const response = {
+    data: {
+      result: {
+        list: [{ itemRank: { summary: { metrics: { item_play_cnt: 12 } } } }],
+        dimension: {
+          extra: {
+            total_ad_cost: 345,
+            ad_orders: 4,
+            total_ad_pay_gmv: 678,
+            pay_gmv: 901,
+            verify_gmv: 234,
+            verify_cert_cnt: 5,
+            refund_gmv: 67,
+            age: '18-23',
+            gender: 'female',
+            province: '贵州',
+            hour: 13,
+            item_id: 'video-1',
+            campaign_id: 'campaign-1',
+            plan_id: 'plan-1',
+            creative_id: 'creative-1',
+            store_id: 'store-1',
+            date_str: '2026-07-13',
+          },
+        },
+      },
+    },
+  }
+
+  assert.deepEqual(Object.keys(core.scanCanonicalFields(response)).sort(), [
+    'ad_orders', 'ad_pay_gmv_fen', 'audience_age', 'audience_gender', 'campaign_id',
+    'creative_id', 'hour', 'pay_gmv_fen', 'plan_id', 'plays', 'refund_gmv_fen',
+    'region', 'spend_fen', 'stat_date', 'store_id', 'verified_count',
+    'verified_gmv_fen', 'video_id',
+  ])
+  assert.deepEqual(core.scanCanonicalFields(response).plays, {
+    paths: ['$.data.result.list[0].itemRank.summary.metrics.item_play_cnt'],
+    count: 1,
+  })
+})
+
+test('maps aliases, counts duplicates, ignores unknown and sensitive keys', () => {
+  const response = {
+    data: [
+      { item_total_play_cnt: 1, current_ad_cost: 2, current_ad_pay_gmv: 3 },
+      { video_id: 'v2', item_play_cnt: 4, totally_unknown_metric: 5 },
+    ],
+    cookie: { item_play_cnt: 999 },
+    Authorization: { total_ad_cost: 999 },
+    nested: { 'x-tt-ls-session-id': { pay_gmv: 999 } },
+  }
+  const found = core.scanCanonicalFields(response)
+
+  assert.equal(found.plays.count, 2)
+  assert.equal(found.plays.paths.length, 2)
+  assert.equal(found.spend_fen.count, 1)
+  assert.equal(found.ad_pay_gmv_fen.count, 1)
+  assert.equal(found.video_id.count, 1)
+  assert.equal('totally_unknown_metric' in found, false)
+  assert.equal('pay_gmv_fen' in found, false)
+  assert.equal(JSON.stringify(found).toLowerCase().includes('authorization'), false)
+})
+
+test('maps every canonical field including real ad order and ad pay GMV aliases', () => {
+  const aliases = {
+    item_play_cnt: 'plays',
+    total_ad_cost: 'spend_fen',
+    order_cnt: 'ad_orders',
+    ad_pay_gmv: 'ad_pay_gmv_fen',
+    pay_gmv: 'pay_gmv_fen',
+    verify_gmv: 'verified_gmv_fen',
+    verify_cert_cnt: 'verified_count',
+    refund_gmv: 'refund_gmv_fen',
+    age: 'audience_age',
+    gender: 'audience_gender',
+    province: 'region',
+    hour: 'hour',
+    item_id: 'video_id',
+    campaign_id: 'campaign_id',
+    plan_id: 'plan_id',
+    creative_id: 'creative_id',
+    store_id: 'store_id',
+    date_str: 'stat_date',
+  }
+  const response = Object.fromEntries(
+    Object.keys(aliases).map((alias, index) => [alias, index + 1]),
+  )
+
+  assert.deepEqual(
+    Object.keys(core.scanCanonicalFields(response)).sort(),
+    Object.values(aliases).sort(),
+  )
+})
+
+test('keeps browser aliases aligned with backend real-response aliases', () => {
+  const aliases = {
+    play_count: 'plays',
+    verified_gmv: 'verified_gmv_fen',
+    age_name: 'audience_age',
+    gender_name: 'audience_gender',
+    sex: 'audience_gender',
+    city_resident: 'region',
+    province_resident: 'region',
+    hour_str: 'hour',
+    aweme_id: 'video_id',
+  }
+
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    assert.deepEqual(Object.keys(core.scanCanonicalFields({ [alias]: 1 })), [canonical])
+  }
+})
+
+test('prioritizes every mandatory field before optional guidance', () => {
+  assert.deepEqual(core.MANDATORY_FIELDS, ['spend_fen', 'verified_gmv_fen', 'stat_date'])
+  const guidance = core.missingFieldGuidance({})
+  assert.deepEqual(guidance.slice(0, 3).map((item) => item.field), core.MANDATORY_FIELDS)
+})
+
+test('excludes nested credential, token, session, signature, and secret subtrees', () => {
+  const response = {
+    safe: { item_play_cnt: 1 },
+    sessionToken: { total_ad_cost: 2 },
+    access_token: { ad_pay_gmv: 3 },
+    refreshToken: { pay_gmv: 4 },
+    request_signature: { verify_gmv: 5 },
+    sign: { refund_gmv: 6 },
+    signing_secret: { order_cnt: 7 },
+    nested: {
+      token: { video_id: 8 },
+      'Bearer private-token': { campaign_id: 9 },
+    },
+  }
+  const found = core.scanCanonicalFields(response)
+
+  assert.deepEqual(found, { plays: { paths: ['$.safe.item_play_cnt'], count: 1 } })
+  assert.equal(JSON.stringify(found).includes('private-token'), false)
+})
+
+test('bounds scanner depth, visited nodes, and sample paths', () => {
+  let tooDeep = { item_play_cnt: 1 }
+  for (let index = 0; index < 41; index += 1) tooDeep = { next: tooDeep }
+  const many = Array.from({ length: 100_001 }, (_, index) => ({
+    item_play_cnt: index,
+  }))
+  const duplicates = Array.from({ length: 12 }, (_, index) => ({
+    total_ad_cost: index,
+  }))
+
+  assert.equal('plays' in core.scanCanonicalFields(tooDeep), false)
+  assert.ok(core.scanCanonicalFields(many).plays.count <= 100_000)
+  assert.equal(core.scanCanonicalFields(duplicates).spend_fen.count, 12)
+  assert.equal(core.scanCanonicalFields(duplicates).spend_fen.paths.length, 8)
+})
+
+test('stops a wide object before a canonical field beyond the node budget', () => {
+  const response = {}
+  for (let index = 0; index < 100_000; index += 1) {
+    response[`filler_${index}`] = index
+  }
+  response.item_play_cnt = 1
+
+  assert.deepEqual(core.scanCanonicalFields(response), {})
+})
+
+test('derives bounded template capabilities without retaining response bodies', () => {
+  const template = { endpoint: '/api/dito/query', pagePath: '/dito/pc/ad/analysis' }
+  const capability = core.templateCapabilities(template, {
+    data: { metrics: { total_ad_cost: 123, stat_date: '2026-07-13' } },
+    authorization: 'secret',
+  })
+
+  assert.deepEqual(capability.fields, ['spend_fen', 'stat_date'])
+  assert.deepEqual(capability.samplePaths, {
+    spend_fen: ['$.data.metrics.total_ad_cost'],
+    stat_date: ['$.data.metrics.stat_date'],
+  })
+  assert.equal(JSON.stringify(capability).includes('secret'), false)
+  assert.equal('response' in capability, false)
 })

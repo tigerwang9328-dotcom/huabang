@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.1.0
+// @version      1.1.1
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @updateURL     https://hbreare.com/life-data-collector.user.js
 // @downloadURL   https://hbreare.com/life-data-collector.user.js
@@ -40,6 +40,46 @@
     'root-life-account-id',
     'life-account-id',
   ])
+  const CANONICAL_FIELD_ALIASES = Object.freeze({
+    plays: ['plays', 'item_play_cnt', 'item_total_play_cnt', 'play_count'],
+    spend_fen: ['spend_fen', 'total_ad_cost', 'current_ad_cost'],
+    ad_orders: [
+      'ad_orders',
+      'order_cnt',
+      'ad_order_cnt',
+      'ad_pay_order_cnt',
+      'total_ad_order_cnt',
+      'current_ad_order_cnt',
+    ],
+    ad_pay_gmv_fen: [
+      'ad_pay_gmv_fen',
+      'ad_pay_gmv',
+      'total_ad_pay_gmv',
+      'current_ad_pay_gmv',
+    ],
+    pay_gmv_fen: ['pay_gmv_fen', 'pay_gmv'],
+    verified_gmv_fen: ['verified_gmv_fen', 'verify_gmv', 'verified_gmv'],
+    verified_count: ['verified_count', 'verify_cert_cnt'],
+    refund_gmv_fen: ['refund_gmv_fen', 'refund_gmv'],
+    audience_age: ['audience_age', 'age', 'age_range', 'age_name'],
+    audience_gender: ['audience_gender', 'gender', 'gender_name', 'sex'],
+    region: ['region', 'province', 'city', 'city_resident', 'province_resident'],
+    hour: ['hour', 'stat_hour', 'hour_str'],
+    video_id: ['video_id', 'item_id', 'aweme_id'],
+    campaign_id: ['campaign_id'],
+    plan_id: ['plan_id'],
+    creative_id: ['creative_id'],
+    store_id: ['store_id'],
+    stat_date: ['stat_date', 'date_str'],
+  })
+  const CANONICAL_FIELD_BY_ALIAS = new Map(
+    Object.entries(CANONICAL_FIELD_ALIASES).flatMap(([canonical, aliases]) =>
+      aliases.map((alias) => [alias, canonical]),
+    ),
+  )
+  const SCAN_MAX_DEPTH = 40
+  const SCAN_MAX_NODES = 100_000
+  const SCAN_MAX_SAMPLE_PATHS = 8
   const RETRY_DELAYS = [30_000, 120_000, 600_000, 1_800_000]
   const TRUSTED_PROMPT =
     typeof globalThis.prompt === 'function'
@@ -180,18 +220,167 @@
 
     const clean = {}
     for (const [key, child] of Object.entries(value)) {
-      const normalized = String(key).toLowerCase()
       if (
-        SENSITIVE_JSON_KEYS.has(normalized) ||
-        normalized === '__proto__' ||
-        normalized === 'prototype' ||
-        normalized === 'constructor'
+        isSensitiveJsonKey(key) ||
+        ['__proto__', 'prototype', 'constructor'].includes(
+          String(key).toLowerCase(),
+        )
       ) {
         continue
       }
       clean[key] = sanitizeBusinessJson(child)
     }
     return clean
+  }
+
+  function isSensitiveJsonKey(key) {
+    const normalized = String(key).toLowerCase()
+    if (SENSITIVE_JSON_KEYS.has(normalized)) return true
+    const compact = normalized.replace(/[^a-z0-9]/g, '')
+    return (
+      compact.includes('cookie') ||
+      compact.includes('authorization') ||
+      compact.includes('session') ||
+      compact.includes('token') ||
+      compact.includes('signature') ||
+      compact === 'sign' ||
+      compact.includes('signingsecret') ||
+      compact === 'secret'
+    )
+  }
+
+  function responsePath(parent, key, isArray) {
+    if (isArray) return `${parent}[${key}]`
+    return /^[A-Za-z_$][\w$]*$/.test(key)
+      ? `${parent}.${key}`
+      : `${parent}[${JSON.stringify(key)}]`
+  }
+
+  function *jsonEntries(value) {
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        yield [index, value[index]]
+      }
+      return
+    }
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        yield [key, value[key]]
+      }
+    }
+  }
+
+  function scanCanonicalFields(response) {
+    const found = {}
+    if (!response || typeof response !== 'object') return found
+    const stack = [{
+      iterator: jsonEntries(response),
+      value: response,
+      path: '$',
+      depth: 0,
+    }]
+    const seen = new Set()
+    seen.add(response)
+    let visited = 1
+
+    while (stack.length > 0 && visited < SCAN_MAX_NODES) {
+      const current = stack[stack.length - 1]
+      const next = current.iterator.next()
+      if (next.done) {
+        stack.pop()
+        continue
+      }
+      visited += 1
+      const [rawKey, child] = next.value
+      const key = String(rawKey)
+      const isArray = Array.isArray(current.value)
+      const normalized = key.toLowerCase()
+      const path = responsePath(current.path, key, isArray)
+      if (!isArray && isSensitiveJsonKey(key)) continue
+      const canonical = isArray
+        ? null
+        : CANONICAL_FIELD_BY_ALIAS.get(normalized)
+      if (canonical) {
+        if (!found[canonical]) found[canonical] = { paths: [], count: 0 }
+        found[canonical].count += 1
+        if (found[canonical].paths.length < SCAN_MAX_SAMPLE_PATHS) {
+          found[canonical].paths.push(path)
+        }
+      }
+      if (
+        visited < SCAN_MAX_NODES &&
+        child &&
+        typeof child === 'object' &&
+        current.depth < SCAN_MAX_DEPTH &&
+        !seen.has(child)
+      ) {
+        seen.add(child)
+        stack.push({
+          iterator: jsonEntries(child),
+          value: child,
+          path,
+          depth: current.depth + 1,
+        })
+      }
+    }
+    return found
+  }
+
+  function templateCapabilities(_template, response) {
+    const scanned = scanCanonicalFields(response)
+    const fields = Object.keys(scanned).sort()
+    return {
+      fields,
+      samplePaths: Object.fromEntries(
+        fields.map((field) => [field, [...scanned[field].paths]]),
+      ),
+    }
+  }
+
+  const FIELD_GUIDANCE = {
+    plays: ['流量', '视频分析'],
+    spend_fen: ['投放', '广告分析'],
+    ad_orders: ['投放', '广告分析'],
+    ad_pay_gmv_fen: ['投放', '广告分析'],
+    pay_gmv_fen: ['经营', '经营概览'],
+    verified_gmv_fen: ['经营', '经营概览'],
+    verified_count: ['经营', '经营概览'],
+    refund_gmv_fen: ['经营', '经营概览'],
+    audience_age: ['人群分析', '人群分析'],
+    audience_gender: ['人群分析', '人群分析'],
+    region: ['地域分析', '地域分析'],
+    hour: ['时间趋势', '时间趋势'],
+    video_id: ['视频详情', '交易明细'],
+    campaign_id: ['视频详情', '交易明细'],
+    plan_id: ['视频详情', '交易明细'],
+    creative_id: ['视频详情', '交易明细'],
+    store_id: ['经营', '经营概览'],
+    stat_date: ['经营', '经营概览'],
+  }
+  const MANDATORY_FIELDS = Object.freeze(['spend_fen', 'verified_gmv_fen', 'stat_date'])
+
+  function missingFieldGuidance(registry) {
+    const available = new Set()
+    for (const template of Object.values(registry || {})) {
+      for (const field of Array.isArray(template && template.canonicalFields)
+        ? template.canonicalFields
+        : []) available.add(field)
+    }
+    const orderedFields = [
+      ...MANDATORY_FIELDS,
+      ...Object.keys(FIELD_GUIDANCE).filter((field) => !MANDATORY_FIELDS.includes(field)),
+    ]
+    return orderedFields
+      .filter((field) => !available.has(field))
+      .map((field) => {
+        const [page, module] = FIELD_GUIDANCE[field]
+        return {
+          field,
+          page,
+          module,
+          message: `请打开${page} → ${module}并刷新页面`,
+        }
+      })
   }
 
   function nextLeaderLease(currentLease, tabId, now, ttl = 30_000) {
@@ -431,6 +620,37 @@
     template.kind = template.group === 'video' ? 'video' : template.group
     const key = templateFingerprint(template)
     const existing = registry[key]
+    if (
+      existing &&
+      Array.isArray(template.canonicalFields) &&
+      template.canonicalFields.length === 0 &&
+      Array.isArray(existing.canonicalFields) &&
+      existing.canonicalFields.length > 0
+    ) {
+      template.canonicalFields = [...existing.canonicalFields]
+      template.fieldSamplePaths = Object.fromEntries(
+        template.canonicalFields.map((field) => [
+          field,
+          [...((existing.fieldSamplePaths || {})[field] || [])]
+            .slice(0, SCAN_MAX_SAMPLE_PATHS),
+        ]),
+      )
+      template.lastSuccessfulAt = existing.lastSuccessfulAt
+    }
+    if (existing && template.canonicalFields && existing.canonicalFields) {
+      const fields = [...new Set([
+        ...existing.canonicalFields,
+        ...template.canonicalFields,
+      ])].sort()
+      template.canonicalFields = fields
+      template.fieldSamplePaths = Object.fromEntries(fields.map((field) => [
+        field,
+        [...new Set([
+          ...((existing.fieldSamplePaths || {})[field] || []),
+          ...((template.fieldSamplePaths || {})[field] || []),
+        ])].slice(0, SCAN_MAX_SAMPLE_PATHS),
+      ]))
+    }
     if (!existing || Number(template.learnedAt || 0) >= Number(existing.learnedAt || 0)) {
       registry[key] = template
     }
@@ -441,6 +661,7 @@
   }
 
   const core = {
+    MANDATORY_FIELDS,
     ACCOUNT_ID,
     LIFE_ACCOUNT_ID,
     buildIngestPayload,
@@ -452,6 +673,7 @@
     extractItemRank,
     hasMeaningfulBusinessData,
     mergeTemplateRegistry,
+    missingFieldGuidance,
     isAllowedEndpoint,
     nextLeaderLease,
     pickLifeDataHeaders,
@@ -459,6 +681,8 @@
     resolveGroupId,
     retryDelayForAttempt,
     sanitizeBusinessJson,
+    scanCanonicalFields,
+    templateCapabilities,
     templateFingerprint,
     validateVideoPage,
   }
@@ -1009,7 +1233,16 @@
         isVideo,
         learnedAt: Date.now(),
       }
-      if (hasMeaningfulBusinessData(response, group)) saveTemplate(template)
+      const capabilities = templateCapabilities(template, response)
+      template.canonicalFields = capabilities.fields
+      template.fieldSamplePaths = capabilities.samplePaths
+      if (capabilities.fields.length > 0) {
+        template.lastSuccessfulAt = new Date().toISOString()
+      }
+      if (
+        hasMeaningfulBusinessData(response, group) &&
+        responseHasBusinessContent(response)
+      ) saveTemplate(template)
       if (template.isVideo) {
         setStatus({ lastCapture: new Date().toISOString(), error: '' })
         if (state.ready && synchronizeLeadership()) maybeCollectNewTemplate()
@@ -1043,6 +1276,25 @@
           setError(`${result.message}，事件已进入离线队列`)
         }
       }
+    }
+
+    function responseHasBusinessContent(response) {
+      const stack = [response && response.data]
+      while (stack.length > 0) {
+        const value = stack.pop()
+        if (Array.isArray(value)) {
+          if (value.length > 0) return true
+          continue
+        }
+        if (value && typeof value === 'object') {
+          const children = Object.values(value)
+          if (children.length === 0) continue
+          stack.push(...children)
+          continue
+        }
+        if (value !== null && value !== undefined && value !== '') return true
+      }
+      return false
     }
 
     async function replayLifeData(template, requestPayload) {
@@ -1650,6 +1902,16 @@
       ]
         .map(([label, health]) => `${label}${health.template_count}:${health.status === 'healthy' ? '正常' : health.status === 'error' ? '异常' : '缺失'}`)
         .join(' · ')
+      const guidance = missingFieldGuidance(readTemplates())
+      const mandatory = guidance.filter((item) => MANDATORY_FIELDS.includes(item.field))
+      const optional = guidance.filter((item) => !MANDATORY_FIELDS.includes(item.field))
+      const shown = [...mandatory, ...optional].slice(0, 5)
+      const optionalShown = shown.filter((item) => !MANDATORY_FIELDS.includes(item.field))
+      refs.missingFields.textContent = mandatory.length
+        ? `缺少必需字段 ${mandatory.map((item) => item.field).join('、')}；${mandatory[0].message}${optionalShown.length ? `；可选维度待补 ${optionalShown.map((item) => item.field).join('、')}` : ''}`
+        : optional.length
+          ? `必需字段已覆盖；可选维度待补 ${optional.slice(0, 5).map((item) => item.field).join('、')}；${optional[0].message}`
+          : '必需字段已覆盖；可选维度已覆盖'
       refs.fullResult.textContent = state.lastFullResult || '等待全量采集'
       refs.queue.textContent = String(readQueue().length)
       refs.error.textContent = state.error || '无'
@@ -1682,6 +1944,7 @@
             <div class="row"><span>视频数</span><span class="value video"></span></div>
             <div class="row"><span>已登记模板</span><span class="value templates"></span></div>
             <div class="row"><span>分组状态</span><span class="value groups"></span></div>
+            <div class="row"><span>缺少字段</span><span class="value missing-fields"></span></div>
             <div class="row"><span>全量结果</span><span class="value full-result"></span></div>
             <div class="row"><span>队列数</span><span class="value queue"></span></div>
             <div class="row"><span>错误</span><span class="value error"></span></div>
@@ -1715,6 +1978,7 @@
         video: shadow.querySelector('.video'),
         templates: shadow.querySelector('.templates'),
         groups: shadow.querySelector('.groups'),
+        missingFields: shadow.querySelector('.missing-fields'),
         fullResult: shadow.querySelector('.full-result'),
         queue: shadow.querySelector('.queue'),
         error: shadow.querySelector('.error'),

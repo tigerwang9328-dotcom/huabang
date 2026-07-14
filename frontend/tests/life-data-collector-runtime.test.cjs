@@ -8,6 +8,7 @@ const vm = require('node:vm')
 
 const scriptPath = path.join(__dirname, '..', 'public', 'life-data-collector.user.js')
 const scriptSource = fs.readFileSync(scriptPath, 'utf8')
+const core = require(scriptPath)
 const ACCOUNT_ID = '1798826701211732'
 const LIFE_ACCOUNT_ID = '7319301636050913280'
 const DITO_URL = 'https://www.life-data.cn/api/dito/query'
@@ -1522,4 +1523,164 @@ test('flush keeps an explicit error when removing an uploaded queue item cannot 
 
   assert.equal((harness.storage.get('lifeDataQueue') || []).length, 1)
   assert.match(harness.panelText('.error'), /队列写入失败|未保存/)
+})
+
+test('successful XHR learns bounded canonical capability metadata', async () => {
+  const harness = createHarness()
+  observeXhr(harness, summaryRequest(), {
+    code: 0,
+    data: { summary: { verify_gmv: 123, refund_gmv: 4, stat_date: '2026-07-13' } },
+  })
+  await harness.flush()
+
+  const [template] = Object.values(harness.storage.get('lifeDataTemplates') || {})
+  assert.deepEqual(template.canonicalFields, ['refund_gmv_fen', 'stat_date', 'verified_gmv_fen'])
+  assert.deepEqual(Object.keys(template.fieldSamplePaths), template.canonicalFields)
+  assert.match(template.lastSuccessfulAt, /^\d{4}-\d{2}-\d{2}T/)
+})
+
+test('successful fetch learns capabilities without persisting body or sensitive headers', async () => {
+  const secret = 'do-not-store-this-secret'
+  const harness = createHarness({
+    fetchResponse(url) {
+      return jsonResponse({ code: 0, data: { metrics: { total_ad_cost: 88, order_cnt: 2 } } }, String(url))
+    },
+  })
+  await harness.page.fetch(DITO_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: secret,
+      Cookie: secret,
+      'X-TT-LS-Session-ID': secret,
+      'Root-Life-Account-ID': LIFE_ACCOUNT_ID,
+      'Life-Account-ID': LIFE_ACCOUNT_ID,
+    },
+    body: JSON.stringify(summaryRequest()),
+  })
+  await harness.flush()
+
+  const serialized = JSON.stringify(harness.storage.get('lifeDataTemplates')).toLowerCase()
+  assert.match(serialized, /canonicalfields/)
+  assert.match(serialized, /spend_fen/)
+  assert.doesNotMatch(serialized, /do-not-store-this-secret|authorization|cookie|response_payload|responsebody/)
+})
+
+test('equivalent successful templates union capability metadata and sample paths', async () => {
+  const harness = createHarness()
+  observeXhr(harness, summaryRequest(), { code: 0, data: { pay_gmv: 10 } })
+  await harness.flush()
+  observeXhr(harness, summaryRequest(), {
+    code: 0,
+    data: { nested: { pay_gmv: 12 }, refund_gmv: 3 },
+  })
+  await harness.flush()
+  const templates = Object.values(harness.storage.get('lifeDataTemplates') || {})
+  assert.equal(templates.length, 1)
+  assert.deepEqual(templates[0].canonicalFields, ['pay_gmv_fen', 'refund_gmv_fen'])
+  assert.deepEqual(templates[0].fieldSamplePaths.pay_gmv_fen, [
+    '$.data.pay_gmv',
+    '$.data.nested.pay_gmv',
+  ])
+  assert.deepEqual(templates[0].fieldSamplePaths.refund_gmv_fen, [
+    '$.data.refund_gmv',
+  ])
+})
+
+test('failed and empty responses do not erase the last valid template', async () => {
+  const harness = createHarness()
+  observeXhr(harness, summaryRequest(), { code: 0, data: { pay_gmv: 10 } })
+  await harness.flush()
+  const before = structuredClone(harness.storage.get('lifeDataTemplates'))
+  observeXhr(harness, summaryRequest(), { code: 1, data: { refund_gmv: 3 } })
+  observeXhr(harness, summaryRequest(), { code: 0, data: {} })
+  await harness.flush()
+  assert.deepEqual(harness.storage.get('lifeDataTemplates'), before)
+})
+
+test('successful other response without canonical fields preserves capability timestamp', async () => {
+  const harness = createHarness()
+  observeXhr(harness, summaryRequest(), { code: 0, data: { pay_gmv: 10 } })
+  await harness.flush()
+  const before = structuredClone(harness.storage.get('lifeDataTemplates'))
+  observeXhr(harness, summaryRequest(), {
+    code: 0,
+    data: { contentSummary: { unknown_business_value: 99 } },
+  })
+  await harness.flush()
+  const [beforeTemplate] = Object.values(before)
+  const [afterTemplate] = Object.values(harness.storage.get('lifeDataTemplates'))
+  assert.deepEqual(afterTemplate.canonicalFields, beforeTemplate.canonicalFields)
+  assert.deepEqual(afterTemplate.fieldSamplePaths, beforeTemplate.fieldSamplePaths)
+  assert.equal(afterTemplate.lastSuccessfulAt, beforeTemplate.lastSuccessfulAt)
+})
+
+test('first capability-less other template may persist without claiming field success', async () => {
+  const harness = createHarness()
+  observeXhr(harness, summaryRequest(), {
+    code: 0,
+    data: { contentSummary: { unknown_business_value: 99 } },
+  })
+  await harness.flush()
+  const [template] = Object.values(harness.storage.get('lifeDataTemplates') || {})
+  assert.ok(template)
+  assert.deepEqual(template.canonicalFields, [])
+  assert.deepEqual(template.fieldSamplePaths, {})
+  assert.equal(Object.hasOwn(template, 'lastSuccessfulAt'), false)
+})
+
+test('missing field guidance maps every planned page and module', () => {
+  const registry = {
+    one: { canonicalFields: ['plays'] },
+  }
+  const guidance = core.missingFieldGuidance(registry)
+  const byField = Object.fromEntries(guidance.map((item) => [item.field, item]))
+  assert.match(`${byField.video_id.page} ${byField.video_id.module}`, /视频详情.*交易明细|交易明细.*视频详情/)
+  assert.match(`${byField.spend_fen.page} ${byField.spend_fen.module}`, /投放.*广告分析/)
+  assert.match(`${byField.ad_orders.page} ${byField.ad_orders.module}`, /投放.*广告分析/)
+  assert.match(`${byField.pay_gmv_fen.page} ${byField.pay_gmv_fen.module}`, /经营.*经营概览/)
+  assert.match(`${byField.verified_gmv_fen.page} ${byField.verified_gmv_fen.module}`, /经营.*经营概览/)
+  assert.match(`${byField.refund_gmv_fen.page} ${byField.refund_gmv_fen.module}`, /经营.*经营概览/)
+  assert.match(`${byField.audience_age.page} ${byField.audience_age.module}`, /人群分析/)
+  assert.match(`${byField.audience_gender.page} ${byField.audience_gender.module}`, /人群分析/)
+  assert.match(`${byField.region.page} ${byField.region.module}`, /地域分析/)
+  assert.match(`${byField.hour.page} ${byField.hour.module}`, /时间趋势/)
+  for (const field of ['campaign_id', 'plan_id', 'creative_id', 'store_id', 'stat_date']) {
+    assert.ok(byField[field], `missing guidance for ${field}`)
+  }
+  assert.equal(byField.plays, undefined)
+})
+
+test('panel shows no more than five missing fields without navigation or server replay', () => {
+  const harness = createHarness({ ready: true })
+  const text = harness.panelText('.missing-fields')
+  assert.match(text, /缺少|请打开|刷新/)
+  assert.equal((text.match(/、/g) || []).length <= 4, true)
+  assert.equal(harness.page.location.pathname, '/flow/content/analysis/video')
+  assert.equal(harness.gmRequests.some((request) => /replay/i.test(request.url)), false)
+  assert.equal(harness.nativeFetchCalls.length, 0)
+})
+
+test('panel five-item cap never hides mandatory fields behind optional gaps', () => {
+  const harness = createHarness({ ready: true })
+  const text = harness.panelText('.missing-fields')
+
+  for (const field of ['spend_fen', 'verified_gmv_fen', 'stat_date']) {
+    assert.match(text, new RegExp(field))
+  }
+  assert.equal((text.match(/、/g) || []).length <= 4, true)
+})
+
+test('panel marks optional gaps separately after mandatory fields are covered', () => {
+  const harness = createHarness({
+    ready: true,
+    storage: [[
+      'lifeDataTemplates',
+      { mandatory: { canonicalFields: ['spend_fen', 'verified_gmv_fen', 'stat_date'] } },
+    ]],
+  })
+  const text = harness.panelText('.missing-fields')
+
+  assert.match(text, /必需字段已覆盖/)
+  assert.match(text, /可选维度待补/)
+  assert.doesNotMatch(text, /必需字段.*缺|缺少必需/)
 })
