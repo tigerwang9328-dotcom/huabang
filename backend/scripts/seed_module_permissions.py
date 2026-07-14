@@ -25,6 +25,12 @@ MODULES = {
         ("sales:guide:view", "导购销售"),
         ("sales:warning:view", "销售异常"),
     ]),
+    "member": ("会员运营", [
+        ("member:segment:view", "会员分层查看"),
+        ("member:segment:rebuild", "会员分层重算"),
+        ("member:sensitive:view", "会员敏感数据查看"),
+        ("member:sensitive:export", "会员敏感数据导出"),
+    ]),
     "product": ("商品经营", [
         ("product:overview:view", "商品总览"),
         ("product:master:view", "商品主档"),
@@ -125,8 +131,8 @@ ALL = [code for _, perms in MODULES.values() for code, _ in perms]
 VIEW_ALL = [c for c in ALL if c.endswith(':view')]
 M = {
     "super_admin": ALL,
-    "boss": [c for c in VIEW_ALL if not c.startswith('system:')] + ["system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
-    "ceo": [c for c in VIEW_ALL if not c.startswith('system:')] + ["system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
+    "boss": [c for c in VIEW_ALL if not c.startswith('system:')] + ["member:segment:rebuild", "member:sensitive:export", "system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
+    "ceo": [c for c in VIEW_ALL if not c.startswith('system:')] + ["member:segment:rebuild", "member:sensitive:export", "system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
     "product_manager": [
         "dashboard:overview:view", "diagnosis:product:view", "diagnosis:inventory:view",
         "sales:overview:view", "sales:store:view", "product:overview:view", "product:master:view", "product:sku:view",
@@ -160,11 +166,11 @@ M = {
     "operation_manager": [
         "dashboard:overview:view", "diagnosis:overall:view", "diagnosis:sales:view", "diagnosis:inventory:view",
         "sales:overview:view", "sales:offline:view", "sales:online:view", "sales:store:view", "sales:guide:view", "sales:warning:view",
-        "product:overview:view", "inventory:overview:view", "inventory:balance:view", "inventory:warning:view", "knowledge:ai:view",
+        "product:overview:view", "inventory:overview:view", "inventory:balance:view", "inventory:warning:view", "member:segment:view", "member:sensitive:view", "knowledge:ai:view",
     ],
     "store_manager": [
         "dashboard:overview:view", "diagnosis:sales:view", "sales:overview:view", "sales:offline:view", "sales:store:view", "sales:guide:view",
-        "product:overview:view", "inventory:overview:view", "inventory:balance:view", "hr:performance:view", "knowledge:ai:view", "knowledge:doc:view",
+        "product:overview:view", "inventory:overview:view", "inventory:balance:view", "member:segment:view", "member:sensitive:view", "hr:performance:view", "knowledge:ai:view", "knowledge:doc:view",
     ],
     "guide": [
         "sales:guide:view", "knowledge:ai:view", "knowledge:doc:view",

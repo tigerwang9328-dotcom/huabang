@@ -3,12 +3,15 @@
 当前会员档案和回访名单表可能为空；页面先展示百胜小票中可识别的会员线索，
 等会员主档同步后再自然启用档案和回访数据。
 """
+import csv
+import io
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +21,11 @@ from app.core.field_permissions import get_user_field_rules
 from app.core.database import get_db
 from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
 from app.models.sys import SysOperationLog, SysUser
+from app.services.member_segment_service import (
+    get_member_segment_overview,
+    list_member_segment_rows,
+    rebuild_member_segments,
+)
 from app.services.member_sales_service import get_vip_sales_analysis
 
 logger = logging.getLogger("member.api")
@@ -73,6 +81,43 @@ def _num(value: Any) -> float:
         return 0.0
 
 
+def _safe_csv_cell(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return f"'{value}"
+    return value
+
+
+def _redact_member_fields(
+    item: dict[str, Any],
+    fields: tuple[str, ...],
+) -> dict[str, Any]:
+    redacted = dict(item)
+    for field in fields:
+        redacted[field] = None
+    redacted["sensitive_redacted"] = True
+    return redacted
+
+
+def _redact_segment_item(item: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(item)
+    redacted["phone"] = _mask_member_key(redacted.get("phone"))
+    for key in ("current_balance", "total_amount", "total_count", "last_consume_date"):
+        redacted[key] = None
+    for key in ("labels", "risks", "wakeup_reasons"):
+        redacted[key] = [
+            {field: value for field, value in entry.items() if field != "evidence"}
+            for entry in (redacted.get(key) or [])
+        ]
+    redacted["metrics"] = {}
+    redacted["preferences"] = []
+    redacted["suggested_products"] = []
+    redacted["candidate_guide_ids"] = []
+    redacted["sensitive_redacted"] = True
+    return redacted
+
+
 def _date_str(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -105,6 +150,32 @@ async def _allowed_store_codes(db: AsyncSession, current_user: SysUser) -> list[
     if data_scope.is_limited_store:
         return sorted(set(data_scope.store_codes or []) & set(ALLOWED_STORE_CODES))
     return sorted(ALLOWED_STORE_CODES)
+
+
+async def _allowed_member_codes(db: AsyncSession, current_user: SysUser) -> list[str]:
+    """VIP assets use the confirmed 7 stores + 3 warehouse codes."""
+    data_scope = await get_data_scope(db, current_user)
+    allowed = {str(code).upper() for code in ALLOWED_INVENTORY_CODES}
+    if data_scope.is_limited_store:
+        return sorted({str(code).upper() for code in (data_scope.store_codes or [])} & allowed)
+    return sorted(allowed)
+
+
+async def _has_permission(
+    db: AsyncSession,
+    current_user: SysUser,
+    permission_code: str,
+) -> bool:
+    if current_user.is_admin:
+        return True
+    return bool((await db.execute(text("""
+        SELECT 1
+        FROM sys.sys_user_role ur
+        JOIN sys.sys_role_permission rp ON rp.role_id=ur.role_id
+        JOIN sys.sys_permission p ON p.id=rp.permission_id
+        WHERE ur.user_id=:user_id AND p.code=:permission_code
+        LIMIT 1
+    """), {"user_id": current_user.id, "permission_code": permission_code})).scalar())
 
 
 async def _table_count(db: AsyncSession, schema: str, table: str) -> int:
@@ -157,6 +228,24 @@ async def _audit_sensitive_phone_view(
     ))
 
 
+async def _audit_sensitive_data_access(
+    db: AsyncSession,
+    current_user: SysUser,
+    action: str,
+    target: str,
+    fields: list[str],
+) -> None:
+    db.add(SysOperationLog(
+        user_id=current_user.id,
+        username=current_user.username,
+        module="member",
+        action=action,
+        target_type="member_sensitive_data",
+        target_id=target,
+        after_data={"fields": fields, "access": "view" if not action.endswith(".export") else "export"},
+    ))
+
+
 @router.get("/overview")
 async def member_overview(
     current_user: SysUser = Depends(require_permission("sales:store:view")),
@@ -165,11 +254,18 @@ async def member_overview(
     """会员运营概览：档案表、回访表、小票会员线索三个层面的状态。"""
     try:
         store_codes = await _allowed_store_codes(db, current_user)
-        if not store_codes:
+        member_codes = await _allowed_member_codes(db, current_user)
+        if not store_codes and not member_codes:
             return {"success": True, "data": {"summary": {}, "data_status": {"has_store_access": False}}}
 
-        dim_members = await _table_count(db, "dim", "dim_member")
-        ods_members = await _table_count(db, "ods", "ods_baison_member")
+        dim_members = int((await db.execute(text("""
+            SELECT COUNT(*) FROM dim.dim_member
+            WHERE UPPER(register_store)=ANY(:codes)
+        """), {"codes": member_codes})).scalar() or 0)
+        ods_members = int((await db.execute(text("""
+            SELECT COUNT(*) FROM ods.ods_baison_member
+            WHERE UPPER(register_store)=ANY(:codes)
+        """), {"codes": member_codes})).scalar() or 0)
 
         ticket_row = (await db.execute(text("""
             WITH ticket_base AS (
@@ -322,9 +418,13 @@ async def list_members(
 ):
     """会员档案分页。"""
     try:
+        member_codes = await _allowed_member_codes(db, current_user)
+        if not member_codes:
+            return {"success": True, "data": {"items": [], "total": 0, "page": page, "page_size": page_size, "phone_masked": True}}
         show_sensitive = await _can_view_sensitive_phone(db, current_user, include_sensitive)
-        conditions = ["1=1"]
-        params: dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+        can_view_member_sensitive = await _has_permission(db, current_user, "member:sensitive:view")
+        conditions = ["UPPER(m.register_store)=ANY(:member_codes)"]
+        params: dict[str, Any] = {"member_codes": member_codes, "limit": page_size, "offset": (page - 1) * page_size}
         if keyword and keyword.strip():
             params["kw"] = f"%{keyword.strip()}%"
             phone_search = " OR m.phone ILIKE :kw" if show_sensitive else ""
@@ -337,6 +437,7 @@ async def list_members(
             conditions.append("m.status = :status")
         where_sql = " AND ".join(conditions)
         total = (await db.execute(text(f"SELECT COUNT(*) FROM dim.dim_member m WHERE {where_sql}"), params)).scalar() or 0
+        order_sql = "m.last_consume_date DESC NULLS LAST, m.total_amount DESC NULLS LAST, m.member_no" if can_view_member_sensitive else "m.member_no"
         rows = (await db.execute(text(f"""
             SELECT m.member_no, m.member_name, m.phone, m.gender, m.birthday,
                    m.register_date, m.register_store, COALESCE(s.store_name, m.register_store) AS register_store_name,
@@ -345,7 +446,7 @@ async def list_members(
             FROM dim.dim_member m
             LEFT JOIN dim.dim_store s ON s.store_code = m.register_store
             WHERE {where_sql}
-            ORDER BY m.last_consume_date DESC NULLS LAST, m.total_amount DESC NULLS LAST, m.member_no
+            ORDER BY {order_sql}
             LIMIT :limit OFFSET :offset
         """), params)).mappings().all()
         items = []
@@ -359,10 +460,14 @@ async def list_members(
             item["register_date"] = _date_str(item.get("register_date"))
             item["last_consume_date"] = _date_str(item.get("last_consume_date"))
             item["updated_at"] = _time_str(item.get("updated_at"))
+            if not can_view_member_sensitive:
+                item = _redact_member_fields(item, ("birthday", "total_amount", "total_count", "last_consume_date", "last_consume_store", "rfm_score", "rfm_segment"))
             items.append(item)
         if show_sensitive:
             await _audit_sensitive_phone_view(db, current_user, "member/list")
-        return {"success": True, "data": {"items": items, "total": int(total), "page": page, "page_size": page_size, "phone_masked": not show_sensitive}}
+        if can_view_member_sensitive:
+            await _audit_sensitive_data_access(db, current_user, "sensitive_profile.view", "member/list", ["total_amount", "total_count", "last_consume_date"])
+        return {"success": True, "data": {"items": items, "total": int(total), "page": page, "page_size": page_size, "phone_masked": not show_sensitive, "sensitive_redacted": not can_view_member_sensitive}}
     except Exception:
         logger.exception("member list error")
         return {"success": False, "message": "会员档案查询失败，请查看服务日志"}
@@ -379,9 +484,13 @@ async def list_member_visits(
 ):
     """会员回访名单分页。"""
     try:
+        member_codes = await _allowed_member_codes(db, current_user)
+        if not member_codes:
+            return {"success": True, "data": {"items": [], "total": 0, "page": page, "page_size": page_size, "phone_masked": True}}
         show_sensitive = await _can_view_sensitive_phone(db, current_user, include_sensitive)
-        conditions = ["1=1"]
-        params: dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+        can_view_member_sensitive = await _has_permission(db, current_user, "member:sensitive:view")
+        conditions = ["UPPER(v.store_code)=ANY(:member_codes)"]
+        params: dict[str, Any] = {"member_codes": member_codes, "limit": page_size, "offset": (page - 1) * page_size}
         if visit_status:
             params["visit_status"] = visit_status
             conditions.append("v.visit_status = :visit_status")
@@ -409,10 +518,14 @@ async def list_member_visits(
             item["last_consume_date"] = _date_str(item.get("last_consume_date"))
             item["visited_at"] = _time_str(item.get("visited_at"))
             item["conversion_amount"] = round(_num(item.get("conversion_amount")), 2)
+            if not can_view_member_sensitive:
+                item = _redact_member_fields(item, ("last_consume_date", "sleep_days", "ai_suggestion", "visit_result", "conversion_amount"))
             items.append(item)
         if show_sensitive:
             await _audit_sensitive_phone_view(db, current_user, "member/visits")
-        return {"success": True, "data": {"items": items, "total": int(total), "page": page, "page_size": page_size, "phone_masked": not show_sensitive}}
+        if can_view_member_sensitive:
+            await _audit_sensitive_data_access(db, current_user, "sensitive_visit.view", "member/visits", ["last_consume_date", "conversion_amount"])
+        return {"success": True, "data": {"items": items, "total": int(total), "page": page, "page_size": page_size, "phone_masked": not show_sensitive, "sensitive_redacted": not can_view_member_sensitive}}
     except Exception:
         logger.exception("member visits error")
         return {"success": False, "message": "会员回访查询失败，请查看服务日志"}
@@ -424,7 +537,10 @@ async def member_asset_overview(
     db: AsyncSession = Depends(get_db),
 ):
     """VIP储值资产概览；当前余额以百胜会员主档CZ_DQJE为准。"""
-    codes = sorted(ALLOWED_INVENTORY_CODES)
+    can_view_member_sensitive = await _has_permission(db, current_user, "member:sensitive:view")
+    codes = await _allowed_member_codes(db, current_user)
+    if not codes:
+        return {"success": True, "data": {"summary": {}, "stores": [], "scope_codes": [], "balance_source": "百胜会员主档 CZ_DQJE", "sensitive_redacted": not can_view_member_sensitive}}
     summary = (await db.execute(text("""
         SELECT COUNT(*) member_count,
                COUNT(*) FILTER (WHERE current_balance>0) balance_member_count,
@@ -467,9 +583,147 @@ async def member_asset_overview(
     data["consume_30d"] = round(_num(deposits.get("consume_30d")), 2)
     data["recharge_member_30d"] = int(deposits.get("recharge_member_30d") or 0)
     data["transaction_updated_at"] = _time_str(deposits.get("updated_at"))
-    return {"success": True, "data": {"summary": data, "stores": [
-        {**dict(row), "member_count": int(row["member_count"] or 0), "balance": round(_num(row["balance"]),2)} for row in stores
-    ], "scope_codes": codes, "balance_source": "百胜会员主档 CZ_DQJE"}}
+    store_items = [
+        {**dict(row), "member_count": int(row["member_count"] or 0), "balance": round(_num(row["balance"]), 2)}
+        for row in stores
+    ]
+    if can_view_member_sensitive:
+        await _audit_sensitive_data_access(db, current_user, "sensitive_balance.view", "member/assets/overview", ["current_balance"])
+    else:
+        data = _redact_member_fields(
+            data,
+            ("total_balance", "negative_balance_amount", "dormant_balance_90d", "recharge_30d", "consume_30d"),
+        )
+        store_items = [_redact_member_fields(item, ("balance",)) for item in store_items]
+    return {"success": True, "data": {
+        "summary": data,
+        "stores": store_items,
+        "scope_codes": codes,
+        "balance_source": "百胜会员主档 CZ_DQJE",
+        "sensitive_redacted": not can_view_member_sensitive,
+    }}
+
+
+@router.get("/segments/overview")
+async def member_segment_overview(
+    calc_date: Optional[date] = None,
+    current_user: SysUser = Depends(require_permission("member:segment:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _allowed_member_codes(db,current_user)
+    data = await get_member_segment_overview(db,codes,calc_date)
+    await _audit_sensitive_data_access(db,current_user,"sensitive_segment.view","member/segments/overview",["current_balance","total_amount","risks"])
+    return {"success":True,"data":data}
+
+
+async def _segment_list_response(
+    db: AsyncSession,
+    current_user: SysUser,
+    *,
+    kind: str,
+    calc_date: Optional[date],
+    page: int,
+    page_size: int,
+    keyword: Optional[str],
+    label_code: Optional[str] = None,
+    risk_code: Optional[str] = None,
+) -> dict[str, Any]:
+    codes = await _allowed_member_codes(db,current_user)
+    data = await list_member_segment_rows(
+        db,codes,calc_date=calc_date,kind=kind,page=page,page_size=page_size,
+        keyword=keyword,label_code=label_code,risk_code=risk_code,
+    )
+    can_view_sensitive = await _has_permission(db, current_user, "member:sensitive:view")
+    if can_view_sensitive:
+        for item in data["items"]:
+            item["phone"] = _mask_member_key(item.get("phone"))
+            item["sensitive_redacted"] = False
+        await _audit_sensitive_data_access(db,current_user,"sensitive_segment.view",f"member/segments/{kind}",["current_balance","total_amount","risks"])
+    else:
+        data["items"] = [_redact_segment_item(item) for item in data["items"]]
+    return {"success":True,"data":data}
+
+
+@router.get("/segments/list")
+async def list_member_segments(
+    calc_date: Optional[date] = None,
+    page: int = Query(1,ge=1),
+    page_size: int = Query(20,ge=1,le=200),
+    keyword: Optional[str] = None,
+    label_code: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("member:segment:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _segment_list_response(db,current_user,kind="segments",calc_date=calc_date,page=page,page_size=page_size,keyword=keyword,label_code=label_code)
+
+
+@router.get("/segments/risks")
+async def list_member_risks(
+    calc_date: Optional[date] = None,
+    page: int = Query(1,ge=1),
+    page_size: int = Query(20,ge=1,le=200),
+    keyword: Optional[str] = None,
+    risk_code: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("member:segment:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _segment_list_response(db,current_user,kind="risks",calc_date=calc_date,page=page,page_size=page_size,keyword=keyword,risk_code=risk_code)
+
+
+@router.get("/segments/wakeups")
+async def list_member_wakeups(
+    calc_date: Optional[date] = None,
+    page: int = Query(1,ge=1),
+    page_size: int = Query(20,ge=1,le=200),
+    keyword: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("member:segment:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _segment_list_response(db,current_user,kind="wakeups",calc_date=calc_date,page=page,page_size=page_size,keyword=keyword)
+
+
+@router.post("/segments/rebuild")
+async def rebuild_member_segment_snapshot(
+    calc_date: Optional[date] = None,
+    current_user: SysUser = Depends(require_permission("member:segment:rebuild")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _allowed_member_codes(db,current_user)
+    try:
+        result = await rebuild_member_segments(db,calc_date=calc_date,store_codes=codes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.add(SysOperationLog(user_id=current_user.id,username=current_user.username,module="member",action="segment.rebuild",target_type="member_segment",target_id=result.get("calc_date"),after_data={key:value for key,value in result.items() if key!="member_nos"}))
+    return {"success":True,"data":result}
+
+
+@router.get("/segments/export")
+async def export_member_segments(
+    kind: str = Query("segments",pattern="^(segments|risks|wakeups)$"),
+    calc_date: Optional[date] = None,
+    keyword: Optional[str] = None,
+    current_user: SysUser = Depends(require_permission("member:sensitive:export")),
+    db: AsyncSession = Depends(get_db),
+):
+    codes = await _allowed_member_codes(db,current_user)
+    data = await list_member_segment_rows(db,codes,calc_date=calc_date,kind=kind,page=1,page_size=50000,keyword=keyword)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["计算日期","会员编号","会员姓名","手机号","门店编码","门店名称","当前余额","累计消费","最近消费","标签","风险","偏好","建议商品","责任状态"])
+    for item in data["items"]:
+        writer.writerow([
+            _safe_csv_cell(item.get("calc_date")),_safe_csv_cell(item.get("member_no")),_safe_csv_cell(item.get("member_name")),_safe_csv_cell(item.get("phone")),
+            _safe_csv_cell(item.get("store_code")),_safe_csv_cell(item.get("store_name")),item.get("current_balance"),item.get("total_amount"),
+            _safe_csv_cell(item.get("last_consume_date")),_safe_csv_cell("、".join(value.get("name","") for value in item.get("labels") or [])),
+            _safe_csv_cell("、".join(value.get("name","") for value in item.get("risks") or [])),
+            _safe_csv_cell("、".join(value.get("name","") for value in item.get("preferences") or [])),
+            _safe_csv_cell("、".join(value.get("product_name","") for value in item.get("suggested_products") or [])),
+            _safe_csv_cell(item.get("responsibility_status")),
+        ])
+    await _audit_sensitive_data_access(db,current_user,"sensitive_member.export",f"member/segments/{kind}",["phone","current_balance","total_amount","risks"])
+    payload=("\ufeff"+output.getvalue()).encode("utf-8")
+    filename=f"member_{kind}_{data.get('calc_date') or 'empty'}.csv"
+    return StreamingResponse(iter([payload]),media_type="text/csv; charset=utf-8",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
 
 
 @router.get("/sales/analysis")
@@ -505,7 +759,12 @@ async def list_member_assets(
     db: AsyncSession = Depends(get_db),
 ):
     show_sensitive = await _can_view_sensitive_phone(db, current_user, include_sensitive)
-    codes = sorted(ALLOWED_INVENTORY_CODES)
+    can_view_member_sensitive = await _has_permission(db, current_user, "member:sensitive:view")
+    if not can_view_member_sensitive and (balance_status or min_balance > 0):
+        raise HTTPException(status_code=403, detail="无会员敏感数据查看权限")
+    codes = await _allowed_member_codes(db,current_user)
+    if not codes:
+        return {"success":True,"data":{"items":[],"total":0,"page":page,"page_size":page_size,"phone_masked":True,"sensitive_redacted":not can_view_member_sensitive}}
     conditions = ["UPPER(m.register_store)=ANY(:codes)", "COALESCE(m.status,'active')='active'"]
     params: dict[str, Any] = {"codes": codes, "min_balance": min_balance, "limit": page_size, "offset": (page-1)*page_size}
     if keyword and keyword.strip():
@@ -513,20 +772,21 @@ async def list_member_assets(
         conditions.append(f"(m.member_no ILIKE :kw OR m.member_name ILIKE :kw{phone_search})")
         params["kw"] = f"%{keyword.strip()}%"
     if store_code:
-        if store_code.upper() not in ALLOWED_INVENTORY_CODES:
+        if store_code.upper() not in codes:
             return {"success": False, "message": "门店不在VIP统计范围"}
         conditions.append("UPPER(m.register_store)=:store_code")
         params["store_code"] = store_code.upper()
-    if balance_status == "positive":
-        conditions.append("m.current_balance>=GREATEST(:min_balance,0.01)")
-    elif balance_status == "negative":
-        conditions.append("m.current_balance<0")
-    elif balance_status == "dormant":
-        conditions.extend(["m.current_balance>0", "m.last_consume_date<CURRENT_DATE-90"])
-    elif balance_status == "high":
-        conditions.append("m.current_balance>=5000")
-    else:
-        conditions.append("COALESCE(m.current_balance,0)>=:min_balance")
+    if can_view_member_sensitive:
+        if balance_status == "positive":
+            conditions.append("m.current_balance>=GREATEST(:min_balance,0.01)")
+        elif balance_status == "negative":
+            conditions.append("m.current_balance<0")
+        elif balance_status == "dormant":
+            conditions.extend(["m.current_balance>0", "m.last_consume_date<CURRENT_DATE-90"])
+        elif balance_status == "high":
+            conditions.append("m.current_balance>=5000")
+        else:
+            conditions.append("COALESCE(m.current_balance,0)>=:min_balance")
     where_sql = " AND ".join(conditions)
     total = (await db.execute(text(f"SELECT COUNT(*) FROM dim.dim_member m WHERE {where_sql}"), params)).scalar() or 0
     rows = (await db.execute(text(f"""
@@ -541,7 +801,7 @@ async def list_member_assets(
         LEFT JOIN dim.dim_store s ON s.store_code=m.register_store
         LEFT JOIN dim.dim_warehouse w ON w.warehouse_code=UPPER(m.register_store)
         WHERE {where_sql}
-        ORDER BY m.current_balance DESC NULLS LAST,m.last_consume_date NULLS FIRST,m.member_no
+        ORDER BY {"m.current_balance DESC NULLS LAST,m.last_consume_date NULLS FIRST,m.member_no" if can_view_member_sensitive else "m.member_no"}
         LIMIT :limit OFFSET :offset
     """), params)).mappings().all()
     items=[]
@@ -549,9 +809,14 @@ async def list_member_assets(
         item=dict(row)
         if not show_sensitive: item["phone"]=_mask_member_key(item.get("phone"))
         item["current_balance"]=round(_num(item.get("current_balance")),2)
-        item["total_amount"]=round(_num(item.get("total_amount")),2); item["last_consume_date"]=_date_str(item.get("last_consume_date")); item["balance_updated_at"]=_time_str(item.get("balance_updated_at")); items.append(item)
+        item["total_amount"]=round(_num(item.get("total_amount")),2); item["last_consume_date"]=_date_str(item.get("last_consume_date")); item["balance_updated_at"]=_time_str(item.get("balance_updated_at"))
+        if not can_view_member_sensitive:
+            item = _redact_member_fields(item, ("current_balance", "total_amount", "total_count", "last_consume_date", "balance_updated_at", "balance_status"))
+        items.append(item)
     if show_sensitive: await _audit_sensitive_phone_view(db,current_user,"member/assets/list")
-    return {"success": True, "data": {"items": items,"total": int(total),"page": page,"page_size": page_size,"phone_masked": not show_sensitive}}
+    if can_view_member_sensitive:
+        await _audit_sensitive_data_access(db,current_user,"sensitive_balance.view","member/assets/list",["current_balance","total_amount"])
+    return {"success": True, "data": {"items": items,"total": int(total),"page": page,"page_size": page_size,"phone_masked": not show_sensitive,"sensitive_redacted":not can_view_member_sensitive}}
 
 
 @router.get("/assets/transactions")
@@ -567,10 +832,18 @@ async def list_member_asset_transactions(
     current_user: SysUser = Depends(require_permission("sales:store:view")),
     db: AsyncSession = Depends(get_db),
 ):
+    if not await _has_permission(db, current_user, "member:sensitive:view"):
+        raise HTTPException(status_code=403, detail="无会员敏感数据查看权限")
     show_sensitive=await _can_view_sensitive_phone(db,current_user,include_sensitive)
-    codes=sorted(ALLOWED_INVENTORY_CODES); end=date.fromisoformat(end_date) if end_date else date.today(); start=date.fromisoformat(start_date) if start_date else end.replace(day=1)
+    codes=await _allowed_member_codes(db,current_user)
+    if not codes:
+        return {"success":True,"data":{"items":[],"total":0,"page":page,"page_size":page_size,"phone_masked":True}}
+    end=date.fromisoformat(end_date) if end_date else date.today(); start=date.fromisoformat(start_date) if start_date else end.replace(day=1)
     conditions=["l.biz_date BETWEEN :start AND :end","UPPER(l.store_code)=ANY(:codes)"]; params:dict[str,Any]={"start":start,"end":end,"codes":codes,"limit":page_size,"offset":(page-1)*page_size}
-    if store_code: conditions.append("UPPER(l.store_code)=:store_code"); params["store_code"]=store_code.upper()
+    if store_code:
+        if store_code.upper() not in codes:
+            return {"success":False,"message":"门店不在当前用户VIP数据范围"}
+        conditions.append("UPPER(l.store_code)=:store_code"); params["store_code"]=store_code.upper()
     if business_type: conditions.append("l.business_type=:business_type"); params["business_type"]=business_type
     if keyword and keyword.strip():
         phone_search=" OR l.customer_phone ILIKE :kw" if show_sensitive else ""
@@ -585,4 +858,5 @@ async def list_member_asset_transactions(
         for key in ("money_before","money_change","money_after"): item[key]=round(_num(item.get(key)),2)
         items.append(item)
     if show_sensitive: await _audit_sensitive_phone_view(db,current_user,"member/assets/transactions")
+    await _audit_sensitive_data_access(db,current_user,"sensitive_transaction.view","member/assets/transactions",["money_before","money_change","money_after"])
     return {"success":True,"data":{"items":items,"total":int(total),"page":page,"page_size":page_size,"date_range":{"start_date":str(start),"end_date":str(end)},"phone_masked":not show_sensitive}}

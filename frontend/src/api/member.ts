@@ -9,4 +9,10 @@ export const memberApi = {
   getSalesAnalysis: (params?: any) => request.get("/member/sales/analysis", { params }),
   listAssets: (params?: any) => request.get("/member/assets/list", { params }),
   listAssetTransactions: (params?: any) => request.get("/member/assets/transactions", { params }),
+  getSegmentOverview: (params?: any) => request.get("/member/segments/overview", { params }),
+  listSegments: (params?: any) => request.get("/member/segments/list", { params }),
+  listSegmentRisks: (params?: any) => request.get("/member/segments/risks", { params }),
+  listWakeups: (params?: any) => request.get("/member/segments/wakeups", { params }),
+  rebuildSegments: (params?: any) => request.post("/member/segments/rebuild", null, { params }),
+  exportSegments: (params?: any) => request.get("/member/segments/export", { params, responseType: "blob" }),
 };
