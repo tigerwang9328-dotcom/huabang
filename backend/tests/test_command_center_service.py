@@ -50,6 +50,14 @@ def test_metric_does_not_turn_missing_data_into_zero():
     assert metric["display"] == "待接入"
 
 
+def test_metric_does_not_mark_missing_data_as_ready():
+    metric = build_metric(None, source="baison_return", status="ready")
+
+    assert metric["value"] is None
+    assert metric["status"] == "pending_data"
+    assert metric["display"] == "待接入"
+
+
 def test_metric_statuses_follow_each_source_freshness():
     statuses = derive_metric_statuses(
         sales={"etl_at": None, "is_cost_complete": False},
@@ -61,6 +69,7 @@ def test_metric_statuses_follow_each_source_freshness():
     assert statuses == {
         "sales": "stale",
         "sales_detail": "stale",
+        "returns": "stale",
         "actual_pay": "stale",
         "gross_profit": "estimated",
         "online_sales": "stale",
@@ -69,6 +78,22 @@ def test_metric_statuses_follow_each_source_freshness():
         "vip_balance": "stale",
         "operating_profit": "pending_data",
     }
+
+
+def test_return_metric_is_pending_when_sales_is_ready_but_return_source_is_missing():
+    statuses = derive_metric_statuses(
+        sales={
+            "etl_at": "2026-07-13T20:00:00Z",
+            "total_return_amount": None,
+            "is_cost_complete": True,
+        },
+        ticket={"synced_at": "2026-07-13T20:00:00Z"},
+        inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
+        members={"updated_at": "2026-07-13T20:00:00Z"},
+    )
+
+    assert statuses["sales_detail"] == "ready"
+    assert statuses["returns"] == "pending_data"
 
 
 def test_metric_rejects_unknown_status():

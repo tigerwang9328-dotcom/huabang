@@ -8,8 +8,23 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
 from app.core.database import AsyncSessionLocal, engine
 from app.services.command_center_service import run_daily_command_center
+
+
+MEMBER_BALANCE_CHECK_SQL = """
+    SELECT COUNT(*) AS member_count,
+           COUNT(*) FILTER (WHERE current_balance < 0) AS negative_count,
+           COALESCE(SUM(current_balance) FILTER (WHERE current_balance > 0), 0) AS positive_balance
+    FROM dim.dim_member
+    WHERE UPPER(register_store)=ANY(:codes)
+      AND COALESCE(status,'active')='active'
+"""
+
+
+def member_balance_check_params() -> dict[str, list[str]]:
+    return {"codes": sorted(ALLOWED_INVENTORY_CODES)}
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,12 +48,9 @@ async def main() -> None:
                 inventory_date=inventory_date,
                 creator_id=args.creator_id,
             )
-            balances = (await db.execute(text("""
-                SELECT COUNT(*) AS member_count,
-                       COUNT(*) FILTER (WHERE current_balance < 0) AS negative_count,
-                       COALESCE(SUM(current_balance) FILTER (WHERE current_balance > 0), 0) AS positive_balance
-                FROM dim.dim_member
-            """))).mappings().one()
+            balances = (
+                await db.execute(text(MEMBER_BALANCE_CHECK_SQL), member_balance_check_params())
+            ).mappings().one()
             result["member_balance_check"] = {
                 "member_count": int(balances["member_count"] or 0),
                 "negative_count": int(balances["negative_count"] or 0),

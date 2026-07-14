@@ -67,10 +67,11 @@ def build_metric(
     if status is not None and status not in VALID_METRIC_STATUSES:
         raise ValueError(f"unknown metric status: {status}")
     if value is None:
+        missing_status = "pending_data" if status in {None, "ready"} else status
         return {
             "value": None,
             "display": "待接入",
-            "status": status or "pending_data",
+            "status": missing_status,
             "source": source,
             "as_of": _json_value(as_of),
             "reason": reason or "数据源尚未接入",
@@ -97,9 +98,18 @@ def derive_metric_statuses(
     members: dict[str, Any],
 ) -> dict[str, str]:
     sales_status = "ready" if ticket.get("synced_at") else "stale"
+    sales_detail_status = "ready" if sales.get("etl_at") else "stale"
+    returns_status = (
+        "ready"
+        if sales_detail_status == "ready" and sales.get("total_return_amount") is not None
+        else "pending_data"
+        if sales_detail_status == "ready"
+        else "stale"
+    )
     return {
         "sales": sales_status,
-        "sales_detail": "ready" if sales.get("etl_at") else "stale",
+        "sales_detail": sales_detail_status,
+        "returns": returns_status,
         "actual_pay": sales_status,
         "gross_profit": "ready" if bool(sales.get("is_cost_complete")) else "estimated",
         "online_sales": sales_status,
@@ -865,7 +875,13 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "offline_sales": offline_sales,
         "online_sales": online_sales,
         "actual_pay_amount": actual_pay_amount,
-        "net_sales": total_sales - return_amount if total_sales is not None and return_amount is not None else existing.get("net_sales"),
+        "net_sales": (
+            total_sales - return_amount
+            if total_sales is not None and return_amount is not None
+            else None
+            if sales_detail_ready
+            else existing.get("net_sales")
+        ),
         "order_count": preserve_trusted_value(
             int(sales.get("total_order_count") or 0), source_ready=sales_detail_ready, previous=existing.get("order_count")
         ),
@@ -884,7 +900,10 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "return_amount": return_amount,
         "return_rate": (
             return_amount / total_sales
-            if total_sales and return_amount is not None else existing.get("return_rate")
+            if total_sales and return_amount is not None
+            else None
+            if sales_detail_ready
+            else existing.get("return_rate")
         ),
         "gross_profit": gross_profit,
         "gross_margin": (
@@ -1002,8 +1021,8 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
         "items_per_order": build_metric(data.get("items_per_order"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),
         "avg_discount_rate": build_metric(data.get("avg_discount_rate"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=4),
-        "return_amount": build_metric(data.get("return_amount"), source="baison_return", as_of=report_date, status=statuses.get("sales_detail")),
-        "return_rate": build_metric(data.get("return_rate"), source="baison_return", as_of=report_date, status=statuses.get("sales_detail"), decimals=4),
+        "return_amount": build_metric(data.get("return_amount"), source="baison_return", as_of=report_date, status=statuses.get("returns")),
+        "return_rate": build_metric(data.get("return_rate"), source="baison_return", as_of=report_date, status=statuses.get("returns"), decimals=4),
         "gross_profit": build_metric(data.get("gross_profit"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason),
         "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason, decimals=4),
         "inventory_amount": build_metric(data.get("total_inventory_amount"), source="apparel_inventory", as_of=source_freshness.get("inventory", {}).get("updated_at"), status=statuses.get("inventory")),
