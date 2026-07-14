@@ -692,33 +692,9 @@ async def create_inventory_warning_task_drafts(
 
 
 async def _persist_rule_results(db: AsyncSession, report_date: date, results: list[dict[str, Any]]) -> int:
-    await db.execute(
-        text("DELETE FROM dm.dm_exception_audit WHERE audit_date=:report_date AND exception_type LIKE 'rule_%'"),
-        {"report_date": report_date},
-    )
-    triggered = [item for item in results if item.get("triggered")]
-    if triggered:
-        await db.execute(text("""
-            INSERT INTO dm.dm_exception_audit (
-                audit_date, exception_type, severity, store_code, description,
-                data_snapshot, is_reviewed, is_converted_to_task, generated_at
-            ) VALUES (
-                :audit_date, :exception_type, :severity, :store_code, :description,
-                CAST(:data_snapshot AS jsonb), false, false, now()
-            )
-        """), [{
-            "audit_date": report_date,
-            "exception_type": f"rule_{item['rule_id'].lower()}",
-            "severity": item.get("severity", "warning"),
-            "store_code": item.get("store_code"),
-            "description": item.get("title", ""),
-            "data_snapshot": json.dumps({
-                "evidence": item.get("evidence", {}),
-                "suggestion": item.get("suggestion", ""),
-                "rule_name": item.get("rule_name", ""),
-            }, ensure_ascii=False, default=_json_value),
-        } for item in triggered])
-    return len(triggered)
+    from app.services.exception_rule_service import persist_rule_findings
+
+    return await persist_rule_findings(db, report_date, results)
 
 
 async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_date: date) -> dict[str, Any]:

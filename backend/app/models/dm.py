@@ -1,5 +1,5 @@
 """dm schema: 数据集市应用层"""
-from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON
+from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -155,6 +155,12 @@ class DmExceptionAudit(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     audit_date = Column(Date, nullable=False)
+    unique_key = Column(String(64), unique=True)
+    rule_code = Column(String(32))
+    rule_version = Column(String(32))
+    subject_type = Column(String(32))
+    subject_id = Column(String(160))
+    evidence_hash = Column(String(64))
     exception_type = Column(String(32), nullable=False,
                             comment="discount_abnormal/return_abnormal/negative_inv/cost_missing/data_quality")
     severity = Column(String(16), comment="info/warning/critical")
@@ -164,6 +170,12 @@ class DmExceptionAudit(Base):
     order_no = Column(String(64))
     description = Column(Text)
     data_snapshot = Column(JSON, comment="异常时的数据快照")
+    thresholds = Column(JSON, default=dict)
+    metric_status = Column(String(16), default="ready")
+    source_name = Column(String(128))
+    source_updated_at = Column(DateTime(timezone=True))
+    drilldown = Column(JSON, default=dict)
+    responsibility_status = Column(String(16), default="pending_data")
     is_reviewed = Column(Boolean, default=False)
     reviewed_by = Column(BigInteger)
     reviewed_at = Column(DateTime(timezone=True))
@@ -171,6 +183,51 @@ class DmExceptionAudit(Base):
     is_converted_to_task = Column(Boolean, default=False)
     task_id = Column(BigInteger)
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DmExceptionRuleVersion(Base):
+    """异常规则版本，阈值变化时保留历史定义。"""
+    __tablename__ = "dm_exception_rule_version"
+    __table_args__ = (
+        UniqueConstraint("rule_code", "version", name="uq_exception_rule_version"),
+        {"schema": "dm"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    rule_code = Column(String(32), nullable=False)
+    version = Column(String(32), nullable=False)
+    rule_name = Column(String(128), nullable=False)
+    thresholds = Column(JSON, default=dict, nullable=False)
+    definition_hash = Column(String(64), nullable=False)
+    source_status = Column(String(16), default="ready", nullable=False)
+    effective_from = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    retired_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DmExceptionEvidence(Base):
+    """异常对应的原始业务证据。"""
+    __tablename__ = "dm_exception_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "exception_id", "source_table", "record_key", "evidence_hash",
+            name="uq_exception_evidence_record",
+        ),
+        {"schema": "dm"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    exception_id = Column(BigInteger, ForeignKey("dm.dm_exception_audit.id", ondelete="CASCADE"), nullable=False)
+    source_table = Column(String(128), nullable=False)
+    record_key = Column(String(256), nullable=False)
+    source_record_id = Column(String(160))
+    document_no = Column(String(128))
+    before_value = Column(JSON)
+    after_value = Column(JSON)
+    source_fields = Column(JSON, default=dict, nullable=False)
+    evidence_hash = Column(String(64), nullable=False)
+    source_updated_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class DmMemberVisitList(Base):
