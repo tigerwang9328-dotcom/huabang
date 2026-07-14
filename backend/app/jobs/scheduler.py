@@ -27,6 +27,7 @@ def setup_jobs():
         cleanup_life_data_captures,
         mark_stale_life_data_collectors_offline,
     )
+    from app.jobs.command_center_health_jobs import run_command_center_health_monitor
 
     # 每天凌晨1:00 - 同步百盛数据 + ETL
     scheduler.add_job(
@@ -46,6 +47,19 @@ def setup_jobs():
         name="早间老板日报",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # 每天06:40 - 核对04:00销售/退货、05:30库存和06:30经营快照。
+    # 异常只生成待人工确认的幂等任务草稿，不依赖钉钉开关。
+    scheduler.add_job(
+        run_command_center_health_monitor,
+        CronTrigger(hour=6, minute=40, timezone="Asia/Shanghai"),
+        id="command_center_health_monitor",
+        name="经营指挥台每日健康检查",
+        replace_existing=True,
+        misfire_grace_time=1800,
+        coalesce=True,
+        max_instances=1,
     )
 
     # 每天10:00 - 会员回访名单
