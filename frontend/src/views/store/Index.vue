@@ -16,6 +16,12 @@
       </div>
     </section>
 
+    <section class="source-band">
+      <div><span>销售数据</span><strong>{{ sourceFreshness.sales?.business_date || latestSalesDate || "待同步" }}</strong></div>
+      <div><span>库存快照</span><strong>{{ sourceFreshness.inventory?.snapshot_date || "待同步" }}</strong></div>
+      <div><span>会员数据</span><strong>{{ formatTime(sourceFreshness.member?.updated_at) }}</strong></div>
+    </section>
+
     <section class="filter-band">
       <div class="filter-left">
         <el-radio-group v-model="preset" size="small" @change="applyPreset">
@@ -79,6 +85,7 @@
           size="small"
           class="rank-table"
           :default-sort="{ prop: 'sales_amount', order: 'descending' }"
+          @row-click="openStore"
         >
           <el-table-column prop="rank" label="排名" width="64" fixed align="center">
             <template #default="{ row }">
@@ -93,8 +100,11 @@
           <el-table-column prop="actual_pay_amount" label="实收金额" width="118" sortable align="right">
             <template #default="{ row }">{{ formatMoney(row.actual_pay_amount) }}</template>
           </el-table-column>
-          <el-table-column prop="period_growth" label="环比" width="88" sortable align="right">
-            <template #default="{ row }"><span :class="row.period_growth < 0 ? 'down' : 'up'">{{ formatSignedPercent(row.period_growth) }}</span></template>
+          <el-table-column prop="day_over_day_growth" label="日环比" width="88" sortable align="right">
+            <template #default="{ row }"><span :class="row.day_over_day_growth < 0 ? 'down' : 'up'">{{ formatSignedPercent(row.day_over_day_growth) }}</span></template>
+          </el-table-column>
+          <el-table-column prop="week_over_week_growth" label="周同比" width="88" sortable align="right">
+            <template #default="{ row }"><span :class="row.week_over_week_growth < 0 ? 'down' : 'up'">{{ formatSignedPercent(row.week_over_week_growth) }}</span></template>
           </el-table-column>
           <el-table-column prop="vip_sales_amount" label="VIP销售" width="112" sortable align="right">
             <template #default="{ row }">{{ formatMoney(row.vip_sales_amount) }}</template>
@@ -149,11 +159,48 @@
         </div>
       </div>
     </section>
+
+    <section class="decision-grid">
+      <div class="rank-panel">
+        <div class="panel-head"><div><h2>畅销款</h2><span>按本期销售件数排序</span></div></div>
+        <button v-for="item in topProducts" :key="`${item.store_code}-${item.product_code}`" class="drill-row" @click="openProduct(item)">
+          <span><strong>{{ item.product_name || item.product_code }}</strong><small>{{ item.store_code }} · 库存 {{ formatQty(item.inventory_qty) }}</small></span>
+          <b>{{ formatQty(item.sales_qty) }} 件</b>
+        </button>
+        <div v-if="!topProducts.length" class="empty-row">暂无畅销款数据</div>
+      </div>
+      <div class="rank-panel">
+        <div class="panel-head"><div><h2>滞销款</h2><span>有库存且本期销量最低</span></div></div>
+        <button v-for="item in slowProducts" :key="`${item.store_code}-${item.product_code}`" class="drill-row" @click="openProduct(item)">
+          <span><strong>{{ item.product_name || item.product_code }}</strong><small>{{ item.store_code }} · 销量 {{ formatQty(item.sales_qty) }}</small></span>
+          <b>库存 {{ formatQty(item.inventory_qty) }}</b>
+        </button>
+        <div v-if="!slowProducts.length" class="empty-row">暂无滞销款数据</div>
+      </div>
+    </section>
+
+    <section class="decision-grid">
+      <div class="rank-panel">
+        <div class="panel-head"><div><h2>门店异常</h2><span>点击查看证据或任务</span></div></div>
+        <button v-for="item in exceptions" :key="item.id" class="drill-row" @click="openException(item)">
+          <span><strong>{{ item.description }}</strong><small>{{ item.store_code || "公司" }} · {{ item.exception_type }}</small></span>
+          <el-tag :type="item.severity === 'critical' ? 'danger' : 'warning'" size="small">{{ item.severity }}</el-tag>
+        </button>
+        <div v-if="!exceptions.length" class="empty-row">当前没有门店异常</div>
+      </div>
+      <div class="rank-panel">
+        <div class="panel-head"><div><h2>待接入经营指标</h2><span>不按零参与判断</span></div><el-button text type="primary" @click="openMember({})">会员下钻</el-button></div>
+        <div class="pending-grid">
+          <div v-for="(item, key) in pendingMetrics" :key="key"><span>{{ pendingLabel(String(key)) }}</span><strong>待接入</strong><small>{{ item.reason }}</small></div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Refresh, Search } from "@element-plus/icons-vue";
 import { use } from "echarts/core";
@@ -176,6 +223,13 @@ const dateRange = ref<[string, string]>(["", ""]);
 const summary = ref<any>({});
 const stores = ref<any[]>([]);
 const trend = ref<any[]>([]);
+const sourceFreshness = ref<any>({});
+const pendingMetrics = ref<any>({});
+const topProducts = ref<any[]>([]);
+const slowProducts = ref<any[]>([]);
+const exceptions = ref<any[]>([]);
+const router = useRouter();
+const route = useRoute();
 
 function parseDate(value: string) {
   const d = new Date(`${value}T00:00:00`);
@@ -253,6 +307,11 @@ async function fetchData() {
     summary.value = payload.summary || {};
     stores.value = payload.stores || [];
     trend.value = payload.trend || [];
+    sourceFreshness.value = payload.source_freshness || {};
+    pendingMetrics.value = payload.pending_metrics || {};
+    topProducts.value = payload.top_products || [];
+    slowProducts.value = payload.slow_products || [];
+    exceptions.value = payload.exceptions || [];
     if (payload.date_range?.start_date && payload.date_range?.end_date) {
       dateRange.value = [payload.date_range.start_date, payload.date_range.end_date];
     }
@@ -268,6 +327,18 @@ async function refresh() {
 }
 
 const filteredStores = computed(() => stores.value || []);
+
+function openStore(row: any) {
+  keyword.value = row.store_code;
+  router.replace({ path: "/app/store", query: { store_code: row.store_code } });
+  fetchData();
+}
+function openProduct(row: any) { router.push({ path: "/app/product", query: { product_code: row.product_code, store_code: row.store_code } }); }
+function openMember(row: any) { router.push({ path: "/app/member", query: row.store_code ? { store_code: row.store_code } : {} }); }
+function openException(row: any) { router.push(row.task_id ? `/app/task/${row.task_id}` : "/app/warning"); }
+function pendingLabel(key: string) {
+  return ({ footfall: "客流", conversion_count: "成交人数", fitting_rate: "试穿率", new_returning_customer: "新老客", guide_sales: "导购业绩" } as any)[key] || key;
+}
 
 const metricCards = computed(() => [
   { label: "销售额", value: formatMoney(summary.value.total_sales_amount), sub: "VIP/收钱吧/五月前储值/现金/线上" },
@@ -335,6 +406,7 @@ const trendOption = computed(() => ({
 }));
 
 onMounted(async () => {
+  if (route.query.store_code) keyword.value = String(route.query.store_code);
   await fetchData();
   if (!dateRange.value[0] && latestSalesDate.value) applyPreset();
 });
@@ -407,6 +479,9 @@ onMounted(async () => {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
 }
+.source-band { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); background:#fff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; }
+.source-band div { display:flex; justify-content:space-between; gap:12px; padding:11px 14px; border-right:1px solid #eef2f7; font-size:12px; }
+.source-band span { color:#64748b; }.source-band strong { color:#334155; }
 
 .filter-left {
   display: flex;
@@ -532,15 +607,20 @@ onMounted(async () => {
   width: 100% !important;
   height: 270px !important;
 }
+.decision-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.drill-row { width:100%; display:flex; justify-content:space-between; align-items:center; gap:14px; padding:10px 0; border:0; border-bottom:1px solid #eef2f7; background:transparent; text-align:left; cursor:pointer; color:#334155; }
+.drill-row span,.drill-row small { display:block; }.drill-row small { margin-top:4px; color:#94a3b8; }.drill-row b { white-space:nowrap; color:#0f172a; }
+.pending-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }.pending-grid div { padding:10px; border:1px solid #eef2f7; border-radius:6px; }.pending-grid span,.pending-grid small { display:block; color:#64748b; font-size:12px; }.pending-grid strong { display:block; margin:5px 0; color:#b7791f; }.empty-row { padding:20px; color:#94a3b8; text-align:center; }
 
 @media (max-width: 1280px) {
   .summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+      .decision-grid { grid-template-columns:1fr; }
 
   .chart-stack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -564,10 +644,11 @@ onMounted(async () => {
     white-space: normal;
   }
 
-  .summary-grid,
-  .chart-stack {
-    grid-template-columns: 1fr;
-  }
+      .summary-grid,
+      .chart-stack {
+        grid-template-columns: 1fr;
+      }
+      .source-band,.pending-grid { grid-template-columns:1fr; }
 
   .keyword-input {
     width: 100%;
