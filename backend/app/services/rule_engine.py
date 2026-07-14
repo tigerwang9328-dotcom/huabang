@@ -400,7 +400,7 @@ class RuleEngine:
 
         SEVERITY_DAYS = {"critical": 1, "risk": 3, "warning": 7, "info": 14}
         SEVERITY_ROLE = {"critical": "store_manager", "risk": "store_manager",
-                         "warning": "operation", "info": "operation"}
+                         "warning": "operation_manager", "info": "operation_manager"}
         created = []
         for result in rule_results:
             if not result.get("triggered"):
@@ -449,7 +449,7 @@ class RuleEngine:
                 "sid": source_id,
                 "store": result.get("store_code"),
                 "rd": date.fromisoformat(stat_date),
-                "role": SEVERITY_ROLE.get(severity, "operation"),
+                "role": SEVERITY_ROLE.get(severity, "operation_manager"),
                 "creator": creator_id,
                 "due_date": deadline,
                 "priority": 10 if severity == "critical" else 8 if severity == "risk" else 5,

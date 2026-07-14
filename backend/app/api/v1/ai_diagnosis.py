@@ -88,4 +88,4 @@ async def confirm_action_tasks(
         result = await service.confirm_action_tasks(body.module, body.diagnosis_ids, body.stat_date, store_code, current_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ApiResponse.ok(data=result, message=f"已创建 {result['created_count']} 个正式任务")
+    return ApiResponse.ok(data=result, message=f"已创建 {result['created_count']} 个任务草稿，等待老板或主管确认派发")

@@ -245,6 +245,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
     path: "/app/task",
     label: "任务管理",
     icon: Bell,
+    permission: "task:view",
   },
   {
     label: "AI经营诊断",

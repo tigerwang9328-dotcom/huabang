@@ -34,13 +34,22 @@ async def rate_limit_check(key: str, max_count: int, window_seconds: int) -> boo
     """检查频率限制，返回True表示未超限可继续，False表示已超限"""
     try:
         r = await get_redis()
-        current = await r.get(key)
-        if current and int(current) >= max_count:
-            return False
-        pipe = r.pipeline()
-        await pipe.incr(key)
-        await pipe.expire(key, window_seconds)
-        await pipe.execute()
-        return True
+        allowed = await r.eval(
+            """
+            local count = redis.call('INCR', KEYS[1])
+            if count == 1 then
+                redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+            end
+            if count <= tonumber(ARGV[1]) then
+                return 1
+            end
+            return 0
+            """,
+            1,
+            key,
+            max_count,
+            window_seconds,
+        )
+        return bool(allowed)
     except Exception:
         return True  # Redis不可用时放行
