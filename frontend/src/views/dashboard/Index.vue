@@ -190,6 +190,7 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
 import VChart from "vue-echarts";
 import { dashboardApi } from "@/api/dashboard";
+import { shanghaiDateOffset } from "@/utils/shanghaiDate.mjs";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
 
@@ -202,9 +203,7 @@ const rawOverview = ref<any>({});
 const commandCenter = ref<any>({});
 const router = useRouter();
 
-const yesterday = new Date();
-yesterday.setDate(yesterday.getDate() - 1);
-const selectedDate = ref(yesterday.toISOString().slice(0, 10));
+const selectedDate = ref(shanghaiDateOffset(-1));
 
 function onDateChange() { fetchData(); }
 
