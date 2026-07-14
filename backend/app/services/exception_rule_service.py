@@ -26,6 +26,7 @@ RULE_SOURCES: dict[str, dict[str, str]] = {
     "stocktake": {"status": "pending_data", "source": "baison_stocktake", "reason": "盘点单据待接入"},
     "inventory": {"status": "ready", "source": "dws.dws_inventory_daily", "reason": "外穿衣物统一库存已接入"},
     "responsibility": {"status": "pending_data", "source": "assignment", "reason": "导购、店长和平台归属尚无可靠来源"},
+    "attribution": {"status": "pending_data", "source": "performance_attribution", "reason": "订单级抖音来源、排班和改单日志尚未全部接入"},
 }
 
 
@@ -48,6 +49,7 @@ RULE_SOURCE_BY_CODE = {
     "R022": ("dm.dm_finance_profit_daily", "/app/finance"),
     "R023": ("dwd.dwd_pos_ticket", "/app/member"),
     "VIP_NEGATIVE_BALANCE": ("dim.dim_member", "/app/member"),
+    "ATTRIBUTION_CONFLICT": ("performance_attribution", "/app/warning"),
 }
 
 
