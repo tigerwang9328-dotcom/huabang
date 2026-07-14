@@ -12,6 +12,7 @@
 """
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -27,6 +28,7 @@ logger = logging.getLogger("baison.client")
 # 日志脱敏：这些 key 一旦出现一律打码（兜底，正常请求参数里不应含 secret）
 _SENSITIVE_KEYS = {"app_key", "appkey", "key", "app_secret", "appsecret", "secret"}
 BAISON_TIMEZONE = ZoneInfo("Asia/Shanghai")
+TRANSPORT_RETRY_DELAYS = (1.0, 2.0)
 
 
 def baison_timestamp() -> str:
@@ -115,17 +117,37 @@ class BaisonClient:
             method, http_method, self.config.base_url, masked,
         )
 
-        try:
-            with httpx.Client(timeout=timeout) as client:
-                if http_method == "GET":
-                    resp = client.get(self.config.base_url, params=full_params)
-                else:
-                    # POST 表单提交，httpx 以 UTF-8 编码 application/x-www-form-urlencoded
-                    resp = client.post(self.config.base_url, data=full_params)
-        except httpx.HTTPError as exc:
-            # 不打印异常详情中可能携带的敏感 URL 参数，仅记录类型
-            logger.error("baison http error method=%s err_type=%s", method, exc.__class__.__name__)
-            raise BaisonRequestError(f"HTTP 请求失败: {exc.__class__.__name__}") from exc
+        for attempt in range(1, len(TRANSPORT_RETRY_DELAYS) + 2):
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    if http_method == "GET":
+                        resp = client.get(self.config.base_url, params=full_params)
+                    else:
+                        # POST 表单提交，httpx 以 UTF-8 编码 application/x-www-form-urlencoded
+                        resp = client.post(self.config.base_url, data=full_params)
+                break
+            except httpx.RequestError as exc:
+                if attempt > len(TRANSPORT_RETRY_DELAYS):
+                    logger.error(
+                        "baison http error method=%s err_type=%s attempts=%s",
+                        method,
+                        exc.__class__.__name__,
+                        attempt,
+                    )
+                    raise BaisonRequestError(f"HTTP 请求失败: {exc.__class__.__name__}") from exc
+                delay = TRANSPORT_RETRY_DELAYS[attempt - 1]
+                logger.warning(
+                    "baison transport retry method=%s err_type=%s attempt=%s delay=%s",
+                    method,
+                    exc.__class__.__name__,
+                    attempt,
+                    delay,
+                )
+                time.sleep(delay)
+            except httpx.HTTPError as exc:
+                # 不打印异常详情中可能携带的敏感 URL 参数，仅记录类型
+                logger.error("baison http error method=%s err_type=%s", method, exc.__class__.__name__)
+                raise BaisonRequestError(f"HTTP 请求失败: {exc.__class__.__name__}") from exc
 
         raw_text = resp.text
         try:
