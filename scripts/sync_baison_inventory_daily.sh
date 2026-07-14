@@ -18,6 +18,7 @@ HUABANG_INVENTORY_STAT_DATE="$STAT_DATE" PYTHONIOENCODING=utf-8 ./.venv/bin/pyth
 import asyncio
 import json
 import os
+from datetime import date
 
 from sqlalchemy import text
 
@@ -26,7 +27,7 @@ from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
 from app.integrations.baison.services.inventory_service import import_all_inventory
 
 
-STAT_DATE = os.environ["HUABANG_INVENTORY_STAT_DATE"]
+STAT_DATE = date.fromisoformat(os.environ["HUABANG_INVENTORY_STAT_DATE"])
 
 
 async def main():
