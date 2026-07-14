@@ -364,7 +364,8 @@ class RuleEngine:
                   AND sales_amount>0 AND standard_amount>0
                   AND COALESCE(NULLIF(BTRIM(vip_code::text),''),
                                NULLIF(BTRIM(customer_code::text),'')) IS NOT NULL
-                  AND (:store_code IS NULL OR UPPER(store_code)=UPPER(:store_code))
+                  AND (CAST(:store_code AS text) IS NULL
+                       OR UPPER(store_code)=UPPER(CAST(:store_code AS text)))
                 GROUP BY UPPER(store_code),
                          COALESCE(NULLIF(BTRIM(vip_code::text),''),
                                   NULLIF(BTRIM(customer_code::text),''))
