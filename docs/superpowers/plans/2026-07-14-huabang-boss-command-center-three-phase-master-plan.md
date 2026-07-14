@@ -80,11 +80,11 @@
 - Consumes: 百胜小票、支付明细、成本明细、外穿衣物库存视图、会员主档。
 - Produces: `MetricEnvelope(value, status, source, as_of, reason)` 语义及统一销售/实收/毛利字段。
 
-- [ ] **Step 1: 为固定口径建立失败测试**
+- [x] **Step 1: 为固定口径建立失败测试**
 
 在 `backend/tests/test_command_center_contract.py` 增加固定样本，覆盖 VIP、POS、扫码、胜券扫、五月前储值、现金、线上支付、充值和退款；断言销售额与实收金额分别按全局口径计算，且 `total_sales = offline_sales + online_sales`。
 
-- [ ] **Step 2: 验证测试先失败**
+- [x] **Step 2: 验证测试先失败**
 
 Run:
 
@@ -95,7 +95,7 @@ pytest -q tests/test_command_center_contract.py tests/test_sales_channel_split.p
 
 Expected: 新增的不完整状态或固定口径断言失败，旧测试保持通过。
 
-- [ ] **Step 3: 统一指标封装与来源字段**
+- [x] **Step 3: 统一指标封装与来源字段**
 
 在 `command_center_service.py` 中确保所有首页指标使用统一结构：
 
@@ -111,11 +111,11 @@ Expected: 新增的不完整状态或固定口径断言失败，旧测试保持�
 
 缺数时 `value` 为 `None`，状态为 `pending_data` 或 `stale`，不得以 `0` 代替。
 
-- [ ] **Step 4: 扩展快照表并升级数据库**
+- [x] **Step 4: 扩展快照表并升级数据库**
 
 补充线上/线下销售、实收、退货、成本覆盖率、库存未知库龄、VIP 正负余额、异常和任务数量、各来源更新时间字段。迁移必须有 `upgrade()` 和 `downgrade()`，并对 `report_date` 保持唯一约束。
 
-- [ ] **Step 5: 运行契约和迁移测试**
+- [x] **Step 5: 运行契约和迁移测试**
 
 ```bash
 cd /srv/huabang-ai-center/backend
@@ -140,15 +140,15 @@ Expected: 测试通过，升级/回滚/再升级均成功，历史日报记录�
 - Consumes: 昨日销售、当日 05:30 后库存快照、会员同步后余额、规则结果。
 - Produces: 一条幂等 `dm.dm_boss_daily_report` 记录、库存预警和待确认任务草稿。
 
-- [ ] **Step 1: 编写重复执行测试**
+- [x] **Step 1: 编写重复执行测试**
 
 同一 `report_date` 连续执行两次 `run_daily_command_center()`，断言日报只有一条、异常证据不重复、相同 `source_type + source_id` 的任务草稿只有一条。
 
-- [ ] **Step 2: 实现事务锁和数据门禁**
+- [x] **Step 2: 实现事务锁和数据门禁**
 
 沿用 PostgreSQL advisory lock；库存必须选择当日 `05:30` 后最新成功快照，会员必须选择最近一次完整同步。来源过期时仍生成日报，但对应指标标记 `stale` 并保留上次可信值。
 
-- [ ] **Step 3: 固定调度时间**
+- [x] **Step 3: 固定调度时间**
 
 crontab 使用服务器 UTC：
 
@@ -156,7 +156,7 @@ crontab 使用服务器 UTC：
 30 22 * * * /usr/bin/flock -n /tmp/huabang_boss_command_center.lock /srv/huabang-ai-center/scripts/generate_boss_command_center_daily.sh >> /srv/huabang-ai-center/logs/boss_command_center_daily.log 2>&1
 ```
 
-- [ ] **Step 4: 验证幂等和日志**
+- [x] **Step 4: 验证幂等和日志**
 
 ```bash
 cd /srv/huabang-ai-center/backend
@@ -182,23 +182,23 @@ Expected: 两次结果一致，无重复日报、异常或任务草稿，日志�
 **Interfaces:**
 - Produces: 非破坏性扩展 `GET /dashboard/overview`、`GET /report/boss-daily/{date}`、`GET /report/boss-daily`。
 
-- [ ] **Step 1: 固定 API 响应契约**
+- [x] **Step 1: 固定 API 响应契约**
 
 首页必须返回：经营结论、销售额、线上/线下销售、实收、订单、件数、客单价、连带率、折扣率、退货、毛利、库存、90/180 天库存、VIP 余额、VIP 销售、重大异常、今日行动及数据质量。
 
-- [ ] **Step 2: 补全日报近 14 日字段**
+- [x] **Step 2: 补全日报近 14 日字段**
 
 近 14 日记录至少显示日期、销售额、实收、订单、件数、客单价、连带率、折扣率、退货率、毛利额、毛利率、成本状态和数据状态；点击日期切换完整日报。
 
-- [ ] **Step 3: 调整首页信息顺序**
+- [x] **Step 3: 调整首页信息顺序**
 
 页面顺序固定为：昨日经营结论 -> 核心指标 -> 销售模块 -> 门店明细 -> 库存/VIP -> 数据质量 -> 重大异常与今日行动清单（底部）。不删除现有下钻入口。
 
-- [ ] **Step 4: 应用浅色 UI 规范**
+- [x] **Step 4: 应用浅色 UI 规范**
 
 内容区 `#F5F7FA`，卡片白底、8px 圆角、浅边框；状态色低饱和。禁止深色内容块，表格排序图标与文字同排。
 
-- [ ] **Step 5: 测试构建与桌面/移动验收**
+- [x] **Step 5: 测试构建与桌面/移动验收**
 
 ```bash
 cd /srv/huabang-ai-center/frontend
@@ -221,19 +221,19 @@ Expected: 测试、类型检查和构建通过；桌面和 390px 移动视口无
 **Interfaces:**
 - Produces: 门店汇总、趋势、商品、库存、VIP 与异常下钻字段；保留现有门店接口路径。
 
-- [ ] **Step 1: 增加门店可信指标测试**
+- [x] **Step 1: 增加门店可信指标测试**
 
 覆盖昨日销售、日环比、周同比、毛利、VIP 销售、库存金额、畅销款、滞销款和异常。客流、成交人数、试穿率、新老客、导购业绩无来源时必须返回 `pending_data`。
 
-- [ ] **Step 2: 扩展门店聚合**
+- [x] **Step 2: 扩展门店聚合**
 
 对销售、库存和 VIP 分别使用其业务日期，不把库存同步日期伪装为销售日期。每个指标返回来源和更新时间。
 
-- [ ] **Step 3: 完成门店下钻**
+- [x] **Step 3: 完成门店下钻**
 
 门店行可进入门店详情；畅滞销款可进入款号/SKU；VIP 指标可进入会员列表；异常可进入证据或任务草稿。
 
-- [ ] **Step 4: 验证 7 家销售门店范围**
+- [x] **Step 4: 验证 7 家销售门店范围**
 
 ```bash
 cd /srv/huabang-ai-center/backend
@@ -258,23 +258,23 @@ Expected: 返回范围固定为 7 家销售门店，仓库不进入销售排行�
 **Interfaces:**
 - Produces: 单款销售、毛利、库存、动销、售罄、颜色/尺码结构及结构化建议。
 
-- [ ] **Step 1: 补齐百胜入库和调拨到货历史**
+- [x] **Step 1: 补齐百胜入库和调拨到货历史**
 
 按 10 编码库存范围回填可用历史，幂等写入入库批次。供应商、采购单、调拨来源存在时保留原始编号，无法匹配时进入库龄未知。
 
-- [ ] **Step 2: 验证 FIFO 分摊**
+- [x] **Step 2: 验证 FIFO 分摊**
 
 测试销售先消耗老批次；现存库存从最近入库批次反向分摊；分摊总量等于当前库存；未知量独立列示。
 
-- [ ] **Step 3: 形成结构化商品建议**
+- [x] **Step 3: 形成结构化商品建议**
 
 后端返回 `continue_sale`、`replenish`、`transfer`、`clearance` 四类建议之一，并返回规则证据。建议不得只返回自然语言。
 
-- [ ] **Step 4: 完成款号/SKU/尺码墙下钻**
+- [x] **Step 4: 完成款号/SKU/尺码墙下钻**
 
 所有数量、金额、7 天销量和 7 天销售额支持排序；库存为 0 可筛除；排序图标与表头同排。
 
-- [ ] **Step 5: 执行商品与库龄测试**
+- [x] **Step 5: 执行商品与库龄测试**
 
 ```bash
 cd /srv/huabang-ai-center/backend
@@ -296,19 +296,19 @@ Expected: FIFO、建议、外穿衣物范围及无成本不计金额全部通过
 **Interfaces:**
 - Produces: `GET /inventory/warnings`，支持日期、门店、类型、等级和任务状态筛选。
 
-- [ ] **Step 1: 配置化库存规则**
+- [x] **Step 1: 配置化库存规则**
 
 覆盖 90/180 天、过季、断码、低动销高库存、有销量低库存、门店不均衡、可调拨、清仓和返仓；每条结果保存阈值、证据、来源和生成时间。
 
-- [ ] **Step 2: 清理停滞规则结果**
+- [x] **Step 2: 清理停滞规则结果**
 
 使用幂等重算替换停留在 `2026-06-16` 的旧结果；保留历史日期快照，不直接物理删除审计证据。
 
-- [ ] **Step 3: 保持任务草稿去重**
+- [x] **Step 3: 保持任务草稿去重**
 
 同一 `warning_date + store_code + product_code + sku_code + warning_type` 只生成一个活跃任务草稿。
 
-- [ ] **Step 4: 验证仓库合计和库存金额**
+- [x] **Step 4: 验证仓库合计和库存金额**
 
 10 个编码库存数量之和必须等于公司库存；无成本 SKU 数量保留、金额不计；页面显示成本覆盖率。
 
@@ -326,23 +326,23 @@ Expected: FIFO、建议、外穿衣物范围及无成本不计金额全部通过
 **Interfaces:**
 - Produces: `GET /member/assets/overview`、`/member/assets/list`、`/member/assets/transactions`。
 
-- [ ] **Step 1: 校准会员主档余额**
+- [x] **Step 1: 校准会员主档余额**
 
 以 `CZ_DQJE` 汇总当前余额；正余额、负余额、零余额分别统计。资产总额只汇总正余额，负余额输出异常人数、金额和会员下钻。
 
-- [ ] **Step 2: 校准储值流水**
+- [x] **Step 2: 校准储值流水**
 
 保持 `change_type=0` 为充值、`2` 为储值消费、`8` 为审计调整；充值不重复计入销售额。交易明细可追溯门店、会员、时间和原始单号。
 
-- [ ] **Step 3: 增加 VIP 销售分析**
+- [x] **Step 3: 增加 VIP 销售分析**
 
 显示 VIP 销售额、占比、订单、件数、客单价、连带率、复购、门店排行、品类/款式、折扣、毛利、退货和充值消费转化率；缺少可靠字段时返回 `pending_data`。
 
-- [ ] **Step 4: 保护会员隐私**
+- [x] **Step 4: 保护会员隐私**
 
 列表默认脱敏手机号；只有具备会员敏感字段权限的用户可查看完整联系方式，操作写入审计日志。
 
-- [ ] **Step 5: 核对总额**
+- [x] **Step 5: 核对总额**
 
 会员明细正余额合计必须等于首页 VIP 余额；10 编码外会员不得进入首期总额。
 
@@ -353,11 +353,11 @@ Expected: FIFO、建议、外穿衣物范围及无成本不计金额全部通过
 - Create or Modify: `backend/tests/test_phase1_acceptance.py`
 - Create: `docs/acceptance/boss-command-center-phase1.md`
 
-- [ ] **Step 1: 固定验收日期和原始凭证**
+- [x] **Step 1: 固定验收日期和原始凭证**
 
 选择至少 3 个业务日，保存百胜销售结算、库存、会员余额和入库记录的只读验收摘要；其中一天必须包含线上支付、充值或退款。
 
-- [ ] **Step 2: 执行后端全量测试**
+- [x] **Step 2: 执行后端全量测试**
 
 ```bash
 cd /srv/huabang-ai-center/backend
@@ -366,7 +366,7 @@ pytest -q
 
 Expected: 全量通过；任何与口径相关的失败都阻止上线。
 
-- [ ] **Step 3: 执行前端全量验证**
+- [x] **Step 3: 执行前端全量验证**
 
 ```bash
 cd /srv/huabang-ai-center/frontend
@@ -377,11 +377,11 @@ npm run build
 
 Expected: 全部通过，产物生成到现有部署目录。
 
-- [ ] **Step 4: 执行 Playwright 路由检查**
+- [x] **Step 4: 执行 Playwright 路由检查**
 
 检查 `/app/dashboard`、`/app/report`、`/app/store`、`/app/product`、`/app/product/size-wall`、`/app/inventory`、`/app/member` 的桌面和移动视口；验证筛选、排序、分页、日期切换、下钻和导航。
 
-- [ ] **Step 5: 完成第一阶段签字条件**
+- [x] **Step 5: 完成第一阶段签字条件**
 
 只有在销售/实收固定样本一致、库存合计一致、VIP 明细等于总额、日报幂等、来源时间可见、未知/待接入不冒充零值时，第一阶段标记完成。
 
@@ -743,7 +743,8 @@ Expected: 全部通过；Playwright 桌面/移动截图无重叠、空白主区�
 - 2026-07-13 Web 与移动接口逐字段核对一致：销售 13,455 元、实收 8,820 元、库存金额 2,401,938.52 元、VIP 余额 1,118,709.26 元、重大异常 7 项、待处理任务 38 项、退货 0 元。
 - 退货金额已接百胜 `baison_pos.refund_amount`：2026-07-06 为 54 元，2026-07-12/13 为 0 元，状态均为 `ready`。
 - 后端全量测试 472 passed、前端 126 项测试、类型检查、生产构建、20 组 Playwright 桌面/移动检查和前端原子回滚机制均已通过；数据库为 `222d5e6f7081 (head)`，一步回滚证据沿用第二阶段同一迁移链实测。
-- Step 5 暂不勾选：2026-07-14 晚间百胜库存刷新连续 3 次 `RemoteProtocolError`，且自动健康告警尚未启用；需复验 2026-07-15 的 04:00 销售、05:30 库存、06:30 日报完整周期。
+- 百胜库存传输错误已增加最多 3 次短退避重试，后端全量测试更新为 475 passed；2026-07-15 03:27 手工全量同步成功，覆盖 10 个编码、82,233 条记录、原始库存 24,356 件且未误删旧数据。
+- Step 5 暂不勾选：自动健康告警尚未启用；仍需复验 2026-07-15 的 04:00 销售、05:30 库存、06:30 日报完整周期。
 
 ---
 
