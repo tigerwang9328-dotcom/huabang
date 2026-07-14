@@ -50,9 +50,11 @@ async def list_boss_daily(
     r = await db.execute(text("""
         SELECT report_date, total_sales, actual_pay_amount, order_count,
                item_count, avg_order_value, items_per_order,
+               avg_discount_rate, return_rate,
                gross_profit, gross_margin, vip_sales_amount,
                vip_negative_balance_amount,
-               is_cost_complete, ai_summary, generated_at
+               is_cost_complete, data_quality_status, metric_status,
+               ai_summary, generated_at
         FROM dm.dm_boss_daily_report
         WHERE report_date BETWEEN :start AND :end
         ORDER BY report_date DESC
@@ -65,12 +67,16 @@ async def list_boss_daily(
         "item_count": int(row[4]) if row[4] is not None else None,
         "avg_order_value": float(row[5]) if row[5] is not None else None,
         "items_per_order": float(row[6]) if row[6] is not None else None,
-        "gross_profit": float(row[7]) if row[7] is not None else None,
-        "gross_margin": float(row[8]) if row[8] is not None else None,
-        "vip_sales_amount": float(row[9]) if row[9] is not None else None,
-        "vip_negative_balance_amount": float(row[10]) if row[10] is not None else None,
-        "is_cost_complete": bool(row[11]),
-        "has_ai_summary": bool(row[12]),
-        "generated_at": str(row[13]) if row[13] else None,
+        "avg_discount_rate": float(row[7]) if row[7] is not None else None,
+        "return_rate": float(row[8]) if row[8] is not None else None,
+        "gross_profit": float(row[9]) if row[9] is not None else None,
+        "gross_margin": float(row[10]) if row[10] is not None else None,
+        "vip_sales_amount": float(row[11]) if row[11] is not None else None,
+        "vip_negative_balance_amount": float(row[12]) if row[12] is not None else None,
+        "is_cost_complete": bool(row[13]),
+        "data_quality_status": row[14] or "warning",
+        "metric_status": row[15] or {},
+        "has_ai_summary": bool(row[16]),
+        "generated_at": str(row[17]) if row[17] else None,
     } for row in r.fetchall()]
     return ApiResponse.ok(data={"items": items, "total": len(items)})

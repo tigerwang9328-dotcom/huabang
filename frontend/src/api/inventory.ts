@@ -11,9 +11,9 @@ export const inventoryApi = {
   syncWarehouses: (payload?: any) =>
     request.post("/sync/baison/warehouses", payload || { full_sync: true, page_size: 20 }, { timeout: 120000 }),
   // 库存余额
-  listInventory: (params) => request.get("/inventory/balance", { params }),
+  listInventory: (params?: Record<string, unknown>) => request.get("/inventory/balance", { params }),
   // 同步库存余额（逐店全量后台执行，立即返回）
-  syncInventory: (payload) =>
+  syncInventory: (payload?: Record<string, unknown>) =>
     request.post("/sync/baison/inventory", payload || { full_sync: true, page_size: 20 }, { timeout: 120000 }),
   listWarnings: (params?: any) => request.get("/inventory/warnings", { params }),
   createWarningTask: (warningId: number) => request.post(`/inventory/warnings/${warningId}/task-draft`),

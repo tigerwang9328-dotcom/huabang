@@ -79,11 +79,29 @@ def test_boss_daily_history_exposes_operating_detail_metrics():
         "item_count",
         "avg_order_value",
         "items_per_order",
+        "avg_discount_rate",
+        "return_rate",
         "gross_profit",
         "vip_sales_amount",
         "vip_negative_balance_amount",
+        "data_quality_status",
+        "metric_status",
     ):
         assert field in report_api
+
+
+def test_dashboard_command_center_exposes_full_phase_one_metric_contract():
+    command_source = (BACKEND / "app" / "services" / "command_center_service.py").read_text(
+        encoding="utf-8"
+    )
+
+    for field in (
+        '"avg_discount_rate": build_metric',
+        '"return_amount": build_metric',
+        '"return_rate": build_metric',
+        '"age_180_amount": build_metric',
+    ):
+        assert field in command_source
 
 
 def test_dashboard_splits_baison_online_payment_from_offline_sales():
