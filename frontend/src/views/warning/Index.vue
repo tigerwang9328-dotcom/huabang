@@ -83,6 +83,7 @@
       </div>
 
       <el-table :data="items" v-loading="loading" stripe row-key="id" empty-text="当前筛选条件下暂无异常">
+        <el-table-column prop="id" label="ID" width="74" />
         <el-table-column label="等级" width="82">
           <template #default="{ row }"><el-tag :type="severityType(row.severity)" effect="light">{{ severityLabel(row.severity) }}</el-tag></template>
         </el-table-column>
@@ -190,12 +191,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { Refresh, Search } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { auditApi } from "@/api/audit";
+import { parsePositiveIntegerQuery } from "@/utils/routeQuery.mjs";
 
 const router = useRouter();
+const route = useRoute();
 const loading = ref(false);
 const items = ref<any[]>([]);
 const total = ref(0);
@@ -254,8 +257,8 @@ async function loadData() {
 
 function search() { page.value = 1; loadData(); }
 function reset() { Object.assign(query, { business_date: "", keyword: "", store_code: "", severity: "", metric_status: "", task_status: "" }); search(); }
-async function openDetail(id: number) {
-  detail.value = (await auditApi.getException(id)).data.data;
+async function openDetail(id: number, silentError = false) {
+  detail.value = (await auditApi.getException(id, { silentError })).data.data;
   const current = detail.value?.data_snapshot?.adjudication;
   Object.assign(adjudication, {
     selected_owner_id: current?.selected_owner_id || "",
@@ -295,7 +298,18 @@ async function submitAdjudication() {
 }
 function drilldown(row: any) { if (row.drilldown?.route) router.push({ path: row.drilldown.route, query: row.drilldown.params || {} }); }
 
-onMounted(loadData);
+async function initialize() {
+  await loadData();
+  const exceptionId = parsePositiveIntegerQuery(route.query.exception_id);
+  if (exceptionId === null) return;
+  try {
+    await openDetail(exceptionId, true);
+  } catch {
+    ElMessage.warning("指定异常不存在或无权查看");
+  }
+}
+
+onMounted(initialize);
 </script>
 
 <style scoped>

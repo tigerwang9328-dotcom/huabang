@@ -2,7 +2,10 @@ import request from "./request";
 
 export const auditApi = {
   listExceptions: (params?: Record<string, unknown>) => request.get("/audit/exceptions", { params }),
-  getException: (id: number) => request.get(`/audit/exceptions/${id}`),
+  getException: (id: number, options?: { silentError?: boolean }) => request.get(
+    `/audit/exceptions/${id}`,
+    { silentError: options?.silentError },
+  ),
   getRuleStatuses: () => request.get("/audit/rules/status"),
   getAttributionStatus: (businessDate?: string) => request.get("/audit/attribution/status", {
     params: businessDate ? { business_date: businessDate } : undefined,

@@ -2,6 +2,12 @@ import axios from "axios";
 import type { AxiosResponse } from "axios";
 import { ElMessage } from "element-plus";
 
+declare module "axios" {
+  interface AxiosRequestConfig {
+    silentError?: boolean;
+  }
+}
+
 export interface ApiResponse<T = any> {
   code: number;
   message: string;
@@ -50,7 +56,7 @@ request.interceptors.response.use(
       return Promise.reject(new Error("登录已过期，请重新登录"));
     }
     if (!data.success && data.code !== 200) {
-      ElMessage.error(data.message || "操作失败");
+      if (!response.config.silentError) ElMessage.error(data.message || "操作失败");
       return Promise.reject(new Error(data.message));
     }
     return response;
@@ -68,7 +74,7 @@ request.interceptors.response.use(
       return Promise.reject(new Error("登录已过期，请重新登录"));
     }
     const msg = error.response?.data?.message || error.message || "网络错误";
-    ElMessage.error(msg);
+    if (!error.config?.silentError) ElMessage.error(msg);
     return Promise.reject(error);
   }
 );
