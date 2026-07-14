@@ -8,6 +8,7 @@ from typing import Optional
 
 from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
+from app.core.cost_policy import effective_sales_cost_sql
 from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, allowed_inventory_sql_in
 from sqlalchemy import text
 
@@ -221,6 +222,9 @@ class PosSaleGoodsService:
             params = {"sd": dt.date.fromisoformat(start_date[:10]), "ed": dt.date.fromisoformat(end_date[:10])}
             # 华邦业务口径:销售明细仅统计 10 个白名单门店/仓,见 app.core.store_whitelist
             store_in = allowed_inventory_sql_in()
+            line_cost_sql = effective_sales_cost_sql(
+                "p.supplier_code", "p.cost_price", "s.sales_amount", "s.sales_qty"
+            )
             async with AsyncSessionLocal() as db:
                 # 公司日汇总 -> dws_company_daily
                 await db.execute(
@@ -314,6 +318,104 @@ class PosSaleGoodsService:
                            avg_discount_rate = EXCLUDED.avg_discount_rate,
                            etl_at = now()"""),
                     params,
+                )
+
+                # 统一回填商品、门店和公司销售成本。温州徐总成本价1元商品
+                # 按实际销售额的60%计成本，其余商品仍按数量乘主档成本。
+                await db.execute(
+                    text(f"""
+                        WITH product_cost AS (
+                            SELECT s.biz_date,s.product_code,s.store_code,
+                                   COALESCE(SUM({line_cost_sql}),0) cost_amount,
+                                   BOOL_AND(
+                                       (p.supplier_code='GY1229' AND COALESCE(p.cost_price,0)=1)
+                                       OR COALESCE(p.cost_price,0)>0
+                                   ) is_cost_complete
+                            FROM dwd.dwd_pos_sale_goods s
+                            LEFT JOIN dim.dim_product p
+                              ON p.product_code=s.product_code
+                             AND COALESCE(p.source_system,'baison')='baison'
+                            WHERE s.biz_date>=:sd AND s.biz_date<=:ed
+                              AND s.store_code IN {store_in}
+                            GROUP BY s.biz_date,s.product_code,s.store_code
+                        )
+                        UPDATE dws.dws_product_daily d
+                        SET cost_amount=x.cost_amount,
+                            gross_profit=d.sales_amount-x.cost_amount,
+                            gross_margin=CASE WHEN d.sales_amount<>0
+                                THEN (d.sales_amount-x.cost_amount)/d.sales_amount ELSE NULL END,
+                            is_cost_complete=x.is_cost_complete,
+                            etl_at=now()
+                        FROM product_cost x
+                        WHERE d.stat_date=x.biz_date AND d.product_code=x.product_code
+                          AND d.store_code=x.store_code
+                    """), params,
+                )
+                await db.execute(
+                    text(f"""
+                        WITH store_cost AS (
+                            SELECT stat_date,store_code,COALESCE(SUM(cost_amount),0) cost_amount,
+                                   BOOL_AND(is_cost_complete) is_cost_complete
+                            FROM dws.dws_product_daily
+                            WHERE stat_date>=:sd AND stat_date<=:ed AND store_code IN {store_in}
+                            GROUP BY stat_date,store_code
+                        )
+                        UPDATE dws.dws_store_daily d
+                        SET cost_amount=x.cost_amount,
+                            gross_profit=d.sales_amount-x.cost_amount,
+                            gross_margin=CASE WHEN d.sales_amount<>0
+                                THEN (d.sales_amount-x.cost_amount)/d.sales_amount ELSE NULL END,
+                            is_cost_complete=x.is_cost_complete,
+                            etl_at=now()
+                        FROM store_cost x
+                        WHERE d.stat_date=x.stat_date AND d.store_code=x.store_code
+                          AND d.channel='offline'
+                    """), params,
+                )
+                await db.execute(
+                    text(f"""
+                        WITH company_cost AS (
+                            SELECT stat_date,COALESCE(SUM(cost_amount),0) cost_amount,
+                                   BOOL_AND(is_cost_complete) is_cost_complete
+                            FROM dws.dws_store_daily
+                            WHERE stat_date>=:sd AND stat_date<=:ed
+                              AND store_code IN {store_in} AND channel='offline'
+                            GROUP BY stat_date
+                        )
+                        UPDATE dws.dws_company_daily d
+                        SET total_cost_amount=x.cost_amount,
+                            gross_profit=d.total_sales_amount-x.cost_amount,
+                            gross_margin=CASE WHEN d.total_sales_amount<>0
+                                THEN (d.total_sales_amount-x.cost_amount)/d.total_sales_amount ELSE NULL END,
+                            is_cost_complete=x.is_cost_complete,
+                            etl_at=now()
+                        FROM company_cost x WHERE d.stat_date=x.stat_date
+                    """), params,
+                )
+                await db.execute(
+                    text(f"""
+                        WITH finance_source AS (
+                            SELECT stat_date,store_code,net_sales_amount,cost_amount,
+                                   gross_profit,gross_margin
+                            FROM dws.dws_store_daily
+                            WHERE stat_date>=:sd AND stat_date<=:ed
+                              AND store_code IN {store_in} AND channel='offline'
+                            UNION ALL
+                            SELECT stat_date,'ALL',net_sales_amount,total_cost_amount,
+                                   gross_profit,gross_margin
+                            FROM dws.dws_company_daily
+                            WHERE stat_date>=:sd AND stat_date<=:ed
+                        )
+                        UPDATE dws.dws_finance_daily d
+                        SET net_sales_amount=x.net_sales_amount,
+                            cost_amount=x.cost_amount,
+                            gross_profit=x.gross_profit,
+                            gross_margin=x.gross_margin,
+                            operating_profit_estimate=x.gross_profit-COALESCE(d.total_expense,0),
+                            etl_at=now()
+                        FROM finance_source x
+                        WHERE d.stat_date=x.stat_date AND d.store_code=x.store_code
+                    """), params,
                 )
 
                 await db.commit()

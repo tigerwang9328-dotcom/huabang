@@ -345,8 +345,12 @@ class DwsToDm:
                         :d,:sc,:net,:cog,:gp,:gm,:exp,:op,:dt,:cost,:exp_ok,NOW()
                     )
                     ON CONFLICT (stat_date, store_code) DO UPDATE SET
+                        net_sales       = EXCLUDED.net_sales,
+                        cost_of_goods   = EXCLUDED.cost_of_goods,
+                        gross_profit    = EXCLUDED.gross_profit,
                         operating_profit = EXCLUDED.operating_profit,
                         gross_margin     = EXCLUDED.gross_margin,
+                        is_cost_complete = EXCLUDED.is_cost_complete,
                         data_type        = EXCLUDED.data_type,
                         generated_at     = NOW()
                 """), {
