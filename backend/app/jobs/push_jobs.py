@@ -30,7 +30,8 @@ async def run_replenishment_push():
     stat_date = (date.today() - timedelta(days=1)).isoformat()
     logger.info(f"[定时] 补货提醒: {stat_date}")
     try:
-        from sqlalchemy import text
+        from sqlalchemy import select, text
+        from app.models.app import AppActionTask
         from datetime import date as ddate
         from app.services.dingtalk import DingtalkService
         from app.core.database import AsyncSessionLocal
@@ -71,45 +72,70 @@ async def run_replenishment_push():
         logger.error(f"[定时] 补货提醒失败: {e}", exc_info=True)
 
 
+async def run_task_assignment_notifications():
+    """Drain the durable task notification outbox."""
+    from app.services.task_notification_service import TaskNotificationService
+
+    results = await TaskNotificationService().process_pending(limit=20)
+    if results:
+        logger.info(
+            "[定时] 任务通知队列 processed=%s success=%s",
+            len(results),
+            sum(1 for result in results if result.get("success")),
+        )
+
+
 async def run_overdue_reminder():
     """18:00 任务逾期提醒"""
     logger.info("[定时] 任务逾期提醒开始")
     try:
-        from sqlalchemy import text
-        from app.services.dingtalk import DingtalkService
+        from sqlalchemy import select, text
+        from app.models.app import AppActionTask
+        from app.services.task_notification_service import TaskNotificationService, beijing_today
         from app.core.database import AsyncSessionLocal
 
+        business_date = beijing_today()
         async with AsyncSessionLocal() as db:
-            r = await db.execute(text("""
-                SELECT title, assignee_name, assignee_id
-                FROM app.app_action_task
-                WHERE status = 'overdue' AND is_deleted = FALSE
-                LIMIT 10
-            """))
-            rows = r.fetchall()
+            marked = await db.execute(text("""
+                UPDATE app.app_action_task
+                SET status='overdue', overdue_at=COALESCE(overdue_at, now()), updated_at=now()
+                WHERE due_date<:business_date
+                  AND status IN ('pending','processing')
+                  AND is_deleted=false
+                RETURNING id
+            """), {"business_date": business_date})
+            marked_ids = [int(row[0]) for row in marked.fetchall()]
+            candidates = await db.execute(text("""
+                SELECT task.id
+                FROM app.app_action_task task
+                WHERE task.status='overdue' AND task.is_deleted=false
+                  AND NOT EXISTS (
+                      SELECT 1 FROM app.app_task_notification_outbox outbox
+                      WHERE outbox.task_id=task.id
+                        AND outbox.event_key=(
+                            'task:' || task.id::text || ':overdue:' || CAST(:business_date AS text)
+                        )
+                )
+                ORDER BY task.due_date, task.priority DESC
+            """), {"business_date": business_date})
+            task_ids = [int(row[0]) for row in candidates.fetchall()]
+            tasks = (await db.execute(select(AppActionTask).where(
+                AppActionTask.id.in_(task_ids or [-1])
+            ))).scalars().all()
+            notifier = TaskNotificationService()
+            for task in tasks:
+                await notifier.enqueue_overdue(db, task, business_date)
+            await db.commit()
 
-            if not rows:
+            if not task_ids:
                 logger.info("[定时] 无逾期任务")
                 return
-
-            lines = ["## 任务逾期提醒", "", f"当前共 **{len(rows)}** 个任务已逾期：", ""]
-            for row in rows:
-                lines.append(f"- {row[0]}（{row[1] or '未分配'}）")
-
-            content = "\n".join(lines) + "\n\n请及时处理逾期任务！"
-
-            dt_svc = DingtalkService(db)
-            user_ids = await dt_svc.get_push_user_ids()
-            if user_ids:
-                result = await dt_svc.send_work_notification(
-                    user_id_list=user_ids,
-                    title=f"【逾期提醒】{len(rows)}个任务待处理",
-                    content=content,
-                    push_type="overdue_reminder",
-                    template_code="overdue_reminder",
-                )
-                await db.commit()
-                logger.info(f"[定时] 逾期提醒推送: {result}")
+        results = await notifier.process_pending(kind="overdue", limit=20)
+        success = sum(1 for result in results if result.get("success"))
+        logger.info(
+            "[定时] 逾期任务 marked=%s queued=%s processed=%s success=%s",
+            len(marked_ids), len(task_ids), len(results), success,
+        )
     except Exception as e:
         logger.error(f"[定时] 逾期提醒失败: {e}", exc_info=True)
 

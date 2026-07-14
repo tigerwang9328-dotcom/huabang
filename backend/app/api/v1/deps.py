@@ -54,7 +54,7 @@ async def get_current_user_roles(
     result = await db.execute(
         select(SysRole.code)
         .join(SysUserRole, SysUserRole.role_id == SysRole.id)
-        .where(SysUserRole.user_id == current_user.id)
+        .where(SysUserRole.user_id == current_user.id, SysRole.status == 1)
     )
     return [row[0] for row in result.fetchall()]
 
@@ -75,7 +75,8 @@ def require_permission(permission_code: str):
             .join(SysUserRole, SysUserRole.role_id == SysRole.id)
             .where(
                 SysUserRole.user_id == current_user.id,
-                SysPermission.code == permission_code
+                SysPermission.code == permission_code,
+                SysRole.status == 1,
             )
         )
         if not result.scalar_one_or_none():

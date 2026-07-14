@@ -1297,6 +1297,12 @@ class AIDiagnosisService:
         }
 
     async def confirm_action_tasks(self, module: str, diagnosis_ids: list[str], stat_date: Optional[str], store_code: Optional[str], user: Any) -> dict:
+        from app.services.task_workflow_service import normalize_assignee_roles
+
+        actionable_roles = {
+            "area_supervisor", "finance_manager", "guide", "operation_manager",
+            "product_manager", "store_manager", "warehouse_manager",
+        }
         dt = _as_date(stat_date or await self._latest_date())
         payload = await self.module(module, dt, store_code)
         diagnoses = {d.get("id"): d for d in payload.get("diagnoses", [])}
@@ -1313,15 +1319,18 @@ class AIDiagnosisService:
             level = str(task.get("priority") or "中")
             priority = 3 if level in ("高", "high") else 2 if level in ("中", "medium") else 1
             task_no = f"AI{dt:%Y%m%d}{source_id:015x}"
+            owner = task.get("owner") or "运营经理"
+            owner_roles = normalize_assignee_roles(owner) & actionable_roles
+            assignee_role = " / ".join(sorted(owner_roles or {"operation_manager"}))
             result = await self.db.execute(text("""
                 insert into app.app_action_task
                   (task_no,title,description,data_evidence,data_evidence_text,suggested_actions,review_metrics,
                    feedback_requirement,source_type,source_id,related_store_code,related_date,assignee_name,
-                   assignee_role,creator_id,confirmed_by,confirmed_at,due_date,status,priority,risk_level,requires_human_confirm,is_deleted)
+                   assignee_role,creator_id,due_date,status,priority,risk_level,requires_human_confirm,is_deleted)
                 values
                   (:task_no,:title,:description,cast(:evidence as jsonb),:evidence_text,cast(:actions as jsonb),cast(:metrics as jsonb),
                    :feedback,'ai_diagnosis',:source_id,:store_code,:related_date,:assignee_name,
-                   :assignee_role,:creator_id,:creator_id,now(),:due_date,'pending',:priority,:risk_level,false,false)
+                   :assignee_role,:creator_id,:due_date,'draft',:priority,:risk_level,true,false)
                 on conflict (source_type,source_id) where is_deleted=false and source_id is not null do nothing
                 returning id
             """), {
@@ -1333,7 +1342,7 @@ class AIDiagnosisService:
                 "metrics": json.dumps([task.get("review_metric")] if task.get("review_metric") else [], ensure_ascii=False),
                 "feedback": task.get("feedback_requirement") or "提交处理过程和结果证据。",
                 "source_id": source_id, "store_code": store_code or None, "related_date": dt,
-                "assignee_name": task.get("owner"), "assignee_role": task.get("owner"),
+                "assignee_name": owner, "assignee_role": assignee_role,
                 "creator_id": getattr(user, "id", None), "due_date": datetime.now(ZoneInfo("Asia/Shanghai")).date() + timedelta(days=1),
                 "priority": priority, "risk_level": "high" if priority == 3 else "medium" if priority == 2 else "low",
             })

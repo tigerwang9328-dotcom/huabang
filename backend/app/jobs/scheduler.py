@@ -16,7 +16,12 @@ def setup_jobs():
     """注册所有定时任务"""
     from app.jobs.sync_jobs import run_daily_sync, run_dingtalk_approval_sync, run_dingtalk_attendance_sync
     from app.jobs.report_jobs import run_morning_report
-    from app.jobs.push_jobs import run_member_visit_push, run_replenishment_push, run_overdue_reminder
+    from app.jobs.push_jobs import (
+        run_member_visit_push,
+        run_overdue_reminder,
+        run_replenishment_push,
+        run_task_assignment_notifications,
+    )
     from app.jobs.review_jobs import run_evening_diagnosis
     from app.jobs.life_data_jobs import (
         cleanup_life_data_captures,
@@ -96,6 +101,18 @@ def setup_jobs():
         name="任务逾期提醒",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # 每分钟清空任务通知队列；API进程中断后也不会丢失已派发通知。
+    scheduler.add_job(
+        run_task_assignment_notifications,
+        CronTrigger(minute="*"),
+        id="task_assignment_notifications",
+        name="任务通知队列",
+        replace_existing=True,
+        misfire_grace_time=60,
+        coalesce=True,
+        max_instances=1,
     )
 
     # 每天21:30 - 门店诊断复查

@@ -1,21 +1,21 @@
 """同步公共工具：access_token、oapi 调用、脱敏日志、权限提示。"""
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 
 from app.core.database import AsyncSessionLocal
-from app.core.redis import get_redis
 from app.services.dingtalk import DingtalkService
+from app.services.dingtalk_budget_service import (
+    DINGTALK_DAILY_API_LIMIT,
+    DingtalkApiBudgetExceeded,
+    consume_daily_dingtalk_budget,
+    record_dingtalk_api_call,
+)
 
 logger = logging.getLogger("dingtalk.sync")
 
 OAPI = "https://oapi.dingtalk.com"
-CST = timezone(timedelta(hours=8))
-DINGTALK_DAILY_API_LIMIT = 160
-
-
 def quiet_http_logs() -> None:
     """压低 httpx 日志，避免把含 access_token 的 URL 打进日志。"""
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -27,10 +27,6 @@ class DingtalkApiError(Exception):
         super().__init__(f"errcode={errcode} errmsg={errmsg}")
         self.errcode = errcode
         self.errmsg = errmsg
-
-
-class DingtalkApiBudgetExceeded(Exception):
-    """Raised before a DingTalk request when the configured daily budget is spent."""
 
 
 class DingtalkApiBudget:
@@ -52,37 +48,6 @@ class DingtalkApiBudget:
     def refund(self) -> None:
         if self.used > 0:
             self.used -= 1
-
-
-def _daily_budget_key(now: Optional[datetime] = None) -> tuple[str, int]:
-    now = now or datetime.now(CST)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=CST)
-    today = now.astimezone(CST).date().isoformat()
-    tomorrow = (now.astimezone(CST).date() + timedelta(days=1))
-    reset_at = datetime.combine(tomorrow, datetime.min.time(), tzinfo=CST)
-    ttl = max(60, int((reset_at - now.astimezone(CST)).total_seconds()) + 300)
-    return f"dingtalk:oapi:daily:{today}", ttl
-
-
-async def consume_daily_dingtalk_budget(path: str, limit: int = DINGTALK_DAILY_API_LIMIT) -> int:
-    """Consume one DingTalk daily API call from the shared Beijing-date budget."""
-    key, ttl = _daily_budget_key()
-    try:
-        r = await get_redis()
-        used = int(await r.incr(key))
-        if used == 1:
-            await r.expire(key, ttl)
-        elif used > limit:
-            await r.decr(key)
-            raise DingtalkApiBudgetExceeded(f"dingtalk daily api budget exhausted: {limit}/{limit}")
-        logger.info("钉钉每日接口预算: %s/%s path=%s", used, limit, path)
-        return used
-    except DingtalkApiBudgetExceeded:
-        raise
-    except Exception as exc:
-        raise DingtalkApiBudgetExceeded(f"dingtalk daily api budget unavailable: {exc}") from exc
-
 
 PERMISSION_HELP = (
     "可能缺少钉钉权限，请在开放平台『应用权限管理』开通：\n"
@@ -111,16 +76,30 @@ async def post_oapi(client: httpx.AsyncClient, path: str, token: str, body: dict
     if budget:
         budget.consume(path)
     try:
-        await consume_daily_dingtalk_budget(path)
-    except DingtalkApiBudgetExceeded:
+        used = await consume_daily_dingtalk_budget(path, category="sync")
+    except DingtalkApiBudgetExceeded as exc:
         if budget:
             budget.refund()
+        await record_dingtalk_api_call(
+            path=path, category="sync", priority="normal", status="denied",
+            error_message=str(exc),
+        )
         raise
-    resp = await client.post(OAPI + path, params={"access_token": token}, json=body)
-    data = resp.json()
-    if isinstance(data, dict) and data.get("errcode") not in (0, None):
-        raise DingtalkApiError(data.get("errcode"), data.get("errmsg"))
-    return data
+    try:
+        resp = await client.post(OAPI + path, params={"access_token": token}, json=body)
+        data = resp.json()
+        if isinstance(data, dict) and data.get("errcode") not in (0, None):
+            raise DingtalkApiError(data.get("errcode"), data.get("errmsg"))
+        await record_dingtalk_api_call(
+            path=path, category="sync", priority="normal", status="success", used_after=used,
+        )
+        return data
+    except Exception as exc:
+        await record_dingtalk_api_call(
+            path=path, category="sync", priority="normal", status="failed",
+            used_after=used, error_message=str(exc),
+        )
+        raise
 
 
 async def get_all_dept_ids(client: httpx.AsyncClient, token: str,

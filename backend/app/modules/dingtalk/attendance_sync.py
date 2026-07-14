@@ -20,33 +20,18 @@ from app.core.database import AsyncSessionLocal
 from app.core.logger import setup_logging
 from app.models.dingtalk_attendance import DingtalkAttendanceRecord
 from app.services.dingtalk import DingtalkService
+from app.modules.dingtalk.sync._common import DingtalkApiError, post_oapi
 
 logger = logging.getLogger("dingtalk.attendance")
 
 CST = timezone(timedelta(hours=8))
 
-DEPT_LISTSUB_URL = "https://oapi.dingtalk.com/topapi/v2/department/listsub"
-USER_LISTID_URL = "https://oapi.dingtalk.com/topapi/user/listid"
-ATTENDANCE_LIST_URL = "https://oapi.dingtalk.com/attendance/list"
+DEPT_LISTSUB_PATH = "/topapi/v2/department/listsub"
+USER_LISTID_PATH = "/topapi/user/listid"
+ATTENDANCE_LIST_PATH = "/attendance/list"
 
 LATE_RESULTS = ("Late", "SeriousLate", "VeryLate")
 MISSING_RESULTS = ("NotSigned", "Absenteeism")
-
-
-class DingtalkApiError(Exception):
-    def __init__(self, errcode, errmsg):
-        super().__init__(f"errcode={errcode} errmsg={errmsg}")
-        self.errcode = errcode
-        self.errmsg = errmsg
-
-
-async def _post(client: httpx.AsyncClient, url: str, token: str, body: dict) -> dict:
-    """调用 oapi 接口（access_token 走 query），errcode!=0 抛 DingtalkApiError。"""
-    resp = await client.post(url, params={"access_token": token}, json=body)
-    data = resp.json()
-    if isinstance(data, dict) and data.get("errcode") not in (0, None):
-        raise DingtalkApiError(data.get("errcode"), data.get("errmsg"))
-    return data
 
 
 async def get_all_user_ids(client: httpx.AsyncClient, token: str) -> list:
@@ -55,7 +40,7 @@ async def get_all_user_ids(client: httpx.AsyncClient, token: str) -> list:
     queue = [1]
     while queue:
         d = queue.pop()
-        data = await _post(client, DEPT_LISTSUB_URL, token, {"dept_id": d})
+        data = await post_oapi(client, DEPT_LISTSUB_PATH, token, {"dept_id": d})
         for item in data.get("result", []) or []:
             did = item.get("dept_id")
             if did and did not in dept_ids:
@@ -64,7 +49,7 @@ async def get_all_user_ids(client: httpx.AsyncClient, token: str) -> list:
 
     user_ids, seen = [], set()
     for d in dept_ids:
-        data = await _post(client, USER_LISTID_URL, token, {"dept_id": d})
+        data = await post_oapi(client, USER_LISTID_PATH, token, {"dept_id": d})
         for uid in (data.get("result") or {}).get("userid_list", []) or []:
             if uid not in seen:
                 seen.add(uid)
@@ -88,7 +73,7 @@ async def fetch_attendance(client: httpx.AsyncClient, token: str, user_ids: list
                 "limit": 50,
                 "isI18n": False,
             }
-            data = await _post(client, ATTENDANCE_LIST_URL, token, body)
+            data = await post_oapi(client, ATTENDANCE_LIST_PATH, token, body)
             recs = data.get("recordresult") or []
             out.extend(recs)
             if data.get("hasMore") and recs:

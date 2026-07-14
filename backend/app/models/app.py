@@ -1,5 +1,5 @@
 """app schema: 业务应用表（任务/反馈/配置）"""
-from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON
+from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON, CheckConstraint, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -7,7 +7,13 @@ from app.core.database import Base
 class AppActionTask(Base):
     """AI任务（全闭环）"""
     __tablename__ = "app_action_task"
-    __table_args__ = {"schema": "app"}
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','pending','processing','feedback_submitted','review_passed','overdue','closed','cancelled')",
+            name="ck_action_task_workflow_status",
+        ),
+        {"schema": "app"},
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     task_no = Column(String(32), nullable=False, unique=True, comment="任务编号T2024XXXXX")
@@ -33,6 +39,8 @@ class AppActionTask(Base):
     creator_id = Column(BigInteger, nullable=False)
     confirmed_by = Column(BigInteger, comment="确认派发的人")
     confirmed_at = Column(DateTime(timezone=True))
+    closed_by = Column(BigInteger, comment="最终关闭人")
+    closed_at = Column(DateTime(timezone=True), comment="最终关闭时间")
 
     # 时间节点
     due_date = Column(Date, comment="截止日期")
@@ -41,28 +49,68 @@ class AppActionTask(Base):
 
     # 状态（详见任务闭环规则）
     status = Column(String(32), nullable=False, default="draft",
-                    comment="draft/pending/processing/feedback_submitted/review_passed/review_failed/overdue/closed/cancelled")
+                    comment="draft/pending/processing/feedback_submitted/review_passed/overdue/closed/cancelled")
     priority = Column(Integer, default=5, comment="优先级1-10，10最高")
     risk_level = Column(String(16), comment="low/medium/high/critical")
     requires_human_confirm = Column(Boolean, default=True)
+    workflow_version = Column(Integer, nullable=False, default=0, comment="状态机版本号")
 
     # 钉钉
     dingtalk_task_url = Column(String(512))
     dingtalk_notified_at = Column(DateTime(timezone=True))
     dingtalk_reminder_count = Column(Integer, default=0)
+    notification_status = Column(String(32), comment="queued/sending/success/partial/failed/skipped")
+    notification_event_key = Column(String(128), comment="当前展示的通知事件")
+    notification_kind = Column(String(16), comment="assignment/overdue")
+    notification_pending_recipients = Column(JSON, comment="等待重试的钉钉用户ID")
+    notification_attempt_count = Column(Integer, nullable=False, default=0)
+    notification_manual_retry_count = Column(Integer, nullable=False, default=0)
+    notification_last_retry_by = Column(BigInteger)
+    notification_last_retry_at = Column(DateTime(timezone=True))
+    notification_error = Column(Text)
+    notification_updated_at = Column(DateTime(timezone=True))
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_deleted = Column(Boolean, default=False)
 
 
+class AppTaskNotificationOutbox(Base):
+    """One durable delivery row per task event and DingTalk recipient."""
+    __tablename__ = "app_task_notification_outbox"
+    __table_args__ = (
+        UniqueConstraint("event_key", "recipient_user_id", name="uq_task_notification_event_recipient"),
+        {"schema": "app"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    task_id = Column(BigInteger, ForeignKey("app.app_action_task.id", ondelete="CASCADE"), nullable=False)
+    event_key = Column(String(128), nullable=False)
+    notification_kind = Column(String(16), nullable=False)
+    recipient_user_id = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="queued")
+    attempt_count = Column(Integer, nullable=False, default=0)
+    manual_retry_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text)
+    claimed_at = Column(DateTime(timezone=True))
+    claim_generation = Column(BigInteger, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True))
+    delivered_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class AppTaskFeedback(Base):
     """任务反馈"""
     __tablename__ = "app_task_feedback"
-    __table_args__ = {"schema": "app"}
+    __table_args__ = (
+        UniqueConstraint("task_id", "request_id", name="uq_task_feedback_request"),
+        {"schema": "app"},
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     task_id = Column(BigInteger, nullable=False, comment="app_action_task.id")
+    request_id = Column(String(64), comment="客户端幂等请求ID")
     feedback_by = Column(BigInteger, nullable=False)
     feedback_content = Column(Text, nullable=False, comment="反馈内容")
     attachment_urls = Column(JSON, comment="附件URL列表")
@@ -75,10 +123,14 @@ class AppTaskFeedback(Base):
 class AppTaskReview(Base):
     """任务复查"""
     __tablename__ = "app_task_review"
-    __table_args__ = {"schema": "app"}
+    __table_args__ = (
+        UniqueConstraint("task_id", "request_id", name="uq_task_review_request"),
+        {"schema": "app"},
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     task_id = Column(BigInteger, nullable=False)
+    request_id = Column(String(64), comment="客户端幂等请求ID")
     reviewed_by = Column(BigInteger, nullable=False)
     review_result = Column(String(16), nullable=False, comment="passed/failed/pending")
     review_note = Column(Text)

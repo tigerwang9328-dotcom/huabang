@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import rate_limit_check
 from app.models.log import LogDingtalkPush
+from app.services.dingtalk_budget_service import (
+    DingtalkApiBudgetExceeded,
+    consume_daily_dingtalk_budget,
+    record_dingtalk_api_call,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,12 @@ class DingtalkService:
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(
+        self,
+        *,
+        priority: str = "normal",
+        category: str = "auth",
+    ) -> Optional[str]:
         """获取钉钉 access_token（有效期2小时，缓存复用）"""
         if not settings.DINGTALK_CLIENT_ID or not settings.DINGTALK_CLIENT_SECRET:
             logger.warning("钉钉 ClientID/Secret 未配置")
@@ -36,7 +46,13 @@ class DingtalkService:
             return self._access_token
 
         for attempt in range(MAX_RETRY):
+            used = None
             try:
+                used = await consume_daily_dingtalk_budget(
+                    "/v1.0/oauth2/accessToken",
+                    category=category,
+                    priority=priority,
+                )
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.post(
                         DINGTALK_TOKEN_URL,
@@ -48,13 +64,49 @@ class DingtalkService:
                     data = resp.json()
                     token = data.get("accessToken")
                     if token:
+                        await record_dingtalk_api_call(
+                            path="/v1.0/oauth2/accessToken",
+                            category=category,
+                            priority=priority,
+                            status="success",
+                            used_after=used,
+                        )
                         self._access_token = token
                         expire_in = data.get("expireIn", 7200)
                         self._token_expires_at = now + timedelta(seconds=expire_in - 60)
                         return token
                     logger.error(f"获取钉钉token失败: {data}")
+                    await record_dingtalk_api_call(
+                        path="/v1.0/oauth2/accessToken",
+                        category=category,
+                        priority=priority,
+                        status="failed",
+                        used_after=used,
+                        error_message=str(data),
+                    )
                     return None
+            except DingtalkApiBudgetExceeded as exc:
+                await record_dingtalk_api_call(
+                    path="/v1.0/oauth2/accessToken",
+                    category=category,
+                    priority=priority,
+                    status="denied",
+                    error_message=str(exc),
+                )
+                logger.warning("DingTalk access token budget denied category=%s", category)
+                if priority == "task":
+                    raise
+                return None
             except Exception as e:
+                if used is not None:
+                    await record_dingtalk_api_call(
+                        path="/v1.0/oauth2/accessToken",
+                        category=category,
+                        priority=priority,
+                        status="failed",
+                        used_after=used,
+                        error_message=str(e),
+                    )
                 if attempt < MAX_RETRY - 1:
                     delay = RETRY_DELAYS[attempt]
                     logger.warning(f"钉钉token请求异常(第{attempt+1}次)，{delay}s后重试: {e}")
@@ -71,6 +123,7 @@ class DingtalkService:
         content: str,
         push_type: str = "daily_report",
         template_code: str = "",
+        notification_key: str = "",
     ) -> dict:
         """发送钉钉工作通知"""
         if not settings.DINGTALK_PUSH_ENABLED:
@@ -79,14 +132,32 @@ class DingtalkService:
 
         results = []
         for user_id in user_id_list:
-            result = await self._send_to_user(user_id, title, content, push_type, template_code)
+            result = await self._send_to_user(
+                user_id,
+                title,
+                content,
+                push_type,
+                template_code,
+                notification_key=notification_key,
+            )
             results.append(result)
 
         success_count = sum(1 for r in results if r.get("success"))
+        deferred = any(r.get("deferred") for r in results)
+        uncertain = any(r.get("uncertain") for r in results)
+        failed_recipient_ids = [
+            str(result.get("user_id") or user_id)
+            for user_id, result in zip(user_id_list, results)
+            if not result.get("success")
+        ]
         return {
-            "success": success_count > 0,
+            "success": bool(user_id_list) and success_count == len(user_id_list),
+            "partial": 0 < success_count < len(user_id_list),
             "total": len(user_id_list),
             "success_count": success_count,
+            "deferred": deferred,
+            "uncertain": uncertain,
+            "failed_recipient_ids": failed_recipient_ids,
             "results": results,
         }
 
@@ -97,13 +168,23 @@ class DingtalkService:
         content: str,
         push_type: str,
         template_code: str,
+        notification_key: str = "",
     ) -> dict:
-        rate_key = f"dingtalk_push:{user_id}:{push_type}"
-        allowed = await rate_limit_check(
-            rate_key,
-            max_count=settings.DINGTALK_MAX_PUSH_PER_HOUR,
-            window_seconds=3600,
-        )
+        if notification_key:
+            rate_key = f"dingtalk_push:{user_id}:{push_type}:{notification_key}"
+            allowed = await rate_limit_check(
+                rate_key,
+                max_count=1,
+                window_seconds=300,
+            )
+        else:
+            rate_scope = template_code or push_type
+            rate_key = f"dingtalk_push:{user_id}:{push_type}:{rate_scope}"
+            allowed = await rate_limit_check(
+                rate_key,
+                max_count=settings.DINGTALK_MAX_PUSH_PER_HOUR,
+                window_seconds=3600,
+            )
 
         log = LogDingtalkPush(
             push_type=push_type,
@@ -114,16 +195,47 @@ class DingtalkService:
         )
 
         if not allowed:
-            log.status = "skipped"
+            log.status = "uncertain" if notification_key else "skipped"
             log.is_rate_limited = True
-            log.error_message = "频率限制，本小时内已推送过"
+            log.error_message = (
+                "相同任务通知键已被占用，可能已由其他发送进程投递；需人工确认"
+                if notification_key else "频率限制，本小时内已推送过"
+            )
             self.db.add(log)
+            if notification_key:
+                return {
+                    "success": False,
+                    "user_id": user_id,
+                    "uncertain": True,
+                    "reason": "duplicate_delivery_state_unknown",
+                    "error": log.error_message,
+                }
             return {"success": False, "user_id": user_id, "reason": "频率限制"}
 
         # 指数退避重试
         last_error = ""
+        notification_priority = (
+            "task" if push_type in {"task_assignment", "task_overdue", "overdue_reminder"}
+            else "normal"
+        )
+        notification_category = (
+            "task_notification" if notification_priority == "task" else "push_notification"
+        )
         for attempt in range(MAX_RETRY):
-            token = await self._get_access_token()
+            used = None
+            try:
+                token = await self._get_access_token(
+                    priority=notification_priority,
+                    category=notification_category,
+                )
+            except DingtalkApiBudgetExceeded as exc:
+                return {
+                    "success": False,
+                    "user_id": user_id,
+                    "deferred": True,
+                    "reason": "budget_exhausted",
+                    "error": str(exc),
+                }
             if not token:
                 log.status = "failed"
                 log.error_message = "无法获取access_token"
@@ -131,6 +243,11 @@ class DingtalkService:
                 return {"success": False, "user_id": user_id, "reason": "token获取失败"}
 
             try:
+                used = await consume_daily_dingtalk_budget(
+                    "/topapi/message/corpconversation/asyncsend_v2",
+                    category=notification_category,
+                    priority=notification_priority,
+                )
                 async with httpx.AsyncClient(timeout=15) as client:
                     resp = await client.post(
                         DINGTALK_WORK_NOTIFY_URL,
@@ -152,11 +269,26 @@ class DingtalkService:
                     log.retry_count = attempt
 
                     if resp_data.get("errcode", -1) == 0:
+                        await record_dingtalk_api_call(
+                            path="/topapi/message/corpconversation/asyncsend_v2",
+                            category=notification_category,
+                            priority=notification_priority,
+                            status="success",
+                            used_after=used,
+                        )
                         log.status = "success"
                         self.db.add(log)
                         return {"success": True, "user_id": user_id, "attempt": attempt + 1}
                     else:
                         last_error = f"errcode:{resp_data.get('errcode')} {resp_data.get('errmsg')}"
+                        await record_dingtalk_api_call(
+                            path="/topapi/message/corpconversation/asyncsend_v2",
+                            category=notification_category,
+                            priority=notification_priority,
+                            status="failed",
+                            used_after=used,
+                            error_message=last_error,
+                        )
                         # errcode=88 是token过期，重置token后重试
                         if resp_data.get("errcode") in (88, 40001):
                             self._access_token = None
@@ -166,8 +298,49 @@ class DingtalkService:
                             logger.warning(f"钉钉推送失败(第{attempt+1}次)，{delay}s后重试: {last_error}")
                             await asyncio.sleep(delay)
 
+            except DingtalkApiBudgetExceeded as e:
+                last_error = str(e)
+                await record_dingtalk_api_call(
+                    path="/topapi/message/corpconversation/asyncsend_v2",
+                    category=notification_category,
+                    priority=notification_priority,
+                    status="denied",
+                    error_message=last_error,
+                )
+                if notification_priority == "task":
+                    log.status = "deferred"
+                    log.error_message = last_error
+                    self.db.add(log)
+                    return {
+                        "success": False,
+                        "user_id": user_id,
+                        "deferred": True,
+                        "reason": "budget_exhausted",
+                        "error": last_error,
+                    }
+                break
             except Exception as e:
                 last_error = str(e)
+                await record_dingtalk_api_call(
+                    path="/topapi/message/corpconversation/asyncsend_v2",
+                    category=notification_category,
+                    priority=notification_priority,
+                    status="failed",
+                    used_after=locals().get("used"),
+                    error_message=last_error,
+                )
+                if notification_priority == "task":
+                    log.status = "uncertain"
+                    log.error_message = last_error
+                    log.retry_count = attempt
+                    self.db.add(log)
+                    return {
+                        "success": False,
+                        "user_id": user_id,
+                        "uncertain": True,
+                        "reason": "transport_result_unknown",
+                        "error": last_error,
+                    }
                 if attempt < MAX_RETRY - 1:
                     delay = RETRY_DELAYS[attempt]
                     logger.warning(f"钉钉推送异常(第{attempt+1}次)，{delay}s后重试: {e}")

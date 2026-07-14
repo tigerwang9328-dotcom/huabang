@@ -115,6 +115,7 @@ const routePermissionRules: Array<[string, string]> = [
   ["/app/inventory/balance", "inventory:balance:view"],
   ["/app/inventory", "inventory:overview:view"],
   ["/app/finance", "finance:profit:view"],
+  ["/app/task", "task:view"],
   ["/app/fin/overview", "finance:overview:view"],
   ["/app/fin/reimbursements", "finance:reimbursement:view"],
   ["/app/fin/payments", "finance:payment:view"],

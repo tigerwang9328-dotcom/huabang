@@ -81,6 +81,14 @@ MODULES = {
         ("knowledge:qa:view", "AI问答记录"),
         ("knowledge:edit", "知识编辑"),
     ]),
+    "task": ("任务闭环", [
+        ("task:view", "任务查看"),
+        ("task:create", "任务创建"),
+        ("task:approve", "任务确认派发"),
+        ("task:feedback", "任务反馈"),
+        ("task:review", "任务复查"),
+        ("task:close", "任务关闭"),
+    ]),
     "system": ("系统设置", [
         ("system:dashboard:view", "管理后台"),
         ("system:user:view", "用户查看"),
@@ -123,57 +131,64 @@ ROLES = [
     ("cashier", "出纳", "dept", 7),
     ("warehouse_manager", "仓库主管", "company", 8),
     ("operation_manager", "运营经理", "company", 9),
-    ("store_manager", "店长", "store", 10),
-    ("guide", "导购", "self", 11),
+    ("area_supervisor", "门店督导", "dept", 10),
+    ("store_manager", "店长", "store", 11),
+    ("guide", "导购", "self", 12),
 ]
 
 ALL = [code for _, perms in MODULES.values() for code, _ in perms]
 VIEW_ALL = [c for c in ALL if c.endswith(':view')]
+TASK_MANAGER = ["task:view", "task:create", "task:approve", "task:feedback", "task:review", "task:close"]
 M = {
     "super_admin": ALL,
-    "boss": [c for c in VIEW_ALL if not c.startswith('system:')] + ["member:segment:rebuild", "member:sensitive:export", "system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
-    "ceo": [c for c in VIEW_ALL if not c.startswith('system:')] + ["member:segment:rebuild", "member:sensitive:export", "system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
+    "boss": [c for c in VIEW_ALL if not c.startswith('system:')] + TASK_MANAGER + ["member:segment:rebuild", "member:sensitive:export", "system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
+    "ceo": [c for c in VIEW_ALL if not c.startswith('system:')] + TASK_MANAGER + ["member:segment:rebuild", "member:sensitive:export", "system:dashboard:view", "system:log:view", "system:operation-log:view", "system:permission:view", "system:user:view", "system:role:view"],
     "product_manager": [
         "dashboard:overview:view", "diagnosis:product:view", "diagnosis:inventory:view",
         "sales:overview:view", "sales:store:view", "product:overview:view", "product:master:view", "product:sku:view",
         "product:turnover:view", "product:replenishment:view", "product:clearance:view", "product:edit",
         "purchase:overview:view", "purchase:order:view", "purchase:arrival:view",
-        "inventory:overview:view", "inventory:balance:view", "inventory:warning:view", "knowledge:ai:view", "knowledge:doc:view",
+        "inventory:overview:view", "inventory:balance:view", "inventory:warning:view", "knowledge:ai:view", "knowledge:doc:view", "task:view", "task:feedback",
     ],
     "product_specialist": [
         "diagnosis:product:view", "product:overview:view", "product:master:view", "product:sku:view",
-        "product:turnover:view", "inventory:overview:view", "inventory:balance:view", "purchase:arrival:view", "knowledge:doc:view",
+        "product:turnover:view", "inventory:overview:view", "inventory:balance:view", "purchase:arrival:view", "knowledge:doc:view", "task:view", "task:feedback",
     ],
     "finance_manager": [
         "dashboard:overview:view", "dashboard:profit:view", "dashboard:cost:view", "diagnosis:finance:view",
         "sales:overview:view", "sales:offline:view", "sales:store:view", "product:sku:view", "purchase:order:view",
         "inventory:overview:view", "inventory:balance:view", "finance:overview:view", "finance:profit:view", "finance:expense:view",
         "finance:reimbursement:view", "finance:payment:view", "finance:cash:view", "finance:cost:view", "finance:edit",
-        "knowledge:ai:view", "system:dashboard:view",
+        "knowledge:ai:view", "system:dashboard:view", "task:view", "task:feedback",
     ],
     "accountant": [
         "diagnosis:finance:view", "finance:overview:view", "finance:profit:view", "finance:expense:view",
-        "finance:reimbursement:view", "finance:cost:view", "knowledge:doc:view",
+        "finance:reimbursement:view", "finance:cost:view", "knowledge:doc:view", "task:view", "task:feedback",
     ],
     "cashier": [
-        "finance:overview:view", "finance:payment:view", "finance:cash:view", "knowledge:doc:view",
+        "finance:overview:view", "finance:payment:view", "finance:cash:view", "knowledge:doc:view", "task:view", "task:feedback",
     ],
     "warehouse_manager": [
         "diagnosis:inventory:view", "product:master:view", "product:sku:view", "purchase:arrival:view",
         "inventory:overview:view", "inventory:balance:view", "inventory:warehouse:view", "inventory:age:view",
-        "inventory:transfer:view", "inventory:warning:view", "inventory:edit", "knowledge:doc:view",
+        "inventory:transfer:view", "inventory:warning:view", "inventory:edit", "knowledge:doc:view", "task:view", "task:feedback",
     ],
     "operation_manager": [
         "dashboard:overview:view", "diagnosis:overall:view", "diagnosis:sales:view", "diagnosis:inventory:view",
         "sales:overview:view", "sales:offline:view", "sales:online:view", "sales:store:view", "sales:guide:view", "sales:warning:view",
         "product:overview:view", "inventory:overview:view", "inventory:balance:view", "inventory:warning:view", "member:segment:view", "member:sensitive:view", "knowledge:ai:view",
-    ],
+    ] + TASK_MANAGER,
+    "area_supervisor": [
+        "dashboard:overview:view", "diagnosis:overall:view", "diagnosis:sales:view", "sales:overview:view",
+        "sales:offline:view", "sales:store:view", "sales:guide:view", "sales:warning:view", "member:segment:view",
+        "inventory:overview:view", "inventory:warning:view", "knowledge:ai:view",
+    ] + TASK_MANAGER,
     "store_manager": [
         "dashboard:overview:view", "diagnosis:sales:view", "sales:overview:view", "sales:offline:view", "sales:store:view", "sales:guide:view",
-        "product:overview:view", "inventory:overview:view", "inventory:balance:view", "member:segment:view", "member:sensitive:view", "hr:performance:view", "knowledge:ai:view", "knowledge:doc:view",
+        "product:overview:view", "inventory:overview:view", "inventory:balance:view", "member:segment:view", "member:sensitive:view", "hr:performance:view", "knowledge:ai:view", "knowledge:doc:view", "task:view", "task:feedback",
     ],
     "guide": [
-        "sales:guide:view", "knowledge:ai:view", "knowledge:doc:view",
+        "sales:guide:view", "knowledge:ai:view", "knowledge:doc:view", "task:view", "task:feedback",
     ],
 }
 
