@@ -45,6 +45,8 @@ tail -n 160 /srv/huabang-ai-center/logs/command_center_daily.log
 
 排查顺序：先查小票同步日志，再查 DWD 支付明细，再查 `dm.dm_boss_daily_report.return_amount / return_rate / source_statuses`，最后重新幂等生成该业务日快照。不要直接改日报金额。
 
+百胜 HTTP 客户端对 `RemoteProtocolError`、连接错误和超时等传输异常最多尝试 3 次，退避 1 秒、2 秒；百胜已返回的业务失败不重试。三次仍失败时同步必须保持失败状态并保留最近可信快照。
+
 ## 手工幂等重算
 
 先记录业务日期和当前行数，再使用项目已有脚本按单日重算。执行前确认没有同一 `flock` 作业运行；完成后重复执行一次，确认日报、异常和任务草稿计数不增长。
