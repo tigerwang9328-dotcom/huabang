@@ -72,7 +72,11 @@ async def main():
                            FILTER (WHERE price.standard_purchase_price IS NOT NULL), 0),
                        COUNT(*) FILTER (WHERE b.qty < 0)::int,
                        COUNT(DISTINCT COALESCE(NULLIF(b.sku_code, ''), b.product_code, b.barcode))::int,
-                       BOOL_AND(price.standard_purchase_price IS NOT NULL),
+                       COALESCE(
+                           BOOL_AND(price.standard_purchase_price IS NOT NULL)
+                               FILTER (WHERE b.qty > 0),
+                           true
+                       ),
                        now(), now()
                 FROM dwd.v_apparel_inventory_balance b
                 LEFT JOIN dim.v_baison_sku_standard_purchase_price price

@@ -164,9 +164,17 @@ async def mobile_inventory_styles(
             WHERE store_code = ANY(:store_codes)
         ), inv AS (
             SELECT b.product_code,
-                   COALESCE(SUM(b.qty), 0) AS inventory_qty,
-                   COALESCE(SUM(b.qty * price.standard_purchase_price)
+                   COALESCE(SUM(GREATEST(b.qty, 0)), 0) AS inventory_qty,
+                   COALESCE(SUM(GREATEST(b.qty, 0) * price.standard_purchase_price)
                        FILTER (WHERE price.standard_purchase_price IS NOT NULL), 0) AS inventory_amount,
+                   COALESCE(SUM(GREATEST(b.qty, 0))
+                       FILTER (WHERE price.standard_purchase_price IS NULL), 0)
+                       AS missing_standard_purchase_price_qty,
+                   CASE WHEN SUM(GREATEST(b.qty, 0)) > 0
+                        THEN COALESCE(SUM(GREATEST(b.qty, 0))
+                            FILTER (WHERE price.standard_purchase_price IS NOT NULL), 0)::numeric
+                             / SUM(GREATEST(b.qty, 0))
+                        ELSE 0 END AS standard_purchase_price_coverage_rate,
                    COALESCE(SUM(b.available_qty), 0) AS available_qty,
                    COUNT(DISTINCT b.sku_code) FILTER (
                        WHERE b.sku_code IS NOT NULL AND BTRIM(b.sku_code::text) <> ''
@@ -204,6 +212,10 @@ async def mobile_inventory_styles(
                    p.status,
                    COALESCE(inv.inventory_qty, 0) AS inventory_qty,
                    COALESCE(inv.inventory_amount, 0) AS inventory_amount,
+                   COALESCE(inv.missing_standard_purchase_price_qty, 0)
+                       AS missing_standard_purchase_price_qty,
+                   COALESCE(inv.standard_purchase_price_coverage_rate, 0)
+                       AS standard_purchase_price_coverage_rate,
                    COALESCE(inv.available_qty, 0) AS available_qty,
                    COALESCE(inv.sku_count, 0) AS sku_count,
                    COALESCE(sales.sales_qty, 0) AS sales_qty,
@@ -232,8 +244,18 @@ async def mobile_inventory_styles(
     items = []
     for row in rows:
         item = dict(row)
-        for key in ("inventory_qty", "inventory_amount", "available_qty", "sku_count", "sales_qty", "sales_amount", "turn_rate"):
+        for key in (
+            "inventory_qty", "inventory_amount",
+            "missing_standard_purchase_price_qty",
+            "standard_purchase_price_coverage_rate",
+            "available_qty", "sku_count", "sales_qty", "sales_amount", "turn_rate",
+        ):
             item[key] = float(item[key] or 0)
+        item["inventory_amount_status"] = (
+            "estimated"
+            if item["missing_standard_purchase_price_qty"] > 0
+            else "ready"
+        )
         if item["inventory_qty"].is_integer():
             item["inventory_qty"] = int(item["inventory_qty"])
         if item["available_qty"].is_integer():

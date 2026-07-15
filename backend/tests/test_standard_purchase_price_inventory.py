@@ -93,6 +93,8 @@ def test_user_facing_inventory_functions_use_canonical_view():
     assert "NULLIF(p.cost_price" not in sources["inventory_sync"]
     assert "GREATEST(b.qty, 0)" in sources["inventory_sync"]
     assert "COALESCE(p.tag_price, p.market_price, 0)" not in sources["mobile_inventory"]
+    assert "missing_standard_purchase_price_qty" in sources["mobile_inventory"]
+    assert "standard_purchase_price_coverage_rate" in sources["mobile_inventory"]
 
 
 def test_legacy_ods_sales_and_returns_do_not_reintroduce_old_cost_fields():
