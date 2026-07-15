@@ -28,13 +28,28 @@ BUSINESS_ADVICE_SCOPES = (
     ("company", "company"),
     *(("store", code) for code in sorted(ALLOWED_STORE_CODES)),
 )
-PROMPT_VERSION = "business-advice-v2"
+PROMPT_VERSION = "business-advice-v3"
 SCHEMA_VERSION = "business-advice-json-v1"
 
 
+def normalize_business_advice_context(context: dict[str, Any]) -> dict[str, Any]:
+    normalized_context = dict(context)
+    for key in ("rules", "tasks"):
+        items = normalized_context.get(key)
+        if isinstance(items, list):
+            normalized_context[key] = sorted(
+                items,
+                key=lambda item: json.dumps(
+                    item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+                ),
+            )
+    return normalized_context
+
+
 def business_advice_input_hash(context: dict[str, Any]) -> str:
+    normalized_context = normalize_business_advice_context(context)
     contract = {
-        "context": context,
+        "context": normalized_context,
         "provider": "deepseek",
         "model": settings.AI_BUSINESS_ADVICE_MODEL,
         "enabled": settings.AI_BUSINESS_ADVICE_ENABLED,
@@ -115,7 +130,7 @@ class BusinessAdviceService:
         store_code = None if scope_type == "company" else target_code
         diagnosis = AIDiagnosisService(self.db)
         payload = await diagnosis.module(module, stat_date.isoformat(), store_code)
-        safe_context = diagnosis.command_context(payload)
+        safe_context = normalize_business_advice_context(diagnosis.command_context(payload))
         input_hash = business_advice_input_hash(safe_context)
         lock_source = f"{stat_date}|{module}|{scope_type}|{target_code}"
         lock_key = int(hashlib.sha256(lock_source.encode("utf-8")).hexdigest()[:15], 16)

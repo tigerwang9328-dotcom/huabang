@@ -18,14 +18,15 @@ from app.services.ai_business_advice_service import (
     BUSINESS_ADVICE_SCOPES,
     PROMPT_VERSION as SERVICE_PROMPT_VERSION,
     business_advice_input_hash,
+    normalize_business_advice_context,
 )
 from app.services.ai_engine import AIEngine, PROMPT_VERSION as ENGINE_PROMPT_VERSION
 from app.services.report_service import ReportService
 
 
-def test_business_advice_prompt_contract_uses_v2_everywhere():
-    assert SERVICE_PROMPT_VERSION == ENGINE_PROMPT_VERSION == "business-advice-v2"
-    assert AiBusinessAdviceSnapshot.__table__.c.prompt_version.default.arg == "business-advice-v2"
+def test_business_advice_prompt_contract_uses_v3_everywhere():
+    assert SERVICE_PROMPT_VERSION == ENGINE_PROMPT_VERSION == "business-advice-v3"
+    assert AiBusinessAdviceSnapshot.__table__.c.prompt_version.default.arg == "business-advice-v3"
 
 
 def test_business_advice_matrix_has_company_plus_seven_stores_and_nine_modules():
@@ -47,8 +48,25 @@ def test_business_advice_input_hash_is_order_stable_and_changes_with_facts(monke
 
     assert business_advice_input_hash(left) == business_advice_input_hash(reordered)
     assert business_advice_input_hash(left) != business_advice_input_hash(changed)
+    unordered_lists = {
+        "metrics": {},
+        "rules": [{"rule_id": "rule:b"}, {"rule_id": "rule:a"}],
+        "tasks": [{"task_id": "task:b"}, {"task_id": "task:a"}],
+    }
+    reordered_lists = {
+        "metrics": {},
+        "rules": list(reversed(unordered_lists["rules"])),
+        "tasks": list(reversed(unordered_lists["tasks"])),
+    }
+    assert business_advice_input_hash(unordered_lists) == business_advice_input_hash(reordered_lists)
+    assert normalize_business_advice_context(unordered_lists) == normalize_business_advice_context(reordered_lists)
+    assert [item["rule_id"] for item in normalize_business_advice_context(unordered_lists)["rules"]] == [
+        "rule:a", "rule:b",
+    ]
+    changed_rule = {**reordered_lists, "rules": [{"rule_id": "rule:c"}, {"rule_id": "rule:a"}]}
+    assert business_advice_input_hash(unordered_lists) != business_advice_input_hash(changed_rule)
     original_hash = business_advice_input_hash(left)
-    monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", "business-advice-v3")
+    monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", "business-advice-v4")
     assert business_advice_input_hash(left) != original_hash
 
     monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", SERVICE_PROMPT_VERSION)
@@ -72,6 +90,7 @@ def test_business_advice_generation_uses_database_unit_lock():
     source = inspect.getsource(BusinessAdviceService.generate_unit)
     assert "pg_advisory_xact_lock" in source
     assert "existing.input_hash == input_hash" in source
+    assert "normalize_business_advice_context" in source
     assert "and not force" in source
     assert 'existing.mode == "model"' not in source
     assert "template_cache_fresh" not in source
