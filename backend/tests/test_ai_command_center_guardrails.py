@@ -513,7 +513,7 @@ async def test_report_zero_sales_keeps_gross_profit_but_not_undefined_margin():
 
 @pytest.mark.asyncio
 async def test_existing_report_rebuilds_and_returns_structured_conclusion():
-    row = [None] * 45
+    row = [None] * 46
     row[0] = date(2026, 7, 12)
     row[1:13] = [18560, 18551, 9, 9 / 18560, 18560, 34, 66, 545.88, 1.94, 0.8, 9120, 0.4914]
     row[13:23] = [800, 500, 0, 0, 2400000, 100000, 50000, 3, 1, 4]
