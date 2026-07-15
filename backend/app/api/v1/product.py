@@ -142,10 +142,13 @@ async def _product_metrics(db: AsyncSession, product_codes: list[str]) -> dict[s
                       "is_cost_complete": False} for code in product_codes}
     inv_rows = (await db.execute(text("""
         SELECT i.product_code, COALESCE(SUM(i.qty), 0) AS inventory_qty,
-               COALESCE(SUM(GREATEST(i.qty,0) * COALESCE(NULLIF(s.cost_price,0), NULLIF(p.cost_price,0), 0)),0) inventory_amount
+               COALESCE(SUM(GREATEST(i.qty,0) * sp.standard_purchase_price)
+                   FILTER (WHERE sp.standard_purchase_price IS NOT NULL), 0) inventory_amount
         FROM dwd.v_apparel_inventory_balance i
-        LEFT JOIN dim.dim_sku s ON s.sku_code=i.sku_code
-        LEFT JOIN dim.dim_product p ON p.product_code=i.product_code
+        LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+          ON sp.product_code=i.product_code
+         AND sp.color_code=COALESCE(BTRIM(i.color_code::text), '')
+         AND sp.size_code=COALESCE(BTRIM(i.size_code::text), '')
         WHERE i.product_code = ANY(:codes)
           AND UPPER(i.warehouse_code::text) = ANY(:inventory_codes)
         GROUP BY i.product_code

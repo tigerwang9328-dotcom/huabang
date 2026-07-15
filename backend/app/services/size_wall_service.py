@@ -218,11 +218,12 @@ class SizeWallService:
                      max(i.color_name) color_name,i.size_code,max(i.size_name) size_name,
                      greatest(sum(coalesce(i.qty,0)),0) inventory_qty,
                      greatest(sum(coalesce(i.qty,0)),0)
-                       * max(coalesce(nullif(s.cost_price,0),nullif(p.cost_price,0),0)) inventory_amount
+                       * max(coalesce(sp.standard_purchase_price,0)) inventory_amount
               from dwd.v_apparel_inventory_balance i
-              left join dim.dim_sku s on s.product_code=i.product_code
-               and trim(leading '-' from coalesce(s.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
-               and coalesce(s.size_code,'')=coalesce(i.size_code,'')
+              left join dim.v_baison_sku_standard_purchase_price sp
+                on sp.product_code=i.product_code
+               and trim(leading '-' from coalesce(sp.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
+               and coalesce(sp.size_code,'')=coalesce(i.size_code,'')
               join dim.dim_product p on p.product_code=i.product_code
               where upper(i.warehouse_code)=any(:inventory_codes)
                 and not (upper(trim(coalesce(i.size_code,'')))=any(:excluded_sizes))

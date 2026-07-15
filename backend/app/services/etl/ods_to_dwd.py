@@ -146,13 +146,18 @@ class OdsToDwd:
                     i.color,
                     i.size,
                     i.quantity,
-                    i.cost_price,
-                    i.cost_amount,
+                    sp.standard_purchase_price AS cost_price,
+                    CASE WHEN sp.standard_purchase_price IS NOT NULL
+                         THEN i.quantity * sp.standard_purchase_price
+                         ELSE NULL
+                    END AS cost_amount,
                     COALESCE(i.age_days, 0) AS age_days,
                     {_age_bucket('COALESCE(i.age_days,0)')} AS age_bucket,
                     CASE WHEN COALESCE(i.quantity, 0) < 0 THEN TRUE ELSE FALSE END AS is_negative,
-                    CASE WHEN COALESCE(i.cost_price, 0) = 0 THEN TRUE ELSE FALSE END AS is_cost_missing
+                    CASE WHEN sp.standard_purchase_price IS NULL THEN TRUE ELSE FALSE END AS is_cost_missing
                 FROM ods.ods_baison_inventory i
+                LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                  ON sp.sku_code = i.sku_code
                 WHERE i.snapshot_date = :stat_date
                 ON CONFLICT (snapshot_date, store_code, sku_code) DO UPDATE SET
                     quantity       = EXCLUDED.quantity,

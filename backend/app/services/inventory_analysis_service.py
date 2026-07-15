@@ -69,16 +69,12 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
                    i.color_code,
                    i.size_code,
                    i.qty,
-                   MAX(s.cost_price) AS unit_price
+                   sp.standard_purchase_price AS unit_price
             FROM inv_spec i
-            JOIN dim.dim_sku s
-              ON s.source_system = 'baison'
-             AND s.product_code = i.product_code
-             AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
-             AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
-            WHERE s.cost_price IS NOT NULL
-              AND s.cost_price > 0
-            GROUP BY i.product_code, i.color_code, i.size_code, i.qty
+            LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+              ON sp.product_code = i.product_code
+             AND sp.color_code = i.color_code
+             AND sp.size_code = i.size_code
         ), sales_window AS (
             SELECT MAX(biz_date) AS end_date, MAX(biz_date) - INTERVAL '6 days' AS start_date
             FROM dwd.dwd_pos_sale_goods
@@ -94,22 +90,32 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
             GROUP BY g.product_code
         ), age_snapshot AS (
             SELECT COUNT(*) AS snapshot_rows,
-                   COALESCE(SUM(CASE WHEN age_days > 15 THEN cost_amount ELSE 0 END), 0) AS age_90_plus_amount
-            FROM dwd.v_apparel_inventory_snapshot
-            WHERE UPPER(COALESCE(store_code, '')::text) IN {inventory_in}
+                   COALESCE(SUM(
+                       GREATEST(a.quantity, 0) * sp.standard_purchase_price
+                   ) FILTER (
+                       WHERE a.age_days > 90
+                         AND sp.standard_purchase_price IS NOT NULL
+                   ), 0) AS age_90_plus_amount
+            FROM dwd.v_apparel_inventory_snapshot a
+            LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+              ON sp.sku_code = a.sku_code
+            WHERE UPPER(COALESCE(a.store_code, '')::text) IN {inventory_in}
         )
-        SELECT COALESCE(SUM(priced.qty * priced.unit_price), 0) AS inventory_amount,
+        SELECT COALESCE(SUM(GREATEST(priced.qty, 0) * priced.unit_price)
+                   FILTER (WHERE priced.unit_price IS NOT NULL), 0) AS inventory_amount,
                CASE WHEN MAX(age_snapshot.snapshot_rows) > 0
                     THEN MAX(age_snapshot.age_90_plus_amount)
                     ELSE COALESCE(SUM(CASE WHEN priced.qty > 0 AND COALESCE(recent_sales.sales_qty, 0) <= 0
                                            THEN priced.qty * priced.unit_price ELSE 0 END), 0)
                 END AS age_90_plus_amount,
                (SELECT COUNT(*) FROM inv_spec WHERE qty<>0) AS inventory_sku_count,
-               COUNT(*) FILTER (WHERE priced.qty<>0) AS costed_sku_count,
-               CASE WHEN (SELECT COUNT(*) FROM inv_spec WHERE qty<>0) > 0
-                    THEN COUNT(*) FILTER (WHERE priced.qty<>0)::numeric
-                         / (SELECT COUNT(*) FROM inv_spec WHERE qty<>0)
-                    ELSE 0 END AS cost_coverage_rate
+               COUNT(*) FILTER (WHERE priced.qty>0 AND priced.unit_price IS NOT NULL) AS standard_purchase_price_ready_sku_count,
+               COUNT(*) FILTER (WHERE priced.qty>0 AND priced.unit_price IS NULL) AS missing_standard_purchase_price_sku_count,
+               COALESCE(SUM(GREATEST(priced.qty, 0)) FILTER (WHERE priced.unit_price IS NULL), 0) AS missing_standard_purchase_price_qty,
+               CASE WHEN COALESCE(SUM(GREATEST(priced.qty, 0)), 0) > 0
+                    THEN COALESCE(SUM(GREATEST(priced.qty, 0)) FILTER (WHERE priced.unit_price IS NOT NULL), 0)::numeric
+                         / SUM(GREATEST(priced.qty, 0))
+                    ELSE 0 END AS standard_purchase_price_coverage_rate
         FROM priced
         LEFT JOIN recent_sales ON recent_sales.product_code = priced.product_code
         CROSS JOIN age_snapshot
@@ -118,8 +124,18 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
     inventory_amount = float(amount_row["inventory_amount"] or 0) if amount_row else 0
     age_90_plus_amount = float(amount_row["age_90_plus_amount"] or 0) if amount_row else 0
     inventory_sku_count = int(amount_row["inventory_sku_count"] or 0) if amount_row else 0
-    costed_sku_count = int(amount_row["costed_sku_count"] or 0) if amount_row else 0
-    cost_coverage_rate = float(amount_row["cost_coverage_rate"] or 0) if amount_row else 0
+    standard_purchase_price_ready_sku_count = int(
+        amount_row["standard_purchase_price_ready_sku_count"] or 0
+    ) if amount_row else 0
+    missing_standard_purchase_price_sku_count = int(
+        amount_row["missing_standard_purchase_price_sku_count"] or 0
+    ) if amount_row else 0
+    missing_standard_purchase_price_qty = float(
+        amount_row["missing_standard_purchase_price_qty"] or 0
+    ) if amount_row else 0
+    standard_purchase_price_coverage_rate = float(
+        amount_row["standard_purchase_price_coverage_rate"] or 0
+    ) if amount_row else 0
 
     warning_counts_r = await db.execute(text("""
         SELECT COUNT(DISTINCT (store_code, COALESCE(sku_code, product_code)))
@@ -150,8 +166,12 @@ async def get_inventory_analysis_summary(db: AsyncSession) -> dict:
             "inventory_records": _value(inv_records),
             "total_inventory_qty": _value(total_inv_qty),
             "inventory_amount": _value(round(inventory_amount, 2), 2),
-            "cost_coverage_rate": _value(round(cost_coverage_rate * 100, 1), 1),
-            "costed_sku_count": _value(costed_sku_count),
+            "standard_purchase_price_coverage_rate": _value(
+                round(standard_purchase_price_coverage_rate * 100, 1), 1
+            ),
+            "standard_purchase_price_ready_sku_count": _value(standard_purchase_price_ready_sku_count),
+            "missing_standard_purchase_price_sku_count": _value(missing_standard_purchase_price_sku_count),
+            "missing_standard_purchase_price_qty": _value(missing_standard_purchase_price_qty),
             "inventory_sku_count": _value(inventory_sku_count),
             "age_90_plus_amount": _value(round(age_90_plus_amount, 2), 2),
             "out_of_stock_sku_count": _value(out_of_stock),
@@ -179,16 +199,14 @@ async def get_inventory_overview(db: AsyncSession) -> dict:
                      COALESCE(BTRIM(i.color_code::text), ''), COALESCE(BTRIM(i.size_code::text), '')
         ), amount_by_wh AS (
             SELECT i.warehouse_code,
-                   COALESCE(SUM(i.qty * s.cost_price), 0) AS inventory_amount
+                   COALESCE(SUM(i.qty * sp.standard_purchase_price)
+                       FILTER (WHERE sp.standard_purchase_price IS NOT NULL), 0) AS inventory_amount
             FROM inv_spec i
-            JOIN dim.dim_sku s
-              ON s.source_system = 'baison'
-             AND s.product_code = i.product_code
-             AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
-             AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+            LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+              ON sp.product_code = i.product_code
+             AND sp.color_code = i.color_code
+             AND sp.size_code = i.size_code
             WHERE i.qty <> 0
-              AND s.cost_price IS NOT NULL
-              AND s.cost_price > 0
             GROUP BY i.warehouse_code
         )
         SELECT UPPER(COALESCE(w.warehouse_code, '')::text) AS warehouse_code,
@@ -264,16 +282,14 @@ async def get_warehouse_list(
                 GROUP BY warehouse_code
             ), amount_wh AS (
                 SELECT i.warehouse_code,
-                       COALESCE(SUM(i.qty * s.cost_price), 0) AS inventory_amount
+                       COALESCE(SUM(i.qty * sp.standard_purchase_price)
+                           FILTER (WHERE sp.standard_purchase_price IS NOT NULL), 0) AS inventory_amount
                 FROM inv_spec i
-                JOIN dim.dim_sku s
-                  ON s.source_system = 'baison'
-                 AND s.product_code = i.product_code
-                 AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
-                 AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+                LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                  ON sp.product_code = i.product_code
+                 AND sp.color_code = i.color_code
+                 AND sp.size_code = i.size_code
                 WHERE i.qty <> 0
-                  AND s.cost_price IS NOT NULL
-                  AND s.cost_price > 0
                 GROUP BY i.warehouse_code
             )
             SELECT w.id, w.warehouse_code, w.warehouse_name, w.warehouse_nature,
@@ -343,18 +359,17 @@ async def get_inventory_balance_list(
         text(f"""SELECT i.id, i.warehouse_code, i.warehouse_name, i.product_code, i.sku_code,
                         i.barcode, i.goods_name, i.color_name, i.size_name,
                         i.location_name, i.qty, i.lock_qty, i.road_qty, i.available_qty,
-                        s.cost_price AS sku_cost_price,
-                        CASE WHEN s.cost_price IS NOT NULL AND s.cost_price > 0
-                             THEN i.qty * s.cost_price
+                        sp.standard_purchase_price,
+                        CASE WHEN sp.standard_purchase_price IS NOT NULL
+                             THEN i.qty * sp.standard_purchase_price
                              ELSE NULL
                         END AS inventory_amount,
                         i.source_system, i.synced_at
                  FROM dwd.v_apparel_inventory_balance i
-                 LEFT JOIN dim.dim_sku s
-                   ON s.source_system = 'baison'
-                  AND s.product_code = i.product_code
-                  AND COALESCE(BTRIM(s.color_code::text), '') = COALESCE(BTRIM(i.color_code::text), '')
-                  AND COALESCE(BTRIM(s.size_code::text), '') = COALESCE(BTRIM(i.size_code::text), '')
+                 LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                   ON sp.product_code = i.product_code
+                  AND sp.color_code = COALESCE(BTRIM(i.color_code::text), '')
+                  AND sp.size_code = COALESCE(BTRIM(i.size_code::text), '')
                  WHERE {where}
                  ORDER BY i.warehouse_code, i.product_code
                  LIMIT :lim OFFSET :off""")
@@ -363,7 +378,7 @@ async def get_inventory_balance_list(
     items = []
     for r in rows_r:
         d = dict(r._mapping)
-        for k in ("qty", "lock_qty", "road_qty", "available_qty", "sku_cost_price", "inventory_amount"):
+        for k in ("qty", "lock_qty", "road_qty", "available_qty", "standard_purchase_price", "inventory_amount"):
             if d.get(k) is not None:
                 d[k] = float(d[k])
         for dt_col in ("synced_at",):

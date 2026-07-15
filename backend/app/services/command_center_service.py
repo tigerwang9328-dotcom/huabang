@@ -186,13 +186,15 @@ async def rebuild_inventory_age(db: AsyncSession, snapshot_date: date) -> dict[s
                SUM(GREATEST(COALESCE(b.qty, 0), 0)) AS current_qty,
                MAX(b.synced_at) AS as_of_at,
                COALESCE(SUM(
-                   GREATEST(COALESCE(b.qty, 0), 0) * COALESCE(
-                       NULLIF(sk.cost_price, 0), NULLIF(p.cost_price, 0), 0
-                   )
+                   GREATEST(COALESCE(b.qty, 0), 0) * sp.standard_purchase_price
+               ) FILTER (
+                   WHERE sp.standard_purchase_price IS NOT NULL
                ), 0) AS known_cost_amount
         FROM dwd.v_apparel_inventory_balance b
-        LEFT JOIN dim.dim_sku sk ON sk.sku_code = b.sku_code
-        LEFT JOIN dim.dim_product p ON p.product_code = b.product_code
+        LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+          ON sp.product_code = b.product_code
+         AND sp.color_code = COALESCE(BTRIM(b.color_code::text), '')
+         AND sp.size_code = COALESCE(BTRIM(b.size_code::text), '')
         WHERE UPPER(b.warehouse_code) = ANY(:codes)
           AND b.product_code IS NOT NULL
         GROUP BY b.warehouse_code, b.product_code
