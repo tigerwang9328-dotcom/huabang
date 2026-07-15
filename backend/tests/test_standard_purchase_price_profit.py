@@ -1,6 +1,7 @@
 import inspect
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from app.api.v1 import finance as finance_api
 from app.services.ai_diagnosis_service import _can_assert_operating_profit
@@ -32,6 +33,18 @@ def test_missing_expenses_return_estimated_operating_profit():
     assert result.operating_margin == Decimal("0.6")
     assert result.operating_profit_status == "estimated"
     assert result.missing_expense_types == REQUIRED_EXPENSE_TYPES
+
+
+def test_finance_daily_preserves_completed_dingtalk_expenses_when_dwd_is_empty():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app/services/etl/dwd_to_dws.py"
+    ).read_text(encoding="utf-8")
+
+    assert "if not expenses:" in source
+    assert "FROM finance_expense_records" in source
+    assert "'other' AS expense_type" in source
+    assert "('COMPLETED','APPROVED','FINISHED')" in source
 
 
 def test_missing_standard_price_coverage_keeps_profit_estimated():

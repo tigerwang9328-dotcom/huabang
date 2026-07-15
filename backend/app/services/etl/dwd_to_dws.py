@@ -306,6 +306,16 @@ class DwdToDws:
                   AND COALESCE(allocation_end,expense_date)>=:stat_date
                   AND (store_code IS NULL OR UPPER(store_code)='ALL' OR UPPER(store_code)=ANY(:store_codes))
             """), {"stat_date": target_date, "store_codes": sorted(ALLOWED_STORE_CODES)})).mappings().all()
+            if not expenses:
+                expenses = (await db.execute(text("""
+                    SELECT 'ALL' AS store_code, 'other' AS expense_type,
+                           amount AS expense_amount, 'actual' AS data_type,
+                           expense_date AS allocation_start, expense_date AS allocation_end
+                    FROM finance_expense_records
+                    WHERE expense_date=:stat_date
+                      AND UPPER(COALESCE(approval_status,'')) IN ('COMPLETED','APPROVED','FINISHED')
+                      AND COALESCE(amount,0) <> 0
+                """), {"stat_date": target_date})).mappings().all()
             sales_by_store = {row["store_code"].upper(): row for row in sales}
             target_store_codes = sorted(set(sales_by_store) | {
                 str(e["store_code"]).upper() for e in expenses if e["store_code"]
