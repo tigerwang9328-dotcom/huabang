@@ -16,7 +16,7 @@ test("finance api exposes the profit analysis contract", () => {
   assert.match(api, /getProfitAnalysis/);
   assert.match(api, /\/finance\/profit-analysis/);
   for (const field of [
-    "cost_coverage_rate",
+    "standard_purchase_price_coverage_rate",
     "expense_coverage_rate",
     "operating_profit",
     "inventory_amount",
@@ -36,14 +36,14 @@ test("profit analysis page presents the complete operating console", () => {
     assert.match(index, new RegExp(label));
   }
   assert.match(index, /费用覆盖/);
-  assert.match(index, /成本覆盖/);
+  assert.match(index, /标准进价覆盖/);
   assert.match(index, /class="profit-analysis-page/);
   assert.match(index, /border-radius:\s*8px/);
 });
 
-test("incomplete expenses stay pending instead of becoming zero profit", () => {
-  assert.match(index, /operating_profit\s*==\s*null/);
-  assert.match(index, /待接入/);
+test("incomplete expenses expose estimated operating profit with missing expense types", () => {
+  assert.match(index, /经营利润（估算）/);
+  assert.match(index, /费用缺失/);
   assert.match(index, /missing_expense_types/);
   assert.doesNotMatch(index, /operating_profit\s*\|\|\s*0/);
 });

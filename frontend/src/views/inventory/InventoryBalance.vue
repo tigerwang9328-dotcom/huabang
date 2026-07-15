@@ -2,7 +2,7 @@
   <div class="inv-balance">
     <div class="page-header">
       <h2>库存余额</h2>
-      <p class="page-desc">华邦标准库存余额，来源：百胜 E3ERP 实物库存。可用=库存−占用；库存金额按 SKU 成本计算，无成本不计。</p>
+      <p class="page-desc">华邦标准库存余额，来源：百胜 E3ERP 实物库存。可用=库存−占用；库存金额按标准进价计算，缺标准进价不计金额。</p>
     </div>
     <div class="toolbar">
       <div class="filters">
@@ -35,8 +35,8 @@
       <el-table-column prop="available_qty" label="可用" width="90" align="right">
         <template #default="{ row }"><span :class="{ neg: row.available_qty < 0 }">{{ row.available_qty }}</span></template>
       </el-table-column>
-      <el-table-column label="SKU成本" width="90" align="right">
-        <template #default="{ row }">{{ row.sku_cost_price == null ? "-" : formatMoney(row.sku_cost_price) }}</template>
+      <el-table-column label="标准进价" width="100" align="right">
+        <template #default="{ row }">{{ row.standard_purchase_price == null ? "-" : formatMoney(row.standard_purchase_price) }}</template>
       </el-table-column>
       <el-table-column label="库存金额" width="110" align="right">
         <template #default="{ row }">{{ row.inventory_amount == null ? "-" : formatMoney(row.inventory_amount) }}</template>

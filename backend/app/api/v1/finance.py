@@ -340,6 +340,8 @@ async def get_profit_analysis(
         ),
         "summary": {
             **summary_payload,
+            "standard_purchase_price_coverage_rate": 1.0 if cost_complete else 0.0,
+            # Deprecated compatibility alias; new clients use standard_purchase_price_coverage_rate.
             "cost_coverage_rate": 1.0 if cost_complete else 0.0,
             "inventory_amount": _money(inventory_amount),
             "discount_loss": _money(max(tag_amount - sales_amount, 0)),

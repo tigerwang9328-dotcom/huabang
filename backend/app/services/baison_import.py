@@ -49,6 +49,7 @@ FIELD_MAPPING = {
         "实收单价": "actual_price",
         "吊牌金额": "tag_amount",
         "实收金额": "actual_amount",
+        "标准进价": "cost_price",
         "成本价": "cost_price",
         "折扣率": "discount_rate",
         "导购编号": "guide_id",
@@ -61,6 +62,7 @@ FIELD_MAPPING = {
         "颜色": "color",
         "尺码": "size",
         "库存数量": "quantity",
+        "标准进价": "cost_price",
         "成本价": "cost_price",
         "成本金额": "cost_amount",
         "库龄天数": "age_days",
@@ -262,7 +264,7 @@ class BaisonImportService:
             if "cost_price" in df.columns:
                 missing = pd.to_numeric(df["cost_price"], errors="coerce").isna().sum()
                 if missing > 0:
-                    issues.append(f"成本价缺失{missing}行，毛利计算将不完整")
+                    issues.append(f"标准进价缺失{missing}行，毛利计算将不完整")
         if data_type == "inventory":
             if "quantity" in df.columns:
                 neg = (pd.to_numeric(df["quantity"], errors="coerce") < 0).sum()

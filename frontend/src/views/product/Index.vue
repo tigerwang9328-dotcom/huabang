@@ -54,9 +54,9 @@
               <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="成本" width="76">
+          <el-table-column label="标准进价状态" width="112">
             <template #default="{ row }">
-              <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+              <el-tag :type="row.has_standard_purchase_price ? 'success' : 'warning'" size="small">{{ row.has_standard_purchase_price ? "已维护" : "缺标准进价" }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="inventory_qty" label="库存" width="76" align="right" sortable="custom" />
@@ -106,6 +106,10 @@
             <el-select v-model="sf.status" placeholder="状态" clearable style="width:90px">
               <el-option label="启用" value="active" /><el-option label="停用" value="disabled" />
             </el-select>
+            <el-select v-model="sf.standard_purchase_price_status" placeholder="标准进价" clearable style="width:130px" @change="handleSkuFilterChange">
+              <el-option label="缺标准进价" value="missing" />
+              <el-option label="已有标准进价" value="ready" />
+            </el-select>
             <el-checkbox v-model="sf.onlyPositive" @change="handleSkuFilterChange">隐藏0库存</el-checkbox>
             <el-button type="primary" @click="fetchSkus">搜索</el-button>
             <el-button @click="resetSkus">重置</el-button>
@@ -121,14 +125,17 @@
           <el-table-column prop="size_name" label="尺码" width="70" />
           <el-table-column prop="brand_name" label="品牌" width="70" />
           <el-table-column prop="tag_price" label="吊牌价" width="80" />
+          <el-table-column v-if="canViewStandardPurchasePrice" prop="standard_purchase_price" label="标准进价" width="100" align="right">
+            <template #default="{ row }">{{ row.standard_purchase_price == null ? "-" : formatAmount(row.standard_purchase_price) }}</template>
+          </el-table-column>
           <el-table-column label="状态" width="70">
             <template #default="{ row }">
               <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="成本" width="76">
+          <el-table-column label="标准进价状态" width="112">
             <template #default="{ row }">
-              <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+              <el-tag :type="row.has_standard_purchase_price ? 'success' : 'warning'" size="small">{{ row.has_standard_purchase_price ? "已维护" : "缺标准进价" }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="inventory_qty" label="库存" width="76" align="right" sortable="custom" />
@@ -183,8 +190,8 @@ const activeTab = ref("products");
 const summaryCards = ref([
   { label: "商品款数", value: "—", warning: false },
   { label: "SKU数", value: "—", warning: false },
-  { label: "商品缺成本", value: "—", warning: true },
-  { label: "SKU缺成本", value: "—", warning: true },
+  { label: "商品缺标准进价", value: "—", warning: true },
+  { label: "SKU缺标准进价", value: "—", warning: true },
   { label: "SKU缺条码", value: "—", warning: true },
   { label: "有库存SKU", value: "—", warning: false },
   { label: "7天动销SKU", value: "—", warning: false },
@@ -203,8 +210,9 @@ const pOpts = reactive<{ brands: string[]; categories: string[]; years: any[]; s
 const sLoading = ref(false); const skuList = ref<any[]>([]);
 const sTotal = ref(0); const sPage = ref(1); const sSize = ref(20);
 const sLastSync = ref("");
+const canViewStandardPurchasePrice = ref(false);
 const sSort = reactive({ prop: "", order: "" });
-const sf = reactive({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "", onlyPositive: true });
+const sf = reactive({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "", standard_purchase_price_status: "", onlyPositive: true });
 const sOpts = reactive<{ brands: string[]; colors: string[]; sizes: string[]; seasons: string[] }>({ brands: [], colors: [], sizes: [], seasons: [] });
 
 const barcodeStats = ref({ withBarcode: 0, noBarcode: 0, barcodeRate: 0 });
@@ -221,7 +229,7 @@ function decisionType(text: string) {
 function suggestionType(text: string) {
   if (text === "正常") return "success";
   if (text === "持续跟进") return "primary";
-  if (text === "补条码" || text === "补成本" || text === "关注补货") return "warning";
+  if (text === "补条码" || text === "补标准进价" || text === "关注补货") return "warning";
   return "info";
 }
 
@@ -233,8 +241,8 @@ async function fetchQualitySummary() {
     summaryCards.value = [
       { label: "商品款数", value: formatNum(q.product_count), warning: false },
       { label: "SKU数", value: formatNum(q.sku_count), warning: false },
-      { label: "商品缺成本", value: formatNum(q.product_missing_cost_count), warning: true },
-      { label: "SKU缺成本", value: formatNum(q.sku_missing_cost_count), warning: true },
+      { label: "商品缺标准进价", value: formatNum(q.product_missing_standard_purchase_price_count), warning: true },
+      { label: "SKU缺标准进价", value: formatNum(q.sku_missing_standard_purchase_price_count), warning: true },
       { label: "SKU缺条码", value: formatNum(q.sku_missing_barcode_count), warning: true },
       { label: "有库存SKU", value: formatNum(q.inv_sku_count), warning: false },
       { label: "7天动销SKU", value: formatNum(q.sale_sku_count), warning: false },
@@ -313,6 +321,7 @@ async function fetchSkus() {
     if (data?.success) {
       skuList.value = data.data.items || [];
       sTotal.value = data.data.total || 0;
+      canViewStandardPurchasePrice.value = Boolean(data.data.permissions?.can_view_standard_purchase_price);
       const times = skuList.value.map((x: any) => x.synced_at).filter(Boolean).sort();
       if (times.length) sLastSync.value = fmtTs(times[times.length - 1]);
     }

@@ -2,7 +2,7 @@
   <div class="sku-archive">
     <div class="page-header">
       <h2>SKU档案</h2>
-      <p class="page-desc">华邦标准 SKU 维（dim_sku），当前数据来源：百胜 E3ERP，已接入条码/成本质量、库存与近7天销售。</p>
+      <p class="page-desc">华邦标准 SKU 维（dim_sku），当前数据来源：百胜 E3ERP，标准进价取百胜 marketPrice。</p>
     </div>
 
     <div class="quality-grid" v-loading="qualityLoading">
@@ -11,8 +11,8 @@
         <strong>{{ formatNumber(quality.sku_count) }}</strong>
       </div>
       <div class="quality-card warning">
-        <span>SKU缺成本</span>
-        <strong>{{ formatNumber(quality.sku_missing_cost_count) }}</strong>
+        <span>SKU缺标准进价</span>
+        <strong>{{ formatNumber(quality.sku_missing_standard_purchase_price_count) }}</strong>
       </div>
       <div class="quality-card warning">
         <span>SKU缺条码</span>
@@ -47,6 +47,10 @@
         </el-select>
         <el-select v-model="filters.season_name" placeholder="季节" clearable style="width:100px">
           <el-option v-for="s in options.seasons" :key="s" :label="s" :value="s" />
+        </el-select>
+        <el-select v-model="filters.standard_purchase_price_status" placeholder="标准进价" clearable style="width:130px" @change="handleFilterChange">
+          <el-option label="缺标准进价" value="missing" />
+          <el-option label="已有标准进价" value="ready" />
         </el-select>
         <el-checkbox v-model="filters.onlyPositive" @change="handleFilterChange">隐藏0库存</el-checkbox>
         <el-button type="primary" @click="handleSearch">搜索</el-button>
@@ -86,14 +90,17 @@
       <el-table-column prop="brand_name" label="品牌" width="80" />
       <el-table-column prop="season_name" label="季节" width="70" />
       <el-table-column prop="tag_price" label="吊牌价" width="90" />
+      <el-table-column v-if="canViewStandardPurchasePrice" prop="standard_purchase_price" label="标准进价" width="100" align="right">
+        <template #default="{ row }">{{ row.standard_purchase_price == null ? "-" : formatAmount(row.standard_purchase_price) }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="成本" width="80">
+      <el-table-column label="标准进价状态" width="112">
         <template #default="{ row }">
-          <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+          <el-tag :type="row.has_standard_purchase_price ? 'success' : 'warning'" size="small">{{ row.has_standard_purchase_price ? "已维护" : "缺标准进价" }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="inventory_qty" label="当前库存" width="90" align="right" sortable="custom" />
@@ -133,7 +140,8 @@ const page = ref(1);
 const page_size = ref(20);
 const lastSyncedAt = ref<string | null>(null);
 const quality = ref<any>({});
-const filters = reactive<any>({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "", onlyPositive: true });
+const canViewStandardPurchasePrice = ref(false);
+const filters = reactive<any>({ keyword: "", product_code: "", brand_name: "", color_name: "", size_name: "", season_name: "", status: "", standard_purchase_price_status: "", onlyPositive: true });
 const sortState = reactive({ prop: "", order: "" });
 const options = reactive<{ brands: string[]; colors: string[]; sizes: string[]; seasons: string[] }>({ brands: [], colors: [], sizes: [], seasons: [] });
 
@@ -152,7 +160,7 @@ function formatAmount(v: any) {
 
 function suggestionType(text: string) {
   if (text === "正常") return "success";
-  if (text === "补条码" || text === "补成本" || text === "关注补货") return "warning";
+  if (text === "补条码" || text === "补标准进价" || text === "关注补货") return "warning";
   return "info";
 }
 
@@ -187,6 +195,7 @@ async function fetchList() {
     if (data && data.success) {
       list.value = data.data.items || [];
       total.value = data.data.total || 0;
+      canViewStandardPurchasePrice.value = Boolean(data.data.permissions?.can_view_standard_purchase_price);
       const times = list.value.map((x) => x.synced_at).filter(Boolean).sort();
       if (times.length) lastSyncedAt.value = times[times.length - 1];
     } else {

@@ -36,7 +36,7 @@ export interface ExpenseList {
 export interface ProfitSummary {
   net_sales: number;
   cost_of_goods: number | null;
-  cost_coverage_rate?: number;
+  standard_purchase_price_coverage_rate?: number;
   gross_profit: number | null;
   gross_margin: number | null;
   total_expense: number;

@@ -11,8 +11,8 @@
         <strong>{{ formatNumber(quality.product_count) }}</strong>
       </div>
       <div class="quality-card warning">
-        <span>商品缺成本</span>
-        <strong>{{ formatNumber(quality.product_missing_cost_count) }}</strong>
+        <span>商品缺标准进价</span>
+        <strong>{{ formatNumber(quality.product_missing_standard_purchase_price_count) }}</strong>
       </div>
       <div class="quality-card">
         <span>有库存款数</span>
@@ -70,9 +70,9 @@
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="成本" width="80">
+      <el-table-column label="标准进价状态" width="112">
         <template #default="{ row }">
-          <el-tag :type="row.has_cost ? 'success' : 'warning'" size="small">{{ row.has_cost ? "已维护" : "缺成本" }}</el-tag>
+          <el-tag :type="row.has_standard_purchase_price ? 'success' : 'warning'" size="small">{{ row.has_standard_purchase_price ? "已维护" : "缺标准进价" }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="inventory_qty" label="当前库存" width="90" align="right" sortable="custom" />
@@ -143,7 +143,7 @@ function stageType(stage: string) {
 function suggestionType(text: string) {
   if (text === "正常") return "success";
   if (text === "持续跟进") return "primary";
-  if (text === "补成本" || text === "关注补货") return "warning";
+  if (text === "补标准进价" || text === "关注补货") return "warning";
   return "info";
 }
 

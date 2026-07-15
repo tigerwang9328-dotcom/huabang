@@ -55,6 +55,9 @@
           <el-table-column prop="available_qty" label="可用" width="80" align="right">
             <template #default="{ row }"><span :class="{ neg: row.available_qty < 0 }">{{ row.available_qty }}</span></template>
           </el-table-column>
+          <el-table-column label="标准进价" width="100" align="right">
+            <template #default="{ row }">{{ row.standard_purchase_price == null ? "-" : formatMoney(row.standard_purchase_price) }}</template>
+          </el-table-column>
           <el-table-column label="库存金额" width="100" align="right">
             <template #default="{ row }">{{ row.inventory_amount == null ? "-" : formatMoney(row.inventory_amount) }}</template>
           </el-table-column>
@@ -179,7 +182,7 @@ const summaryCards = ref([
   { label: "库存总件数", value: "—", isPending: false },
   { label: "库存金额", value: "—", isPending: false },
   { label: "缺货SKU", value: "—", isPending: false },
-  { label: "成本覆盖率", value: "—", isPending: false },
+  { label: "标准进价覆盖率", value: "—", isPending: false },
   { label: "当前预警", value: "—", isPending: false },
 ]);
 
@@ -199,7 +202,7 @@ async function fetchOverview() {
     summaryCards.value[3].value = summary.total_inventory_qty?.display || "0";
     summaryCards.value[4].value = formatMoney(summary.inventory_amount?.value || 0);
     summaryCards.value[5].value = summary.out_of_stock_sku_count?.display || "0";
-    summaryCards.value[6].value = `${Number(summary.cost_coverage_rate?.value || 0).toFixed(1)}%`;
+    summaryCards.value[6].value = `${Number(summary.standard_purchase_price_coverage_rate?.value || 0).toFixed(1)}%`;
     whSummary.value = overviewRes?.data?.by_warehouse || [];
   } catch (_) { ElMessage.error("库存总览查询失败"); }
   finally { ovLoading.value = false; }

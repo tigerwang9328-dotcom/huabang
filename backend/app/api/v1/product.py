@@ -1,6 +1,6 @@
 """商品经营中心 - 标准商品维(dim.dim_product)查询 + 百胜商品主档同步。
 
-读取标准业务表 dim_product（不返回 raw_data / 成本价 / 任何密钥）。
+读取标准业务表 dim_product（不返回 raw_data / 任何密钥）。
 """
 import logging
 from datetime import date
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import require_permission
 from app.core.data_scope import get_data_scope
 from app.core.database import get_db
+from app.core.field_permissions import get_user_field_rules
 import asyncio as _asyncio
 
 from app.core.database import AsyncSessionLocal
@@ -41,7 +42,7 @@ async def _size_wall_codes(db: AsyncSession, current_user: SysUser, store_code: 
         raise HTTPException(status_code=403, detail="无权查看该门店或仓库")
     return codes
 
-# 列表返回字段（不含 raw_data / cost_price）
+# 列表返回字段（不含 raw_data）
 _COLS = (
     DimProduct.id, DimProduct.product_code, DimProduct.product_name,
     DimProduct.category_code, DimProduct.category_name, DimProduct.brand_name,
@@ -63,9 +64,8 @@ def _fmt_qty(v) -> int | float:
 def _product_suggestion(row: dict) -> str:
     sales_qty = _num(row.get("sales_qty"))
     inventory_qty = _num(row.get("inventory_qty"))
-    has_cost = bool(row.get("has_cost"))
-    if not has_cost:
-        return "补成本"
+    if not row.get("has_standard_purchase_price"):
+        return "补标准进价"
     if sales_qty > 0 and inventory_qty <= 0:
         return "关注补货"
     if sales_qty <= 0 and inventory_qty > 0:
@@ -101,8 +101,8 @@ def _lifecycle_stage(row: dict) -> str:
 def _sku_suggestion(row: dict) -> str:
     if not row.get("barcode"):
         return "补条码"
-    if not row.get("has_cost"):
-        return "补成本"
+    if not row.get("has_standard_purchase_price"):
+        return "补标准进价"
     if _num(row.get("sales_qty")) > 0 and _num(row.get("inventory_qty")) <= 0:
         return "关注补货"
     if _num(row.get("sales_qty")) <= 0 and _num(row.get("inventory_qty")) > 0:
@@ -139,7 +139,19 @@ async def _product_metrics(db: AsyncSession, product_codes: list[str]) -> dict[s
     start_date, end_date = await _latest_sales_window(db)
     metrics = {code: {"inventory_qty": 0.0, "inventory_amount": 0.0, "sales_qty": 0.0,
                       "sales_amount": 0.0, "gross_profit": None, "gross_margin": None,
-                      "is_cost_complete": False} for code in product_codes}
+                      "is_cost_complete": False, "has_standard_purchase_price": False}
+                      for code in product_codes}
+    price_rows = (await db.execute(text("""
+        SELECT product_code,
+               BOOL_OR(standard_purchase_price IS NOT NULL) AS has_standard_purchase_price
+        FROM dim.v_baison_sku_standard_purchase_price
+        WHERE product_code = ANY(:codes)
+        GROUP BY product_code
+    """), {"codes": product_codes})).mappings().all()
+    for row in price_rows:
+        metrics[row["product_code"]]["has_standard_purchase_price"] = bool(
+            row["has_standard_purchase_price"]
+        )
     inv_rows = (await db.execute(text("""
         SELECT i.product_code, COALESCE(SUM(i.qty), 0) AS inventory_qty,
                COALESCE(SUM(GREATEST(i.qty,0) * sp.standard_purchase_price)
@@ -388,11 +400,12 @@ async def sync_baison_products(
         return {"success": False, "message": "内部错误，请查看服务日志"}
 
 
-# SKU 列表返回字段（不含 raw_data / 成本价 / ckj / cbj）
+# SKU 列表返回字段（不含 raw_data / ckj / cbj）
 _SKU_COLS = (
     DimSku.id, DimSku.sku_code, DimSku.product_code, DimSku.product_name,
     DimSku.barcode, DimSku.color_code, DimSku.color_name, DimSku.size_code, DimSku.size_name,
     DimSku.brand_name, DimSku.season_name, DimSku.tag_price, DimSku.market_price,
+    DimSku.standard_purchase_price,
     DimSku.has_cost, DimSku.status, DimSku.source_system, DimSku.synced_at,
 )
 
@@ -413,6 +426,7 @@ async def list_skus(
     size_name: Optional[str] = None,
     season_name: Optional[str] = None,
     status: Optional[str] = None,
+    standard_purchase_price_status: Optional[str] = Query(None, pattern="^(missing|ready)$"),
     source_system: Optional[str] = None,
     only_positive: Optional[int] = None,
     sort_by: Optional[str] = None,
@@ -420,7 +434,7 @@ async def list_skus(
     current_user: SysUser = Depends(require_permission("product:overview:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """标准 SKU 维分页查询（SKU档案）。不返回 raw_data / 成本价。"""
+    """标准 SKU 维分页查询；标准进价仅返回给具备字段权限的用户。"""
     try:
         await ensure_product_image_table(db)
         conds = []
@@ -440,6 +454,13 @@ async def list_skus(
             conds.append(DimSku.season_name == season_name)
         if status:
             conds.append(DimSku.status == status)
+        if standard_purchase_price_status == "missing":
+            conds.append(or_(
+                DimSku.standard_purchase_price.is_(None),
+                DimSku.standard_purchase_price <= 0,
+            ))
+        elif standard_purchase_price_status == "ready":
+            conds.append(DimSku.standard_purchase_price > 0)
         if source_system:
             conds.append(DimSku.source_system == source_system)
         if only_positive:
@@ -474,6 +495,11 @@ async def list_skus(
         rows = (await db.execute(query)).mappings().all()
         row_dicts = [dict(r) for r in rows]
         metrics = await _sku_metrics(db, row_dicts)
+        field_rules = await get_user_field_rules(db, current_user, "product")
+        can_view_standard_purchase_price = bool(
+            current_user.is_admin
+            or field_rules.get("standard_purchase_price") == "none"
+        )
         items = []
         for r in rows:
             item = dict(r)
@@ -481,6 +507,12 @@ async def list_skus(
             item["sales_qty"] = _fmt_qty(item.get("sales_qty"))
             item["sales_amount"] = round(_num(item.get("sales_amount")), 2)
             item["inventory_qty"] = _fmt_qty(item.get("inventory_qty"))
+            item["has_standard_purchase_price"] = bool(
+                item.get("standard_purchase_price")
+                and _num(item.get("standard_purchase_price")) > 0
+            )
+            if not can_view_standard_purchase_price:
+                item.pop("standard_purchase_price", None)
             item["ai_suggestion"] = _sku_suggestion(item)
             items.append(item)
         if sort_by in {"inventory_qty", "sales_qty", "sales_amount"}:
@@ -490,7 +522,15 @@ async def list_skus(
         for item in items:
             source_image_url = image_urls.get((str(item.get("product_code") or "").strip(), str(item.get("color_code") or "").strip()))
             item["image_url"] = _image_proxy_path(source_image_url)
-        return {"success": True, "data": {"items": items, "total": total, "page": page, "page_size": page_size}}
+        return {"success": True, "data": {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "permissions": {
+                "can_view_standard_purchase_price": can_view_standard_purchase_price,
+            },
+        }}
     except Exception:
         logger.exception("sku list error")
         return {"success": False, "message": "查询失败，请查看服务日志"}
