@@ -71,7 +71,7 @@ def test_ai_input_keeps_only_whitelisted_sourced_metrics():
     assert safe["finance_complete"] is False
 
 
-def test_template_marks_estimates_and_blocks_operating_profit_when_expenses_missing():
+def test_template_marks_estimated_operating_profit_when_expenses_missing():
     conclusion = build_template_command_conclusion(sanitize_command_context(_context()))
     rendered = json.dumps(conclusion, ensure_ascii=False)
 
@@ -79,7 +79,12 @@ def test_template_marks_estimates_and_blocks_operating_profit_when_expenses_miss
     assert "费用" in rendered
     assert "公司盈利" not in rendered
     assert "公司亏损" not in rendered
-    assert not any(item.get("key") == "operating_profit" for item in conclusion["facts"])
+    assert any(
+        item.get("key") == "operating_profit"
+        and item.get("value") == 7000
+        and item.get("note") == "预估"
+        for item in conclusion["facts"]
+    )
     assert all(item["status"] == "draft" for item in conclusion["actions"])
     assert all(item["requires_human_confirm"] is True for item in conclusion["actions"])
 

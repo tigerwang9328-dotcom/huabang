@@ -577,13 +577,22 @@ class AIDiagnosisService:
               where stat_date >= CAST(:dt AS date) - interval '7 day' and stat_date <= CAST(:dt AS date)
               group by product_code
             ),
+            standard_price as (
+              select product_code, color_code, size_code,
+                     max(standard_purchase_price) standard_purchase_price
+              from dim.v_baison_sku_standard_purchase_price
+              group by product_code, color_code, size_code
+            ),
             inv as (
               select i.product_code, sum(i.qty) qty,
-                     sum(i.qty * coalesce(sku.cost_price, product.cost_price, 0)) amount,
+                     coalesce(sum(i.qty * sp.standard_purchase_price)
+                              filter(where sp.standard_purchase_price is not null),0) amount,
                      count(*) filter(where i.qty<=0) zero_sku
               from dwd.v_apparel_inventory_balance i
-              left join dim.dim_sku sku on sku.sku_code=i.sku_code
-              left join dim.dim_product product on product.product_code=i.product_code
+              left join standard_price sp
+                on sp.product_code=i.product_code
+               and trim(leading '-' from sp.color_code)=trim(leading '-' from coalesce(i.color_code,''))
+               and sp.size_code=coalesce(i.size_code,'')
               group by i.product_code
             ),
             inbound30 as (
@@ -758,28 +767,36 @@ class AIDiagnosisService:
                      bool_and(coalesce(is_cost_complete,false)) is_cost_complete
               from dws.dws_store_daily
               where stat_date=CAST(:dt AS date) and (:store_code='' or store_code=:store_code)
+            ), standard_price as (
+              select product_code, color_code, size_code,
+                     max(standard_purchase_price) standard_purchase_price
+              from dim.v_baison_sku_standard_purchase_price
+              group by product_code, color_code, size_code
             ), lines as (
               select i.warehouse_code store_code, i.product_code,
                      coalesce(nullif(i.sku_code,''),concat(i.product_code,trim(leading '-' from coalesce(i.color_code,'')),coalesce(i.size_code,''))) sku_code,
                      i.qty,
-                     coalesce(nullif(sku.cost_price,0),nullif(sku.market_price,0),nullif(p.cost_price,0),0) cost_price,
+                     sp.standard_purchase_price,
                      greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
                               coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days,
                      i.synced_at
               from dwd.v_apparel_inventory_balance i
-              left join dim.dim_sku sku
-                on sku.product_code=i.product_code
-               and trim(leading '-' from coalesce(sku.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
-               and coalesce(sku.size_code,'')=coalesce(i.size_code,'')
+              left join standard_price sp
+                on sp.product_code=i.product_code
+               and trim(leading '-' from sp.color_code)=trim(leading '-' from coalesce(i.color_code,''))
+               and sp.size_code=coalesce(i.size_code,'')
               left join dim.dim_product p on p.product_code=i.product_code
               left join dws.dws_product_inbound_summary inbound on inbound.product_code=i.product_code
               where true {balance_store_filter}
             )
             select max((lines.synced_at at time zone 'Asia/Shanghai')::date) inventory_stat_date,
                    coalesce(sum(lines.qty),0) total_quantity,
-                   coalesce(sum(lines.qty*lines.cost_price),0) total_amount,
-                   coalesce(sum(greatest(lines.qty,0)*lines.cost_price) filter(where age_days>=90),0) age_90_amount,
-                   coalesce(sum(greatest(lines.qty,0)*lines.cost_price) filter(where age_days>=180),0) age_180_amount,
+                   coalesce(sum(lines.qty*lines.standard_purchase_price)
+                            filter(where lines.standard_purchase_price is not null),0) total_amount,
+                   coalesce(sum(greatest(lines.qty,0)*lines.standard_purchase_price)
+                            filter(where age_days>=90 and lines.standard_purchase_price is not null),0) age_90_amount,
+                   coalesce(sum(greatest(lines.qty,0)*lines.standard_purchase_price)
+                            filter(where age_days>=180 and lines.standard_purchase_price is not null),0) age_180_amount,
                    count(distinct (store_code,sku_code)) filter(where qty<0) negative_sku_count,
                    count(distinct (store_code,sku_code)) filter(where qty<>0) sku_count,
                    count(distinct (store_code,sku_code)) filter(where qty>0 and age_days>=90) age_90_sku_count,
@@ -792,24 +809,31 @@ class AIDiagnosisService:
         )
         warnings_rows = await self._rows(
             f"""
-            with lines as (
+            with standard_price as (
+              select product_code, color_code, size_code,
+                     max(standard_purchase_price) standard_purchase_price
+              from dim.v_baison_sku_standard_purchase_price
+              group by product_code, color_code, size_code
+            ), lines as (
               select i.warehouse_code store_code, i.product_code,
                      coalesce(nullif(i.sku_code,''),concat(i.product_code,trim(leading '-' from coalesce(i.color_code,'')),coalesce(i.size_code,''))) sku_code,
                      i.qty,
-                     coalesce(nullif(sku.cost_price,0),nullif(sku.market_price,0),nullif(p.cost_price,0),0) cost_price,
+                     sp.standard_purchase_price,
                      greatest(coalesce(CAST(:dt AS date)-p.launch_date,0),
                               coalesce(CAST(:dt AS date)-inbound.first_inbound_date,0)) age_days
               from dwd.v_apparel_inventory_balance i
-              left join dim.dim_sku sku
-                on sku.product_code=i.product_code
-               and trim(leading '-' from coalesce(sku.color_code,''))=trim(leading '-' from coalesce(i.color_code,''))
-               and coalesce(sku.size_code,'')=coalesce(i.size_code,'')
+              left join standard_price sp
+                on sp.product_code=i.product_code
+               and trim(leading '-' from sp.color_code)=trim(leading '-' from coalesce(i.color_code,''))
+               and sp.size_code=coalesce(i.size_code,'')
               left join dim.dim_product p on p.product_code=i.product_code
               left join dws.dws_product_inbound_summary inbound on inbound.product_code=i.product_code
               where true {balance_store_filter}
             ), sku_inventory as (
               select store_code,product_code,sku_code,sum(qty) current_quantity,
-                     sum(qty*cost_price) current_cost_amount,max(age_days) age_days
+                     coalesce(sum(qty*standard_purchase_price)
+                              filter(where standard_purchase_price is not null),0) current_cost_amount,
+                     max(age_days) age_days
               from lines group by store_code,product_code,sku_code
             ), realtime_warning as (
               select 'negative' warning_type,'critical' warning_level,store_code,product_code,sku_code,
@@ -997,10 +1021,10 @@ class AIDiagnosisService:
         expense_complete = bool(row.get("is_expense_complete"))
         finance_approved = bool(row.get("finance_approved"))
         if row and _num(row.get("net_sales")) > 0 and not cost_complete:
-            warnings.append("成本字段未完整接入，财务诊断按销售额与现有毛利字段兜底。")
-            diagnoses.append(self._diag("finance", "medium", "成本口径未完整", "当前销售已接入，但成本金额为0或不完整，毛利和利润只能作为预估参考。", [f"净销售：{_money(row.get('net_sales'))}", f"成本：{_money(row.get('cost_of_goods'))}"], "商品成本未完整同步或DWS成本汇总未生成。", "财务与商品部核对成本价、商品成本汇总和缺失成本款。", "财务经理 / 商品经理", "本周内", "成本完整率、毛利率可用性", row.get("source_table") or "finance fallback"))
+            warnings.append("标准进价未完整接入，毛利和经营利润按已覆盖商品估算。")
+            diagnoses.append(self._diag("finance", "medium", "标准进价口径未完整", "当前销售已接入，但部分商品缺标准进价，毛利和利润只能作为预估参考。", [f"净销售：{_money(row.get('net_sales'))}", f"销售成本：{_money(row.get('cost_of_goods'))}", "标准进价来源：baison_sku.marketPrice"], "缺标准进价商品未计入销售成本。", "财务与商品部核对标准进价、销售成本汇总和缺标准进价商品。", "财务经理 / 商品经理", "本周内", "标准进价覆盖率、毛利率可用性", row.get("source_table") or "baison_sku.marketPrice"))
         elif row and _num(row.get("cost_of_goods")) > 0:
-            warnings.append("成本已按百胜商品成本接入，毛利仍属经营估算口径，最终以财务核准为准。")
+            warnings.append("销售成本已按百胜标准进价 baison_sku.marketPrice 接入，毛利仍属经营估算口径，最终以财务核准为准。")
         if row and _num(row.get("net_sales")) > 0 and not expense_complete:
             warnings.append("费用明细未接入，经营利润暂未扣除完整费用。")
             diagnoses.append(self._diag("finance", "medium", "费用口径未完整", "当前费用明细为空或不完整，经营利润不能作为最终财报。", [f"净销售：{_money(row.get('net_sales'))}", f"已接费用：{_money(row.get('total_expense'))}"], "报销、房租、水电、工资或其他费用未进入日汇总。", "财务补录费用或启用钉钉/金蝶费用同步，页面继续保留预估标识。", "财务经理", "本周内", "费用接入率、预估利润与核准利润差异", "dwd_finance_expense"))

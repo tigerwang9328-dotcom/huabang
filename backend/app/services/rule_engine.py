@@ -344,7 +344,8 @@ class RuleEngine:
         return [{
             "title": f"公司销售额{float(row[1]):.0f}元但经营利润率仅{float(row[3])*100:.1f}%",
             "evidence": {"net_sales": float(row[1]), "operating_profit": float(row[2]),
-                         "operating_margin": float(row[3]), "finance_approved": True},
+                         "operating_margin": float(row[3]), "finance_approved": True,
+                         "standard_purchase_price_source": "baison_sku.marketPrice"},
             "suggestion": "复核折扣、商品毛利和费用结构，制定提升利润方案",
         } for row in rows]
 

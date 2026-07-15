@@ -1,5 +1,7 @@
 import asyncio
 
+from sqlalchemy import text
+
 from app.core.database import AsyncSessionLocal, engine
 from app.services.ai_diagnosis_service import AIDiagnosisService
 
@@ -10,6 +12,25 @@ async def _run_inventory():
         result = await AIDiagnosisService(db).inventory()
     await engine.dispose()
     return result
+
+
+async def _raw_negative_sku_count():
+    await engine.dispose()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(text("""
+            select count(distinct (
+                warehouse_code,
+                coalesce(
+                    nullif(sku_code,''),
+                    concat(product_code, trim(leading '-' from coalesce(color_code,'')), coalesce(size_code,''))
+                )
+            ))
+            from dwd.v_apparel_inventory_balance
+            where qty < 0
+        """))
+        count = int(result.scalar() or 0)
+    await engine.dispose()
+    return count
 
 
 def test_inventory_diagnosis_uses_current_balance_and_complete_business_metrics():
@@ -24,7 +45,7 @@ def test_inventory_diagnosis_uses_current_balance_and_complete_business_metrics(
     assert summary["inventory_amount"] > 0
     assert summary["age_90_amount"] > 0
     assert summary["sku_count"] > 10000
-    assert summary["negative_sku_count"] == 5
+    assert summary["negative_sku_count"] == asyncio.run(_raw_negative_sku_count())
     assert "dwd_inventory_balance" in result["data_quality"]["source_tables"]
     payload = str(result["diagnoses"])
     assert "S003" not in payload

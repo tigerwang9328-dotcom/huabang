@@ -20,7 +20,7 @@ FORBIDDEN_CONCLUSIONS = [
 # 字段权限敏感字段
 SENSITIVE_FIELDS_BY_PERMISSION = {
     "profit": ["gross_profit", "gross_margin", "operating_profit", "net_profit"],
-    "cost": ["cost_price", "cost_amount"],
+    "cost": ["standard_purchase_price", "cost_amount"],
     "cash": ["cash_balance", "cash_safety_days", "total_cash"],
     "member_phone": ["phone", "member_phone"],
 }
@@ -68,9 +68,11 @@ def sanitize_command_context(context: dict[str, Any]) -> dict[str, Any]:
         if status == "pending_data":
             value = None
         if key == "operating_profit" and not finance_complete:
-            value = None
-            status = "pending_data"
-            reason = "费用未完整接入，禁止判断经营利润"
+            if value is None:
+                status = "pending_data"
+            else:
+                status = "estimated"
+            reason = reason or "费用未完整接入，经营利润仅为估算值"
         metrics[key] = {
             "label": COMMAND_METRIC_LABELS[key],
             "value": value,
