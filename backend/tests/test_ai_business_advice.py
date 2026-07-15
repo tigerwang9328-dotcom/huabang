@@ -71,9 +71,11 @@ def test_business_advice_input_hash_is_order_stable_and_changes_with_facts(monke
 def test_business_advice_generation_uses_database_unit_lock():
     source = inspect.getsource(BusinessAdviceService.generate_unit)
     assert "pg_advisory_xact_lock" in source
-    assert 'existing.mode == "model"' in source
-    assert 'existing.mode == "template"' in source
-    assert "AI_BUSINESS_ADVICE_REFRESH_WINDOW_SECONDS" in source
+    assert "existing.input_hash == input_hash" in source
+    assert "and not force" in source
+    assert 'existing.mode == "model"' not in source
+    assert "template_cache_fresh" not in source
+    assert "AI_BUSINESS_ADVICE_REFRESH_WINDOW_SECONDS" not in source
     assert "generated_at.astimezone(timezone.utc) >= request_started" in source
     assert "waited_for_lock or generated_at" not in source
 

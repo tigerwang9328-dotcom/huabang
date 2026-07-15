@@ -126,23 +126,10 @@ class BusinessAdviceService:
         if waited_for_lock:
             await self.db.execute(select(func.pg_advisory_xact_lock(lock_key)))
         existing = await self.latest_snapshot(module, stat_date, scope_type, target_code)
-        template_cache_fresh = False
-        if existing and existing.mode == "template" and existing.generated_at:
-            generated_at = existing.generated_at
-            if generated_at.tzinfo is None:
-                generated_at = generated_at.replace(tzinfo=timezone.utc)
-            cache_age_seconds = max(
-                0.0,
-                (request_started - generated_at.astimezone(timezone.utc)).total_seconds(),
-            )
-            template_cache_fresh = (
-                cache_age_seconds < settings.AI_BUSINESS_ADVICE_REFRESH_WINDOW_SECONDS
-            )
         if (
             existing
             and existing.input_hash == input_hash
             and not force
-            and (existing.mode == "model" or template_cache_fresh)
         ):
             await self.db.commit()
             return {"cached": True, "snapshot": existing}
