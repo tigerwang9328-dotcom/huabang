@@ -267,6 +267,24 @@ async def get_profit_analysis(
     total_sales = sum((row["net_sales"] for row in store_rows), 0)
     total_cost = sum((row["cost_of_goods"] for row in store_rows), 0)
     cost_complete = bool(store_rows) and all(bool(row["is_cost_complete"]) for row in store_rows)
+    coverage_row = (await db.execute(text("""
+        SELECT COALESCE(
+                   SUM(ABS(sales_quantity)) FILTER (
+                       WHERE COALESCE(is_cost_complete, false)
+                   )::numeric / NULLIF(SUM(ABS(sales_quantity)), 0),
+                   0
+               ) AS coverage_rate
+        FROM dws.dws_product_daily
+        WHERE stat_date BETWEEN :start_date AND :end_date
+          AND store_code=ANY(:store_codes)
+    """), {
+        "start_date": query_start,
+        "end_date": query_end,
+        "store_codes": selected_codes,
+    })).mappings().one()
+    standard_purchase_price_coverage_rate = float(
+        coverage_row["coverage_rate"] or 0
+    )
     company_profit = calculate_profit(
         period_start=query_start, period_end=query_end,
         net_sales=total_sales, cost_of_goods=total_cost,
@@ -340,9 +358,9 @@ async def get_profit_analysis(
         ),
         "summary": {
             **summary_payload,
-            "standard_purchase_price_coverage_rate": 1.0 if cost_complete else 0.0,
+            "standard_purchase_price_coverage_rate": standard_purchase_price_coverage_rate,
             # Deprecated compatibility alias; new clients use standard_purchase_price_coverage_rate.
-            "cost_coverage_rate": 1.0 if cost_complete else 0.0,
+            "cost_coverage_rate": standard_purchase_price_coverage_rate,
             "inventory_amount": _money(inventory_amount),
             "discount_loss": _money(max(tag_amount - sales_amount, 0)),
             "return_loss": None,

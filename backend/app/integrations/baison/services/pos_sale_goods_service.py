@@ -9,7 +9,7 @@ from typing import Optional
 from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
 from app.core.standard_purchase_price import effective_sales_standard_cost_sql
-from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, allowed_inventory_sql_in
+from app.core.store_whitelist import ALLOWED_STORE_CODES, allowed_store_sql_in
 from sqlalchemy import text
 
 logger = logging.getLogger("baison.pos_sale")
@@ -31,7 +31,7 @@ class PosSaleGoodsService:
     ) -> dict:
         """同步单个门店全部销售数据"""
         zddm = str(zddm).strip()
-        if zddm not in ALLOWED_INVENTORY_CODES:
+        if zddm not in ALLOWED_STORE_CODES:
             logger.warning("Skip non-whitelisted sale goods store=%s", zddm)
             return {"store": zddm, "ods": 0, "dwd": 0, "pages": 0, "skipped": True}
 
@@ -220,12 +220,22 @@ class PosSaleGoodsService:
     async def rebuild_dws_summary(self, start_date: str, end_date: str) -> dict:
             """重建 DWS/DM 层汇总（匹配当前 dws 表结构）。"""
             params = {"sd": dt.date.fromisoformat(start_date[:10]), "ed": dt.date.fromisoformat(end_date[:10])}
-            # 华邦业务口径:销售明细仅统计 10 个白名单门店/仓,见 app.core.store_whitelist
-            store_in = allowed_inventory_sql_in()
+            # 华邦销售口径只统计7家销售门店，仓库不进入销售与毛利汇总。
+            store_in = allowed_store_sql_in()
             line_cost_sql = effective_sales_standard_cost_sql(
                 "p.supplier_code", "sp.standard_purchase_price", "s.sales_amount", "s.sales_qty"
             )
             async with AsyncSessionLocal() as db:
+                await db.execute(text(f"""
+                    DELETE FROM dws.dws_product_daily
+                    WHERE stat_date >= :sd AND stat_date <= :ed
+                      AND store_code NOT IN {store_in}
+                """), params)
+                await db.execute(text(f"""
+                    DELETE FROM dws.dws_store_daily
+                    WHERE stat_date >= :sd AND stat_date <= :ed
+                      AND channel = 'offline' AND store_code NOT IN {store_in}
+                """), params)
                 # 公司日汇总 -> dws_company_daily
                 await db.execute(
                     text(f"""

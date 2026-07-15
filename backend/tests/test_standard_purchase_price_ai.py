@@ -18,6 +18,19 @@ def test_ai_diagnosis_uses_only_canonical_standard_purchase_price():
     assert "coalesce(nullif(sku.cost_price" not in source
     assert "coalesce(sku.cost_price" not in source
     assert "product.cost_price" not in source
+    assert "missing_standard_purchase_price_qty" in source
+    assert "inventory_amount_status" in source
+    assert '"estimated"' in source
+
+
+def test_size_wall_and_ai_do_not_turn_missing_standard_price_into_zero():
+    from app.services.size_wall_service import SizeWallService
+
+    size_wall_source = inspect.getsource(SizeWallService.build_snapshot)
+    ai_source = inspect.getsource(ai_diagnosis_service)
+
+    assert "coalesce(sp.standard_purchase_price,0)" not in size_wall_source.lower()
+    assert "coalesce(sum(qty*standard_purchase_price)" not in ai_source.lower()
 
 
 def test_cost_permission_uses_standard_purchase_price_name():

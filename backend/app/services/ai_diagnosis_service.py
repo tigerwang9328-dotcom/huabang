@@ -790,9 +790,15 @@ class AIDiagnosisService:
               where true {balance_store_filter}
             )
             select max((lines.synced_at at time zone 'Asia/Shanghai')::date) inventory_stat_date,
-                   coalesce(sum(lines.qty),0) total_quantity,
-                   coalesce(sum(lines.qty*lines.standard_purchase_price)
+                   coalesce(sum(greatest(lines.qty,0)),0) total_quantity,
+                   coalesce(sum(greatest(lines.qty,0)*lines.standard_purchase_price)
                             filter(where lines.standard_purchase_price is not null),0) total_amount,
+                   coalesce(sum(greatest(lines.qty,0))
+                            filter(where lines.standard_purchase_price is null),0)
+                     missing_standard_purchase_price_qty,
+                   coalesce(sum(greatest(lines.qty,0))
+                            filter(where lines.standard_purchase_price is not null),0)
+                     priced_standard_purchase_price_qty,
                    coalesce(sum(greatest(lines.qty,0)*lines.standard_purchase_price)
                             filter(where age_days>=90 and lines.standard_purchase_price is not null),0) age_90_amount,
                    coalesce(sum(greatest(lines.qty,0)*lines.standard_purchase_price)
@@ -831,20 +837,24 @@ class AIDiagnosisService:
               where true {balance_store_filter}
             ), sku_inventory as (
               select store_code,product_code,sku_code,sum(qty) current_quantity,
-                     coalesce(sum(qty*standard_purchase_price)
-                              filter(where standard_purchase_price is not null),0) current_cost_amount,
+                     sum(qty*standard_purchase_price)
+                       filter(where standard_purchase_price is not null) current_cost_amount,
                      max(age_days) age_days
               from lines group by store_code,product_code,sku_code
             ), realtime_warning as (
               select 'negative' warning_type,'critical' warning_level,store_code,product_code,sku_code,
                      current_quantity,current_cost_amount,age_days,
-                     concat('当前库存 ',current_quantity,' 件，请复核同步、调拨或销售出库。') description
+                     case when current_cost_amount is null
+                          then concat('当前库存 ',current_quantity,' 件，标准进价缺失；请先补价并复核同步、调拨或销售出库。')
+                          else concat('当前库存 ',current_quantity,' 件，请复核同步、调拨或销售出库。') end description
               from sku_inventory where current_quantity<0
               union all
               select case when age_days>=180 then 'age_180' else 'age_90' end,
                      case when age_days>=180 then 'critical' else 'warning' end,
                      store_code,product_code,sku_code,current_quantity,current_cost_amount,age_days,
-                     concat('库龄 ',age_days,' 天，库存 ',current_quantity,' 件，金额 ',round(current_cost_amount,2),' 元。')
+                     case when current_cost_amount is null
+                          then concat('库龄 ',age_days,' 天，库存 ',current_quantity,' 件，金额待补标准进价。')
+                          else concat('库龄 ',age_days,' 天，库存 ',current_quantity,' 件，金额 ',round(current_cost_amount,2),' 元。') end
               from sku_inventory where current_quantity>0 and age_days>=90
             )
             select * from realtime_warning
@@ -859,7 +869,12 @@ class AIDiagnosisService:
             level = "high" if w.get("warning_level") == "critical" else "medium"
             wtype = w.get("warning_type") or "inventory"
             warning_name = {"negative": "负库存", "age_90": "90天以上老库存", "age_180": "180天以上老库存"}.get(wtype, "库存异常")
-            diagnoses.append(self._diag("inventory", level, warning_name, w.get("description") or f"{w.get('sku_code') or w.get('product_code')} 触发库存异常。", [f"门店：{w.get('store_code') or 'ALL'}", f"SKU：{w.get('sku_code') or '-'}", f"库存：{_int(w.get('current_quantity'))}", f"金额：{_money(w.get('current_cost_amount'))}"], "库存结构与销售节奏不匹配，可能存在老库存、负库存、断码或门店压货。", "仓库与商品部复核库存，优先处理负库存和爆款断货，再处理高库龄清仓。", "仓库主管 / 商品经理", "今日18:30前", "负库存SKU数、90天以上库存金额、调拨完成率", "dwd_inventory_balance + dim_product + dws_product_inbound_summary"))
+            amount_evidence = (
+                f"金额：{_money(w.get('current_cost_amount'))}"
+                if w.get("current_cost_amount") is not None
+                else "金额：待补标准进价"
+            )
+            diagnoses.append(self._diag("inventory", level, warning_name, w.get("description") or f"{w.get('sku_code') or w.get('product_code')} 触发库存异常。", [f"门店：{w.get('store_code') or 'ALL'}", f"SKU：{w.get('sku_code') or '-'}", f"库存：{_int(w.get('current_quantity'))}", amount_evidence], "库存结构与销售节奏不匹配，可能存在老库存、负库存、断码或门店压货。", "仓库与商品部复核库存，优先处理负库存和爆款断货，再处理高库龄清仓。", "仓库主管 / 商品经理", "今日18:30前", "负库存SKU数、90天以上库存金额、调拨完成率", "dwd_inventory_balance + dim_product + dws_product_inbound_summary"))
         if _num(summary.get("age_90_amount")) > 0:
             diagnoses.append(self._diag("inventory", "high", "90天以上库存占用资金", f"90天以上库存金额 {_money(summary.get('age_90_amount'))}，需要进入清仓池管理。", [f"总库存金额：{_money(summary.get('total_amount'))}", f"90天以上：{_money(summary.get('age_90_amount'))}", f"180天以上：{_money(summary.get('age_180_amount'))}"], "老库存持续占用现金，若不处理会影响新品采购和经营利润。", "商品部输出清仓池，财务跟踪回款，门店按清仓策略执行。", "商品经理 / 财务经理", "本周五前", "90天以上库存金额下降幅度、清仓销售额", "dws_inventory_daily"))
         warnings = [] if summary else ["库存诊断暂无当前库存余额，可能库存同步未完成。"]
@@ -867,6 +882,22 @@ class AIDiagnosisService:
         sku_count = max(_int(summary.get("sku_count")), 1)
         age_ratio = _num(summary.get("age_90_amount")) / max(_num(summary.get("total_amount")), 1)
         health_score = round(max(0, 100 - min(30, negative_count*3) - min(40, age_ratio*100)))
+        missing_standard_purchase_price_qty = _num(
+            summary.get("missing_standard_purchase_price_qty")
+        )
+        total_inventory_qty = _num(summary.get("total_quantity"))
+        standard_purchase_price_coverage_rate = (
+            max(0.0, min(1.0, 1 - missing_standard_purchase_price_qty / total_inventory_qty))
+            if total_inventory_qty > 0
+            else 0.0
+        )
+        inventory_amount_status = (
+            "estimated"
+            if summary.get("inventory_stat_date") and missing_standard_purchase_price_qty > 0
+            else "ready"
+            if summary.get("inventory_stat_date")
+            else "pending_data"
+        )
         return {
             "summary": {
                 "stat_date": dt,
@@ -877,6 +908,8 @@ class AIDiagnosisService:
                 "inventory_stat_date": _date_str(summary.get("inventory_stat_date")),
                 "total_inventory_qty": _int(summary.get("total_quantity")),
                 "inventory_amount": _num(summary.get("total_amount")),
+                "missing_standard_purchase_price_qty": missing_standard_purchase_price_qty,
+                "standard_purchase_price_coverage_rate": standard_purchase_price_coverage_rate,
                 "age_90_amount": _num(summary.get("age_90_amount")),
                 "age_180_amount": _num(summary.get("age_180_amount")),
                 "negative_sku_count": _int(summary.get("negative_sku_count")),
@@ -896,8 +929,8 @@ class AIDiagnosisService:
                     "gross_margin": (
                         "ready" if bool(summary.get("is_cost_complete")) else "estimated"
                     ) if _int(summary.get("sales_source_row_count")) > 0 and summary.get("gross_margin") is not None else "pending_data",
-                    "inventory_amount": "ready" if summary.get("inventory_stat_date") else "pending_data",
-                    "age_90_amount": "estimated" if summary.get("inventory_stat_date") else "pending_data",
+                    "inventory_amount": inventory_amount_status,
+                    "age_90_amount": inventory_amount_status,
                 },
             ),
         }

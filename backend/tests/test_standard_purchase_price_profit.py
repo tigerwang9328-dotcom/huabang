@@ -73,3 +73,15 @@ def test_command_center_report_and_finance_keep_estimated_value_visible():
     assert "data.get(\"operating_profit_estimate\")" in command_read
     assert 'data.get("operating_profit") if data.get("is_finance_complete") else None' not in report_source
     assert "if r.operating_profit is not None and r.is_cost_complete" not in finance_source
+
+
+def test_overview_and_finance_expose_real_standard_price_coverage():
+    from app.services import business_overview_service
+
+    overview_source = inspect.getsource(business_overview_service)
+    finance_source = inspect.getsource(finance_api)
+
+    assert "is_cost_complete" in overview_source
+    assert "cost_coverage_rate" in overview_source
+    assert ">= 0.95" not in overview_source
+    assert "1.0 if cost_complete else 0.0" not in finance_source

@@ -67,8 +67,8 @@ async def main():
                  negative_sku_count, sku_count, is_cost_complete, etl_at, created_at)
                 SELECT CAST(:stat_date AS date),
                        b.warehouse_code,
-                       COALESCE(SUM(b.qty), 0)::int,
-                       COALESCE(SUM(b.qty * price.standard_purchase_price)
+                       COALESCE(SUM(GREATEST(b.qty, 0)), 0)::int,
+                       COALESCE(SUM(GREATEST(b.qty, 0) * price.standard_purchase_price)
                            FILTER (WHERE price.standard_purchase_price IS NOT NULL), 0),
                        COUNT(*) FILTER (WHERE b.qty < 0)::int,
                        COUNT(DISTINCT COALESCE(NULLIF(b.sku_code, ''), b.product_code, b.barcode))::int,

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from sqlalchemy import text
 from app.core.standard_purchase_price import effective_sales_standard_cost_sql
+from app.core.store_whitelist import ALLOWED_STORE_CODES
 
 
 def _age_bucket(age_days_expr: str) -> str:
@@ -64,6 +65,7 @@ class OdsToDwd:
                     WHERE s.order_date = :stat_date
                       AND s.quantity > 0
                       AND COALESCE(s.actual_amount, 0) >= 0
+                      AND s.store_code = ANY(:store_codes)
                 )
                 SELECT
                     s.order_date,
@@ -106,7 +108,10 @@ class OdsToDwd:
                     gross_margin      = EXCLUDED.gross_margin,
                     is_cost_missing   = EXCLUDED.is_cost_missing
             """)
-            result = await db.execute(sql, {"stat_date": date.fromisoformat(stat_date)})
+            result = await db.execute(sql, {
+                "stat_date": date.fromisoformat(stat_date),
+                "store_codes": sorted(ALLOWED_STORE_CODES),
+            })
             await db.commit()
             n = result.rowcount if result.rowcount >= 0 else 0
             etl_log.finish_task(run_id, output_rows=n)
@@ -153,6 +158,7 @@ class OdsToDwd:
                     ) price ON true
                     WHERE r.return_date = :stat_date
                       AND r.quantity > 0
+                      AND r.store_code = ANY(:store_codes)
                 )
                 SELECT
                     r.return_date,
@@ -176,7 +182,10 @@ class OdsToDwd:
                     cost_price     = EXCLUDED.cost_price,
                     cost_amount    = EXCLUDED.cost_amount
             """)
-            result = await db.execute(sql, {"stat_date": date.fromisoformat(stat_date)})
+            result = await db.execute(sql, {
+                "stat_date": date.fromisoformat(stat_date),
+                "store_codes": sorted(ALLOWED_STORE_CODES),
+            })
             await db.commit()
             n = result.rowcount if result.rowcount >= 0 else 0
             etl_log.finish_task(run_id, output_rows=n)

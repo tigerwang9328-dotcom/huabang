@@ -217,8 +217,10 @@ class SizeWallService:
                      i.product_code,trim(leading '-' from coalesce(i.color_code,'')) color_code,
                      max(i.color_name) color_name,i.size_code,max(i.size_name) size_name,
                      greatest(sum(coalesce(i.qty,0)),0) inventory_qty,
-                     greatest(sum(coalesce(i.qty,0)),0)
-                       * max(coalesce(sp.standard_purchase_price,0)) inventory_amount
+                     case when max(sp.standard_purchase_price) is not null
+                          then greatest(sum(coalesce(i.qty,0)),0)
+                               * max(sp.standard_purchase_price)
+                          else null end inventory_amount
               from dwd.v_apparel_inventory_balance i
               left join dim.v_baison_sku_standard_purchase_price sp
                 on sp.product_code=i.product_code

@@ -48,8 +48,8 @@ class DwdToDws:
                     COALESCE(SUM(s.actual_amount), 0) AS sales_amount,
                     COALESCE(r.return_amount, 0) AS return_amount,
                     COALESCE(SUM(s.actual_amount), 0) - COALESCE(r.return_amount, 0) AS net_sales_amount,
-                    COALESCE(SUM(s.cost_amount), 0) AS cost_amount,
-                    COALESCE(SUM(s.gross_profit), 0) AS gross_profit,
+                    SUM(s.cost_amount) AS cost_amount,
+                    SUM(s.gross_profit) AS gross_profit,
                     CASE
                         WHEN COALESCE(SUM(s.actual_amount), 0) = 0 THEN NULL
                         ELSE COALESCE(SUM(s.gross_profit), 0) / SUM(s.actual_amount)
@@ -76,9 +76,11 @@ class DwdToDws:
                            SUM(actual_amount) AS return_amount
                     FROM dwd.dwd_return_detail
                     WHERE return_date = :stat_date
+                      AND store_code=ANY(:store_codes)
                     GROUP BY store_code, channel
                 ) r ON s.store_code = r.store_code AND s.channel = r.channel
                 WHERE s.order_date = :stat_date
+                  AND s.store_code=ANY(:store_codes)
                 GROUP BY s.store_code, s.channel, r.return_count, r.return_qty, r.return_amount
                 ON CONFLICT (stat_date, store_code, channel) DO UPDATE SET
                     order_count         = EXCLUDED.order_count,
@@ -94,7 +96,10 @@ class DwdToDws:
                     is_cost_complete    = EXCLUDED.is_cost_complete,
                     etl_at              = NOW()
             """)
-            result = await db.execute(sql, {"stat_date": date.fromisoformat(stat_date)})
+            result = await db.execute(sql, {
+                "stat_date": date.fromisoformat(stat_date),
+                "store_codes": sorted(ALLOWED_STORE_CODES),
+            })
             await db.commit()
             n = result.rowcount if result.rowcount >= 0 else 0
             etl_log.finish_task(run_id, output_rows=n)
@@ -144,6 +149,7 @@ class DwdToDws:
                     BOOL_AND(is_cost_complete)
                 FROM dws.dws_store_daily
                 WHERE stat_date = :stat_date
+                  AND store_code=ANY(:store_codes)
                 ON CONFLICT (stat_date) DO UPDATE SET
                     total_sales_amount   = EXCLUDED.total_sales_amount,
                     net_sales_amount     = EXCLUDED.net_sales_amount,
@@ -153,7 +159,10 @@ class DwdToDws:
                     is_cost_complete     = EXCLUDED.is_cost_complete,
                     etl_at               = NOW()
             """)
-            result = await db.execute(sql, {"stat_date": date.fromisoformat(stat_date)})
+            result = await db.execute(sql, {
+                "stat_date": date.fromisoformat(stat_date),
+                "store_codes": sorted(ALLOWED_STORE_CODES),
+            })
             await db.commit()
             n = result.rowcount if result.rowcount >= 0 else 0
             etl_log.finish_task(run_id, output_rows=n)
@@ -199,10 +208,12 @@ class DwdToDws:
                            SUM(actual_amount) AS return_amount
                     FROM dwd.dwd_return_detail
                     WHERE return_date = :stat_date
+                      AND store_code=ANY(:store_codes)
                     GROUP BY product_code, store_code
                 ) r ON s.product_code = r.product_code AND s.store_code = r.store_code
                 WHERE s.order_date = :stat_date
                   AND s.product_code IS NOT NULL
+                  AND s.store_code=ANY(:store_codes)
                 GROUP BY s.product_code, s.store_code, r.return_qty, r.return_amount
                 ON CONFLICT (stat_date, product_code, store_code) DO UPDATE SET
                     sales_quantity   = EXCLUDED.sales_quantity,
@@ -213,7 +224,10 @@ class DwdToDws:
                     is_cost_complete = EXCLUDED.is_cost_complete,
                     etl_at           = NOW()
             """)
-            result = await db.execute(sql, {"stat_date": date.fromisoformat(stat_date)})
+            result = await db.execute(sql, {
+                "stat_date": date.fromisoformat(stat_date),
+                "store_codes": sorted(ALLOWED_STORE_CODES),
+            })
             await db.commit()
             n = result.rowcount if result.rowcount >= 0 else 0
             etl_log.finish_task(run_id, output_rows=n)

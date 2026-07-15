@@ -91,6 +91,7 @@ def test_user_facing_inventory_functions_use_canonical_view():
     assert "NULLIF(sk.cost_price" not in sources["inventory_sync"]
     assert "NULLIF(sk.market_price" not in sources["inventory_sync"]
     assert "NULLIF(p.cost_price" not in sources["inventory_sync"]
+    assert "GREATEST(b.qty, 0)" in sources["inventory_sync"]
     assert "COALESCE(p.tag_price, p.market_price, 0)" not in sources["mobile_inventory"]
 
 

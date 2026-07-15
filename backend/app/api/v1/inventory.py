@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission
 from app.core.database import get_db
+from app.core.field_permissions import get_user_field_rules
+from app.core.standard_purchase_price import mask_standard_purchase_price_fields
 from app.integrations.baison.services.warehouse_service import WAREHOUSE_LIST_METHOD, import_all_warehouses, import_warehouse_page
 import asyncio as _asyncio
 from app.core.database import AsyncSessionLocal
@@ -33,6 +35,20 @@ from app.services.command_center_service import inventory_warning_source_id
 logger = logging.getLogger("inventory.api")
 
 router = APIRouter(tags=["库存预警中心"])
+
+
+async def _apply_standard_price_permission(
+    db: AsyncSession, current_user: SysUser, data: dict
+) -> dict:
+    rules = await get_user_field_rules(db, current_user, "product")
+    can_view = bool(
+        current_user.is_admin or rules.get("standard_purchase_price") == "none"
+    )
+    payload = mask_standard_purchase_price_fields(data, can_view)
+    payload["permissions"] = {
+        "can_view_standard_purchase_price": can_view,
+    }
+    return payload
 
 _WH_COLS = (
     DimWarehouse.id, DimWarehouse.warehouse_code, DimWarehouse.warehouse_name,
@@ -136,6 +152,7 @@ async def list_inventory_balance(
         )
         for item in data.get("items", []):
             item.update(_INV_PENDING)
+        data = await _apply_standard_price_permission(db, current_user, data)
         return {"success": True, "data": data}
     except Exception:
         logger.exception("inventory balance list error")
@@ -150,6 +167,7 @@ async def inventory_summary(
     """库存管理顶部汇总，基于百胜库存余额和 SKU 成本。"""
     try:
         data = await get_inventory_analysis_summary(db)
+        data = await _apply_standard_price_permission(db, current_user, data)
         return {"success": True, "updated_at": data.get("updated_at"), "data": data}
     except Exception:
         logger.exception("inventory summary error")
@@ -164,6 +182,7 @@ async def inventory_overview(
     """库存管理仓库总览，按 7 店 + 3 仓白名单汇总。"""
     try:
         data = await get_inventory_overview(db)
+        data = await _apply_standard_price_permission(db, current_user, data)
         return {"success": True, "data": data}
     except Exception:
         logger.exception("inventory overview error")
@@ -187,7 +206,11 @@ async def list_inventory_warnings(
         await db.execute(text("SELECT MAX(warning_date) FROM dm.dm_inventory_warning"))
     ).scalar()
     if not query_date:
-        return {"success": True, "data": {"items": [], "total": 0, "page": page, "page_size": page_size}}
+        data = await _apply_standard_price_permission(
+            db, current_user,
+            {"items": [], "total": 0, "page": page, "page_size": page_size},
+        )
+        return {"success": True, "data": data}
     conditions = ["w.warning_date=:warning_date"]
     params = {"warning_date": query_date, "limit": page_size, "offset": (page - 1) * page_size}
     if store_code:
@@ -231,7 +254,14 @@ async def list_inventory_warnings(
         item["evidence"] = item.get("evidence") or {}
         item["generated_at"] = str(item["generated_at"]) if item.get("generated_at") else None
         items.append(item)
-    return {"success": True, "data": {"items": items, "total": int(total), "page": page, "page_size": page_size, "warning_date": str(query_date)}}
+    data = await _apply_standard_price_permission(db, current_user, {
+        "items": items,
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
+        "warning_date": str(query_date),
+    })
+    return {"success": True, "data": data}
 
 
 @router.post("/inventory/warnings/{warning_id}/task-draft")

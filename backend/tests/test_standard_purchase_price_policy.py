@@ -38,11 +38,24 @@ def test_sql_policy_keeps_missing_price_as_null():
 
 def test_sales_rebuild_joins_canonical_standard_purchase_price():
     source = inspect.getsource(PosSaleGoodsService.rebuild_dws_summary)
+    sync_source = inspect.getsource(PosSaleGoodsService.sync_one_store)
 
     assert "v_baison_sku_standard_purchase_price" in source
+    assert "allowed_store_sql_in" in source
+    assert "allowed_inventory_sql_in" not in source
+    assert "ALLOWED_STORE_CODES" in sync_source
+    assert "ALLOWED_INVENTORY_CODES" not in sync_source
     assert "split_part(s.sku_code, '|', 2)" in source
     assert "split_part(s.sku_code, '|', 3)" in source
     assert "p.cost_price" not in source
+
+
+def test_scheduled_dws_aggregation_keeps_the_seven_store_boundary():
+    from app.services.etl.dwd_to_dws import DwdToDws
+
+    source = inspect.getsource(DwdToDws)
+    assert "ALLOWED_STORE_CODES" in source
+    assert "store_code=ANY(:store_codes)" in source.replace(" ", "")
 
 
 def test_business_overview_uses_canonical_standard_purchase_price():

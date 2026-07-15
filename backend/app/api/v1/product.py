@@ -18,6 +18,7 @@ from app.api.v1.deps import require_permission
 from app.core.data_scope import get_data_scope
 from app.core.database import get_db
 from app.core.field_permissions import get_user_field_rules
+from app.core.standard_purchase_price import mask_standard_purchase_price_fields
 import asyncio as _asyncio
 
 from app.core.database import AsyncSessionLocal
@@ -511,9 +512,10 @@ async def list_skus(
                 item.get("standard_purchase_price")
                 and _num(item.get("standard_purchase_price")) > 0
             )
-            if not can_view_standard_purchase_price:
-                item.pop("standard_purchase_price", None)
             item["ai_suggestion"] = _sku_suggestion(item)
+            item = mask_standard_purchase_price_fields(
+                item, can_view_standard_purchase_price
+            )
             items.append(item)
         if sort_by in {"inventory_qty", "sales_qty", "sales_amount"}:
             items = _sort_items(items, sort_by, sort_order)

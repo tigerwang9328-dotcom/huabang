@@ -325,13 +325,22 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
         if scoped_to_store:
             raise RuntimeError("store scoped user skips company DWS metrics")
         dws_result = await db.execute(text("""
-            SELECT total_sales_amount, offline_sales_amount, online_sales_amount,
-                   total_order_count, total_item_count,
-                   gross_profit, gross_margin, avg_order_value,
-                   items_per_order, avg_discount_rate
-            FROM dws.dws_company_daily
-            WHERE stat_date = :sd
-        """), {"sd": query_date})
+            SELECT c.total_sales_amount, c.offline_sales_amount, c.online_sales_amount,
+                   c.total_order_count, c.total_item_count,
+                   c.gross_profit, c.gross_margin, c.avg_order_value,
+                   c.items_per_order, c.avg_discount_rate, c.is_cost_complete,
+                   COALESCE((
+                       SELECT SUM(ABS(p.sales_quantity)) FILTER (
+                                  WHERE COALESCE(p.is_cost_complete, false)
+                              )::numeric
+                              / NULLIF(SUM(ABS(p.sales_quantity)), 0)
+                       FROM dws.dws_product_daily p
+                       WHERE p.stat_date = :sd
+                         AND p.store_code = ANY(:store_codes)
+                   ), 0) AS cost_coverage_rate
+            FROM dws.dws_company_daily c
+            WHERE c.stat_date = :sd
+        """), {"sd": query_date, "store_codes": sorted(ALLOWED_STORE_CODES)})
         dws_row = dws_result.mappings().first()
         if dws_row and float(dws_row["total_sales_amount"] or 0) > 0:
             bm = data["business_metrics"]
@@ -352,11 +361,28 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             )
             bm["yesterday_orders"] = _value(total_orders)
             bm["yesterday_items"] = _value(total_items)
+            cost_coverage_rate = float(dws_row.get("cost_coverage_rate") or 0)
+            is_cost_complete = bool(dws_row.get("is_cost_complete"))
+            cost_reason = f"标准进价覆盖率 {cost_coverage_rate * 100:.1f}%"
             if dws_row.get("gross_profit") is not None:
-                bm["gross_profit"] = _value(round(float(dws_row["gross_profit"]), 2), 2)
+                bm["gross_profit"] = (
+                    _value(round(float(dws_row["gross_profit"]), 2), 2)
+                    if is_cost_complete
+                    else _estimated(
+                        round(float(dws_row["gross_profit"]), 2), 2, cost_reason
+                    )
+                )
             if dws_row.get("gross_margin") is not None:
-                bm["gross_margin"] = _value(round(float(dws_row["gross_margin"]) * 100, 1), 1)
+                bm["gross_margin"] = (
+                    _value(round(float(dws_row["gross_margin"]) * 100, 1), 1)
+                    if is_cost_complete
+                    else _estimated(
+                        round(float(dws_row["gross_margin"]) * 100, 1), 1, cost_reason
+                    )
+                )
             gross_metrics_ready = (
+                is_cost_complete
+                and
                 dws_row.get("gross_profit") is not None
                 and dws_row.get("gross_margin") is not None
             )
@@ -576,13 +602,21 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                 cost_base_qty = float(row.get("detail_qty") or row.get("total_qty") or 0)
                 costed_qty = float(row.get("costed_qty") or 0)
                 covered_qty = float(row.get("covered_qty") or 0)
-                if cost_base_qty > 0 and covered_qty / cost_base_qty >= 0.95:
+                if cost_base_qty > 0 and covered_qty > 0:
+                    coverage_rate = covered_qty / cost_base_qty
                     gross_profit = total_sales - float(row.get("sales_cost") or 0)
-                    status_reason = "成本覆盖完整" if costed_qty / cost_base_qty >= 0.95 else "部分商品成本按同品类平均成本估算"
-                    setter = _value if costed_qty / cost_base_qty >= 0.95 else _estimated
+                    is_complete = (
+                        coverage_rate >= 1
+                        and costed_qty / cost_base_qty >= 1
+                    )
+                    status_reason = f"标准进价覆盖率 {coverage_rate * 100:.1f}%"
+                    setter = _value if is_complete else _estimated
                     bm["gross_profit"] = setter(round(gross_profit, 2), 2, status_reason) if setter is _estimated else setter(round(gross_profit, 2), 2)
                     gross_margin = round(gross_profit / total_sales * 100, 1) if total_sales else 0
                     bm["gross_margin"] = setter(gross_margin, 1, status_reason) if setter is _estimated else setter(gross_margin, 1)
+                elif cost_base_qty > 0:
+                    bm["gross_profit"] = _pending("标准进价覆盖率 0%，无法计算毛利")
+                    bm["gross_margin"] = _pending("标准进价覆盖率 0%，无法计算毛利率")
         except Exception:
             logger.exception("获取 DWD 销售/小票数据失败，使用待接入占位")
 
