@@ -48,7 +48,8 @@ COMMAND_METRIC_LABELS = {
 COMMAND_STATUSES = {"ready", "estimated", "pending_data", "stale"}
 COMMAND_OUTPUT_KEYS = ("facts", "risks", "recommendations", "actions", "limitations")
 FORBIDDEN_INCOMPLETE_FINANCE_CLAIMS = (
-    "公司盈利", "公司亏损", "最终盈利", "最终亏损", "经营利润为", "净利润为",
+    "公司盈利", "公司亏损", "最终盈利", "最终亏损", "实现盈利", "实现亏损",
+    "利润为正", "利润为负", "净利润为",
 )
 
 
@@ -128,6 +129,7 @@ def build_template_command_conclusion(context: dict[str, Any]) -> dict[str, Any]
                 "status": status,
                 "source": metric["source"],
                 "as_of": metric.get("as_of"),
+                "reason": metric.get("reason"),
                 "note": "预估" if status == "estimated" else "已就绪",
             })
         if status == "estimated":
@@ -149,6 +151,7 @@ def build_template_command_conclusion(context: dict[str, Any]) -> dict[str, Any]
     recommendations = [{
         "title": f"复核{risk['title']}",
         "reason": "依据确定性规则和原始证据处理，执行前由负责人确认。",
+        "evidence": [risk["id"]],
     } for risk in risks[:5]]
     actions = [{
         "title": f"处理{risk['title']}",
@@ -169,13 +172,19 @@ def build_template_command_conclusion(context: dict[str, Any]) -> dict[str, Any]
 def validate_command_conclusion(payload: dict[str, Any], *, finance_complete: bool) -> dict[str, Any]:
     if not isinstance(payload, dict) or any(not isinstance(payload.get(key), list) for key in COMMAND_OUTPUT_KEYS):
         raise ValueError("AI经营结论结构不合法")
+    if set(payload) != set(COMMAND_OUTPUT_KEYS):
+        raise ValueError("AI经营结论包含未授权字段")
     rendered = json.dumps(payload, ensure_ascii=False)
+    if any(pattern in rendered for pattern in FORBIDDEN_CONCLUSIONS):
+        raise ValueError("AI经营结论包含禁止的执行结果表述")
     if not finance_complete and any(pattern in rendered for pattern in FORBIDDEN_INCOMPLETE_FINANCE_CLAIMS):
         raise ValueError("费用不完整时禁止输出确定性盈亏结论")
 
     for key in ("facts", "risks", "recommendations"):
         if any(not isinstance(item, dict) or not item.get("title", item.get("label")) for item in payload[key]):
             raise ValueError(f"AI经营结论的{key}结构不合法")
+    if any(not isinstance(item.get("evidence", []), list) for item in payload["recommendations"]):
+        raise ValueError("AI建议证据结构不合法")
     if any(not isinstance(item, str) for item in payload["limitations"]):
         raise ValueError("AI经营结论的数据限制结构不合法")
     for action in payload["actions"]:
@@ -183,6 +192,8 @@ def validate_command_conclusion(payload: dict[str, Any], *, finance_complete: bo
             raise ValueError("AI行动结构不合法")
         if not isinstance(action.get("evidence", []), list):
             raise ValueError("AI行动证据结构不合法")
+        if action.get("status") not in (None, "draft") or action.get("requires_human_confirm") is not True:
+            raise ValueError("AI行动必须是待人工确认的草稿")
         action["status"] = "draft"
         action["requires_human_confirm"] = True
     payload["facts"] = payload["facts"][:50]
@@ -193,6 +204,96 @@ def validate_command_conclusion(payload: dict[str, Any], *, finance_complete: bo
     return payload
 
 
+def validate_model_grounding(
+    payload: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
+    """Reject model facts or risks that cannot be traced to the supplied context."""
+    fallback = build_template_command_conclusion(context)
+    metrics = context.get("metrics") or {}
+    for fact in payload.get("facts", []):
+        key = fact.get("key") if isinstance(fact, dict) else None
+        metric = metrics.get(key)
+        if not metric:
+            raise ValueError("AI事实缺少已接入指标来源")
+        if metric.get("status") not in {"ready", "estimated"} or metric.get("value") is None:
+            raise ValueError("AI事实引用了未就绪指标")
+        if fact.get("label") != metric.get("label"):
+            raise ValueError("AI事实名称与来源数据不一致")
+        for field in ("value", "status", "source", "as_of", "reason"):
+            if fact.get(field) != metric.get(field):
+                raise ValueError(f"AI事实的{field}与来源数据不一致")
+
+    rules = {item["id"]: item for item in context.get("rules", [])}
+    for risk in payload.get("risks", []):
+        source = rules.get(risk.get("id")) if isinstance(risk, dict) else None
+        if not source or any(
+            risk.get(field) != source.get(field)
+            for field in ("title", "level", "source", "evidence")
+        ):
+            raise ValueError("AI风险缺少确定性规则来源")
+
+    expected_fact_keys = {item["key"] for item in fallback["facts"]}
+    actual_fact_keys = {item.get("key") for item in payload.get("facts", [])}
+    if actual_fact_keys != expected_fact_keys:
+        raise ValueError("AI事实未完整覆盖已就绪指标")
+
+    expected_risk_ids = set(rules)
+    actual_risk_ids = {item.get("id") for item in payload.get("risks", [])}
+    if actual_risk_ids != expected_risk_ids:
+        raise ValueError("AI风险未完整覆盖确定性规则")
+
+    allowed_evidence = {
+        key for key, metric in metrics.items()
+        if metric.get("status") in {"ready", "estimated"} and metric.get("value") is not None
+    } | set(rules)
+    grounded_recommendations = []
+    seen_evidence = set()
+    for recommendation in payload.get("recommendations", []):
+        evidence = {str(item) for item in recommendation.get("evidence", [])}
+        if len(evidence) != 1 or not evidence.issubset(allowed_evidence):
+            raise ValueError("AI建议缺少指标或规则证据")
+        evidence_id = next(iter(evidence))
+        if evidence_id in seen_evidence:
+            continue
+        seen_evidence.add(evidence_id)
+        if evidence_id in rules:
+            title = f"复核{rules[evidence_id]['title']}"
+        else:
+            title = f"复核{metrics[evidence_id]['label']}"
+        grounded_recommendations.append({
+            "title": title,
+            "reason": "依据已接入指标或确定性规则处理，执行前由负责人确认。",
+            "evidence": [evidence_id],
+        })
+    if fallback["recommendations"] and not grounded_recommendations:
+        raise ValueError("AI建议遗漏已有经营风险")
+
+    known_limitations = set(fallback["limitations"])
+    if set(payload.get("limitations", [])) != known_limitations:
+        raise ValueError("AI数据限制未完整匹配系统来源")
+    payload["facts"] = fallback["facts"]
+    payload["risks"] = fallback["risks"]
+    payload["recommendations"] = grounded_recommendations
+    payload["actions"] = fallback["actions"]
+    payload["limitations"] = fallback["limitations"]
+    return payload
+
+
+def parse_model_json(content: str) -> dict[str, Any]:
+    text_content = str(content or "").strip()
+    if text_content.startswith("```"):
+        lines = text_content.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text_content = "\n".join(lines).strip()
+    payload = json.loads(text_content)
+    if not isinstance(payload, dict):
+        raise ValueError("AI经营结论必须是JSON对象")
+    return payload
+
+
 class AIEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -200,13 +301,50 @@ class AIEngine:
     async def generate_command_conclusion(self, context_data: dict[str, Any]) -> dict[str, Any]:
         """Build an auditable conclusion exclusively from sourced metrics and deterministic rules."""
         safe_context = sanitize_command_context(context_data)
-        result = build_template_command_conclusion(safe_context)
-        result.update({
-            "mode": "template",
-            "model_used": "deterministic_rules",
-            "fallback_reason": "经营结论仅采用可追溯指标和确定性规则",
-        })
-        return result
+        fallback = build_template_command_conclusion(safe_context)
+        system_prompt = """你是华邦老板经营指挥台的经营分析模型。
+只能使用输入中的指标、确定性规则和任务，不得补充、猜测或改写任何数值、状态、来源和规则事实。
+费用不完整时不得判断公司盈利、亏损、净利润或最终经营结果。
+所有行动必须保持 status=draft、requires_human_confirm=true，并引用输入中的规则ID作为 evidence。
+facts必须包含全部已就绪或预估指标，risks必须包含全部输入规则，limitations必须完整保留示例中的系统限制。
+recommendations只能选择一个已就绪指标键或规则ID放入evidence，标题和原因会由系统重新生成。
+只输出JSON，不要Markdown，不要解释。JSON必须包含且只需包含 facts、risks、recommendations、actions、limitations 五个数组。"""
+        user_content = json.dumps(
+            {"context": safe_context, "required_shape_example": fallback},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        try:
+            response = await self._call_ai(system_prompt, user_content)
+        except Exception as exc:
+            logger.warning("AI经营结论调用失败，回退到确定性模板: %s", exc)
+            fallback.update({
+                "mode": "template",
+                "model_used": "deterministic_rules",
+                "fallback_reason": "model_unavailable",
+            })
+            return fallback
+
+        try:
+            result = parse_model_json(response.get("content", ""))
+            result = validate_command_conclusion(
+                result, finance_complete=bool(safe_context.get("finance_complete"))
+            )
+            result = validate_model_grounding(result, safe_context)
+            result.update({
+                "mode": "model",
+                "model_used": response.get("model") or settings.DEEPSEEK_MODEL,
+                "fallback_reason": None,
+            })
+            return result
+        except Exception as exc:
+            logger.warning("AI经营结论校验失败，回退到确定性模板: %s", exc)
+            fallback.update({
+                "mode": "template",
+                "model_used": "deterministic_rules",
+                "fallback_reason": "model_output_invalid",
+            })
+            return fallback
 
     async def ask(
         self,
@@ -335,10 +473,11 @@ class AIEngine:
         }
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            resp.raise_for_status()
             data = resp.json()
 
         if "error" in data:
-            raise ValueError(f"AI API错误: {data[error]}")
+            raise ValueError(f"AI API错误: {data['error']}")
 
         choices = data.get("choices", [])
         if not choices:

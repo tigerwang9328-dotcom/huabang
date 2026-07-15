@@ -181,6 +181,30 @@ def test_validator_rejects_profit_claim_without_complete_finance():
 
 
 @pytest.mark.asyncio
+async def test_valid_model_conclusion_uses_real_model_path(monkeypatch):
+    engine = AIEngine(db=object())
+    model_payload = build_template_command_conclusion(sanitize_command_context(_context()))
+    calls = []
+
+    async def model(system_prompt, user_content):
+        calls.append((system_prompt, user_content))
+        return {
+            "content": f"```json\n{json.dumps(model_payload, ensure_ascii=False)}\n```",
+            "model": "deepseek-chat",
+        }
+
+    monkeypatch.setattr(engine, "_call_ai", model)
+    result = await engine.generate_command_conclusion(_context())
+
+    assert len(calls) == 1
+    assert "只输出JSON" in calls[0][0]
+    assert '"baison_pos"' in calls[0][1]
+    assert result["mode"] == "model"
+    assert result["model_used"] == "deepseek-chat"
+    assert result["facts"] == model_payload["facts"]
+
+
+@pytest.mark.asyncio
 async def test_invalid_model_structure_falls_back_without_blocking_report(monkeypatch):
     engine = AIEngine(db=object())
 
@@ -193,6 +217,7 @@ async def test_invalid_model_structure_falls_back_without_blocking_report(monkey
     assert result["mode"] == "template"
     assert result["facts"]
     assert result["limitations"]
+    assert result["fallback_reason"] == "model_output_invalid"
 
 
 @pytest.mark.asyncio
@@ -209,6 +234,88 @@ async def test_invalid_recommendation_shape_falls_back_without_blocking_report(m
 
     assert result["mode"] == "template"
     assert result["facts"]
+
+
+@pytest.mark.asyncio
+async def test_model_cannot_change_sourced_metric_values(monkeypatch):
+    engine = AIEngine(db=object())
+    model_payload = build_template_command_conclusion(sanitize_command_context(_context()))
+    model_payload["facts"][0]["value"] = 999999
+
+    async def model(*_args, **_kwargs):
+        return {"content": json.dumps(model_payload, ensure_ascii=False), "model": "fake"}
+
+    monkeypatch.setattr(engine, "_call_ai", model)
+    result = await engine.generate_command_conclusion(_context())
+
+    assert result["mode"] == "template"
+    assert all(item["value"] != 999999 for item in result["facts"])
+
+
+@pytest.mark.asyncio
+async def test_model_cannot_promote_pending_metric_to_a_fact(monkeypatch):
+    engine = AIEngine(db=object())
+    safe = sanitize_command_context(_context())
+    model_payload = build_template_command_conclusion(safe)
+    pending = safe["metrics"]["online_sales"]
+    model_payload["facts"].append({"key": "online_sales", **pending})
+
+    async def model(*_args, **_kwargs):
+        return {"content": json.dumps(model_payload, ensure_ascii=False), "model": "fake"}
+
+    monkeypatch.setattr(engine, "_call_ai", model)
+    result = await engine.generate_command_conclusion(_context())
+
+    assert result["mode"] == "template"
+    assert not any(item["key"] == "online_sales" for item in result["facts"])
+
+
+@pytest.mark.asyncio
+async def test_model_forbidden_execution_claim_falls_back(monkeypatch):
+    engine = AIEngine(db=object())
+    model_payload = build_template_command_conclusion(sanitize_command_context(_context()))
+    model_payload["actions"][0]["title"] = "已下单100件"
+
+    async def model(*_args, **_kwargs):
+        return {"content": json.dumps(model_payload, ensure_ascii=False), "model": "fake"}
+
+    monkeypatch.setattr(engine, "_call_ai", model)
+    result = await engine.generate_command_conclusion(_context())
+
+    assert result["mode"] == "template"
+    assert "已下单100件" not in json.dumps(result, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_model_empty_conclusion_cannot_hide_available_facts_and_risks(monkeypatch):
+    engine = AIEngine(db=object())
+    empty = {key: [] for key in ("facts", "risks", "recommendations", "actions", "limitations")}
+
+    async def model(*_args, **_kwargs):
+        return {"content": json.dumps(empty, ensure_ascii=False), "model": "fake"}
+
+    monkeypatch.setattr(engine, "_call_ai", model)
+    result = await engine.generate_command_conclusion(_context())
+
+    assert result["mode"] == "template"
+    assert result["facts"]
+    assert result["risks"]
+
+
+@pytest.mark.asyncio
+async def test_model_extra_top_level_conclusion_is_rejected(monkeypatch):
+    engine = AIEngine(db=object())
+    payload = build_template_command_conclusion(sanitize_command_context(_context()))
+    payload["executive_verdict"] = "公司盈利，可以直接执行"
+
+    async def model(*_args, **_kwargs):
+        return {"content": json.dumps(payload, ensure_ascii=False), "model": "fake"}
+
+    monkeypatch.setattr(engine, "_call_ai", model)
+    result = await engine.generate_command_conclusion(_context())
+
+    assert result["mode"] == "template"
+    assert "executive_verdict" not in result
 
 
 @pytest.mark.asyncio
@@ -231,7 +338,7 @@ async def test_model_profit_synonyms_and_forbidden_actions_are_not_exposed(monke
     ]
 
     async def model(*_args, **_kwargs):
-        pytest.fail("deterministic command conclusions must not call a language model")
+        return {"content": json.dumps(model_payload, ensure_ascii=False), "model": "fake"}
 
     monkeypatch.setattr(engine, "_call_ai", model)
     result = await engine.generate_command_conclusion(_context(finance_complete=False))
@@ -302,8 +409,8 @@ async def test_report_zero_sales_keeps_gross_profit_but_not_undefined_margin():
 
 
 @pytest.mark.asyncio
-async def test_existing_report_rebuilds_and_returns_structured_conclusion():
-    row = [None] * 45
+async def test_existing_report_returns_persisted_conclusion_without_model_call(monkeypatch):
+    row = [None] * 46
     row[0] = date(2026, 7, 12)
     row[1:13] = [18560, 18551, 9, 9 / 18560, 18560, 34, 66, 545.88, 1.94, 0.8, 9120, 0.4914]
     row[13:23] = [800, 500, 0, 0, 2400000, 100000, 50000, 3, 1, 4]
@@ -317,6 +424,14 @@ async def test_existing_report_rebuilds_and_returns_structured_conclusion():
         "operating_profit": "ready",
     }
     row[43:45] = [0, 0]
+    persisted = build_template_command_conclusion(sanitize_command_context(_context()))
+    persisted.update({"mode": "model", "model_used": "deepseek-chat", "fallback_reason": None})
+    row[45] = persisted
+
+    async def unexpected_model_call(*_args, **_kwargs):
+        pytest.fail("reading a saved report must not call the external model")
+
+    monkeypatch.setattr(AIEngine, "generate_command_conclusion", unexpected_model_call)
 
     class Result:
         def fetchone(self):
@@ -328,10 +443,7 @@ async def test_existing_report_rebuilds_and_returns_structured_conclusion():
 
     result = await ReportService()._get_existing_report("2026-07-12", Db())
 
-    assert set(result["command_conclusion"]) >= {
-        "facts", "risks", "recommendations", "actions", "limitations"
-    }
-    assert any(item["key"] == "operating_profit" for item in result["command_conclusion"]["facts"])
+    assert result["command_conclusion"] == persisted
 
 
 def test_report_and_diagnosis_use_the_constrained_conclusion_contract():

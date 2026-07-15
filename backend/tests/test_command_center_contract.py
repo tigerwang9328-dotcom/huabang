@@ -23,6 +23,16 @@ def test_vip_negative_balance_amount_has_follow_up_migration_and_model_field():
     assert "vip_negative_balance_amount" in model.read_text(encoding="utf-8")
 
 
+def test_ai_command_conclusion_is_persisted_with_the_daily_report():
+    migration = BACKEND / "alembic" / "versions" / "344f7a8192a3_persist_ai_command_conclusion.py"
+    model = (BACKEND / "app" / "models" / "dm.py").read_text(encoding="utf-8")
+    report = (BACKEND / "app" / "services" / "report_service.py").read_text(encoding="utf-8")
+
+    assert "ai_command_conclusion" in migration.read_text(encoding="utf-8")
+    assert "ai_command_conclusion" in model
+    assert "ai_command_conclusion" in report
+
+
 def test_public_apis_expose_command_center_drilldowns():
     inventory_api = (BACKEND / "app" / "api" / "v1" / "inventory.py").read_text(encoding="utf-8")
     member_api = (BACKEND / "app" / "api" / "v1" / "member.py").read_text(encoding="utf-8")

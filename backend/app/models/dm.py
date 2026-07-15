@@ -70,6 +70,7 @@ class DmBossDailyReport(Base):
     ai_data_completeness = Column(String(32), comment="数据完整性评级")
     ai_model_used = Column(String(64))
     ai_generated_at = Column(DateTime(timezone=True))
+    ai_command_conclusion = Column(JSONB, comment="受约束AI经营结论")
 
     # 元数据
     is_cost_complete = Column(Boolean, default=False)

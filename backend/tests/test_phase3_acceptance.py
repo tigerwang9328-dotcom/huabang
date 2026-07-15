@@ -96,7 +96,7 @@ async def test_model_unavailable_uses_deterministic_template(monkeypatch):
 
     assert result["mode"] == "template"
     assert result["model_used"] == "deterministic_rules"
-    assert result["fallback_reason"]
+    assert result["fallback_reason"] == "model_unavailable"
     assert result["actions"][0]["requires_human_confirm"] is True
 
 

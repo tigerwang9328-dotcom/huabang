@@ -1,10 +1,15 @@
 """老板日报生成服务：聚合25项内容 + DeepSeek AI摘要"""
+import json
 import logging
 from datetime import date, timedelta
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from app.services.ai_engine import AIEngine
+from app.services.ai_engine import (
+    AIEngine,
+    build_template_command_conclusion,
+    sanitize_command_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,7 @@ class ReportService:
                 ai_risk_summary     = :risk_summary,
                 ai_data_completeness = :data_completeness,
                 ai_model_used       = :model_used,
+                ai_command_conclusion = CAST(:command_conclusion AS jsonb),
                 ai_generated_at     = NOW(),
                 updated_at          = NOW()
             WHERE report_date = :d
@@ -57,6 +63,9 @@ class ReportService:
             "risk_summary": ai_result.get("risk_summary", ""),
             "data_completeness": ai_result.get("data_completeness", ""),
             "model_used": ai_result.get("model_used", ""),
+            "command_conclusion": json.dumps(
+                ai_result.get("command_conclusion") or {}, ensure_ascii=False
+            ),
         })
         await db.commit()
 
@@ -199,7 +208,9 @@ class ReportService:
             "trend_7d": trend,
         }
 
-    async def _generate_ai_summary(self, data: dict, db: AsyncSession) -> dict:
+    async def _generate_ai_summary(
+        self, data: dict, db: AsyncSession, *, allow_model: bool = True
+    ) -> dict:
         if "error" in data:
             return {"summary": f"⚠️ {data['error']}", "today_focus": "", "risk_summary": "",
                     "data_completeness": "", "model_used": "none"}
@@ -251,12 +262,23 @@ class ReportService:
             "evidence": [f"数量={item.get('count', 0)}"],
             "source": "dm_inventory_warning",
         } for index, item in enumerate(data.get("inventory_warnings") or [])]
-        conclusion = await AIEngine(db).generate_command_conclusion({
+        command_context = {
             "metrics": metrics,
             "rules": rules,
             "tasks": [],
             "finance_complete": bool(data.get("is_finance_complete")),
-        })
+        }
+        if allow_model:
+            conclusion = await AIEngine(db).generate_command_conclusion(command_context)
+        else:
+            conclusion = build_template_command_conclusion(
+                sanitize_command_context(command_context)
+            )
+            conclusion.update({
+                "mode": "template",
+                "model_used": "deterministic_rules",
+                "fallback_reason": "legacy_report_without_persisted_conclusion",
+            })
         fact_text = "；".join(
             f"{item['label']}{item['value']}{'（预估）' if item['status'] == 'estimated' else ''}"
             for item in conclusion["facts"][:6]
@@ -289,7 +311,8 @@ class ReportService:
                    inventory_total_qty, vip_balance, vip_negative_balance_count,
                    vip_sales_amount, vip_sales_ratio, major_exception_count,
                    source_freshness, metric_status
-                   , inventory_age_unknown_qty, inventory_age_unknown_amount
+                   , inventory_age_unknown_qty, inventory_age_unknown_amount,
+                   ai_command_conclusion
             FROM dm.dm_boss_daily_report WHERE report_date = :d
         """), {"d": d})
         row = r.fetchone()
@@ -342,8 +365,11 @@ class ReportService:
             "metric_status": row[42] or {},
             "inventory_age_unknown_qty": float(row[43] or 0),
             "inventory_age_unknown_amount": float(row[44] or 0),
+            "command_conclusion": row[45] or None,
             "data_completeness_label": "成本缺失，利润不可准确计算。" if not row[29] else "",
         }
+        if report["command_conclusion"]:
+            return report
         risk_count = report["major_exception_count"] or report["exception_count"]
         structured = await self._generate_ai_summary({
             "stat_date": report["report_date"],
@@ -374,7 +400,7 @@ class ReportService:
                 "count": risk_count,
                 "level": "critical",
             }] if risk_count else []),
-        }, db)
+        }, db, allow_model=False)
         report["command_conclusion"] = structured["command_conclusion"]
         return report
 
