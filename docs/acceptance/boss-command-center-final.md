@@ -14,7 +14,7 @@
 - 技术验收：后端、前端、迁移、构建、生产接口、桌面/移动页面和前端回滚机制均已有实测证据。
 - 运行观察：2026-07-15 已完成 04:00 销售/退货、05:30 库存、06:30 日报和 06:40 健康检查的真实完整周期。05:30 与 06:30 首次执行分别暴露业务日期字符串绑定和公司级 VIP 规则空参数类型问题，均补回归测试、修复、全量回归并在同一周期幂等重跑成功；06:40 返回 `healthy=true`、`issues=[]`，未创建健康告警草稿。
 - 人工签字：待老板完成 30 秒经营判断与一条真实行动任务闭环验收。
-- 人工抽查入口已固定：异常 [ID 217](https://hbreare.com/app/warning?exception_id=217)、[ID 226](https://hbreare.com/app/warning?exception_id=226)、[ID 231](https://hbreare.com/app/warning?exception_id=231)；VIP 行动 `/app/task/1715`。归属稽核当前没有真实异常，因为七类归属来源尚未全部就绪，不能伪造样本补验。
+- 人工抽查入口已更新为 2026-07-14 当前业务日样本：R001 [ID 276](https://hbreare.com/app/warning?exception_id=276)、[ID 277](https://hbreare.com/app/warning?exception_id=277)、[ID 278](https://hbreare.com/app/warning?exception_id=278)；R006 [ID 283](https://hbreare.com/app/warning?exception_id=283)、[ID 284](https://hbreare.com/app/warning?exception_id=284)、[ID 285](https://hbreare.com/app/warning?exception_id=285)；R010 [ID 286](https://hbreare.com/app/warning?exception_id=286)、[ID 287](https://hbreare.com/app/warning?exception_id=287)、[ID 288](https://hbreare.com/app/warning?exception_id=288)。VIP 行动仍为 [任务 1715](https://hbreare.com/app/task/1715)。归属稽核当前没有真实异常，因为七类归属来源尚未全部就绪，不能伪造样本补验。
 
 ## AI安全边界
 
@@ -49,6 +49,8 @@
 
 2026-07-14 正式经营快照结果：销售 8,521 元、实收 7,519 元、退货 0 元、17 单、33 件、客单价 501.24 元、连带率 1.94、毛利 6,346.32 元；库存使用 2026-07-15 当日 10 编码外穿衣物快照，共 18,504 件、2,365,867.97 元，VIP 正余额 1,117,707.26 元。销售、退货、库存和 VIP 余额核心来源均为 `ready`；费用仍为 `pending_data`，不输出确定性经营利润。
 
+经营快照的库存指标读取当日 05:30 后最新快照；R006/R010 规则证据则固定记录经营日对应的历史库存 DWS，便于以后按原业务日复核。两者日期用途不同，验收时不得把历史规则证据误认为当日实时库存。毛利率状态已与自身来源状态统一：有销售且成本完整时为 `ready`，有销售但成本不完整时为 `estimated`，零销售时为 `pending_data`。
+
 ## 生产抽查
 
 | 页面/接口 | 验收重点 | 状态 |
@@ -65,7 +67,7 @@
 | 验收项 | 实测结果 |
 | --- | --- |
 | 第三阶段聚焦测试 | `tests/test_phase3_acceptance.py` 7 passed |
-| 后端全量测试 | 487 passed，1 skipped，1 个既有 Pydantic 弃用警告 |
+| 后端全量测试 | 490 passed，1 skipped，1 个既有 Pydantic 弃用警告 |
 | 数据库迁移 | `222d5e6f7081 (head)`；第二阶段已完成 `downgrade -1 -> upgrade head`，关键业务计数不变 |
 | 前端测试 | 131 passed |
 | 类型检查/生产构建 | `vue-tsc --noEmit` 通过；Vite 生产构建通过 |
@@ -79,6 +81,13 @@
 
 ## 人工签字
 
+### 30 秒预读答案（2026-07-14）
+
+1. 昨日销售 8,521 元、实收 7,519 元、退货 0 元、毛利 6,346.32 元；17 单、33 件，客单价 501.24 元，连带率 1.94。
+2. 销售、退货、毛利、库存和 VIP 余额已就绪；库存库龄因历史入库批次匹配不全仍为 `estimated`；费用和经营利润为 `pending_data`，不得判断公司净盈利或亏损。
+3. 当前优先核查负库存：门店 134681 有 3 个负库存 SKU（[证据 ID 284](https://hbreare.com/app/warning?exception_id=284)），门店 285702 和仓库 GYNG 各有 1 个；同时 285702、285102、285101 的历史库存周转天数偏高。
+4. VIP 行动 [任务 1715](https://hbreare.com/app/task/1715) 尚未指定真实负责人，截止 2026-07-17。老板或主管需先确认负责人，再派发、反馈、复查和关闭；当前不能把“责任人是谁”回答完整，因此最终业务签字仍待完成。
+
 老板应在打开首页后 30 秒内回答：
 
 1. 昨天销售、实收、退货和毛利结果如何？
@@ -89,8 +98,8 @@
 | 人工验收项 | 当前状态 | 签字/日期 |
 | --- | --- | --- |
 | 30 秒经营判断 | 待验收 |  |
-| 抽查重大异常原始证据 | 待验收；直接打开 [ID 217](https://hbreare.com/app/warning?exception_id=217)（低销售）、[ID 226](https://hbreare.com/app/warning?exception_id=226)（负库存）、[ID 231](https://hbreare.com/app/warning?exception_id=231)（高周转天数） |  |
-| 完成一条真实 VIP 任务全闭环 | 待验收；使用 `/app/task/1715` |  |
+| 抽查重大异常原始证据 | 待验收；R001 使用 ID 276/277/278，R006 使用 ID 283/284/285，R010 使用 ID 286/287/288，均可从上方直达 |  |
+| 完成一条真实 VIP 任务全闭环 | 待验收；使用 [任务 1715](https://hbreare.com/app/task/1715) |  |
 | 归属稽核 | 待数据源就绪；当前真实归属异常为 0，不制造验收数据 |  |
 | 确认 Web 与移动同日指标一致 | 待验收 |  |
 

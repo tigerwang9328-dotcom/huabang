@@ -87,7 +87,7 @@ def test_metric_statuses_follow_each_source_freshness():
 
 def test_zero_sales_keeps_gross_profit_ready_but_margin_pending():
     statuses = derive_metric_statuses(
-        sales={"etl_at": "2026-07-13T20:00:00Z", "is_cost_complete": True, "net_sales_amount": 0},
+        sales={"etl_at": "2026-07-13T20:00:00Z", "is_cost_complete": True, "total_sales_amount": 0},
         ticket={"synced_at": "2026-07-13T20:00:00Z"},
         inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
         members={"updated_at": "2026-07-13T20:00:00Z"},
@@ -95,6 +95,37 @@ def test_zero_sales_keeps_gross_profit_ready_but_margin_pending():
 
     assert statuses["gross_profit"] == "ready"
     assert statuses["gross_margin"] == "pending_data"
+
+
+def test_positive_company_sales_marks_gross_margin_with_cost_status():
+    statuses = derive_metric_statuses(
+        sales={
+            "etl_at": "2026-07-13T20:00:00Z",
+            "is_cost_complete": True,
+            "total_sales_amount": 8521,
+        },
+        ticket={"synced_at": "2026-07-13T20:00:00Z"},
+        inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
+        members={"updated_at": "2026-07-13T20:00:00Z"},
+    )
+
+    assert statuses["gross_margin"] == "ready"
+
+
+def test_incomplete_cost_marks_positive_sales_margin_estimated():
+    statuses = derive_metric_statuses(
+        sales={
+            "etl_at": "2026-07-13T20:00:00Z",
+            "is_cost_complete": False,
+            "total_sales_amount": 8521,
+        },
+        ticket={"synced_at": "2026-07-13T20:00:00Z"},
+        inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
+        members={"updated_at": "2026-07-13T20:00:00Z"},
+    )
+
+    assert statuses["gross_profit"] == "estimated"
+    assert statuses["gross_margin"] == "estimated"
 
 
 def test_return_metric_is_ready_when_synced_ticket_source_reports_zero_returns():
@@ -261,3 +292,22 @@ async def test_command_center_snapshot_exposes_mobile_first_screen_counts():
 
     assert snapshot["core_metrics"]["major_exception_count"]["value"] == 12
     assert snapshot["core_metrics"]["pending_task_count"]["value"] == 7
+
+
+@pytest.mark.asyncio
+async def test_command_center_snapshot_uses_gross_margin_status():
+    report = {
+        "report_date": date(2026, 7, 13),
+        "source_freshness": {},
+        "metric_status": {
+            "gross_profit": "ready",
+            "gross_margin": "pending_data",
+        },
+        "gross_profit": Decimal("6346.32"),
+        "gross_margin": Decimal("0.7448"),
+    }
+
+    snapshot = await get_command_center_snapshot(_SnapshotDb(report), report["report_date"])
+
+    assert snapshot["core_metrics"]["gross_profit"]["status"] == "ready"
+    assert snapshot["core_metrics"]["gross_margin"]["status"] == "pending_data"
