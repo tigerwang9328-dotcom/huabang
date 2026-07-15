@@ -10,6 +10,10 @@ from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
 from app.core.standard_purchase_price import effective_sales_standard_cost_sql
 from app.core.store_whitelist import ALLOWED_STORE_CODES, allowed_store_sql_in
+from app.services.sales_metric_service import (
+    complete_pos_sync_dates,
+    reconcile_confirmed_sales_dates,
+)
 from sqlalchemy import text
 
 logger = logging.getLogger("baison.pos_sale")
@@ -226,6 +230,9 @@ class PosSaleGoodsService:
                 "p.supplier_code", "sp.standard_purchase_price", "s.sales_amount", "s.sales_qty"
             )
             async with AsyncSessionLocal() as db:
+                await db.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+                confirmed_dates = await complete_pos_sync_dates(db, params["sd"], params["ed"])
+                params["confirmed_dates"] = confirmed_dates
                 await db.execute(text(f"""
                     DELETE FROM dws.dws_product_daily
                     WHERE stat_date >= :sd AND stat_date <= :ed
@@ -256,6 +263,7 @@ class PosSaleGoodsService:
                                now(), now()
                         FROM dwd.dwd_pos_sale_goods
                         WHERE biz_date >= :sd AND biz_date <= :ed
+                          AND biz_date = ANY(:confirmed_dates)
                           AND store_code IN {store_in}
                         GROUP BY biz_date
                         ON CONFLICT (stat_date)
@@ -289,6 +297,7 @@ class PosSaleGoodsService:
                                now(), now()
                         FROM dwd.dwd_pos_sale_goods
                         WHERE biz_date >= :sd AND biz_date <= :ed
+                          AND biz_date = ANY(:confirmed_dates)
                           AND store_code IN {store_in}
                         GROUP BY biz_date, store_code
                         ON CONFLICT (stat_date, store_code, channel)
@@ -390,6 +399,7 @@ class PosSaleGoodsService:
                                    BOOL_AND(is_cost_complete) is_cost_complete
                             FROM dws.dws_store_daily
                             WHERE stat_date>=:sd AND stat_date<=:ed
+                              AND stat_date = ANY(:confirmed_dates)
                               AND store_code IN {store_in} AND channel='offline'
                             GROUP BY stat_date
                         )
@@ -410,12 +420,14 @@ class PosSaleGoodsService:
                                    gross_profit,gross_margin
                             FROM dws.dws_store_daily
                             WHERE stat_date>=:sd AND stat_date<=:ed
+                              AND stat_date = ANY(:confirmed_dates)
                               AND store_code IN {store_in} AND channel='offline'
                             UNION ALL
                             SELECT stat_date,'ALL',net_sales_amount,total_cost_amount,
                                    gross_profit,gross_margin
                             FROM dws.dws_company_daily
                             WHERE stat_date>=:sd AND stat_date<=:ed
+                              AND stat_date = ANY(:confirmed_dates)
                         )
                         UPDATE dws.dws_finance_daily d
                         SET net_sales_amount=x.net_sales_amount,
@@ -429,6 +441,9 @@ class PosSaleGoodsService:
                     """), params,
                 )
 
+                confirmed_dates = await reconcile_confirmed_sales_dates(
+                    db, confirmed_dates
+                )
                 await db.commit()
 
                 result = await db.execute(
@@ -448,4 +463,5 @@ class PosSaleGoodsService:
                     "store_count": int(row[2]),
                     "product_count": int(row[3]),
                     "company_daily_rows": int(row[4]),
+                    "confirmed_sales_dates": [str(value) for value in confirmed_dates],
                 }

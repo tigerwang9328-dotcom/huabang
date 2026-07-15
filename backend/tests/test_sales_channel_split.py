@@ -1,5 +1,9 @@
+from datetime import date
 from pathlib import Path
 
+import pytest
+
+import app.services.sales_metric_service as sales_metric_service
 from app.services.business_overview_service import _build_platform_sales
 from app.services.sales_metric_service import PAY_DETAIL_SQL, summarize_payment_rows
 
@@ -113,3 +117,61 @@ def test_actual_receipts_subtract_refunds_without_reducing_sales_amount():
     assert summary["online_sales_amount"] == 0
     assert summary["refund_amount"] == 54
     assert summary["actual_pay_amount"] == 12976
+
+
+@pytest.mark.asyncio
+async def test_sale_goods_rebuild_reapplies_confirmed_sales_before_finance(monkeypatch):
+    calls = []
+
+    async def fake_rebuild_sales(db, stat_date, *, require_complete_sync=True):
+        calls.append(("sales", stat_date))
+        assert require_complete_sync is False
+        return stat_date != date(2026, 7, 13)
+
+    async def fake_has_complete_sync(db, stat_date):
+        return stat_date != date(2026, 7, 13)
+
+    class FakeDwdToDws:
+        async def rebuild_finance_daily(self, stat_date, db):
+            calls.append(("finance", date.fromisoformat(stat_date)))
+
+    monkeypatch.setattr(sales_metric_service, "rebuild_confirmed_sales_dws", fake_rebuild_sales)
+    monkeypatch.setattr(sales_metric_service, "has_complete_pos_ticket_sync", fake_has_complete_sync)
+    monkeypatch.setattr(sales_metric_service, "DwdToDws", FakeDwdToDws)
+
+    result = await sales_metric_service.reconcile_confirmed_sales_range(
+        object(), date(2026, 7, 12), date(2026, 7, 14)
+    )
+
+    assert result == [date(2026, 7, 12), date(2026, 7, 14)]
+    assert calls == [
+        ("sales", date(2026, 7, 12)),
+        ("finance", date(2026, 7, 12)),
+        ("sales", date(2026, 7, 14)),
+        ("finance", date(2026, 7, 14)),
+    ]
+
+
+def test_sale_goods_rebuild_only_overwrites_confirmed_dates():
+    source = (
+        BACKEND
+        / "app"
+        / "integrations"
+        / "baison"
+        / "services"
+        / "pos_sale_goods_service.py"
+    ).read_text(encoding="utf-8")
+    rebuild = source[source.index("async def rebuild_dws_summary") :]
+
+    guard = "confirmed_dates = await complete_pos_sync_dates"
+    stable_snapshot = 'text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")'
+    company_write = "INSERT INTO dws.dws_company_daily AS t"
+    assert rebuild.index(stable_snapshot) < rebuild.index(guard)
+    assert rebuild.index(guard) < rebuild.index(company_write)
+    assert rebuild.count("biz_date = ANY(:confirmed_dates)") >= 2
+    finance_source = rebuild[
+        rebuild.index("WITH finance_source AS") :
+        rebuild.index("UPDATE dws.dws_finance_daily", rebuild.index("WITH finance_source AS"))
+    ]
+    assert finance_source.count("stat_date = ANY(:confirmed_dates)") == 2
+    assert "reconcile_confirmed_sales_dates(\n                    db, confirmed_dates" in rebuild

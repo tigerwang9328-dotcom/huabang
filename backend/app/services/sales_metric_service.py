@@ -1,6 +1,6 @@
 """Shared Baison POS payment formula for sales and actual receipts."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable
 
@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.store_whitelist import ALLOWED_STORE_CODES
+from app.services.etl.dwd_to_dws import DwdToDws
 
 
 SALES_PAYMENT_CODES = ("000", "003", "004", "011", "666", "971")
@@ -128,9 +129,11 @@ async def has_complete_pos_ticket_sync(db: AsyncSession, stat_date: date) -> boo
     return bool(result.scalar())
 
 
-async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> bool:
+async def rebuild_confirmed_sales_dws(
+    db: AsyncSession, stat_date: date, *, require_complete_sync: bool = True
+) -> bool:
     """Recalculate DWS sales fields with the confirmed Baison payment formula."""
-    if not await has_complete_pos_ticket_sync(db, stat_date):
+    if require_complete_sync and not await has_complete_pos_ticket_sync(db, stat_date):
         return False
     params = {
         "sd": stat_date,
@@ -223,3 +226,38 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> bool
         WHERE d.stat_date=:stat_date
     """), params)
     return True
+
+
+async def reconcile_confirmed_sales_range(
+    db: AsyncSession, start_date: date, end_date: date
+) -> list[date]:
+    """Reapply the canonical payment formula after product-detail DWS rebuilds."""
+    eligible_dates = await complete_pos_sync_dates(db, start_date, end_date)
+    return await reconcile_confirmed_sales_dates(db, eligible_dates)
+
+
+async def reconcile_confirmed_sales_dates(
+    db: AsyncSession, eligible_dates: Iterable[date]
+) -> list[date]:
+    """Reconcile one stable set of dates already verified as fully synced."""
+    confirmed_dates = []
+    for current in eligible_dates:
+        if not await rebuild_confirmed_sales_dws(
+            db, current, require_complete_sync=False
+        ):
+            continue
+        await DwdToDws().rebuild_finance_daily(str(current), db)
+        confirmed_dates.append(current)
+    return confirmed_dates
+
+
+async def complete_pos_sync_dates(
+    db: AsyncSession, start_date: date, end_date: date
+) -> list[date]:
+    complete_dates = []
+    current = start_date
+    while current <= end_date:
+        if await has_complete_pos_ticket_sync(db, current):
+            complete_dates.append(current)
+        current += timedelta(days=1)
+    return complete_dates
