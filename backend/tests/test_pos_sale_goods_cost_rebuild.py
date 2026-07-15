@@ -1,5 +1,6 @@
 import asyncio
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -78,3 +79,22 @@ def test_latest_product_daily_uses_standard_purchase_price():
     assert totals["expected_cost"] > Decimal("0")
     assert totals["actual_cost"] == totals["expected_cost"]
     assert totals["actual_gross"] == totals["expected_gross"]
+
+
+def test_production_rebuild_script_uses_the_same_standard_purchase_price_policy():
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "rebuild_pos_sale_goods_from_tickets.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "v_baison_sku_standard_purchase_price" in source
+    assert "baison_standard_purchase_price" in source
+    assert "GY1229" in source
+    assert "sales_amount * 0.60" in source
+    assert "NULLIF(sk.cost_price" not in source
+    assert "NULLIF(sk.market_price" not in source
+    assert "NULLIF(p.cost_price" not in source
+    assert "('GZ001')" not in source
+    assert "('GZ002')" not in source
+    assert "('GYNG')" not in source

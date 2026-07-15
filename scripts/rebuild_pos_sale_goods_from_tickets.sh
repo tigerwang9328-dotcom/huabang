@@ -47,7 +47,7 @@ INSERT INTO dwd.dwd_pos_sale_goods
  cost_price, cost_amount, gross_profit, gross_margin, cost_source, is_cost_missing,
  stock_qty_snapshot, batch_no, raw_ref_id, synced_at, created_at, updated_at)
 WITH whitelist(code) AS (
-  VALUES ('134681'),('285204'),('285702'),('185805'),('185808'),('285101'),('285102'),('GZ001'),('GZ002'),('GYNG')
+  VALUES ('134681'),('285204'),('285702'),('185805'),('185808'),('285101'),('285102')
 ), detail AS (
   SELECT
     t.id AS ticket_id,
@@ -79,26 +79,40 @@ WITH whitelist(code) AS (
 ), costed AS (
   SELECT
     n.*,
-    COALESCE(
-      NULLIF(sk.cost_price, 0),
-      NULLIF(sk.market_price, 0),
-      NULLIF(p.cost_price, 0)
-    ) AS unit_cost,
     CASE
-      WHEN NULLIF(sk.cost_price, 0) IS NOT NULL THEN 'sku_cost'
-      WHEN NULLIF(sk.market_price, 0) IS NOT NULL THEN 'sku_market_estimate'
-      WHEN NULLIF(p.cost_price, 0) IS NOT NULL THEN 'product_cost'
+      WHEN product.supplier_code = 'GY1229'
+       AND price.standard_purchase_price = 1
+       AND n.sales_qty <> 0
+        THEN n.sales_amount * 0.60 / n.sales_qty
+      ELSE price.standard_purchase_price
+    END AS unit_cost,
+    CASE
+      WHEN product.supplier_code = 'GY1229'
+       AND price.standard_purchase_price = 1
+        THEN 'supplier_ratio_60pct'
+      WHEN price.standard_purchase_price IS NOT NULL
+        THEN 'baison_standard_purchase_price'
       ELSE 'missing'
     END AS cost_source,
-    CASE
-      WHEN NULLIF(sk.cost_price, 0) IS NOT NULL OR NULLIF(p.cost_price, 0) IS NOT NULL
-      THEN false ELSE true
-    END AS is_cost_missing
+    price.standard_purchase_price IS NULL AS is_cost_missing
   FROM normalized n
-  LEFT JOIN dim.dim_sku sk
-    ON REPLACE(n.sku_code, '|', '') = sk.sku_code
-  LEFT JOIN dim.dim_product p
-    ON n.product_code = p.product_code
+  LEFT JOIN LATERAL (
+    SELECT p.supplier_code
+    FROM dim.dim_product p
+    WHERE p.product_code = n.product_code
+      AND p.source_system = 'baison'
+    ORDER BY p.synced_at DESC NULLS LAST, p.id DESC
+    LIMIT 1
+  ) product ON true
+  LEFT JOIN LATERAL (
+    SELECT sp.standard_purchase_price
+    FROM dim.v_baison_sku_standard_purchase_price sp
+    WHERE sp.product_code = n.product_code
+      AND sp.color_code = COALESCE(BTRIM(split_part(n.sku_code, '|', 2)), '')
+      AND sp.size_code = COALESCE(BTRIM(split_part(n.sku_code, '|', 3)), '')
+    ORDER BY sp.synced_at DESC NULLS LAST
+    LIMIT 1
+  ) price ON true
 )
 SELECT
   'baison_ticket_detail', biz_date, store_code, product_code, sku_code, product_name, NULL,
@@ -202,7 +216,7 @@ WHERE d.stat_date = c.stat_date;
 COMMIT;
 
 WITH whitelist(code) AS (
-  VALUES ('134681'),('285204'),('285702'),('185805'),('185808'),('285101'),('285102'),('GZ001'),('GZ002'),('GYNG')
+  VALUES ('134681'),('285204'),('285702'),('185805'),('185808'),('285101'),('285102')
 )
 SELECT 'dwd_non_whitelist' AS check_name, count(*) AS cnt
 FROM dwd.dwd_pos_sale_goods t
