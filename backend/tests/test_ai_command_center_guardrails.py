@@ -26,7 +26,7 @@ def _context(*, finance_complete=False):
             "gross_profit": {
                 "value": 9120,
                 "status": "estimated",
-                "source": "baison_cost",
+                "source": "baison_standard_purchase_price",
                 "as_of": "2026-07-12",
             },
             "operating_profit": {
