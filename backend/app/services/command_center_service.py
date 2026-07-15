@@ -105,7 +105,7 @@ def derive_metric_statuses(
         else "stale"
     )
     gross_profit_status = "ready" if bool(sales.get("is_cost_complete")) else "estimated"
-    gross_margin_status = gross_profit_status if _decimal(sales.get("net_sales_amount")) != ZERO else "pending_data"
+    gross_margin_status = gross_profit_status if _decimal(sales.get("total_sales_amount")) != ZERO else "pending_data"
     return {
         "sales": sales_status,
         "sales_detail": sales_detail_status,
@@ -1026,7 +1026,7 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "major_exception_count": build_metric(data.get("major_exception_count"), source="rule_engine", as_of=report_date, status="ready", decimals=0),
         "pending_task_count": build_metric(data.get("pending_task_count"), source="action_task", as_of=report_date, status="ready", decimals=0),
         "gross_profit": build_metric(data.get("gross_profit"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason),
-        "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_profit"), reason=cost_reason, decimals=4),
+        "gross_margin": build_metric(data.get("gross_margin"), source="baison_cost", as_of=report_date, status=statuses.get("gross_margin"), reason=cost_reason, decimals=4),
         "inventory_amount": build_metric(data.get("total_inventory_amount"), source="apparel_inventory", as_of=source_freshness.get("inventory", {}).get("updated_at"), status=statuses.get("inventory")),
         "age_90_amount": build_metric(data.get("age_90_plus_amount"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory")),
         "age_180_amount": build_metric(data.get("age_180_plus_amount"), source="fifo_inbound", as_of=source_freshness.get("inventory", {}).get("snapshot_date"), status=statuses.get("inventory")),
