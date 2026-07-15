@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 import app.services.command_center_service as command_center_service
 
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
 from app.services.command_center_service import (
     allocate_fifo_inventory,
     build_metric,
@@ -15,6 +16,7 @@ from app.services.command_center_service import (
 )
 from app.services.sales_metric_service import RETURN_SYNC_COMPLETE_SQL
 from app.services.rule_engine import RuleEngine
+from app.services.report_service import ReportService
 
 
 def test_fifo_inventory_keeps_newest_batches_after_old_stock_is_sold():
@@ -151,6 +153,167 @@ def test_partial_standard_price_coverage_overrides_stale_complete_flag():
 
     assert statuses["gross_profit"] == "estimated"
     assert statuses["gross_margin"] == "estimated"
+
+
+@pytest.mark.asyncio
+async def test_report_quality_uses_canonical_snapshot_statuses_instead_of_legacy_tables():
+    class Result:
+        def __init__(self, *, row=None, scalar_value=None):
+            self.row = row
+            self.scalar_value = scalar_value
+
+        def mappings(self):
+            return self
+
+        def first(self):
+            return self.row
+
+        def scalar(self):
+            return self.scalar_value
+
+    class Db:
+        def __init__(self):
+            self.calls = []
+            self.results = iter([
+                Result(row={
+                    "metric_status": {
+                        "sales": "ready",
+                        "returns": "ready",
+                        "inventory": "ready",
+                        "gross_profit": "ready",
+                        "operating_profit": "estimated",
+                    },
+                    "is_cost_complete": True,
+                    "is_finance_complete": False,
+                    "source_freshness": {
+                        "inventory": {"snapshot_date": "2026-07-15"}
+                    },
+                }),
+                Result(scalar_value=1),
+                Result(scalar_value=0),
+                Result(scalar_value=0),
+            ])
+
+        async def execute(self, *args, **kwargs):
+            self.calls.append((str(args[0]), args[1] if len(args) > 1 else kwargs))
+            return next(self.results)
+
+    db = Db()
+    quality = await ReportService()._check_data_quality(
+        "2026-07-14", date(2026, 7, 14), db
+    )
+
+    assert quality["has_sales"] is True
+    assert quality["has_return"] is True
+    assert quality["has_inventory"] is True
+    assert quality["has_cost"] is True
+    assert quality["has_finance"] is False
+    assert quality["block_generation"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_quality_allows_legacy_snapshot_without_metric_status():
+    class Result:
+        def __init__(self, *, row=None, scalar_value=None):
+            self.row = row
+            self.scalar_value = scalar_value
+
+        def mappings(self):
+            return self
+
+        def first(self):
+            return self.row
+
+        def scalar(self):
+            return self.scalar_value
+
+    class Db:
+        def __init__(self):
+            self.calls = []
+            self.results = iter([
+                Result(row={
+                    "metric_status": None,
+                    "is_cost_complete": True,
+                    "is_finance_complete": False,
+                    "source_freshness": None,
+                    "total_sales": Decimal("100"),
+                    "return_amount": Decimal("0"),
+                    "total_inventory_amount": Decimal("0"),
+                    "gross_profit": Decimal("60"),
+                    "has_inventory_source": True,
+                }),
+                Result(scalar_value=1),
+                Result(scalar_value=0),
+                Result(scalar_value=0),
+            ])
+
+        async def execute(self, *args, **kwargs):
+            self.calls.append((str(args[0]), args[1] if len(args) > 1 else kwargs))
+            return next(self.results)
+
+    db = Db()
+    quality = await ReportService()._check_data_quality(
+        "2026-07-14", date(2026, 7, 14), db
+    )
+
+    assert quality["has_sales"] is True
+    assert quality["has_return"] is True
+    assert quality["has_inventory"] is True
+    assert quality["has_cost"] is True
+    assert quality["block_generation"] is False
+    assert "按历史快照兼容判断" in "；".join(quality["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_report_quality_blocks_legacy_snapshot_without_inventory_source_rows():
+    class Result:
+        def __init__(self, *, row=None, scalar_value=None):
+            self.row = row
+            self.scalar_value = scalar_value
+
+        def mappings(self):
+            return self
+
+        def first(self):
+            return self.row
+
+        def scalar(self):
+            return self.scalar_value
+
+    class Db:
+        def __init__(self):
+            self.calls = []
+            self.results = iter([
+                Result(row={
+                    "metric_status": None,
+                    "is_cost_complete": True,
+                    "is_finance_complete": False,
+                    "source_freshness": None,
+                    "total_sales": Decimal("100"),
+                    "return_amount": Decimal("0"),
+                    "total_inventory_amount": Decimal("0"),
+                    "gross_profit": Decimal("60"),
+                    "has_inventory_source": False,
+                }),
+                Result(scalar_value=1),
+                Result(scalar_value=0),
+                Result(scalar_value=0),
+            ])
+
+        async def execute(self, *args, **kwargs):
+            self.calls.append((str(args[0]), args[1] if len(args) > 1 else kwargs))
+            return next(self.results)
+
+    db = Db()
+    quality = await ReportService()._check_data_quality(
+        "2026-07-14", date(2026, 7, 14), db
+    )
+
+    assert quality["has_inventory"] is False
+    assert quality["block_generation"] is True
+    assert "库存指标未就绪" in quality["blocking_issues"]
+    assert "UPPER(store_code) = ANY(:inventory_codes)" in db.calls[0][0]
+    assert set(db.calls[0][1]["inventory_codes"]) == set(ALLOWED_INVENTORY_CODES)
 
 
 @pytest.mark.asyncio
