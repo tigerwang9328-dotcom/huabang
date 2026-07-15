@@ -340,7 +340,11 @@ class DwsToDm:
                   logistics_expense,marketing_expense,other_expense,operating_profit,operating_margin,data_type,
                   gross_profit_status='ready',expense_coverage_rate=1,expense_coverage_rate,missing_expense_types,
                   finance_approved,gross_profit_status,operating_profit_status,profit_reasons,
-                  CASE WHEN operating_profit_status='ready' THEN NULL ELSE '费用、成本或财务核准未完成' END,NOW()
+                  CASE WHEN operating_profit_status='ready' THEN NULL
+                       WHEN operating_profit_status='estimated'
+                       THEN '经营利润为估算值：费用、标准进价覆盖或财务核准未完成'
+                       ELSE '经营利润待接入'
+                  END,NOW()
                 FROM dws.dws_finance_daily WHERE stat_date=:d
                 ON CONFLICT(stat_date,store_code) DO UPDATE SET
                   net_sales=EXCLUDED.net_sales,cost_of_goods=EXCLUDED.cost_of_goods,gross_profit=EXCLUDED.gross_profit,

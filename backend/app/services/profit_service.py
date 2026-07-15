@@ -153,10 +153,11 @@ def calculate_profit(
     operating_profit = None
     operating_margin = None
     operating_profit_status = "pending_data"
-    if not reasons and gross_profit is not None:
+    if gross_profit is not None:
         operating_profit = gross_profit - total_expense
-        operating_margin = operating_profit / net_sales_value
-        operating_profit_status = "ready"
+        if net_sales_value > 0:
+            operating_margin = operating_profit / net_sales_value
+        operating_profit_status = "ready" if not reasons else "estimated"
 
     return ProfitResult(
         net_sales=net_sales_value,

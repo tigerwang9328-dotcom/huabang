@@ -192,13 +192,12 @@ async def get_profit_daily(
                 "total_expense": float(r.total_expense) if r.total_expense is not None else None,
                 "operating_profit": (
                     float(r.operating_profit)
-                    if r.operating_profit is not None and r.is_cost_complete
-                    and r.is_expense_complete and getattr(r, "finance_approved", False)
+                    if r.operating_profit is not None
                     else None
                 ),
-                "status": (
+                "status": getattr(r, "operating_profit_status", None) or (
                     "ready" if r.is_cost_complete and r.is_expense_complete
-                    and getattr(r, "finance_approved", False) else "pending_data"
+                    and getattr(r, "finance_approved", False) else "estimated"
                 ),
                 "data_type": r.data_type,
                 "is_cost_complete": r.is_cost_complete,
@@ -332,7 +331,13 @@ async def get_profit_analysis(
     return ApiResponse.ok(data={
         "period": {"start_date": str(query_start), "end_date": str(query_end)},
         "status": summary_payload["operating_profit_status"],
-        "status_label": "已核准" if summary_payload["operating_profit_status"] == "ready" else "待接入完整费用并核准",
+        "status_label": (
+            "已核准"
+            if summary_payload["operating_profit_status"] == "ready"
+            else "估算值，费用尚未完整接入"
+            if summary_payload["operating_profit_status"] == "estimated"
+            else "待接入"
+        ),
         "summary": {
             **summary_payload,
             "cost_coverage_rate": 1.0 if cost_complete else 0.0,
@@ -357,7 +362,8 @@ async def get_profit_analysis(
                 "退货损失缺少可靠退货明细，暂不计算",
                 "清仓损失缺少清仓标识，暂不计算",
                 "门店经营利润等待总部费用分摊规则",
-            ] + (["费用或成本不完整，不输出经营盈亏结论"] if company_profit.operating_profit is None else []),
+            ] + (["费用或标准进价覆盖不完整，经营利润仅为估算值"]
+                 if company_profit.operating_profit_status == "estimated" else []),
             "source_updated_at": source_updated_at.isoformat() if source_updated_at else None,
         },
     })

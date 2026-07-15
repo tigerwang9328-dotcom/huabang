@@ -98,7 +98,7 @@ def _approved_expenses(amount: str = "100") -> list[ExpenseAllocation]:
     ]
 
 
-def test_profit_gate_matches_approved_finance_and_hides_incomplete_operating_profit():
+def test_profit_gate_matches_approved_finance_and_blocks_estimated_conclusions():
     approved_expenses = _approved_expenses()
     approved = calculate_profit(
         period_start=ACCEPTANCE_DATE,
@@ -134,8 +134,8 @@ def test_profit_gate_matches_approved_finance_and_hides_incomplete_operating_pro
     assert incomplete.gross_profit == Decimal("1300")
     assert incomplete.gross_profit_status == "ready"
     assert incomplete.missing_expense_types == ("other",)
-    assert incomplete.operating_profit is None
-    assert incomplete.operating_profit_status == "pending_data"
+    assert incomplete.operating_profit == Decimal("600")
+    assert incomplete.operating_profit_status == "estimated"
     assert "expense_coverage_incomplete" in incomplete.reasons
     assert _can_assert_operating_profit({
         "operating_profit": incomplete.operating_profit,

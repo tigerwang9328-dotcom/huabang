@@ -66,7 +66,7 @@ def test_explicit_zero_amount_declares_a_required_expense_category():
     assert result.reasons == ()
 
 
-def test_missing_required_category_keeps_operating_profit_pending():
+def test_missing_required_category_keeps_operating_profit_estimated():
     expenses = [
         expense for expense in _expenses(amount="10")
         if expense.expense_type != "other"
@@ -76,8 +76,8 @@ def test_missing_required_category_keeps_operating_profit_pending():
 
     assert result.expense_coverage_rate == Decimal("0.875")
     assert result.missing_expense_types == ("other",)
-    assert result.operating_profit is None
-    assert result.operating_profit_status == "pending_data"
+    assert result.operating_profit == Decimal("530")
+    assert result.operating_profit_status == "estimated"
     assert "expense_coverage_incomplete" in result.reasons
 
 
@@ -137,7 +137,8 @@ def test_partial_date_coverage_is_reported_even_when_all_categories_exist():
 
     assert result.expense_coverage_rate == Decimal("0.5")
     assert result.missing_expense_types == REQUIRED_EXPENSE_TYPES
-    assert result.operating_profit is None
+    assert result.operating_profit == Decimal("600")
+    assert result.operating_profit_status == "estimated"
     assert "expense_coverage_incomplete" in result.reasons
 
 
@@ -168,7 +169,8 @@ def test_store_specific_expense_cannot_complete_company_expense_scope():
 
     assert "rent" in result.missing_expense_types
     assert result.expense_coverage_rate == Decimal("0.875")
-    assert result.operating_profit is None
+    assert result.operating_profit == Decimal("600")
+    assert result.operating_profit_status == "estimated"
 
 
 @pytest.mark.parametrize(
@@ -179,11 +181,11 @@ def test_store_specific_expense_cannot_complete_company_expense_scope():
         ({"net_sales": Decimal("-1")}, "net_sales_not_positive"),
     ],
 )
-def test_invalid_profit_inputs_never_produce_operating_profit(overrides, reason):
+def test_incomplete_profit_inputs_keep_value_estimated(overrides, reason):
     result = _calculate(_expenses(), **overrides)
 
-    assert result.operating_profit is None
-    assert result.operating_profit_status == "pending_data"
+    assert result.operating_profit is not None
+    assert result.operating_profit_status == "estimated"
     assert reason in result.reasons
 
 
@@ -200,8 +202,8 @@ def test_all_allocated_expenses_must_be_finance_approved_actuals():
     result = _calculate(expenses)
 
     assert result.finance_approved is False
-    assert result.operating_profit is None
-    assert result.operating_profit_status == "pending_data"
+    assert result.operating_profit == Decimal("600")
+    assert result.operating_profit_status == "estimated"
     assert "finance_not_approved" in result.reasons
 
 

@@ -230,11 +230,11 @@ class ReportService:
             "vip_balance": {"value": data.get("vip_balance"), "status": statuses.get("vip_balance") or "pending_data", "source": "baison_member.CZ_DQJE", "as_of": stat_date},
             "vip_sales": {"value": data.get("vip_sales_amount"), "status": statuses.get("sales") or "pending_data", "source": "baison_pos", "as_of": stat_date},
             "operating_profit": {
-                "value": data.get("operating_profit") if data.get("is_finance_complete") else None,
+                "value": data.get("operating_profit"),
                 "status": statuses.get("operating_profit") or finance_status,
                 "source": "finance",
                 "as_of": stat_date,
-                "reason": None if data.get("is_finance_complete") else "费用未完整接入，禁止判断经营利润",
+                "reason": None if data.get("is_finance_complete") else "费用未完整接入，当前经营利润为估算值",
             },
             "expense_amount": {
                 "value": data.get("today_expense") if data.get("is_finance_complete") else None,

@@ -723,6 +723,13 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "report_date": report_date,
         "store_codes": sorted(ALLOWED_STORE_CODES),
     })).mappings().first() or {}
+    finance = (await db.execute(text("""
+        SELECT operating_profit, operating_margin, total_expense,
+               expense_coverage_rate, missing_expense_types,
+               finance_approved, operating_profit_status, profit_reasons, etl_at
+        FROM dws.dws_finance_daily
+        WHERE stat_date=:report_date AND store_code='ALL'
+    """), {"report_date": report_date})).mappings().first() or {}
     ticket = (await db.execute(text(f"""
         WITH pay AS ({PAY_DETAIL_SQL}), recharge AS (
             SELECT COALESCE(SUM(recharge_amount),0) recharge_amount
@@ -802,6 +809,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
     sales_detail_ready = bool(sales.get("etl_at"))
     inventory_ready = bool(inventory.get("updated_at"))
     member_ready = bool(members.get("updated_at"))
+    finance_ready = bool(finance.get("etl_at"))
 
     total_sales = _optional_decimal(preserve_trusted_value(
         ticket.get("sales_amount"), source_ready=ticket_ready, previous=existing.get("total_sales")
@@ -855,11 +863,26 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             "business_date": str(report_date),
             "updated_at": _json_value(ticket.get("return_sync_completed_at")),
         },
-        "finance": {"status": "pending_data", "reason": "费用未完整接入"},
+        "finance": {
+            "status": finance.get("operating_profit_status") or "pending_data",
+            "reason": (
+                "费用完整并已核准"
+                if finance.get("operating_profit_status") == "ready"
+                else "费用不完整，经营利润为估算值"
+            ),
+            "expense_coverage_rate": _json_value(finance.get("expense_coverage_rate")),
+            "missing_expense_types": _json_value(finance.get("missing_expense_types") or []),
+            "known_expense_amount": _json_value(finance.get("total_expense")),
+            "updated_at": _json_value(finance.get("etl_at")),
+        },
     }
     metric_status = derive_metric_statuses(
         sales=dict(sales), ticket=dict(ticket), inventory=dict(inventory), members=dict(members)
     )
+    metric_status["operating_profit"] = (
+        finance.get("operating_profit_status") if finance_ready else "pending_data"
+    ) or "pending_data"
+    finance_complete = metric_status["operating_profit"] == "ready"
     summary = build_template_summary(
         sales=total_sales,
         gross_profit=_optional_decimal(gross_profit),
@@ -867,7 +890,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             _optional_decimal(gross_profit) / total_sales
             if gross_profit is not None and total_sales else None
         ),
-        finance_complete=False,
+        finance_complete=finance_complete,
         risk_count=int(risks.get("major") or 0),
         pending_task_count=int(tasks.get("pending") or 0),
     )
@@ -912,6 +935,11 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             _optional_decimal(gross_profit) / total_sales
             if gross_profit is not None and total_sales else existing.get("gross_margin")
         ),
+        "operating_profit_estimate": preserve_trusted_value(
+            finance.get("operating_profit"),
+            source_ready=finance_ready,
+            previous=existing.get("operating_profit_estimate"),
+        ),
         "total_inventory_amount": preserve_trusted_value(
             _decimal(inventory.get("total_amount")), source_ready=inventory_ready, previous=existing.get("total_inventory_amount")
         ),
@@ -952,6 +980,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "major_exception_count": int(risks.get("major") or 0),
         "ai_summary": summary,
         "is_cost_complete": cost_complete,
+        "is_finance_complete": finance_complete,
         "data_quality_status": "warning" if any(v != "ready" for v in metric_status.values()) else "normal",
         "source_freshness": json.dumps(source_freshness, ensure_ascii=False),
         "metric_status": json.dumps(metric_status, ensure_ascii=False),
@@ -960,7 +989,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         INSERT INTO dm.dm_boss_daily_report (
             report_date, total_sales, offline_sales, online_sales, net_sales,
             order_count, item_count, avg_order_value, items_per_order, avg_discount_rate,
-            actual_pay_amount, return_amount, return_rate, gross_profit, gross_margin,
+            actual_pay_amount, return_amount, return_rate, gross_profit, gross_margin, operating_profit_estimate,
             total_inventory_amount, inventory_total_qty, age_90_plus_amount, age_180_plus_amount,
             inventory_age_unknown_qty, inventory_age_unknown_amount,
             vip_balance, vip_negative_balance_count, vip_negative_balance_amount, vip_sales_amount, vip_sales_ratio,
@@ -970,12 +999,12 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         ) VALUES (
             :report_date, :total_sales, :offline_sales, :online_sales, :net_sales,
             :order_count, :item_count, :avg_order_value, :items_per_order, :avg_discount_rate,
-            :actual_pay_amount, :return_amount, :return_rate, :gross_profit, :gross_margin,
+            :actual_pay_amount, :return_amount, :return_rate, :gross_profit, :gross_margin, :operating_profit_estimate,
             :total_inventory_amount, :inventory_total_qty, :age_90_plus_amount, :age_180_plus_amount,
             :inventory_age_unknown_qty, :inventory_age_unknown_amount,
             :vip_balance, :vip_negative_balance_count, :vip_negative_balance_amount, :vip_sales_amount, :vip_sales_ratio,
             :pending_task_count, :overdue_task_count, :exception_count, :major_exception_count,
-            :ai_summary, 'template', :is_cost_complete, false,
+            :ai_summary, 'template', :is_cost_complete, :is_finance_complete,
             :data_quality_status, CAST(:source_freshness AS jsonb), CAST(:metric_status AS jsonb), now(), now()
         ) ON CONFLICT (report_date) DO UPDATE SET
             total_sales=EXCLUDED.total_sales, offline_sales=EXCLUDED.offline_sales,
@@ -984,7 +1013,8 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             items_per_order=EXCLUDED.items_per_order, avg_discount_rate=EXCLUDED.avg_discount_rate,
             actual_pay_amount=EXCLUDED.actual_pay_amount, return_amount=EXCLUDED.return_amount,
             return_rate=EXCLUDED.return_rate, gross_profit=EXCLUDED.gross_profit,
-            gross_margin=EXCLUDED.gross_margin, total_inventory_amount=EXCLUDED.total_inventory_amount,
+            gross_margin=EXCLUDED.gross_margin, operating_profit_estimate=EXCLUDED.operating_profit_estimate,
+            total_inventory_amount=EXCLUDED.total_inventory_amount,
             inventory_total_qty=EXCLUDED.inventory_total_qty, age_90_plus_amount=EXCLUDED.age_90_plus_amount,
             inventory_age_unknown_qty=EXCLUDED.inventory_age_unknown_qty,
             inventory_age_unknown_amount=EXCLUDED.inventory_age_unknown_amount,
@@ -995,7 +1025,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             pending_task_count=EXCLUDED.pending_task_count, overdue_task_count=EXCLUDED.overdue_task_count,
             exception_count=EXCLUDED.exception_count, major_exception_count=EXCLUDED.major_exception_count,
             ai_summary=EXCLUDED.ai_summary, ai_model_used='template', is_cost_complete=EXCLUDED.is_cost_complete,
-            is_finance_complete=false, data_quality_status=EXCLUDED.data_quality_status,
+            is_finance_complete=EXCLUDED.is_finance_complete, data_quality_status=EXCLUDED.data_quality_status,
             source_freshness=EXCLUDED.source_freshness, metric_status=EXCLUDED.metric_status, updated_at=now()
     """), params)
     return await get_command_center_snapshot(db, report_date)
@@ -1037,7 +1067,13 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "vip_negative_balance_amount": build_metric(data.get("vip_negative_balance_amount"), source="baison_member.CZ_DQJE", as_of=source_freshness.get("member", {}).get("updated_at"), status=statuses.get("vip_balance")),
         "vip_sales": build_metric(data.get("vip_sales_amount"), source="baison_pos", as_of=report_date, status=statuses.get("sales")),
         "online_sales": build_metric(data.get("online_sales"), source="baison_payment.011", as_of=report_date, status=statuses.get("online_sales")),
-        "operating_profit": build_metric(None, source="finance", reason="费用未完整接入，不判断净利润"),
+        "operating_profit": build_metric(
+            data.get("operating_profit_estimate"),
+            source="finance",
+            as_of=source_freshness.get("finance", {}).get("updated_at"),
+            status=statuses.get("operating_profit"),
+            reason=source_freshness.get("finance", {}).get("reason"),
+        ),
     }
     risks = (await db.execute(text("""
         SELECT id, exception_type, severity, store_code, product_code, sku_code,
