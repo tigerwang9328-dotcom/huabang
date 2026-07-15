@@ -545,16 +545,14 @@ async def product_quality_summary(
                 WHERE s.source_system = 'baison'
                   AND i.qty <> 0
             ), inv_amount AS (
-                SELECT COALESCE(SUM(i.qty * s.cost_price), 0) AS inventory_amount
+                SELECT COALESCE(SUM(i.qty * sp.standard_purchase_price), 0) AS inventory_amount
                 FROM inv_spec i
-                JOIN dim.dim_sku s
-                  ON s.source_system = 'baison'
-                 AND s.product_code = i.product_code
-                 AND COALESCE(BTRIM(s.color_code::text), '') = i.color_code
-                 AND COALESCE(BTRIM(s.size_code::text), '') = i.size_code
+                JOIN dim.v_baison_sku_standard_purchase_price sp
+                  ON sp.product_code = i.product_code
+                 AND sp.color_code = i.color_code
+                 AND sp.size_code = i.size_code
                 WHERE i.qty <> 0
-                  AND s.cost_price IS NOT NULL
-                  AND s.cost_price > 0
+                  AND sp.standard_purchase_price IS NOT NULL
             ), sale AS (
                 SELECT COUNT(DISTINCT product_code) AS sale_product_count,
                        COUNT(DISTINCT sku_code) FILTER (WHERE sku_code IS NOT NULL AND BTRIM(sku_code::text) <> '') AS sale_sku_count
@@ -566,8 +564,12 @@ async def product_quality_summary(
             SELECT
                 (SELECT COUNT(*) FROM dim.dim_product WHERE source_system='baison') AS product_count,
                 (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison') AS sku_count,
-                (SELECT COUNT(*) FROM dim.dim_product WHERE source_system='baison' AND (cost_price IS NULL OR cost_price <= 0)) AS product_missing_cost_count,
-                (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (cost_price IS NULL OR cost_price <= 0)) AS sku_missing_cost_count,
+                (SELECT COUNT(*) FROM dim.dim_product p WHERE p.source_system='baison' AND NOT EXISTS (
+                    SELECT 1 FROM dim.v_baison_sku_standard_purchase_price sp
+                    WHERE sp.product_code = p.product_code
+                      AND sp.standard_purchase_price IS NOT NULL
+                )) AS product_missing_standard_purchase_price_count,
+                (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (standard_purchase_price IS NULL OR standard_purchase_price <= 0)) AS sku_missing_standard_purchase_price_count,
                 (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (barcode IS NULL OR BTRIM(barcode::text)='')) AS sku_missing_barcode_count,
                 (SELECT COUNT(*) FROM dim.dim_sku WHERE source_system='baison' AND (
                     sku_code IS NULL OR BTRIM(sku_code::text) = ''
@@ -585,8 +587,12 @@ async def product_quality_summary(
         data = dict(row or {})
         product_count = _num(data.get("product_count"))
         sku_count = _num(data.get("sku_count"))
-        data["product_cost_ready_count"] = int(product_count - _num(data.get("product_missing_cost_count")))
-        data["sku_cost_ready_count"] = int(sku_count - _num(data.get("sku_missing_cost_count")))
+        data["product_standard_purchase_price_ready_count"] = int(
+            product_count - _num(data.get("product_missing_standard_purchase_price_count"))
+        )
+        data["sku_standard_purchase_price_ready_count"] = int(
+            sku_count - _num(data.get("sku_missing_standard_purchase_price_count"))
+        )
         data["sku_barcode_ready_count"] = int(sku_count - _num(data.get("sku_missing_barcode_count")))
         data["sku_barcode_rate"] = round(data["sku_barcode_ready_count"] / sku_count * 100, 1) if sku_count else 0
         return {"success": True, "data": data}

@@ -118,6 +118,9 @@ def _dim_row(raw: dict, now: datetime) -> dict:
     gb = _s(raw.get("gbBarcode")); s69 = _s(raw.get("sixNineCode"))
     ckj = raw.get("ckj")
     cbj = raw.get("cbj")
+    standard_purchase_price = _num(raw.get("marketPrice"))
+    if standard_purchase_price is not None and standard_purchase_price <= 0:
+        standard_purchase_price = None
     return {
         "sku_code": _trim(raw.get("sku")),
         "product_code": _trim(raw.get("goodsSn")),
@@ -131,6 +134,7 @@ def _dim_row(raw: dict, now: datetime) -> dict:
         "season_code": _s(raw.get("seasonCode")), "season_name": _s(raw.get("seasonName")),
         "series_code": _s(raw.get("seriesCode")), "series_name": _s(raw.get("seriesName")),
         "tag_price": _num(raw.get("shopPrice") or ckj), "market_price": _num(raw.get("marketPrice")),
+        "standard_purchase_price": standard_purchase_price,
         "cost_price": _num(cbj), "has_cost": _num(cbj) is not None,   # cbj=成本价，ckj/shopPrice=吊牌/售价
         "weight": _num(raw.get("goodsWeight")), "remark": _s(raw.get("remark")),
         "status": "active",   # 接口未返回状态，默认 active，待百胜确认
@@ -142,7 +146,7 @@ def _dim_row(raw: dict, now: datetime) -> dict:
 
 
 _Q_KEYS = ("sku_empty", "goods_sn_empty", "product_not_found", "barcode_empty",
-           "color_empty", "size_empty", "shop_price_empty", "cost_empty",
+           "color_empty", "size_empty", "shop_price_empty", "standard_purchase_price_empty",
            "lastchanged_bytes", "has_space")
 
 
@@ -174,8 +178,9 @@ async def _upsert_skus(db: AsyncSession, skus: list, batch_no: str, now: datetim
         sp = _num(raw.get("shopPrice"))
         if sp is None or sp == 0:
             q["shop_price_empty"] += 1
-        if _num(raw.get("cbj")) is None:
-            q["cost_empty"] += 1
+        standard_purchase_price = _num(raw.get("marketPrice"))
+        if standard_purchase_price is None or standard_purchase_price <= 0:
+            q["standard_purchase_price_empty"] += 1
         if str(raw.get("lastchanged")) == _BYTE_SENTINEL:
             q["lastchanged_bytes"] += 1
         if not sku:
