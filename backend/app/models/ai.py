@@ -95,7 +95,7 @@ class AiBusinessAdviceSnapshot(Base):
     data_status = Column(String(16), nullable=False, default="pending_data")
     provider = Column(String(32))
     model_name = Column(String(128))
-    prompt_version = Column(String(32), nullable=False, default="business-advice-v1")
+    prompt_version = Column(String(32), nullable=False, default="business-advice-v2")
     schema_version = Column(String(32), nullable=False, default="business-advice-json-v1")
     prompt_tokens = Column(Integer)
     completion_tokens = Column(Integer)

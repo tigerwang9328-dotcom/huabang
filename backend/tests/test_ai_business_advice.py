@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.services.ai_business_advice_service as advice_service_module
 import app.services.ai_engine as ai_engine_module
 from app.api.v1.ai_diagnosis import ConfirmTasksRequest
 from app.core.config import settings
@@ -14,9 +15,15 @@ from app.services.ai_business_advice_service import (
     BusinessAdviceService,
     BUSINESS_ADVICE_MODULES,
     BUSINESS_ADVICE_SCOPES,
+    PROMPT_VERSION as SERVICE_PROMPT_VERSION,
     business_advice_input_hash,
 )
-from app.services.ai_engine import AIEngine
+from app.services.ai_engine import AIEngine, PROMPT_VERSION as ENGINE_PROMPT_VERSION
+
+
+def test_business_advice_prompt_contract_uses_v2_everywhere():
+    assert SERVICE_PROMPT_VERSION == ENGINE_PROMPT_VERSION == "business-advice-v2"
+    assert AiBusinessAdviceSnapshot.__table__.c.prompt_version.default.arg == "business-advice-v2"
 
 
 def test_business_advice_matrix_has_company_plus_seven_stores_and_nine_modules():
@@ -38,6 +45,11 @@ def test_business_advice_input_hash_is_order_stable_and_changes_with_facts(monke
 
     assert business_advice_input_hash(left) == business_advice_input_hash(reordered)
     assert business_advice_input_hash(left) != business_advice_input_hash(changed)
+    original_hash = business_advice_input_hash(left)
+    monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", "business-advice-v3")
+    assert business_advice_input_hash(left) != original_hash
+
+    monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", SERVICE_PROMPT_VERSION)
     original_hash = business_advice_input_hash(left)
     original = settings.AI_BUSINESS_ADVICE_MODEL
     monkeypatch.setattr(settings, "AI_BUSINESS_ADVICE_MODEL", "deepseek-contract-change", raising=False)

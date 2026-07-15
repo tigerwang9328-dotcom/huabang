@@ -28,7 +28,7 @@ BUSINESS_ADVICE_SCOPES = (
     ("company", "company"),
     *(("store", code) for code in sorted(ALLOWED_STORE_CODES)),
 )
-PROMPT_VERSION = "business-advice-v1"
+PROMPT_VERSION = "business-advice-v2"
 SCHEMA_VERSION = "business-advice-json-v1"
 
 

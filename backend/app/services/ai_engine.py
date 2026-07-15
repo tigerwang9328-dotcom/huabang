@@ -64,7 +64,7 @@ ALLOWED_RESPONSIBLE_ROLES = {
 }
 ALLOWED_PRIORITIES = {"high", "medium", "low"}
 ALLOWED_CONFIDENCE = {"high", "medium", "low"}
-PROMPT_VERSION = "business-advice-v1"
+PROMPT_VERSION = "business-advice-v2"
 FORBIDDEN_INCOMPLETE_FINANCE_CLAIMS = (
     "公司盈利", "公司亏损", "最终盈利", "最终亏损", "实现盈利", "实现亏损",
     "利润为正", "利润为负", "经营利润为", "净利润为",
