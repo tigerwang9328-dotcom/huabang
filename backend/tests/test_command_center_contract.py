@@ -23,6 +23,16 @@ def test_vip_negative_balance_amount_has_follow_up_migration_and_model_field():
     assert "vip_negative_balance_amount" in model.read_text(encoding="utf-8")
 
 
+def test_ai_command_conclusion_is_persisted_with_the_daily_report():
+    migration = BACKEND / "alembic" / "versions" / "344f7a8192a3_persist_ai_command_conclusion.py"
+    model = (BACKEND / "app" / "models" / "dm.py").read_text(encoding="utf-8")
+    report = (BACKEND / "app" / "services" / "report_service.py").read_text(encoding="utf-8")
+
+    assert "ai_command_conclusion" in migration.read_text(encoding="utf-8")
+    assert "ai_command_conclusion" in model
+    assert "ai_command_conclusion" in report
+
+
 def test_public_apis_expose_command_center_drilldowns():
     inventory_api = (BACKEND / "app" / "api" / "v1" / "inventory.py").read_text(encoding="utf-8")
     member_api = (BACKEND / "app" / "api" / "v1" / "member.py").read_text(encoding="utf-8")
@@ -55,6 +65,18 @@ def test_daily_command_center_rebuilds_dws_before_running_rules():
     assert "UPDATE dws.dws_company_daily" in payment_source
     assert "cost_coverage_rate" in command_source
     assert command_source.index("await rebuild_confirmed_sales_dws") < command_source.index("engine = RuleEngine()")
+
+
+def test_daily_command_center_rebuilds_finance_after_confirmed_sales():
+    command_source = (BACKEND / "app" / "services" / "command_center_service.py").read_text(
+        encoding="utf-8"
+    )
+
+    confirmed_sales = command_source.index("await rebuild_confirmed_sales_dws")
+    finance = command_source.index("await DwdToDws().rebuild_finance_daily")
+    snapshot = command_source.index("await build_boss_snapshot", confirmed_sales)
+
+    assert confirmed_sales < finance < snapshot
 
 
 def test_daily_command_wrapper_forwards_manual_rebuild_arguments():

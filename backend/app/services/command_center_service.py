@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, ALLOWED_STORE_CODES
 from app.services.sales_metric_service import PAY_DETAIL_SQL, rebuild_confirmed_sales_dws
+from app.services.etl.dwd_to_dws import DwdToDws
 
 
 ZERO = Decimal("0")
@@ -104,8 +105,15 @@ def derive_metric_statuses(
         if ticket.get("return_sync_completed_at") and ticket.get("return_amount") is not None
         else "stale"
     )
-    gross_profit_status = "ready" if bool(sales.get("is_cost_complete")) else "estimated"
-    gross_margin_status = gross_profit_status if _decimal(sales.get("total_sales_amount")) != ZERO else "pending_data"
+    coverage = sales.get("cost_coverage_rate")
+    has_sales = _decimal(sales.get("total_sales_amount")) != ZERO
+    coverage_complete = not has_sales or coverage is None or _decimal(coverage) >= Decimal("1")
+    gross_profit_status = (
+        "ready"
+        if bool(sales.get("is_cost_complete")) and coverage_complete
+        else "estimated"
+    )
+    gross_margin_status = gross_profit_status if has_sales else "pending_data"
     return {
         "sales": sales_status,
         "sales_detail": sales_detail_status,
@@ -1152,7 +1160,9 @@ async def run_daily_command_center(
     age_result = await rebuild_inventory_age(db, inventory_date)
     warning_result = await rebuild_inventory_warnings(db, inventory_date)
     inventory_drafts = await create_inventory_warning_task_drafts(db, inventory_date, creator_id)
-    await rebuild_confirmed_sales_dws(db, report_date)
+    sales_rebuilt = await rebuild_confirmed_sales_dws(db, report_date)
+    if sales_rebuilt:
+        await DwdToDws().rebuild_finance_daily(str(report_date), db)
     await build_boss_snapshot(db, report_date, inventory_date)
 
     from app.services.rule_engine import RuleEngine

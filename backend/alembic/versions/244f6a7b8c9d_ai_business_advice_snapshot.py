@@ -1,7 +1,7 @@
 """add AI business advice snapshot cache
 
 Revision ID: 244f6a7b8c9d
-Revises: 233e6f708192
+Revises: 344f7a8192a3
 """
 from alembic import op
 import sqlalchemy as sa
@@ -9,7 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "244f6a7b8c9d"
-down_revision = "233e6f708192"
+down_revision = "344f7a8192a3"
 branch_labels = None
 depends_on = None
 

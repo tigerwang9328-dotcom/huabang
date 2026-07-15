@@ -128,10 +128,10 @@ async def has_complete_pos_ticket_sync(db: AsyncSession, stat_date: date) -> boo
     return bool(result.scalar())
 
 
-async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None:
+async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> bool:
     """Recalculate DWS sales fields with the confirmed Baison payment formula."""
     if not await has_complete_pos_ticket_sync(db, stat_date):
-        return
+        return False
     params = {
         "sd": stat_date,
         "ed": stat_date,
@@ -222,3 +222,4 @@ async def rebuild_confirmed_sales_dws(db: AsyncSession, stat_date: date) -> None
         FROM company_with_channels x
         WHERE d.stat_date=:stat_date
     """), params)
+    return True
