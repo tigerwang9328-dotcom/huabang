@@ -120,6 +120,10 @@ class DimSku(Base):
     series_name = Column(String(64))
     tag_price = Column(Numeric(12, 2))
     market_price = Column(Numeric(12, 2))
+    standard_purchase_price = Column(
+        Numeric(12, 2),
+        comment="百胜SKU marketPrice标准进价",
+    )
     cost_price = Column(Numeric(12, 2), comment="ckj/cbj 之一，敏感，前端不展示，含义待确认")
     has_cost = Column(Boolean, default=False)
     weight = Column(Numeric(12, 4))

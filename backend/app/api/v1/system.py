@@ -18,7 +18,7 @@ router = APIRouter(prefix="/system", tags=["系统管理"])
 
 ROLE_LABELS = {"super_admin":"超级管理员","boss":"BOSS","ceo":"总经理","product_manager":"商品经理","product_specialist":"商品专员","finance_manager":"财务经理","accountant":"会计","cashier":"出纳","warehouse_manager":"仓库主管","operation_manager":"运营经理","store_manager":"店长","guide":"导购"}
 DATA_SCOPE_NAMES = {"all":"全部数据","company":"公司数据","dept":"部门数据","store":"门店数据","self":"个人数据"}
-FIELD_RESOURCES = [("sales","sales.amount","销售金额"),("sales","sales.profit","销售利润"),("sales","sales.customer_phone","客户手机号"),("product","product.cost_price","商品成本价"),("product","product.gross_margin","商品毛利率"),("inventory","inventory.stock_amount","库存金额"),("finance","finance.payable","应付款"),("finance","finance.receivable","应收款"),("finance","finance.cash_balance","资金余额"),("hr","hr.salary","员工薪资"),("hr","hr.phone","员工手机号")]
+FIELD_RESOURCES = [("sales","sales.amount","销售金额"),("sales","sales.profit","销售利润"),("sales","sales.customer_phone","客户手机号"),("product","product.standard_purchase_price","商品标准进价"),("product","product.gross_margin","商品毛利率"),("inventory","inventory.stock_amount","库存金额"),("finance","finance.payable","应付款"),("finance","finance.receivable","应收款"),("finance","finance.cash_balance","资金余额"),("hr","hr.salary","员工薪资"),("hr","hr.phone","员工手机号")]
 SECURITY_DEFAULTS = {"password_min_length":8,"password_require_number":True,"password_require_letter":True,"password_require_special":False,"login_max_failed":5,"login_lock_minutes":30,"register_apply_rate_limit":5,"register_apply_window_minutes":10,"remember_password_enabled":False}
 
 
