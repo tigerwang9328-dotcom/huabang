@@ -36,11 +36,19 @@ class Settings(BaseSettings):
 
     # AI - DeepSeek
     DEEPSEEK_API_KEY: str = ""
-    DEEPSEEK_MODEL: str = "deepseek-chat"
+    DEEPSEEK_MODEL: str = "deepseek-v4-pro"
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
 
+    # AI经营顾问（确定性事实之外的解释和候选行动）
+    AI_BUSINESS_ADVICE_ENABLED: bool = False
+    AI_BUSINESS_ADVICE_MODEL: str = "deepseek-v4-pro"
+    AI_BUSINESS_ADVICE_CONCURRENCY: int = 3
+    AI_BUSINESS_ADVICE_TIMEOUT_SECONDS: int = 60
+    AI_BUSINESS_ADVICE_BATCH_TIME: str = "06:45"
+    AI_BUSINESS_ADVICE_REFRESH_WINDOW_SECONDS: int = 600
+
     # AI 默认提供商
-    AI_PROVIDER: str = "dashscope"
+    AI_PROVIDER: str = "deepseek"
 
     # 钉钉
     DINGTALK_APP_ID: str = ""

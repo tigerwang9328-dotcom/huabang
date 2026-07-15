@@ -13,6 +13,8 @@
 | 05:30 | 百胜外穿衣物库存同步 | `logs/sync_inventory_daily.log` |
 | 06:00 | 尺码墙快照 | `logs/size_wall_snapshot.log` |
 | 06:30 | 老板经营快照、异常和任务草稿 | `logs/command_center_daily.log` |
+| 06:40 | 数据健康检查 | `logs/command_center_health.log` |
+| 06:45 | 公司与七店九模块 AI 经营建议 | `logs/ai_business_advice_daily.log` |
 
 库存日内还在北京时间 10:00、12:00、14:00、16:00、18:00、20:00、22:00 刷新。所有同步使用 `flock` 防并发；日报和任务生成必须按业务日及稳定来源键幂等。
 
@@ -25,14 +27,16 @@ tail -n 120 /srv/huabang-ai-center/logs/sync_tickets_daily.log
 tail -n 120 /srv/huabang-ai-center/logs/sync_inventory_daily.log
 tail -n 120 /srv/huabang-ai-center/logs/sync_members_daily.log
 tail -n 160 /srv/huabang-ai-center/logs/command_center_daily.log
+tail -n 160 /srv/huabang-ai-center/logs/ai_business_advice_daily.log
 ```
 
-确认最近一个完整北京时间日周期中：销售、退货、库存、会员均先完成，06:30 日报随后成功；同一业务日只有一份有效日报，异常和任务草稿没有重复。
+确认最近一个完整北京时间日周期中：销售、退货、库存、会员均先完成，06:30 日报随后成功，06:40 健康检查后才执行 06:45 AI 批处理；同一业务日只有一份有效日报，异常、任务草稿和 AI 输入哈希没有重复。AI 批处理必须产生 72 个 `model` 或 `template` 快照，且不得增加正式任务数。
 
 ## 监控与告警
 
 - `scripts/health_check.sh` 可人工检查后端、前端、数据库、Redis、最近同步和备份。
 - 任一核心同步连续失败 2 次、最新可信库存超过 4 小时或 06:30 日报未生成时，应按重大数据异常处理，暂停用该指标作经营结论并标记 `stale`。
+- AI 监控至少检查 72 单元成功数、模板回退数、延迟、Token、非法结构次数、模型名和缓存业务日期；单模块失败不得中断确定性日报或其他模块。
 - 当前钉钉推送开关关闭，健康检查也未加入独立定时告警。因此日志可查不等于自动告警可用；启用告警前，值班人必须在 06:40 和日内库存刷新后人工检查日志。该项未启用前不能在最终验收中标记“自动告警通过”。
 
 ## 退货金额排查
@@ -57,6 +61,20 @@ cd /srv/huabang-ai-center
   scripts/generate_boss_command_center_daily.sh
 ```
 
+AI 建议使用独立锁；相同输入的成功模型快照直接命中缓存，模板回退会在后续批处理重新校验，人工刷新仍受十分钟限频：
+
+```bash
+cd /srv/huabang-ai-center
+/usr/bin/flock -n /tmp/huabang_ai_business_advice.lock \
+  scripts/generate_ai_business_advice_daily.sh
+```
+
+服务器为 UTC，定时项固定为：
+
+```cron
+45 22 * * * /usr/bin/flock -n /tmp/huabang_ai_business_advice.lock /srv/huabang-ai-center/scripts/generate_ai_business_advice_daily.sh >> /srv/huabang-ai-center/logs/ai_business_advice_daily.log 2>&1
+```
+
 ## 部署与技术验收
 
 ```bash
@@ -72,6 +90,8 @@ npm run build
 
 部署后检查服务、健康接口、经营总览、日报、门店、商品、库存、会员、异常、任务、AI 和移动接口。桌面与移动截图不得出现空白主区、横向溢出或导航死链。
 
+AI 发布先保持 `AI_BUSINESS_ADVICE_ENABLED=false` 完成迁移、测试和生产只读抽查，再设为 `true` 重启后端并手工运行一次 72 单元批处理。发布前后逐字段核对确定性日报哈希，并核对 `app.app_action_task` 行数不增长；生产快照模型名必须为 `deepseek-v4-pro`。
+
 ## 数据库迁移回滚
 
 1. 记录当前 revision、数据库备份位置及关键业务表计数。
@@ -86,6 +106,13 @@ npm run build
 2. 新版本发布后抽查主要路由和静态资源。
 3. 如需回滚，用同一服务器上的上一份 `dist` 原子替换当前目录，重载 Web 服务并复查路由。
 4. 回滚演练只验证版本切换与恢复，不修改后端数据。
+
+## AI 经营建议回退
+
+1. 将 `AI_BUSINESS_ADVICE_ENABLED=false` 并重启后端，页面立即使用确定性模板；不要回滚销售、库存、利润、会员或任务数据。
+2. 保留 `ai.ai_business_advice_snapshot` 和调用日志用于排障，不删除已验证缓存。
+3. 检查失败类型、数据状态、模型名与输入哈希。修复后只允许授权用户刷新单个公司/门店模块，或重新执行幂等批处理。
+4. 模型不可用、空响应、非法 JSON、虚构引用、未授权数字、声称已执行及费用缺失时判断盈亏，均应整单回退模板。
 
 ## 故障处置原则
 

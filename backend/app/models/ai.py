@@ -1,5 +1,6 @@
 """ai schema: AI诊断结果表"""
-from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON
+from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, BigInteger, Numeric, Text, JSON, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -68,3 +69,42 @@ class AiRuleMatch(Base):
     is_sent_to_ai = Column(Boolean, default=False)
     ai_diagnosis_id = Column(BigInteger)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiBusinessAdviceSnapshot(Base):
+    """公司/门店模块级 AI 经营建议缓存；事实值只保存在 safe_context 中。"""
+    __tablename__ = "ai_business_advice_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "stat_date", "module", "scope_type", "target_code",
+            name="uq_ai_business_advice_snapshot_unit",
+        ),
+        {"schema": "ai"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    stat_date = Column(Date, nullable=False)
+    module = Column(String(32), nullable=False)
+    scope_type = Column(String(16), nullable=False)
+    target_code = Column(String(64), nullable=False, default="company")
+    safe_context = Column(JSONB, nullable=False, default=dict)
+    input_hash = Column(String(64), nullable=False)
+    conclusion = Column(JSONB, nullable=False, default=dict)
+    mode = Column(String(16), nullable=False, default="template")
+    status = Column(String(16), nullable=False, default="success")
+    data_status = Column(String(16), nullable=False, default="pending_data")
+    provider = Column(String(32))
+    model_name = Column(String(128))
+    prompt_version = Column(String(32), nullable=False, default="business-advice-v1")
+    schema_version = Column(String(32), nullable=False, default="business-advice-json-v1")
+    prompt_tokens = Column(Integer)
+    completion_tokens = Column(Integer)
+    total_tokens = Column(Integer)
+    latency_ms = Column(Integer)
+    error_code = Column(String(64))
+    fallback_reason = Column(Text)
+    last_attempt_status = Column(String(16))
+    last_attempt_error_code = Column(String(64))
+    last_attempt_at = Column(DateTime(timezone=True))
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

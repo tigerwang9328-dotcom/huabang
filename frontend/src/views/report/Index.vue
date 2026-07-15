@@ -26,6 +26,18 @@
       </article>
     </section>
 
+    <section class="panel ai-advice-panel">
+      <div class="panel-title">
+        <div><h2>AI经营顾问</h2><span>{{ commandConclusion.executive_summary || "等待经营建议" }}</span></div>
+        <div class="ai-meta"><el-tag :type="commandConclusion.mode === 'model' ? 'success' : 'info'">{{ commandConclusion.mode === "model" ? "大模型建议" : "确定性模板" }}</el-tag><span>{{ commandConclusion.model_used || report.ai_model_used || "deterministic_rules" }} · {{ shortTime(commandConclusion.generated_at || report.ai_generated_at) }}</span></div>
+      </div>
+      <div class="advice-grid">
+        <div><h3>关键发现</h3><ul><li v-for="item in commandConclusion.key_findings || []" :key="item.title"><strong>{{ item.title }} · {{ confidenceLabel(item.confidence) }}</strong><p>{{ item.explanation }}</p><small v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</small></li></ul><el-empty v-if="!(commandConclusion.key_findings || []).length" description="暂无模型关键发现" :image-size="50" /></div>
+        <div><h3>优先行动</h3><ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><strong>{{ item.title }}</strong><p>{{ item.reason }} · {{ item.responsible_role || "待主管确认" }}</p><small v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</small></li></ul><el-empty v-if="!(commandConclusion.recommendations || []).length" description="暂无候选行动" :image-size="50" /></div>
+        <div class="limitations"><h3>数据限制</h3><ul><li v-for="item in commandConclusion.limitations || []" :key="item">{{ item }}</li></ul><p v-if="commandConclusion.fallback_reason">回退原因：{{ commandConclusion.fallback_reason }}</p></div>
+      </div>
+    </section>
+
     <section class="report-grid">
       <div class="panel">
         <div class="panel-title"><h2>库存与会员资产</h2><span>外穿衣物 / 白名单10编码</span></div>
@@ -82,6 +94,7 @@ yesterday.setDate(yesterday.getDate() - 1);
 const selectedDate = ref(yesterday.toISOString().slice(0, 10));
 const freshness = computed(() => report.value.source_freshness || {});
 const statuses = computed(() => report.value.metric_status || {});
+const commandConclusion = computed(() => report.value.command_conclusion || {});
 
 function money(value: any) { const n = Number(value || 0); return `¥${n.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`; }
 function number(value: any) { return Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 }); }
@@ -97,6 +110,13 @@ function tagType(value: string) { return ({ ready: "success", estimated: "warnin
 function dataStatusLabel(value: string) { return ({ normal: "完整", warning: "需关注" } as any)[value] || "需关注"; }
 function dataStatusType(value: string) { return value === "normal" ? "success" : "warning"; }
 function statusName(key: string) { return ({ sales: "销售", actual_pay: "实收", gross_profit: "毛利", online_sales: "线上销售", inventory: "库存", vip_balance: "VIP余额", operating_profit: "经营利润" } as any)[key] || key; }
+function confidenceLabel(value: string) { return ({ high: "高置信", medium: "中置信", low: "低置信" } as any)[value] || "待核验"; }
+function evidenceLabel(ref: string) {
+  const fact = (commandConclusion.value.facts || []).find((item: any) => item.fact_id === ref);
+  if (fact) return `${fact.label}：${fact.value}（${fact.status}）`;
+  const risk = (commandConclusion.value.risks || []).find((item: any) => item.rule_id === ref);
+  return risk ? `${risk.title}（${risk.source}）` : ref;
+}
 
 const metrics = computed(() => [
   { label: "销售额", value: money(report.value.total_sales), note: "固定7家销售门店" },
@@ -142,6 +162,9 @@ h1 { margin:0; font-size:28px; } .report-head p:last-child { margin:8px 0 0; col
 .report-grid { display:grid; grid-template-columns:1.4fr 1fr; gap:14px; }
 .panel { margin-top:14px; background:#fff; border:1px solid #E1E6EC; border-radius:6px; padding:16px; }
 .panel-title { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }.panel-title h2 { margin:0; font-size:16px; }.panel-title span { color:#8A96A5; font-size:12px; }
+.ai-advice-panel .panel-title>div:first-child span { display:block; margin-top:6px; max-width:760px; color:#475569; line-height:1.6; }
+.ai-meta { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.advice-grid { display:grid; grid-template-columns:1fr 1fr .8fr; gap:12px; }.advice-grid>div { border:1px solid #e5eaf2; border-radius:6px; padding:14px; background:#f8fafc; }.advice-grid .limitations { background:#fffbeb; border-color:#fde68a; }.advice-grid h3 { margin:0 0 10px; font-size:14px; }.advice-grid ul { margin:0; padding-left:18px; color:#475569; font-size:13px; line-height:1.6; }.advice-grid li+li { margin-top:9px; }.advice-grid p { margin:3px 0; }.advice-grid small { display:block; color:#8b5e34; }
 .asset-list { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid #EEF1F4; }.asset-list div { padding:15px; border-right:1px solid #EEF1F4; border-bottom:1px solid #EEF1F4; }.asset-list span,.status-list span { color:#718096; font-size:12px; }.asset-list strong { display:block; margin-top:7px; font-size:17px; }
 .status-list { display:grid; gap:10px; }.status-list div { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #EEF1F4; padding-bottom:9px; }
 .history-table { --el-table-header-bg-color:#F7F9FC; --el-table-row-hover-bg-color:#FFF8ED; }
@@ -151,6 +174,6 @@ h1 { margin:0; font-size:28px; } .report-head p:last-child { margin:8px 0 0; col
 .history-panel :deep(th.el-table__cell) { color:#5F6B7A; font-size:12px; font-weight:700; }
 .history-panel :deep(td.el-table__cell) { color:#344054; font-variant-numeric:tabular-nums; }
 .history-panel :deep(td.el-table__cell strong) { color:#111827; font-weight:700; }
-@media(max-width:1100px){.quality-band,.metric-grid{grid-template-columns:repeat(2,1fr)}.report-grid{grid-template-columns:1fr}.asset-list{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){.report-head{align-items:flex-start;flex-direction:column}.quality-band,.metric-grid{grid-template-columns:1fr}.quality-band div{border-bottom:1px solid #EEF2F7}.report-page{padding:14px}}
+@media(max-width:1100px){.quality-band,.metric-grid{grid-template-columns:repeat(2,1fr)}.report-grid,.advice-grid{grid-template-columns:1fr}.asset-list{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.report-head,.panel-title{align-items:flex-start;flex-direction:column}.quality-band,.metric-grid{grid-template-columns:1fr}.quality-band div{border-bottom:1px solid #EEF2F7}.report-page{padding:14px}.ai-meta{white-space:normal;flex-wrap:wrap}}
 </style>

@@ -2,7 +2,10 @@
 import logging
 import httpx
 import json
+import hashlib
+import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
@@ -14,7 +17,10 @@ logger = logging.getLogger(__name__)
 # AI禁止输出的敏感结论模式（后处理检查）
 FORBIDDEN_CONCLUSIONS = [
     "已下单", "已采购", "已改价", "已调库存", "已扣款", "已罚款",
-    "自动完成", "已执行", "已生成凭证",
+    "自动完成", "已执行", "已生成凭证", "已经下单", "已经采购",
+    "已经改价", "已经调拨", "已经执行", "任务已完成", "任务已经完成",
+    "处理完成", "自动派发", "自动创建任务", "已联系会员", "已经联系会员",
+    "已经结束", "已结束", "工作完成",
 ]
 
 # 字段权限敏感字段
@@ -47,9 +53,49 @@ COMMAND_METRIC_LABELS = {
 }
 COMMAND_STATUSES = {"ready", "estimated", "pending_data", "stale"}
 COMMAND_OUTPUT_KEYS = ("facts", "risks", "recommendations", "actions", "limitations")
+MODEL_OUTPUT_KEYS = ("executive_summary", "key_findings", "recommendations", "limitations")
+ALLOWED_ACTION_TYPES = {
+    "verify_data", "refresh_data", "review_inventory", "adjust_merchandising",
+    "coach_store", "member_followup", "investigate_exception", "review_expense",
+}
+ALLOWED_RESPONSIBLE_ROLES = {
+    "operation_manager", "area_supervisor", "store_manager", "product_manager",
+    "warehouse_manager", "finance_manager", "hr_manager", "member_manager", "audit_manager",
+}
+ALLOWED_PRIORITIES = {"high", "medium", "low"}
+ALLOWED_CONFIDENCE = {"high", "medium", "low"}
+PROMPT_VERSION = "business-advice-v1"
 FORBIDDEN_INCOMPLETE_FINANCE_CLAIMS = (
-    "公司盈利", "公司亏损", "最终盈利", "最终亏损", "经营利润为", "净利润为",
+    "公司盈利", "公司亏损", "最终盈利", "最终亏损", "实现盈利", "实现亏损",
+    "利润为正", "利润为负", "经营利润为", "净利润为",
 )
+SENSITIVE_TEXT_KEYWORDS = (
+    "手机号", "会员号", "员工姓名", "导购姓名", "员工：", "导购：", "负责人：",
+    "审批", "备注", "原始JSON", "raw_json", "cookie", "token", "secret",
+)
+FINANCE_CLAIM_TERMS = ("盈利", "亏损", "净利润", "经营利润", "赚钱", "赔钱", "净赚", "净亏", "盈亏")
+FINANCE_LIMITATION_TERMS = ("不能判断", "无法判断", "不可判断", "不判断", "尚不能判断")
+FORBIDDEN_POSITIVE_FINANCE_CLAIMS = (
+    "赚钱", "赔钱", "净赚", "净亏", "已盈利", "已亏损", "实现盈利", "实现亏损",
+    "盈利为", "亏损为", "利润为正", "利润为负",
+)
+
+
+def contains_sensitive_text(value: str) -> bool:
+    lowered = value.lower()
+    return bool(
+        re.search(r"1[3-9]\d{9}", value)
+        or re.search(r"(?<!\d)\d{8,}(?!\d)", value)
+        or re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", value)
+        or re.search(r"[\{\}]|\"[^\"]+\"\s*:", value)
+        or re.search(r"(?:员工|导购|负责人|会员)(?:姓名)?[：:为是]\s*[\u4e00-\u9fff]{2,4}", value)
+        or re.search(r"请[\u4e00-\u9fff]{2,4}(?:复核|处理|跟进|确认|执行|联系)", value)
+        or re.search(
+            r"(?:赵|钱|孙|李|周|吴|郑|王|冯|陈|褚|卫|蒋|沈|韩|杨|朱|秦|尤|许|何|吕|施|张|孔|曹|严|华|金|魏|陶|姜|谢|邹|喻|柏|水|窦|章|云|苏|潘|葛|奚|范|彭|郎|鲁|韦|昌|马|苗|凤|花|方|俞|任|袁|柳|唐|罗|薛|雷|贺|倪|汤|滕|殷|段|郝|邬|安|常|乐|于|时|傅|皮|卞|齐|康|伍|余|元|卜|顾|孟|平|黄|和|穆|萧|尹)[\u4e00-\u9fff]{1,2}(?:负责|复核|处理|跟进|确认|执行|联系)",
+            value,
+        )
+        or any(keyword.lower() in lowered for keyword in SENSITIVE_TEXT_KEYWORDS)
+    )
 
 
 def sanitize_command_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -64,22 +110,20 @@ def sanitize_command_context(context: dict[str, Any]) -> dict[str, Any]:
         if status not in COMMAND_STATUSES or not source:
             continue
         value = raw.get("value")
+        if isinstance(value, Decimal):
+            value = float(value)
         reason = raw.get("reason")
-        if status == "pending_data":
+        if status in {"pending_data", "stale"}:
             value = None
         if key == "operating_profit" and not finance_complete:
-            if value is None or status != "estimated":
-                value = None
-                status = "pending_data"
-            else:
-                status = "estimated"
-            reason = reason or "费用未完整接入，经营利润仅为估算值"
+            continue
         metrics[key] = {
+            "fact_id": f"fact:{key}",
             "label": COMMAND_METRIC_LABELS[key],
             "value": value,
             "status": status,
             "source": source,
-            "as_of": raw.get("as_of"),
+            "as_of": str(raw.get("as_of")) if raw.get("as_of") is not None else None,
             "reason": reason,
         }
 
@@ -87,29 +131,28 @@ def sanitize_command_context(context: dict[str, Any]) -> dict[str, Any]:
     for raw in (context.get("rules") or [])[:50]:
         if not isinstance(raw, dict) or not raw.get("id") or not raw.get("title"):
             continue
+        title = str(raw["title"])
+        if contains_sensitive_text(title):
+            continue
+        evidence = []
+        for value in (raw.get("evidence") or [])[:10]:
+            text_value = str(value)
+            if contains_sensitive_text(text_value):
+                continue
+            evidence.append(text_value[:160])
         rules.append({
+            "rule_id": f"rule:{raw['id']}",
             "id": str(raw["id"]),
-            "title": str(raw["title"]),
+            "title": title,
             "level": str(raw.get("level") or "warning"),
-            "evidence": [str(value) for value in (raw.get("evidence") or [])[:10]],
+            "evidence": evidence,
             "source": str(raw.get("source") or "rule_engine"),
         })
 
-    tasks = []
-    for raw in (context.get("tasks") or [])[:50]:
-        if not isinstance(raw, dict) or raw.get("id") is None:
-            continue
-        tasks.append({
-            "id": raw["id"],
-            "title": str(raw.get("title") or ""),
-            "status": str(raw.get("status") or ""),
-            "owner": str(raw.get("owner") or ""),
-            "due_date": raw.get("due_date"),
-        })
     return {
         "metrics": metrics,
         "rules": rules,
-        "tasks": tasks,
+        "tasks": [],
         "finance_complete": finance_complete,
     }
 
@@ -122,6 +165,7 @@ def build_template_command_conclusion(context: dict[str, Any]) -> dict[str, Any]
         status = metric.get("status")
         if status in {"ready", "estimated"} and metric.get("value") is not None:
             facts.append({
+                "fact_id": metric.get("fact_id") or f"fact:{key}",
                 "key": key,
                 "label": metric["label"],
                 "value": metric["value"],
@@ -140,6 +184,7 @@ def build_template_command_conclusion(context: dict[str, Any]) -> dict[str, Any]
         limitations.append("费用未完整接入，只能判断毛利，不能判断最终盈亏")
 
     risks = [{
+        "rule_id": rule.get("rule_id") or f"rule:{rule['id']}",
         "id": rule["id"],
         "title": rule["title"],
         "level": rule["level"],
@@ -147,17 +192,30 @@ def build_template_command_conclusion(context: dict[str, Any]) -> dict[str, Any]
         "source": rule["source"],
     } for rule in context.get("rules", [])]
     recommendations = [{
+        "action_type": "verify_data",
         "title": f"复核{risk['title']}",
         "reason": "依据确定性规则和原始证据处理，执行前由负责人确认。",
+        "priority": "high" if risk["level"] in {"critical", "high"} else "medium",
+        "evidence_refs": [risk["rule_id"]],
+        "responsible_role": "operation_manager",
+        "due_in_days": 1,
+        "review_metric": "规则复核状态",
     } for risk in risks[:5]]
     actions = [{
+        "suggestion_key": hashlib.sha256(risk["rule_id"].encode("utf-8")).hexdigest()[:24],
+        "action_type": "verify_data",
         "title": f"处理{risk['title']}",
-        "owner": "待主管确认",
+        "owner": "operation_manager",
+        "responsible_role": "operation_manager",
+        "due_in_days": 1,
+        "review_metric": "规则复核状态",
         "status": "draft",
         "requires_human_confirm": True,
         "evidence": [risk["id"], *risk.get("evidence", [])[:3]],
     } for risk in risks[:5]]
     return {
+        "executive_summary": "基于确定性指标与规则生成，未调用大模型。",
+        "key_findings": [],
         "facts": facts,
         "risks": risks,
         "recommendations": recommendations,
@@ -193,20 +251,218 @@ def validate_command_conclusion(payload: dict[str, Any], *, finance_complete: bo
     return payload
 
 
+def _validate_narrative(text: Any, *, finance_complete: bool) -> str:
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("AI经营建议文本为空")
+    value = text.strip()
+    if (
+        re.search(r"\d", value)
+        or re.search(r"[%％]", value)
+        or any(term in value for term in ("翻倍", "倍增", "成倍"))
+        or re.search(r"百分之[零〇一二三四五六七八九十百千万亿两]+", value)
+        or re.search(
+            r"[零〇一二三四五六七八九十百千万亿两]+(?:元|万元|件|单|笔|人|天|日|家|款|个)",
+            value,
+        )
+    ):
+        raise ValueError("AI经营建议不得自行书写指标数值")
+    if any(pattern in value for pattern in FORBIDDEN_CONCLUSIONS):
+        raise ValueError("AI经营建议不得声称已执行")
+    action_terms = r"(?:采购|下单|改价|调拨|调库存|联系|派发|建单|创建|处理|执行|复核|任务|工作)"
+    completion_terms = r"(?:已经|已)(?:完成|结束|执行|处理|联系|派发)"
+    if (
+        re.search(action_terms + r".{0,12}" + completion_terms, value)
+        or re.search(completion_terms + r".{0,8}" + action_terms, value)
+    ):
+        raise ValueError("AI经营建议不得声称已执行")
+    if contains_sensitive_text(value):
+        raise ValueError("AI经营建议不得包含个人信息或原始数据")
+    if not finance_complete:
+        if any(term in value for term in FORBIDDEN_POSITIVE_FINANCE_CLAIMS):
+            raise ValueError("费用不完整时禁止输出确定性盈亏结论")
+        clauses = re.split(r"[。！？；;!?，,]|但(?:是)?|然而|不过|却", value)
+        for clause in clauses:
+            has_finance_claim = any(term in clause for term in FINANCE_CLAIM_TERMS)
+            is_limitation = any(term in clause for term in FINANCE_LIMITATION_TERMS)
+            if (
+                any(pattern in clause for pattern in FORBIDDEN_INCOMPLETE_FINANCE_CLAIMS)
+                or (has_finance_claim and not is_limitation)
+            ):
+                raise ValueError("费用不完整时禁止输出确定性盈亏结论")
+    return value
+
+
+def validate_model_business_advice(
+    payload: dict[str, Any], *, safe_context: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate only model-owned narrative. Facts and risks are never accepted from the model."""
+    if not isinstance(payload, dict) or set(payload) != set(MODEL_OUTPUT_KEYS):
+        raise ValueError("AI经营建议 JSON 结构不合法")
+    if not all(isinstance(payload.get(key), list) for key in ("key_findings", "recommendations", "limitations")):
+        raise ValueError("AI经营建议 JSON 数组结构不合法")
+    finance_complete = bool(safe_context.get("finance_complete"))
+    valid_refs = {
+        metric.get("fact_id") for metric in (safe_context.get("metrics") or {}).values()
+    } | {
+        rule.get("rule_id") for rule in (safe_context.get("rules") or [])
+    }
+    valid_refs.discard(None)
+    metric_status = {
+        metric.get("fact_id"): metric.get("status")
+        for metric in (safe_context.get("metrics") or {}).values()
+    }
+
+    result = {
+        "executive_summary": _validate_narrative(payload.get("executive_summary"), finance_complete=finance_complete),
+        "key_findings": [],
+        "recommendations": [],
+        "limitations": [],
+    }
+    for item in payload["key_findings"][:10]:
+        if not isinstance(item, dict) or set(item) != {"title", "explanation", "confidence", "evidence_refs"}:
+            raise ValueError("AI关键发现结构不合法")
+        refs = item.get("evidence_refs")
+        if not isinstance(refs, list) or not refs or any(ref not in valid_refs for ref in refs):
+            raise ValueError("AI关键发现引用了不存在的证据")
+        confidence = item.get("confidence")
+        if confidence not in ALLOWED_CONFIDENCE:
+            raise ValueError("AI关键发现置信度非法")
+        if confidence == "high" and any(metric_status.get(ref) == "estimated" for ref in refs):
+            raise ValueError("预估事实最高只能给中等置信度")
+        result["key_findings"].append({
+            "title": _validate_narrative(item.get("title"), finance_complete=finance_complete),
+            "explanation": _validate_narrative(item.get("explanation"), finance_complete=finance_complete),
+            "confidence": confidence,
+            "evidence_refs": refs,
+        })
+    for item in payload["recommendations"][:10]:
+        expected = {
+            "action_type", "title", "reason", "priority", "evidence_refs",
+            "responsible_role", "due_in_days", "review_metric",
+        }
+        if not isinstance(item, dict) or set(item) != expected:
+            raise ValueError("AI行动建议结构不合法")
+        refs = item.get("evidence_refs")
+        if not isinstance(refs, list) or not refs or any(ref not in valid_refs for ref in refs):
+            raise ValueError("AI行动建议引用了不存在的证据")
+        if item.get("action_type") not in ALLOWED_ACTION_TYPES:
+            raise ValueError("AI行动类型非法")
+        if item.get("responsible_role") not in ALLOWED_RESPONSIBLE_ROLES:
+            raise ValueError("AI责任角色非法")
+        if item.get("priority") not in ALLOWED_PRIORITIES:
+            raise ValueError("AI优先级非法")
+        due_in_days = item.get("due_in_days")
+        if not isinstance(due_in_days, int) or not 1 <= due_in_days <= 30:
+            raise ValueError("AI建议期限非法")
+        result["recommendations"].append({
+            "action_type": item["action_type"],
+            "title": _validate_narrative(item.get("title"), finance_complete=finance_complete),
+            "reason": _validate_narrative(item.get("reason"), finance_complete=finance_complete),
+            "priority": item["priority"],
+            "evidence_refs": refs,
+            "responsible_role": item["responsible_role"],
+            "due_in_days": due_in_days,
+            "review_metric": _validate_narrative(item.get("review_metric"), finance_complete=finance_complete),
+        })
+    result["limitations"] = [
+        _validate_narrative(item, finance_complete=finance_complete)
+        for item in payload["limitations"][:20]
+    ]
+    return result
+
+
+def _candidate_actions(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actions = []
+    for item in recommendations:
+        suggestion_source = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        actions.append({
+            **item,
+            "suggestion_key": hashlib.sha256(suggestion_source.encode("utf-8")).hexdigest()[:24],
+            "owner": item["responsible_role"],
+            "status": "draft",
+            "requires_human_confirm": True,
+            "evidence": item["evidence_refs"],
+        })
+    return actions
+
+
 class AIEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def generate_command_conclusion(self, context_data: dict[str, Any]) -> dict[str, Any]:
-        """Build an auditable conclusion exclusively from sourced metrics and deterministic rules."""
+    async def generate_command_conclusion(
+        self, context_data: dict[str, Any], *, allow_model: Optional[bool] = None
+    ) -> dict[str, Any]:
+        """Keep facts immutable while letting DeepSeek explain and propose candidate actions."""
         safe_context = sanitize_command_context(context_data)
-        result = build_template_command_conclusion(safe_context)
-        result.update({
+        template = build_template_command_conclusion(safe_context)
+        template.update({
             "mode": "template",
             "model_used": "deterministic_rules",
-            "fallback_reason": "经营结论仅采用可追溯指标和确定性规则",
+            "fallback_reason": "AI经营建议功能未开启",
         })
-        return result
+        usable = any(
+            metric.get("status") in {"ready", "estimated"} and metric.get("value") is not None
+            for metric in safe_context.get("metrics", {}).values()
+        ) or bool(safe_context.get("rules"))
+        if not usable:
+            template["fallback_reason"] = "没有可供模型解释的就绪事实"
+            return template
+        model_enabled = settings.AI_BUSINESS_ADVICE_ENABLED if allow_model is None else allow_model
+        if not model_enabled:
+            return template
+
+        system_prompt = """你是华邦经营顾问。只输出 json，不得输出 Markdown。
+模型只能解释服务端事实引用和提出候选行动；不得输出、改写或猜测任何金额、比例、件数、单数。
+不得声称行动已经执行。费用不完整时不得判断盈利、亏损、经营利润或净利润。
+所有 evidence_refs 必须逐字来自输入，责任角色和行动类型必须使用给定枚举。"""
+        user_content = """请按以下 json 格式返回：
+{"executive_summary":"不含数字的简短结论","key_findings":[{"title":"标题","explanation":"解释","confidence":"high|medium|low","evidence_refs":["fact:或rule:引用"]}],"recommendations":[{"action_type":"受控类型","title":"行动","reason":"原因","priority":"high|medium|low","evidence_refs":["引用"],"responsible_role":"受控角色","due_in_days":1,"review_metric":"复查指标名"}],"limitations":["限制"]}
+受控行动类型：%s
+受控责任角色：%s
+服务端脱敏事实上下文：%s""" % (
+            ",".join(sorted(ALLOWED_ACTION_TYPES)),
+            ",".join(sorted(ALLOWED_RESPONSIBLE_ROLES)),
+            json.dumps(safe_context, ensure_ascii=False, sort_keys=True, default=str),
+        )
+        last_error: Exception | None = None
+        for _attempt in range(2):
+            started = datetime.now(timezone.utc)
+            try:
+                response = await self._call_business_advice(
+                    system_prompt,
+                    user_content,
+                )
+                content = (response.get("content") or "").strip()
+                if not content:
+                    raise ValueError("AI返回空内容")
+                if response.get("model") != settings.AI_BUSINESS_ADVICE_MODEL:
+                    raise ValueError("经营建议模型与配置不一致")
+                model_payload = validate_model_business_advice(json.loads(content), safe_context=safe_context)
+                latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+                return {
+                    **template,
+                    **model_payload,
+                    "recommendations": model_payload["recommendations"],
+                    "actions": _candidate_actions(model_payload["recommendations"]),
+                    "limitations": list(dict.fromkeys([
+                        *template["limitations"], *model_payload["limitations"],
+                    ])),
+                    "mode": "model",
+                    "model_used": response["model"],
+                    "fallback_reason": None,
+                    "prompt_version": PROMPT_VERSION,
+                    "prompt_tokens": response.get("prompt_tokens"),
+                    "completion_tokens": response.get("completion_tokens"),
+                    "total_tokens": response.get("total_tokens"),
+                    "latency_ms": latency_ms,
+                }
+            except Exception as exc:
+                last_error = exc
+                logger.warning("AI经营建议校验/调用失败，第%s次: %s", _attempt + 1, type(exc).__name__)
+        template["fallback_reason"] = f"模型结果未通过校验：{type(last_error).__name__ if last_error else 'unknown'}"
+        template["error_code"] = type(last_error).__name__ if last_error else "unknown"
+        return template
 
     async def ask(
         self,
@@ -293,7 +549,14 @@ class AIEngine:
                 "permission_blocked": False,
             }
 
-    async def _call_ai(self, system_prompt: str, user_content: str) -> dict:
+    async def _call_ai(
+        self,
+        system_prompt: str,
+        user_content: str,
+        *,
+        json_mode: bool = False,
+        model_override: str | None = None,
+    ) -> dict:
         """调用AI API（支持百炼/DeepSeek/OpenAI兼容）"""
         provider = settings.AI_PROVIDER
 
@@ -301,24 +564,39 @@ class AIEngine:
             return await self._call_openai_compatible(
                 base_url=settings.DASHSCOPE_BASE_URL,
                 api_key=settings.DASHSCOPE_API_KEY,
-                model=settings.DASHSCOPE_MODEL,
+                model=model_override or settings.DASHSCOPE_MODEL,
                 system_prompt=system_prompt,
                 user_content=user_content,
+                json_mode=json_mode,
             )
         elif provider == "deepseek" and settings.DEEPSEEK_API_KEY:
             return await self._call_openai_compatible(
                 base_url=settings.DEEPSEEK_BASE_URL,
                 api_key=settings.DEEPSEEK_API_KEY,
-                model=settings.DEEPSEEK_MODEL,
+                model=model_override or settings.DEEPSEEK_MODEL,
                 system_prompt=system_prompt,
                 user_content=user_content,
+                json_mode=json_mode,
             )
         else:
             raise ValueError(f"AI提供商未配置或API Key为空: provider={provider}")
 
+    async def _call_business_advice(self, system_prompt: str, user_content: str) -> dict:
+        """经营建议固定走 DeepSeek 专用配置，不继承通用问答提供商。"""
+        if not settings.DEEPSEEK_API_KEY:
+            raise ValueError("DeepSeek API Key 未配置")
+        return await self._call_openai_compatible(
+            base_url=settings.DEEPSEEK_BASE_URL,
+            api_key=settings.DEEPSEEK_API_KEY,
+            model=settings.AI_BUSINESS_ADVICE_MODEL,
+            system_prompt=system_prompt,
+            user_content=user_content,
+            json_mode=True,
+        )
+
     async def _call_openai_compatible(
         self, base_url: str, api_key: str, model: str,
-        system_prompt: str, user_content: str
+        system_prompt: str, user_content: str, json_mode: bool = False
     ) -> dict:
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -333,20 +611,22 @@ class AIEngine:
             "max_tokens": 2000,
             "temperature": 0.3,
         }
-        async with httpx.AsyncClient(timeout=60) as client:
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        async with httpx.AsyncClient(timeout=settings.AI_BUSINESS_ADVICE_TIMEOUT_SECONDS) as client:
             resp = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            resp.raise_for_status()
             data = resp.json()
 
         if "error" in data:
-            raise ValueError(f"AI API错误: {data[error]}")
+            raise ValueError(f"AI API错误: {data['error']}")
 
         choices = data.get("choices", [])
         if not choices:
             raise ValueError("AI返回空结果")
 
-        content = choices[0]["message"]["content"]
+        content = choices[0]["message"].get("content") or ""
         # 剥离 <think> 标签（推理模型）
-        import re
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
         usage = data.get("usage", {})

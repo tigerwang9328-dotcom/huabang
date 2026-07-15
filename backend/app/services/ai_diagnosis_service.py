@@ -183,7 +183,7 @@ class AIDiagnosisService:
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    def _attach_command_conclusion(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def command_context(self, payload: dict[str, Any]) -> dict[str, Any]:
         summary = payload.get("summary") or {}
         quality = payload.get("data_quality") or {}
         sources = quality.get("source_tables") or ["diagnosis_service"]
@@ -205,7 +205,7 @@ class AIDiagnosisService:
         missing = set(quality.get("missing_fields") or [])
         warnings = quality.get("warnings") or []
         metric_status = {
-            **(summary.pop("_metric_status", {}) or {}),
+            **(summary.get("_metric_status", {}) or {}),
             **(quality.get("metric_status") or {}),
         }
         for command_key, summary_key in metric_map.items():
@@ -228,12 +228,15 @@ class AIDiagnosisService:
             "source": item.get("data_source") or "diagnosis_rules",
         } for item in payload.get("diagnoses") or []]
         finance_complete = bool(summary.get("finance_complete"))
-        safe_context = sanitize_command_context({
+        return sanitize_command_context({
             "metrics": metrics,
             "rules": rules,
             "tasks": payload.get("action_suggestions") or [],
             "finance_complete": finance_complete,
         })
+
+    def _attach_command_conclusion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        safe_context = self.command_context(payload)
         payload["command_conclusion"] = {
             **build_template_command_conclusion(safe_context),
             "mode": "template",
@@ -304,6 +307,7 @@ class AIDiagnosisService:
         hr = await self.hr(dt, store_code)
         finance = await self.finance(dt, store_code)
         audit = await self.audit(dt, store_code)
+        overview_metrics = sales.get("summary", {}) if store_code else company
 
         module_sets = [sales, products, inventory, hr, finance, audit]
         diagnoses = []
@@ -370,9 +374,9 @@ class AIDiagnosisService:
                 "inventory_health": self._risk_label(inventory),
                 "hr_health": self._risk_label(hr),
                 "finance_health": self._risk_label(finance),
-                "net_sales": _num(company.get("net_sales_amount") or company.get("net_sales")),
-                "order_count": _int(company.get("total_order_count") or company.get("order_count")),
-                "gross_margin": _num(company.get("gross_margin")),
+                "net_sales": _num(overview_metrics.get("net_sales_amount") or overview_metrics.get("net_sales")),
+                "order_count": _int(overview_metrics.get("total_order_count") or overview_metrics.get("order_count")),
+                "gross_margin": _num(overview_metrics.get("gross_margin")),
                 "ai_summary": summary_text,
             },
             "risks": risks,
@@ -1525,7 +1529,18 @@ class AIDiagnosisService:
             "data_quality": self._quality(warnings[:6], sorted(set(missing)), ["app_action_task", "AI diagnosis rules", "dws/dwd/dm"]),
         }
 
-    async def confirm_action_tasks(self, module: str, diagnosis_ids: list[str], stat_date: Optional[str], store_code: Optional[str], user: Any) -> dict:
+    async def confirm_action_tasks(
+        self,
+        module: str,
+        diagnosis_ids: list[str],
+        stat_date: Optional[str],
+        store_code: Optional[str],
+        user: Any,
+        *,
+        suggestion_key: Optional[str] = None,
+        assignee_id: int,
+        due_date: date,
+    ) -> dict:
         from app.services.task_workflow_service import normalize_assignee_roles
 
         actionable_roles = {
@@ -1533,17 +1548,81 @@ class AIDiagnosisService:
             "product_manager", "store_manager", "warehouse_manager",
         }
         dt = _as_date(stat_date or await self._latest_date())
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        if due_date < today:
+            raise ValueError("截止日期不能早于今天")
+        assignee_row = (await self.db.execute(text("""
+            select id, coalesce(real_name, username) as display_name, store_code
+            from sys.sys_user
+            where id=:id and status=1 and is_deleted=false
+        """), {"id": assignee_id})).mappings().first()
+        if not assignee_row:
+            raise ValueError("负责人不存在或账号未启用")
+        if store_code:
+            mapped = (await self.db.execute(text("""
+                select 1
+                from sys.sys_user_store
+                where user_id=:user_id and store_code=:store_code
+                union all
+                select 1
+                from sys.sys_user
+                where id=:user_id and store_code=:store_code
+                limit 1
+            """), {"user_id": assignee_id, "store_code": store_code})).scalar_one_or_none()
+            if not mapped:
+                raise ValueError("负责人尚未绑定该门店，请先完成人员门店映射")
+
         payload = await self.module(module, dt, store_code)
         diagnoses = {d.get("id"): d for d in payload.get("diagnoses", [])}
         missing_ids = [diagnosis_id for diagnosis_id in diagnosis_ids if diagnosis_id not in diagnoses]
         if missing_ids:
             raise ValueError(f"诊断不存在或已失效: {', '.join(missing_ids[:3])}")
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        if suggestion_key:
+            from app.services.ai_business_advice_service import business_advice_input_hash
+
+            current_context = self.command_context(payload)
+            current_input_hash = business_advice_input_hash(current_context)
+            row = (await self.db.execute(text("""
+                select conclusion,input_hash,data_status,status
+                from ai.ai_business_advice_snapshot
+                where stat_date=:dt and module=:module
+                  and scope_type=:scope_type and target_code=:target_code
+            """), {
+                "dt": dt,
+                "module": module,
+                "scope_type": "store" if store_code else "company",
+                "target_code": store_code or "company",
+            })).mappings().first()
+            if not row or row.get("input_hash") != current_input_hash:
+                raise ValueError("AI建议证据已变化，请先刷新建议")
+            if row.get("data_status") in {"stale", "pending_data"}:
+                raise ValueError("AI建议证据未就绪，请先刷新或核验数据")
+            actions = ((row or {}).get("conclusion") or {}).get("actions") or []
+            action = next((item for item in actions if item.get("suggestion_key") == suggestion_key), None)
+            if (
+                not action
+                or action.get("status") != "draft"
+                or action.get("requires_human_confirm") is not True
+            ):
+                raise ValueError("AI建议不存在、已失效或证据已变化")
+            candidates.append((suggestion_key, {
+                "problem_type": action.get("title") or "AI经营建议",
+                "description": action.get("reason") or "",
+                "today_action": action.get("title") or "",
+                "evidence": action.get("evidence_refs") or action.get("evidence") or [],
+                "review_metric": action.get("review_metric") or "建议复查指标",
+                "owner": action.get("responsible_role") or "operation_manager",
+                "priority": action.get("priority") or "medium",
+            }))
+        for diagnosis_id in dict.fromkeys(diagnosis_ids[:50]):
+            candidates.append((diagnosis_id, self._task_from_diag(diagnoses[diagnosis_id], 1)))
+        if not candidates:
+            raise ValueError("没有可确认的经营建议")
         created = 0
         skipped = 0
-        for idx, diagnosis_id in enumerate(dict.fromkeys(diagnosis_ids[:50]), 1):
-            diag = diagnoses[diagnosis_id]
-            task = self._task_from_diag(diag, idx)
-            source_text = f"{dt}|{store_code or ''}|{diagnosis_id}"
+        for idx, (source_key, task) in enumerate(candidates[:50], 1):
+            source_text = f"{dt}|{store_code or ''}|{source_key}"
             source_id = int(hashlib.sha256(source_text.encode("utf-8")).hexdigest()[:15], 16)
             level = str(task.get("priority") or "中")
             priority = 3 if level in ("高", "high") else 2 if level in ("中", "medium") else 1
@@ -1555,11 +1634,11 @@ class AIDiagnosisService:
                 insert into app.app_action_task
                   (task_no,title,description,data_evidence,data_evidence_text,suggested_actions,review_metrics,
                    feedback_requirement,source_type,source_id,related_store_code,related_date,assignee_name,
-                   assignee_role,creator_id,due_date,status,priority,risk_level,requires_human_confirm,is_deleted)
+                    assignee_id,assignee_role,creator_id,confirmed_by,confirmed_at,due_date,status,priority,risk_level,requires_human_confirm,is_deleted)
                 values
                   (:task_no,:title,:description,cast(:evidence as jsonb),:evidence_text,cast(:actions as jsonb),cast(:metrics as jsonb),
                    :feedback,'ai_diagnosis',:source_id,:store_code,:related_date,:assignee_name,
-                   :assignee_role,:creator_id,:due_date,'draft',:priority,:risk_level,true,false)
+                    :assignee_id,:assignee_role,:creator_id,:confirmed_by,now(),:due_date,'pending',:priority,:risk_level,true,false)
                 on conflict (source_type,source_id) where is_deleted=false and source_id is not null do nothing
                 returning id
             """), {
@@ -1571,8 +1650,10 @@ class AIDiagnosisService:
                 "metrics": json.dumps([task.get("review_metric")] if task.get("review_metric") else [], ensure_ascii=False),
                 "feedback": task.get("feedback_requirement") or "提交处理过程和结果证据。",
                 "source_id": source_id, "store_code": store_code or None, "related_date": dt,
-                "assignee_name": owner, "assignee_role": assignee_role,
-                "creator_id": getattr(user, "id", None), "due_date": datetime.now(ZoneInfo("Asia/Shanghai")).date() + timedelta(days=1),
+                "assignee_name": assignee_row["display_name"], "assignee_id": assignee_id,
+                "assignee_role": assignee_role,
+                "creator_id": getattr(user, "id", None), "confirmed_by": getattr(user, "id", None),
+                "due_date": due_date,
                 "priority": priority, "risk_level": "high" if priority == 3 else "medium" if priority == 2 else "low",
             })
             if result.scalar_one_or_none() is None:

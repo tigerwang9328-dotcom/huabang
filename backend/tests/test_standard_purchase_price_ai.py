@@ -38,7 +38,7 @@ def test_cost_permission_uses_standard_purchase_price_name():
     assert "cost_price" not in SENSITIVE_FIELDS_BY_PERMISSION["cost"]
 
 
-def test_estimated_operating_profit_remains_visible_with_limitation():
+def test_incomplete_finance_removes_operating_profit_from_ai_context():
     safe = sanitize_command_context({
         "finance_complete": False,
         "metrics": {
@@ -52,9 +52,8 @@ def test_estimated_operating_profit_remains_visible_with_limitation():
     })
     conclusion = build_template_command_conclusion(safe)
 
-    assert safe["metrics"]["operating_profit"]["value"] == -200
-    assert safe["metrics"]["operating_profit"]["status"] == "estimated"
-    assert conclusion["facts"][0]["note"] == "预估"
+    assert "operating_profit" not in safe["metrics"]
+    assert not conclusion["facts"]
     assert any("不能判断最终盈亏" in item for item in conclusion["limitations"])
 
 

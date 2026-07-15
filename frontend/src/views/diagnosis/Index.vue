@@ -14,7 +14,8 @@
           <el-option label="中风险" value="medium" />
           <el-option label="低风险" value="low" />
         </el-select>
-        <el-button type="primary" :loading="loading" @click="loadData">刷新诊断</el-button>
+        <el-button type="primary" :loading="loading" @click="loadData">刷新页面</el-button>
+        <el-button :loading="refreshingAdvice" @click="refreshAdvice">重新生成AI建议</el-button>
       </div>
     </section>
 
@@ -49,14 +50,17 @@
         </div>
         <el-tag :type="dataQuality.is_complete ? 'success' : 'warning'">{{ dataQuality.is_complete ? "数据完整" : "数据需补齐" }}</el-tag>
       </div>
-      <p class="summary-text">{{ summary.ai_summary || fallbackSummary }}</p>
+      <p class="summary-text">{{ commandConclusion.executive_summary || summary.ai_summary || fallbackSummary }}</p>
       <div class="source-line">数据来源：{{ (dataQuality.source_tables || []).join(" / ") || "规则诊断服务" }}</div>
     </section>
 
     <section v-if="commandConclusion.facts?.length || commandConclusion.limitations?.length" class="panel">
       <div class="section-title">
         <div><p>CONSTRAINED CONCLUSION</p><h2>受约束经营结论</h2></div>
-        <el-tag type="info">{{ commandConclusion.mode === "model" ? "AI归纳" : "规则模板" }}</el-tag>
+        <div class="model-meta">
+          <el-tag :type="commandConclusion.mode === 'model' ? 'success' : 'info'">{{ commandConclusion.mode === "model" ? "大模型建议" : "确定性模板" }}</el-tag>
+          <span>{{ commandConclusion.model_used || "deterministic_rules" }} · {{ shortTime(commandConclusion.generated_at) }}</span>
+        </div>
       </div>
       <div class="conclusion-grid">
         <div class="conclusion-block">
@@ -64,16 +68,21 @@
           <ul><li v-for="fact in commandConclusion.facts || []" :key="fact.key"><b>{{ fact.label }}</b> {{ fact.value }} <span>{{ fact.note }} · {{ fact.source }}</span></li></ul>
         </div>
         <div class="conclusion-block">
-          <h3>风险与建议</h3>
-          <ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.reason }}</span></li></ul>
+          <h3>模型关键发现</h3>
+          <ul><li v-for="item in commandConclusion.key_findings || []" :key="item.title"><b>{{ item.title }} · {{ confidenceLabel(item.confidence) }}</b><span>{{ item.explanation }}</span><em v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</em></li></ul>
         </div>
         <div class="conclusion-block">
-          <h3>行动草稿</h3>
-          <ul><li v-for="item in commandConclusion.actions || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.owner }} · 待人工确认</span></li></ul>
+          <h3>候选行动</h3>
+          <ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.reason }} · {{ item.responsible_role }} · {{ item.due_in_days }}天内</span><em v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</em></li></ul>
+        </div>
+        <div class="conclusion-block">
+          <h3>行动草稿（人工确认后才建单）</h3>
+          <ul><li v-for="item in commandConclusion.actions || []" :key="item.suggestion_key"><b>{{ item.title }}</b><span>{{ item.owner }} · 待选择真实负责人和期限</span><el-button size="small" type="primary" @click="openConfirm(item)">确认任务</el-button></li></ul>
         </div>
         <div class="conclusion-block limitations">
           <h3>数据限制</h3>
           <ul><li v-for="item in commandConclusion.limitations || []" :key="item">{{ item }}</li></ul>
+          <p v-if="commandConclusion.fallback_reason" class="fallback-reason">回退原因：{{ commandConclusion.fallback_reason }}</p>
         </div>
       </div>
     </section>
@@ -135,10 +144,24 @@
       </el-table>
     </section>
 
+    <el-dialog v-model="confirmDialog" title="确认经营任务" width="520px">
+      <el-alert type="info" :closable="false" title="AI 不会自动建单。请选择真实系统用户和截止日期后再确认。" />
+      <el-form label-position="top" class="confirm-form">
+        <el-form-item label="候选行动"><el-input :model-value="confirmation.title" disabled /></el-form-item>
+        <el-form-item label="负责人">
+          <el-select v-model="confirmation.assignee_id" filterable placeholder="选择已启用系统用户" style="width:100%">
+            <el-option v-for="user in users" :key="user.id" :label="`${user.label}${user.store_codes?.length ? ` · ${user.store_codes.join('/')}` : ''}`" :value="user.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="截止日期"><el-date-picker v-model="confirmation.due_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disablePast" style="width:100%" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="confirmDialog=false">取消</el-button><el-button type="primary" :loading="confirming" @click="confirmTasks">确认并创建正式任务</el-button></template>
+    </el-dialog>
+
     <section class="panel">
       <div class="section-title">
         <div><p>ACTION LOOP</p><h2>行动建议 / 闭环任务</h2></div>
-        <el-button v-if="actions.some((x: any) => x.status === '建议任务')" type="primary" :loading="confirming" @click="confirmTasks">确认并创建正式任务</el-button>
+        <el-button v-if="actions.some((x: any) => x.status === '建议任务')" type="primary" :loading="confirming" @click="openConfirm()">确认并创建正式任务</el-button>
       </div>
       <el-table :data="actions" empty-text="暂无行动建议" border>
         <el-table-column prop="task_no" label="任务编号" width="150" />
@@ -182,6 +205,10 @@ const filters = reactive({ stat_date: "", store_code: "", level: "" });
 const loading = ref(false);
 const generating = ref(false);
 const confirming = ref(false);
+const refreshingAdvice = ref(false);
+const confirmDialog = ref(false);
+const users = ref<any[]>([]);
+const confirmation = reactive<any>({ title: "", suggestion_key: "", diagnosis_ids: [], assignee_id: undefined, due_date: "" });
 const payload = ref<any>({ summary: {}, risks: [], diagnoses: [], action_suggestions: [], data_quality: {} });
 
 const summary = computed(() => payload.value.summary || {});
@@ -192,6 +219,20 @@ const dataQuality = computed(() => payload.value.data_quality || {});
 const commandConclusion = computed(() => payload.value.command_conclusion || {});
 const qualityWarnings = computed(() => [...(dataQuality.value.warnings || []), ...(dataQuality.value.missing_fields || []).map((x: string) => `缺失：${x}`)]);
 const fallbackSummary = "当前模块将优先基于真实销售、商品、库存、财务、任务数据生成诊断；数据不足时会降级显示，不会编造结论。";
+const shortTime = (value: any) => value ? String(value).replace("T", " ").slice(0, 16) : "尚未生成";
+const formatLocalDate = (value: Date) => {
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${day}`;
+};
+const confidenceLabel = (value: string) => ({ high: "高置信", medium: "中置信", low: "低置信" } as any)[value] || "待核验";
+const evidenceLabel = (ref: string) => {
+  const fact = (commandConclusion.value.facts || []).find((item: any) => item.fact_id === ref);
+  if (fact) return `${fact.label}：${fact.value}（${fact.status}）`;
+  const risk = (commandConclusion.value.risks || []).find((item: any) => item.rule_id === ref);
+  return risk ? `${risk.title}（${risk.source}）` : ref;
+};
+const disablePast = (value: Date) => value.getTime() < new Date(new Date().toDateString()).getTime();
 
 const filteredDiagnoses = computed(() => {
   if (!filters.level) return diagnoses.value;
@@ -290,6 +331,17 @@ const loadData = async () => {
   }
 };
 
+const refreshAdvice = async () => {
+  refreshingAdvice.value = true;
+  try {
+    await aiDiagnosisApi.refreshAdvice(apiModuleKey.value, { stat_date: filters.stat_date || undefined, store_code: filters.store_code || undefined });
+    ElMessage.success("AI经营建议已重新生成");
+    await loadData();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || "AI建议刷新失败");
+  } finally { refreshingAdvice.value = false; }
+};
+
 const generateTasks = async () => {
   generating.value = true;
   try {
@@ -301,13 +353,29 @@ const generateTasks = async () => {
   }
 };
 
+const loadUsers = async () => {
+  const res = await aiDiagnosisApi.getAssigneeOptions({ store_code: filters.store_code || undefined });
+  users.value = res.data.data || [];
+};
+
+const openConfirm = async (item?: any) => {
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + Math.max(1, Number(item?.due_in_days || 1)));
+  confirmation.title = item?.title || "批量确认诊断建议";
+  confirmation.suggestion_key = item?.suggestion_key || "";
+  confirmation.diagnosis_ids = item ? [] : actions.value.filter((x: any) => x.status === "建议任务").map((x: any) => x.diagnosis_id);
+  confirmation.assignee_id = undefined;
+  confirmation.due_date = formatLocalDate(tomorrow);
+  await loadUsers();
+  confirmDialog.value = true;
+};
+
 const confirmTasks = async () => {
-  const tasks = actions.value.filter((x: any) => x.status === "建议任务");
-  if (!tasks.length) return;
+  if (!confirmation.assignee_id || !confirmation.due_date) return ElMessage.warning("请选择负责人和截止日期");
   confirming.value = true;
   try {
-    const res = await aiDiagnosisApi.confirmTasks({ module: apiModuleKey.value, diagnosis_ids: tasks.map((x: any) => x.diagnosis_id), stat_date: filters.stat_date, store_code: filters.store_code });
+    const res = await aiDiagnosisApi.confirmTasks({ module: apiModuleKey.value, suggestion_key: confirmation.suggestion_key || undefined, diagnosis_ids: confirmation.diagnosis_ids.length ? confirmation.diagnosis_ids : undefined, assignee_id: confirmation.assignee_id, due_date: confirmation.due_date, stat_date: filters.stat_date || undefined, store_code: filters.store_code || undefined });
     ElMessage.success(`已创建 ${res.data.data?.created_count || 0} 个正式任务`);
+    confirmDialog.value = false;
     await loadData();
   } finally {
     confirming.value = false;
@@ -324,7 +392,7 @@ onMounted(loadData);
 .hero p, .section-title p { margin: 0 0 8px; color: #c0762a; font-size: 11px; letter-spacing: .18em; font-weight: 900; }
 .hero h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: .02em; }
 .hero span { color: #64748b; font-size: 14px; }
-.filters { display: grid; grid-template-columns: 170px 180px 130px 100px; gap: 10px; align-items: center; }
+.filters { display: grid; grid-template-columns: 170px 180px 130px 100px 140px; gap: 10px; align-items: center; }
 .quality-alert { margin: 12px 0; }
 .score-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
 .score-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 18px; box-shadow: 0 12px 32px rgba(15,23,42,.05); min-height: 106px; }
@@ -347,6 +415,10 @@ onMounted(loadData);
 .conclusion-block li + li { margin-top: 7px; }
 .conclusion-block b, .conclusion-block span { display: block; }
 .conclusion-block span { color: #64748b; font-size: 12px; }
+.conclusion-block em { display:block; margin-top:4px; color:#8b5e34; font-size:11px; font-style:normal; }
+.model-meta { display:flex; align-items:center; gap:8px; color:#64748b; font-size:12px; }
+.fallback-reason { margin:10px 0 0; color:#92400e; font-size:12px; }
+.confirm-form { margin-top:16px; }
 .focus-grid { display: grid; grid-template-columns: 1.4fr .8fr; gap: 18px; }
 .focus-list { display: grid; gap: 12px; }
 .focus-item { border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; background: #f8fafc; }

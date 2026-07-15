@@ -256,7 +256,7 @@ class ReportService:
             "rules": rules,
             "tasks": [],
             "finance_complete": bool(data.get("is_finance_complete")),
-        })
+        }, allow_model=False)
         fact_text = "；".join(
             f"{item['label']}{item['value']}{'（预估）' if item['status'] == 'estimated' else ''}"
             for item in conclusion["facts"][:6]
@@ -376,6 +376,28 @@ class ReportService:
             }] if risk_count else []),
         }, db)
         report["command_conclusion"] = structured["command_conclusion"]
+        advice_row = (await db.execute(text("""
+            select conclusion, model_name, generated_at, mode, fallback_reason
+            from ai.ai_business_advice_snapshot
+            where stat_date=:d and module='overview'
+              and scope_type='company' and target_code='company'
+        """), {"d": d})).mappings().first()
+        if advice_row:
+            conclusion = advice_row["conclusion"] or {}
+            report["command_conclusion"] = {
+                **conclusion,
+                "generated_at": str(advice_row["generated_at"]) if advice_row["generated_at"] else None,
+                "fallback_reason": advice_row["fallback_reason"],
+            }
+            report["ai_summary"] = conclusion.get("executive_summary") or report["ai_summary"]
+            report["ai_today_focus"] = "；".join(
+                item.get("title", "") for item in conclusion.get("recommendations", [])[:3]
+            ) or report["ai_today_focus"]
+            report["ai_risk_summary"] = "；".join(
+                item.get("title", "") for item in conclusion.get("key_findings", [])[:3]
+            ) or report["ai_risk_summary"]
+            report["ai_model_used"] = advice_row["model_name"] or advice_row["mode"]
+            report["ai_generated_at"] = str(advice_row["generated_at"]) if advice_row["generated_at"] else None
         return report
 
     async def _check_data_quality(self, stat_date: str, d, db) -> dict:

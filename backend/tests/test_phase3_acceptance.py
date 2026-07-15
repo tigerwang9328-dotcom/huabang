@@ -69,8 +69,7 @@ def test_ai_context_hides_missing_inputs_and_never_turns_them_into_zero():
 
     assert "footfall" not in safe["metrics"]
     assert safe["metrics"]["expense_amount"]["value"] is None
-    assert safe["metrics"]["operating_profit"]["value"] is None
-    assert safe["metrics"]["operating_profit"]["status"] == "pending_data"
+    assert "operating_profit" not in safe["metrics"]
 
     conclusion = build_template_command_conclusion(safe)
     fact_keys = {item["key"] for item in conclusion["facts"]}
@@ -91,7 +90,7 @@ async def test_model_unavailable_uses_deterministic_template(monkeypatch):
     async def unavailable(*_args, **_kwargs):
         raise RuntimeError("model unavailable")
 
-    monkeypatch.setattr(engine, "_call_ai", unavailable)
+    monkeypatch.setattr(engine, "_call_business_advice", unavailable)
     result = await engine.generate_command_conclusion(_unsafe_context())
 
     assert result["mode"] == "template"
