@@ -48,10 +48,11 @@ def test_warning_rebuild_preserves_other_historical_dates():
     )
 
 
-def test_inventory_summary_discloses_cost_coverage_without_pricing_missing_skus():
+def test_inventory_summary_discloses_standard_price_coverage_without_pricing_missing_skus():
     source = (BACKEND / "app" / "services" / "inventory_analysis_service.py").read_text(encoding="utf-8")
-    assert '"cost_coverage_rate"' in source
-    assert '"costed_sku_count"' in source
+    assert '"standard_purchase_price_coverage_rate"' in source
+    assert '"standard_purchase_price_ready_sku_count"' in source
     assert '"inventory_sku_count"' in source
-    assert "s.cost_price IS NOT NULL" in source
-    assert "s.cost_price > 0" in source
+    assert "priced.unit_price IS NULL" in source
+    assert "v_baison_sku_standard_purchase_price" in source
+    assert "p.cost_price" not in source

@@ -68,7 +68,8 @@ def sanitize_command_context(context: dict[str, Any]) -> dict[str, Any]:
         if status == "pending_data":
             value = None
         if key == "operating_profit" and not finance_complete:
-            if value is None:
+            if value is None or status != "estimated":
+                value = None
                 status = "pending_data"
             else:
                 status = "estimated"

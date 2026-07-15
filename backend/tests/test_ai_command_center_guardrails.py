@@ -31,7 +31,7 @@ def _context(*, finance_complete=False):
             },
             "operating_profit": {
                 "value": 7000,
-                "status": "ready",
+                "status": "ready" if finance_complete else "estimated",
                 "source": "finance",
                 "as_of": "2026-07-12",
             },
