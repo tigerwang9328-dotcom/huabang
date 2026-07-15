@@ -242,3 +242,29 @@ async def test_boss_daily_endpoints_attach_cached_company_overview_advice(monkey
 
     assert response.data["command_conclusion"]["mode"] == "model"
     assert calls == [("overview", "2026-07-14", None)]
+
+
+@pytest.mark.asyncio
+async def test_blocked_boss_daily_generation_never_attaches_stale_ai_advice(monkeypatch):
+    async def fake_generate(_self, report_date, _db, *, force=False):
+        return {
+            "report_date": report_date,
+            "blocked": True,
+            "block_reason": "销售同步未完成",
+        }
+
+    async def forbidden_attach(*_args, **_kwargs):
+        raise AssertionError("blocked report must not attach cached AI advice")
+
+    monkeypatch.setattr(ReportService, "generate_boss_daily", fake_generate)
+    monkeypatch.setattr(BusinessAdviceService, "attach_cached", forbidden_attach)
+
+    response = await generate_boss_daily(
+        stat_date="2026-07-14",
+        force=False,
+        current_user=SimpleNamespace(id=1),
+        db=object(),
+    )
+
+    assert response.data["blocked"] is True
+    assert "command_conclusion" not in response.data
