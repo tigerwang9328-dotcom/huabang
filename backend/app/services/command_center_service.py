@@ -104,7 +104,13 @@ def derive_metric_statuses(
         if ticket.get("return_sync_completed_at") and ticket.get("return_amount") is not None
         else "stale"
     )
-    gross_profit_status = "ready" if bool(sales.get("is_cost_complete")) else "estimated"
+    coverage = sales.get("cost_coverage_rate")
+    coverage_complete = coverage is None or _decimal(coverage) >= Decimal("1")
+    gross_profit_status = (
+        "ready"
+        if bool(sales.get("is_cost_complete")) and coverage_complete
+        else "estimated"
+    )
     gross_margin_status = gross_profit_status if _decimal(sales.get("total_sales_amount")) != ZERO else "pending_data"
     return {
         "sales": sales_status,

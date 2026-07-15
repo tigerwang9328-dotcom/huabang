@@ -128,6 +128,23 @@ def test_incomplete_cost_marks_positive_sales_margin_estimated():
     assert statuses["gross_margin"] == "estimated"
 
 
+def test_partial_standard_price_coverage_overrides_stale_complete_flag():
+    statuses = derive_metric_statuses(
+        sales={
+            "etl_at": "2026-07-13T20:00:00Z",
+            "is_cost_complete": True,
+            "cost_coverage_rate": Decimal("0.948"),
+            "total_sales_amount": 18066,
+        },
+        ticket={"synced_at": "2026-07-13T20:00:00Z"},
+        inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
+        members={"updated_at": "2026-07-13T20:00:00Z"},
+    )
+
+    assert statuses["gross_profit"] == "estimated"
+    assert statuses["gross_margin"] == "estimated"
+
+
 def test_return_metric_is_ready_when_synced_ticket_source_reports_zero_returns():
     statuses = derive_metric_statuses(
         sales={
