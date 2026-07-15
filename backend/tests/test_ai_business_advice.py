@@ -146,7 +146,18 @@ async def test_deepseek_json_mode_request_uses_configured_timeout_and_response_f
     assert captured["timeout"] == 25
     assert captured["payload"]["response_format"] == {"type": "json_object"}
     assert captured["payload"]["model"] == "deepseek-v4-pro"
+    assert captured["payload"]["max_tokens"] >= 4000
+    assert captured["payload"]["temperature"] <= 0.1
     assert result["total_tokens"] == 3
+
+
+def test_business_advice_prompt_forbids_every_narrative_number_except_due_days():
+    source = inspect.getsource(AIEngine.generate_command_conclusion)
+
+    assert "除 due_in_days 外" in source
+    assert "阿拉伯数字、中文数字、日期" in source
+    assert "见证据引用" in source
+    assert "只能在 limitations 使用固定句" in source
 
 
 def test_skill_exporter_is_select_only_and_never_exposes_raw_business_rows():

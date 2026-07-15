@@ -314,10 +314,12 @@ async def test_empty_model_content_retries_once_then_uses_valid_json(monkeypatch
         }, ensure_ascii=False), "model": "deepseek-v4-pro"},
     ])
     calls = 0
+    user_contents = []
 
-    async def model(*_args, **_kwargs):
+    async def model(_system_prompt, user_content):
         nonlocal calls
         calls += 1
+        user_contents.append(user_content)
         return next(responses)
 
     monkeypatch.setattr(engine, "_call_business_advice", model)
@@ -325,6 +327,9 @@ async def test_empty_model_content_retries_once_then_uses_valid_json(monkeypatch
 
     assert calls == 2
     assert result["mode"] == "model"
+    assert "上次输出未通过校验" not in user_contents[0]
+    assert "上次输出未通过校验" in user_contents[1]
+    assert "AI返回空内容" in user_contents[1]
 
 
 @pytest.mark.asyncio

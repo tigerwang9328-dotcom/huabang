@@ -414,7 +414,11 @@ class AIEngine:
 
         system_prompt = """你是华邦经营顾问。只输出 json，不得输出 Markdown。
 模型只能解释服务端事实引用和提出候选行动；不得输出、改写或猜测任何金额、比例、件数、单数。
+除 due_in_days 外，所有叙述字段都不得出现阿拉伯数字、中文数字、日期、金额、比例、件数或数量单位；涉及指标时只写“见证据引用”。
+叙述字段包括 executive_summary、key_findings 的 title/explanation、recommendations 的 title/reason/review_metric，以及 limitations。
 不得声称行动已经执行。费用不完整时不得判断盈利、亏损、经营利润或净利润。
+若输入 finance_complete=false，只能在 limitations 使用固定句“费用数据待接入，无法判断盈亏”；其他叙述字段禁止出现盈利、亏损、利润、赚钱、赔钱或盈亏。
+引用 estimated 状态事实时 confidence 只能为 medium 或 low，禁止 high。
 所有 evidence_refs 必须逐字来自输入，责任角色和行动类型必须使用给定枚举。"""
         user_content = """请按以下 json 格式返回：
 {"executive_summary":"不含数字的简短结论","key_findings":[{"title":"标题","explanation":"解释","confidence":"high|medium|low","evidence_refs":["fact:或rule:引用"]}],"recommendations":[{"action_type":"受控类型","title":"行动","reason":"原因","priority":"high|medium|low","evidence_refs":["引用"],"responsible_role":"受控角色","due_in_days":1,"review_metric":"复查指标名"}],"limitations":["限制"]}
@@ -426,12 +430,13 @@ class AIEngine:
             json.dumps(safe_context, ensure_ascii=False, sort_keys=True, default=str),
         )
         last_error: Exception | None = None
+        attempt_user_content = user_content
         for _attempt in range(2):
             started = datetime.now(timezone.utc)
             try:
                 response = await self._call_business_advice(
                     system_prompt,
-                    user_content,
+                    attempt_user_content,
                 )
                 content = (response.get("content") or "").strip()
                 if not content:
@@ -460,6 +465,15 @@ class AIEngine:
             except Exception as exc:
                 last_error = exc
                 logger.warning("AI经营建议校验/调用失败，第%s次: %s", _attempt + 1, type(exc).__name__)
+                if _attempt == 0:
+                    if isinstance(exc, ValueError):
+                        retry_reason = str(exc)[:160]
+                    else:
+                        retry_reason = type(exc).__name__
+                    attempt_user_content = (
+                        f"{user_content}\n\n上次输出未通过校验：{retry_reason}。"
+                        "请重新生成完整 json，并只修正该错误；不得放宽任何事实、数字、隐私或执行边界。"
+                    )
         template["fallback_reason"] = f"模型结果未通过校验：{type(last_error).__name__ if last_error else 'unknown'}"
         template["error_code"] = type(last_error).__name__ if last_error else "unknown"
         return template
@@ -608,8 +622,8 @@ class AIEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            "max_tokens": 2000,
-            "temperature": 0.3,
+            "max_tokens": 4000 if json_mode else 2000,
+            "temperature": 0.1 if json_mode else 0.3,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
