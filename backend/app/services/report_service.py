@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from app.core.store_whitelist import ALLOWED_INVENTORY_CODES
 from app.services.ai_engine import (
     AIEngine,
     build_template_command_conclusion,
@@ -434,34 +435,60 @@ class ReportService:
         has_sales = has_return = has_inventory = has_cost = False
         has_finance = has_cash = False
 
-        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_sales_detail WHERE order_date = :d"), {"d": d})
-        if int(r.scalar() or 0) > 0:
-            has_sales = True
+        snapshot_result = await db.execute(text("""
+            SELECT metric_status, is_cost_complete, is_finance_complete, source_freshness,
+                   total_sales, return_amount, total_inventory_amount, gross_profit,
+                   EXISTS (
+                       SELECT 1 FROM dws.dws_inventory_daily
+                       WHERE stat_date=:d
+                         AND UPPER(store_code) = ANY(:inventory_codes)
+                   ) AS has_inventory_source
+            FROM dm.dm_boss_daily_report
+            WHERE report_date=:d
+        """), {"d": d, "inventory_codes": sorted(ALLOWED_INVENTORY_CODES)})
+        snapshot = snapshot_result.mappings().first()
+        if not snapshot:
+            issues.append("老板日报基础数据未生成，请先运行完整ETL")
+            statuses = {}
         else:
-            issues.append("无销售明细数据")
-
-        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_return_detail WHERE return_date = :d"), {"d": d})
-        has_return = int(r.scalar() or 0) > 0
+            statuses = snapshot.get("metric_status") or {}
+            if statuses:
+                has_sales = statuses.get("sales") in {"ready", "estimated"}
+                has_return = statuses.get("returns") in {"ready", "estimated"}
+                has_inventory = statuses.get("inventory") in {"ready", "estimated"}
+                has_cost = (
+                    bool(snapshot.get("is_cost_complete"))
+                    and statuses.get("gross_profit") == "ready"
+                )
+                has_finance = (
+                    bool(snapshot.get("is_finance_complete"))
+                    and statuses.get("operating_profit") == "ready"
+                )
+            else:
+                # Rows created by the legacy DWS->DM job predate metric_status.
+                # Their persisted values remain usable while a canonical rebuild is pending.
+                has_sales = snapshot.get("total_sales") is not None
+                has_return = snapshot.get("return_amount") is not None
+                has_inventory = bool(snapshot.get("has_inventory_source"))
+                has_cost = (
+                    bool(snapshot.get("is_cost_complete"))
+                    and snapshot.get("gross_profit") is not None
+                )
+                has_finance = bool(snapshot.get("is_finance_complete"))
+                warnings.append("指标状态元数据缺失，按历史快照兼容判断，请重算经营快照")
+        if not has_sales:
+            issues.append("销售指标未就绪")
         if not has_return:
-            warnings.append("无退货数据（可能当日无退货）")
-
-        r = await db.execute(text("SELECT COUNT(*) FROM dwd.v_apparel_inventory_snapshot WHERE snapshot_date = :d"), {"d": d})
-        if int(r.scalar() or 0) > 0:
-            has_inventory = True
-        else:
-            issues.append("无库存快照数据")
-
-        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_sales_detail WHERE order_date = :d AND cost_price > 0"), {"d": d})
-        has_cost = int(r.scalar() or 0) > 0
+            warnings.append("退货指标待接入或已过期")
+        if not has_inventory:
+            issues.append("库存指标未就绪")
         if not has_cost:
-            warnings.append("成本缺失，利润不可准确计算")
+            warnings.append("标准进价覆盖不完整，毛利为预估值")
 
         r = await db.execute(text("SELECT COUNT(*) FROM dws.dws_store_daily WHERE stat_date = :d"), {"d": d})
         if int(r.scalar() or 0) == 0:
             issues.append("DWS汇总数据未生成，请先运行ETL")
 
-        r = await db.execute(text("SELECT COUNT(*) FROM dwd.dwd_finance_expense WHERE expense_date = :d"), {"d": d})
-        has_finance = int(r.scalar() or 0) > 0
         if not has_finance:
             warnings.append("无财务费用数据")
 
@@ -477,10 +504,6 @@ class ReportService:
         blocking_reconcile = int(r.scalar() or 0)
         if blocking_reconcile > 0:
             issues.append(f"存在{blocking_reconcile}个指标对账高风险项未处理")
-
-        r = await db.execute(text("SELECT COUNT(*) FROM dm.dm_boss_daily_report WHERE report_date = :d"), {"d": d})
-        if int(r.scalar() or 0) == 0:
-            issues.append("老板日报基础数据未生成，请先运行完整ETL")
 
         block_generation = len(issues) > 0
         return {
