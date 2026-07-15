@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+import app.services.command_center_service as command_center_service
 
 from app.services.command_center_service import (
     allocate_fifo_inventory,
@@ -150,6 +151,95 @@ def test_partial_standard_price_coverage_overrides_stale_complete_flag():
 
     assert statuses["gross_profit"] == "estimated"
     assert statuses["gross_margin"] == "estimated"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("confirmed", [True, False])
+async def test_daily_command_center_refreshes_finance_only_after_confirmed_sales(
+    monkeypatch, confirmed
+):
+    events = []
+
+    class Result:
+        def scalar(self):
+            return True
+
+    class Db:
+        commit_count = 0
+
+        async def execute(self, *_args, **_kwargs):
+            return Result()
+
+        async def commit(self):
+            self.commit_count += 1
+            events.append("commit")
+
+    async def record(name, value=None):
+        events.append(name)
+        return value
+
+    monkeypatch.setattr(
+        command_center_service,
+        "rebuild_inventory_age",
+        lambda *_args, **_kwargs: record("inventory_age", {}),
+    )
+    monkeypatch.setattr(
+        command_center_service,
+        "rebuild_inventory_warnings",
+        lambda *_args, **_kwargs: record("inventory_warnings", {}),
+    )
+    monkeypatch.setattr(
+        command_center_service,
+        "create_inventory_warning_task_drafts",
+        lambda *_args, **_kwargs: record("inventory_drafts", []),
+    )
+    monkeypatch.setattr(
+        command_center_service,
+        "rebuild_confirmed_sales_dws",
+        lambda *_args, **_kwargs: record("confirmed_sales", confirmed),
+    )
+    monkeypatch.setattr(
+        command_center_service,
+        "build_boss_snapshot",
+        lambda *_args, **_kwargs: record("snapshot", {}),
+    )
+    monkeypatch.setattr(
+        command_center_service,
+        "_persist_rule_results",
+        lambda *_args, **_kwargs: record("persist_rules", 0),
+    )
+
+    class Finance:
+        async def rebuild_finance_daily(self, *_args, **_kwargs):
+            return await record("finance", 1)
+
+    class Engine:
+        async def run_all(self, *_args, **_kwargs):
+            return await record("rules", {"results": []})
+
+        async def create_task_drafts(self, *_args, **_kwargs):
+            return await record("rule_drafts", [])
+
+    monkeypatch.setattr(command_center_service, "DwdToDws", lambda: Finance())
+    monkeypatch.setattr("app.services.rule_engine.RuleEngine", Engine)
+
+    db = Db()
+    await command_center_service.run_daily_command_center(
+        db, date(2026, 7, 14), date(2026, 7, 15)
+    )
+
+    expected_prefix = [
+        "inventory_age",
+        "inventory_warnings",
+        "inventory_drafts",
+        "confirmed_sales",
+    ]
+    assert events[:4] == expected_prefix
+    assert ("finance" in events) is confirmed
+    if confirmed:
+        assert events.index("confirmed_sales") < events.index("finance") < events.index("snapshot")
+    assert events[-1] == "commit"
+    assert db.commit_count == 1
 
 
 def test_return_metric_is_ready_when_synced_ticket_source_reports_zero_returns():

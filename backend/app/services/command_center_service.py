@@ -1160,8 +1160,9 @@ async def run_daily_command_center(
     age_result = await rebuild_inventory_age(db, inventory_date)
     warning_result = await rebuild_inventory_warnings(db, inventory_date)
     inventory_drafts = await create_inventory_warning_task_drafts(db, inventory_date, creator_id)
-    await rebuild_confirmed_sales_dws(db, report_date)
-    await DwdToDws().rebuild_finance_daily(str(report_date), db)
+    sales_rebuilt = await rebuild_confirmed_sales_dws(db, report_date)
+    if sales_rebuilt:
+        await DwdToDws().rebuild_finance_daily(str(report_date), db)
     await build_boss_snapshot(db, report_date, inventory_date)
 
     from app.services.rule_engine import RuleEngine
