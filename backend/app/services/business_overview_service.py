@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.data_scope import get_data_scope, sql_in
-from app.core.cost_policy import effective_sales_cost_sql
+from app.core.standard_purchase_price import effective_sales_standard_cost_sql
 from app.core.store_whitelist import (
     ALLOWED_INVENTORY_CODES,
     ALLOWED_STORE_CODES,
@@ -270,21 +270,16 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
 
         if "product_code" in inv_columns:
             amount_result = await db.execute(text(f"""
-                SELECT COALESCE(SUM(i.qty * COALESCE(sku.cost_price, p.cost_price)), 0) AS inventory_amount,
+                SELECT COALESCE(SUM(i.qty * sp.standard_purchase_price), 0) AS inventory_amount,
                        COALESCE(SUM(i.qty) FILTER (
-                           WHERE COALESCE(sku.cost_price, p.cost_price) IS NOT NULL
-                             AND COALESCE(sku.cost_price, p.cost_price) > 0
+                           WHERE sp.standard_purchase_price IS NOT NULL
                        ), 0) AS costed_qty,
                        COALESCE(SUM(i.qty), 0) AS total_qty
                 FROM dwd.v_apparel_inventory_balance i
-                LEFT JOIN dim.dim_sku sku
-                  ON sku.product_code = i.product_code
-                 AND sku.color_code = i.color_code
-                 AND sku.size_code = i.size_code
-                 AND COALESCE(sku.source_system, 'baison') = 'baison'
-                LEFT JOIN dim.dim_product p
-                  ON p.product_code = i.product_code
-                 AND COALESCE(p.source_system, 'baison') = 'baison'
+                LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                  ON sp.product_code = i.product_code
+                 AND sp.color_code = COALESCE(BTRIM(i.color_code::text), '')
+                 AND sp.size_code = COALESCE(BTRIM(i.size_code::text), '')
                 WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
             """))
             amount_row = amount_result.mappings().first()
@@ -296,16 +291,15 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             category_result = await db.execute(text("""
                 SELECT COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), '未分类') AS category_name,
                        COALESCE(SUM(i.qty), 0) AS qty,
-                       COALESCE(SUM(i.qty * COALESCE(sku.cost_price, p.cost_price)), 0) AS amount
+                       COALESCE(SUM(i.qty * sp.standard_purchase_price), 0) AS amount
                 FROM dwd.v_apparel_inventory_balance i
                 LEFT JOIN dim.dim_product p
                   ON p.product_code = i.product_code
                  AND COALESCE(p.source_system, 'baison') = 'baison'
-                LEFT JOIN dim.dim_sku sku
-                  ON sku.product_code = i.product_code
-                 AND sku.color_code = i.color_code
-                 AND sku.size_code = i.size_code
-                 AND COALESCE(sku.source_system, 'baison') = 'baison'
+                LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                  ON sp.product_code = i.product_code
+                 AND sp.color_code = COALESCE(BTRIM(i.color_code::text), '')
+                 AND sp.size_code = COALESCE(BTRIM(i.size_code::text), '')
                 WHERE UPPER(COALESCE(i.warehouse_code, '')::text) IN {inventory_in}
                 GROUP BY 1
                 HAVING COALESCE(SUM(i.qty), 0) <> 0
@@ -455,22 +449,17 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             row = None
             source = "ticket"
 
+            joined_cost_sql = effective_sales_standard_cost_sql(
+                "p.supplier_code", "sp.standard_purchase_price",
+                "s.sales_amount", "s.sales_qty"
+            )
+            fallback_cost_sql = effective_sales_standard_cost_sql(
+                "supplier_code", "standard_purchase_price",
+                "sales_amount", "sales_qty"
+            )
             if has_ticket_table:
-                fallback_cost_sql = effective_sales_cost_sql(
-                    "supplier_code", "COALESCE(NULLIF(cost_price,0),estimated_cost_price)",
-                    "sales_amount", "sales_qty"
-                )
                 ticket_result = await db.execute(text(f"""
-                WITH category_cost AS (
-                    SELECT COALESCE(NULLIF(category_name, ''), NULLIF(top_category_name, ''), 'UNKNOWN') AS cat,
-                           AVG(cost_price) FILTER (
-                               WHERE cost_price IS NOT NULL AND cost_price > 0
-                                 AND NOT (supplier_code='GY1229' AND cost_price=1)
-                           ) AS avg_cost
-                    FROM dim.dim_product
-                    WHERE COALESCE(source_system, 'baison') = 'baison'
-                    GROUP BY 1
-                ), ticket AS (
+                WITH ticket AS (
                     SELECT *
                     FROM dwd.dwd_pos_ticket
                     WHERE biz_date = :sd
@@ -493,39 +482,27 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                                 THEN ROUND(SUM(sales_amount)::numeric / SUM(standard_amount)::numeric, 4)
                                 ELSE NULL END AS discount_rate
                     FROM ticket
-                ), detail AS (
-                    SELECT NULLIF(d.item->>'spdm', '') AS product_code,
-                           COALESCE(NULLIF(d.item->>'sl', '')::numeric, 0) AS sales_qty
-                    FROM ticket t
-                    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(t.raw_data->'orderDetailGets', '[]'::jsonb)) AS d(item)
-                ), consignment_cost AS (
-                    SELECT COALESCE(SUM(s.sales_amount*0.60),0) sales_cost
-                    FROM dwd.dwd_pos_sale_goods s
-                    JOIN dim.dim_product p ON p.product_code=s.product_code
-                    WHERE s.biz_date=:sd AND COALESCE(s.store_code,'') IN {store_in}
-                      AND p.supplier_code='GY1229' AND COALESCE(p.cost_price,0)=1
                 ), detail_cost AS (
-                    SELECT COALESCE(SUM(detail.sales_qty), 0) AS detail_qty,
-                           COALESCE(SUM(detail.sales_qty) FILTER (
-                               WHERE p.cost_price IS NOT NULL AND p.cost_price > 0
+                    SELECT COALESCE(SUM(s.sales_qty), 0) AS detail_qty,
+                           COALESCE(SUM(s.sales_qty) FILTER (
+                               WHERE sp.standard_purchase_price IS NOT NULL
                            ), 0) AS costed_qty,
-                           COALESCE(SUM(detail.sales_qty) FILTER (
-                               WHERE (p.cost_price IS NOT NULL AND p.cost_price > 0)
-                                  OR (cc.avg_cost IS NOT NULL AND cc.avg_cost > 0)
+                           COALESCE(SUM(s.sales_qty) FILTER (
+                               WHERE sp.standard_purchase_price IS NOT NULL
                            ), 0) AS covered_qty,
-                           COALESCE(SUM(
-                               CASE WHEN p.supplier_code='GY1229' AND COALESCE(p.cost_price,0)=1 THEN 0
-                                    ELSE detail.sales_qty * COALESCE(NULLIF(p.cost_price,0),cc.avg_cost) END
-                           ) FILTER (
-                               WHERE (p.cost_price IS NOT NULL AND p.cost_price > 0)
-                                  OR (cc.avg_cost IS NOT NULL AND cc.avg_cost > 0)
-                           ),0) + (SELECT sales_cost FROM consignment_cost) AS sales_cost
-                    FROM detail
+                           COALESCE(SUM({joined_cost_sql}) FILTER (
+                               WHERE sp.standard_purchase_price IS NOT NULL
+                           ), 0) AS sales_cost
+                    FROM dwd.dwd_pos_sale_goods s
                     LEFT JOIN dim.dim_product p
-                      ON p.product_code = detail.product_code
+                      ON p.product_code = s.product_code
                      AND COALESCE(p.source_system, 'baison') = 'baison'
-                    LEFT JOIN category_cost cc
-                      ON cc.cat = COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), 'UNKNOWN')
+                    LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                      ON sp.product_code = s.product_code
+                     AND sp.color_code = COALESCE(BTRIM(split_part(s.sku_code, '|', 2)), '')
+                     AND sp.size_code = COALESCE(BTRIM(split_part(s.sku_code, '|', 3)), '')
+                    WHERE s.biz_date=:sd
+                      AND COALESCE(s.store_code,'') IN {store_in}
                 )
                 SELECT ticket_agg.*, detail_cost.detail_qty, detail_cost.costed_qty,
                        detail_cost.covered_qty, detail_cost.sales_cost
@@ -536,24 +513,17 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
             if not row or not row.get("total_sales") or float(row["total_sales"] or 0) <= 0:
                 source = "sale_goods_fallback"
                 fallback_result = await db.execute(text(f"""
-                WITH category_cost AS (
-                    SELECT COALESCE(NULLIF(category_name, ''), NULLIF(top_category_name, ''), 'UNKNOWN') AS cat,
-                           AVG(cost_price) FILTER (
-                               WHERE cost_price IS NOT NULL AND cost_price > 0
-                                 AND NOT (supplier_code='GY1229' AND cost_price=1)
-                           ) AS avg_cost
-                    FROM dim.dim_product
-                    WHERE COALESCE(source_system, 'baison') = 'baison'
-                    GROUP BY 1
-                ), sale AS (
+                WITH sale AS (
                     SELECT s.sales_amount, s.sales_qty, s.standard_amount,
-                           p.supplier_code,p.cost_price,cc.avg_cost AS estimated_cost_price
+                           p.supplier_code, sp.standard_purchase_price
                     FROM dwd.dwd_pos_sale_goods s
                     LEFT JOIN dim.dim_product p
                       ON p.product_code = s.product_code
                      AND COALESCE(p.source_system, 'baison') = 'baison'
-                    LEFT JOIN category_cost cc
-                      ON cc.cat = COALESCE(NULLIF(p.category_name, ''), NULLIF(p.top_category_name, ''), 'UNKNOWN')
+                    LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                      ON sp.product_code = s.product_code
+                     AND sp.color_code = COALESCE(BTRIM(split_part(s.sku_code, '|', 2)), '')
+                     AND sp.size_code = COALESCE(BTRIM(split_part(s.sku_code, '|', 3)), '')
                     WHERE s.biz_date = :sd
                       AND COALESCE(s.store_code, '') IN {store_in}
                 )
@@ -561,14 +531,12 @@ async def get_overview(db: AsyncSession, stat_date: Optional[str] = None, curren
                        COALESCE(SUM(sales_qty),0) as total_qty,
                        COALESCE(SUM(standard_amount),0) as total_std,
                        NULL::int as total_orders,
-                       COALESCE(SUM(sales_qty) FILTER (WHERE cost_price IS NOT NULL AND cost_price > 0), 0) AS costed_qty,
+                       COALESCE(SUM(sales_qty) FILTER (WHERE standard_purchase_price IS NOT NULL), 0) AS costed_qty,
                        COALESCE(SUM(sales_qty) FILTER (
-                           WHERE (cost_price IS NOT NULL AND cost_price > 0)
-                              OR (estimated_cost_price IS NOT NULL AND estimated_cost_price > 0)
+                           WHERE standard_purchase_price IS NOT NULL
                        ), 0) AS covered_qty,
                        COALESCE(SUM({fallback_cost_sql}) FILTER (
-                           WHERE (cost_price IS NOT NULL AND cost_price > 0)
-                              OR (estimated_cost_price IS NOT NULL AND estimated_cost_price > 0)
+                           WHERE standard_purchase_price IS NOT NULL
                        ), 0) AS sales_cost,
                        CASE WHEN SUM(standard_amount) > 0
                             THEN ROUND(SUM(sales_amount)::numeric / SUM(standard_amount)::numeric, 4)

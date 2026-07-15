@@ -4,10 +4,19 @@ from decimal import Decimal
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal, engine
+from app.integrations.baison.services.pos_sale_goods_service import PosSaleGoodsService
 
 
 async def _load_latest_cost_totals():
     await engine.dispose()
+    async with AsyncSessionLocal() as db:
+        latest_date = (await db.execute(
+            text("SELECT MAX(biz_date) FROM dwd.dwd_pos_sale_goods")
+        )).scalar_one()
+    await engine.dispose()
+    await PosSaleGoodsService().rebuild_dws_summary(
+        latest_date.isoformat(), latest_date.isoformat()
+    )
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text(
@@ -17,22 +26,30 @@ async def _load_latest_cost_totals():
                     FROM dwd.dwd_pos_sale_goods
                 ), expected AS (
                     SELECT
-                        SUM(s.sales_qty * COALESCE(
-                            NULLIF(sk.cost_price, 0),
-                            NULLIF(sk.market_price, 0),
-                            NULLIF(p.cost_price, 0)
-                        )) AS cost_amount,
-                        SUM(s.sales_amount) - SUM(s.sales_qty * COALESCE(
-                            NULLIF(sk.cost_price, 0),
-                            NULLIF(sk.market_price, 0),
-                            NULLIF(p.cost_price, 0)
-                        )) AS gross_profit
+                        SUM(CASE
+                            WHEN p.supplier_code = 'GY1229'
+                             AND sp.standard_purchase_price = 1
+                            THEN s.sales_amount * 0.60
+                            WHEN sp.standard_purchase_price > 0
+                            THEN s.sales_qty * sp.standard_purchase_price
+                            ELSE NULL
+                        END) AS cost_amount,
+                        SUM(s.sales_amount) - SUM(CASE
+                            WHEN p.supplier_code = 'GY1229'
+                             AND sp.standard_purchase_price = 1
+                            THEN s.sales_amount * 0.60
+                            WHEN sp.standard_purchase_price > 0
+                            THEN s.sales_qty * sp.standard_purchase_price
+                            ELSE NULL
+                        END) AS gross_profit
                     FROM dwd.dwd_pos_sale_goods s
                     JOIN latest l ON l.stat_date = s.biz_date
-                    LEFT JOIN dim.dim_sku sk
-                      ON REPLACE(s.sku_code, '|', '') = sk.sku_code
                     LEFT JOIN dim.dim_product p
                       ON s.product_code = p.product_code
+                    LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                      ON sp.product_code = s.product_code
+                     AND sp.color_code = COALESCE(BTRIM(split_part(s.sku_code, '|', 2)), '')
+                     AND sp.size_code = COALESCE(BTRIM(split_part(s.sku_code, '|', 3)), '')
                 ), actual AS (
                     SELECT
                         SUM(d.cost_amount) AS cost_amount,
@@ -54,7 +71,7 @@ async def _load_latest_cost_totals():
     return row
 
 
-def test_latest_product_daily_uses_sku_cost_with_market_price_fallback():
+def test_latest_product_daily_uses_standard_purchase_price():
     totals = asyncio.run(_load_latest_cost_totals())
 
     assert totals["expected_cost"] is not None

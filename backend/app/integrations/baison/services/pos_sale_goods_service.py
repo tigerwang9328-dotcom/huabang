@@ -8,7 +8,7 @@ from typing import Optional
 
 from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
-from app.core.cost_policy import effective_sales_cost_sql
+from app.core.standard_purchase_price import effective_sales_standard_cost_sql
 from app.core.store_whitelist import ALLOWED_INVENTORY_CODES, allowed_inventory_sql_in
 from sqlalchemy import text
 
@@ -222,8 +222,8 @@ class PosSaleGoodsService:
             params = {"sd": dt.date.fromisoformat(start_date[:10]), "ed": dt.date.fromisoformat(end_date[:10])}
             # 华邦业务口径:销售明细仅统计 10 个白名单门店/仓,见 app.core.store_whitelist
             store_in = allowed_inventory_sql_in()
-            line_cost_sql = effective_sales_cost_sql(
-                "p.supplier_code", "p.cost_price", "s.sales_amount", "s.sales_qty"
+            line_cost_sql = effective_sales_standard_cost_sql(
+                "p.supplier_code", "sp.standard_purchase_price", "s.sales_amount", "s.sales_qty"
             )
             async with AsyncSessionLocal() as db:
                 # 公司日汇总 -> dws_company_daily
@@ -320,21 +320,22 @@ class PosSaleGoodsService:
                     params,
                 )
 
-                # 统一回填商品、门店和公司销售成本。温州徐总成本价1元商品
-                # 按实际销售额的60%计成本，其余商品仍按数量乘主档成本。
+                # 统一回填商品、门店和公司销售成本。温州徐总标准进价1元商品
+                # 按实际销售额的60%计成本，其余商品按数量乘SKU标准进价。
                 await db.execute(
                     text(f"""
                         WITH product_cost AS (
                             SELECT s.biz_date,s.product_code,s.store_code,
                                    COALESCE(SUM({line_cost_sql}),0) cost_amount,
-                                   BOOL_AND(
-                                       (p.supplier_code='GY1229' AND COALESCE(p.cost_price,0)=1)
-                                       OR COALESCE(p.cost_price,0)>0
-                                   ) is_cost_complete
+                                   BOOL_AND(sp.standard_purchase_price IS NOT NULL) is_cost_complete
                             FROM dwd.dwd_pos_sale_goods s
                             LEFT JOIN dim.dim_product p
                               ON p.product_code=s.product_code
                              AND COALESCE(p.source_system,'baison')='baison'
+                            LEFT JOIN dim.v_baison_sku_standard_purchase_price sp
+                              ON sp.product_code=s.product_code
+                             AND sp.color_code=COALESCE(BTRIM(split_part(s.sku_code, '|', 2)), '')
+                             AND sp.size_code=COALESCE(BTRIM(split_part(s.sku_code, '|', 3)), '')
                             WHERE s.biz_date>=:sd AND s.biz_date<=:ed
                               AND s.store_code IN {store_in}
                             GROUP BY s.biz_date,s.product_code,s.store_code
