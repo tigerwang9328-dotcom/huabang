@@ -163,14 +163,23 @@ async def mobile_inventory_styles(
             FROM dwd.dwd_pos_sale_goods
             WHERE store_code = ANY(:store_codes)
         ), inv AS (
-            SELECT product_code,
-                   COALESCE(SUM(qty), 0) AS inventory_qty,
-                   COALESCE(SUM(available_qty), 0) AS available_qty,
-                   COUNT(DISTINCT sku_code) FILTER (WHERE sku_code IS NOT NULL AND BTRIM(sku_code::text) <> '') AS sku_count,
-                   MAX(synced_at) AS last_synced_at
-            FROM dwd.v_apparel_inventory_balance
-            WHERE UPPER(COALESCE(warehouse_code, '')::text) = ANY(:inventory_codes)
-            GROUP BY product_code
+            SELECT b.product_code,
+                   COALESCE(SUM(b.qty), 0) AS inventory_qty,
+                   COALESCE(SUM(b.qty * price.standard_purchase_price)
+                       FILTER (WHERE price.standard_purchase_price IS NOT NULL), 0) AS inventory_amount,
+                   COALESCE(SUM(b.available_qty), 0) AS available_qty,
+                   COUNT(DISTINCT b.sku_code) FILTER (
+                       WHERE b.sku_code IS NOT NULL AND BTRIM(b.sku_code::text) <> ''
+                   ) AS sku_count,
+                   MAX(b.synced_at) AS last_synced_at
+            FROM dwd.v_apparel_inventory_balance b
+            LEFT JOIN dim.v_baison_sku_standard_purchase_price price
+              ON price.product_code = b.product_code
+             AND TRIM(LEADING '-' FROM price.color_code) =
+                 TRIM(LEADING '-' FROM COALESCE(BTRIM(b.color_code::text), ''))
+             AND price.size_code = COALESCE(BTRIM(b.size_code::text), '')
+            WHERE UPPER(COALESCE(b.warehouse_code, '')::text) = ANY(:inventory_codes)
+            GROUP BY b.product_code
         ), sales AS (
             SELECT g.product_code,
                    COALESCE(SUM(g.sales_qty), 0) AS sales_qty,
@@ -194,7 +203,7 @@ async def mobile_inventory_styles(
                    p.market_price,
                    p.status,
                    COALESCE(inv.inventory_qty, 0) AS inventory_qty,
-                   COALESCE(p.tag_price, p.market_price, 0) * COALESCE(inv.inventory_qty, 0) AS inventory_amount,
+                   COALESCE(inv.inventory_amount, 0) AS inventory_amount,
                    COALESCE(inv.available_qty, 0) AS available_qty,
                    COALESCE(inv.sku_count, 0) AS sku_count,
                    COALESCE(sales.sales_qty, 0) AS sales_qty,

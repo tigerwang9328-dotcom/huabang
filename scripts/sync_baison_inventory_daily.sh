@@ -68,25 +68,18 @@ async def main():
                 SELECT CAST(:stat_date AS date),
                        b.warehouse_code,
                        COALESCE(SUM(b.qty), 0)::int,
-                       COALESCE(SUM(b.qty * COALESCE(
-                           NULLIF(sk.cost_price, 0),
-                           NULLIF(sk.market_price, 0),
-                           NULLIF(p.cost_price, 0)
-                       )), 0),
+                       COALESCE(SUM(b.qty * price.standard_purchase_price)
+                           FILTER (WHERE price.standard_purchase_price IS NOT NULL), 0),
                        COUNT(*) FILTER (WHERE b.qty < 0)::int,
                        COUNT(DISTINCT COALESCE(NULLIF(b.sku_code, ''), b.product_code, b.barcode))::int,
-                       BOOL_AND(
-                           NULLIF(sk.cost_price, 0) IS NOT NULL
-                           OR NULLIF(p.cost_price, 0) IS NOT NULL
-                       ),
+                       BOOL_AND(price.standard_purchase_price IS NOT NULL),
                        now(), now()
                 FROM dwd.v_apparel_inventory_balance b
-                LEFT JOIN dim.dim_sku sk
-                  ON sk.product_code = b.product_code
-                 AND TRIM(LEADING '-' FROM COALESCE(sk.color_code, '')) =
-                     TRIM(LEADING '-' FROM COALESCE(b.color_code, ''))
-                 AND COALESCE(sk.size_code, '') = COALESCE(b.size_code, '')
-                LEFT JOIN dim.dim_product p ON b.product_code = p.product_code
+                LEFT JOIN dim.v_baison_sku_standard_purchase_price price
+                  ON price.product_code = b.product_code
+                 AND TRIM(LEADING '-' FROM price.color_code) =
+                     TRIM(LEADING '-' FROM COALESCE(BTRIM(b.color_code::text), ''))
+                 AND price.size_code = COALESCE(BTRIM(b.size_code::text), '')
                 WHERE UPPER(b.warehouse_code::text) = ANY(:allowed)
                 GROUP BY b.warehouse_code
                 ON CONFLICT (stat_date, store_code)
