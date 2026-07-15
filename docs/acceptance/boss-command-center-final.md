@@ -14,7 +14,7 @@
 - 技术验收：后端、前端、迁移、构建、生产接口、桌面/移动页面和前端回滚机制均已有实测证据。
 - 运行观察：2026-07-15 已完成 04:00 销售/退货、05:30 库存、06:30 日报和 06:40 健康检查的真实完整周期。05:30 与 06:30 首次执行分别暴露业务日期字符串绑定和公司级 VIP 规则空参数类型问题，均补回归测试、修复、全量回归并在同一周期幂等重跑成功；06:40 返回 `healthy=true`、`issues=[]`，未创建健康告警草稿。
 - 人工签字：待老板完成 30 秒经营判断与一条真实行动任务闭环验收。
-- 人工抽查入口已更新为 2026-07-14 当前业务日样本：R001 [ID 276](https://hbreare.com/app/warning?exception_id=276)、[ID 277](https://hbreare.com/app/warning?exception_id=277)、[ID 278](https://hbreare.com/app/warning?exception_id=278)；R006 [ID 283](https://hbreare.com/app/warning?exception_id=283)、[ID 284](https://hbreare.com/app/warning?exception_id=284)、[ID 285](https://hbreare.com/app/warning?exception_id=285)；R010 [ID 286](https://hbreare.com/app/warning?exception_id=286)、[ID 287](https://hbreare.com/app/warning?exception_id=287)、[ID 288](https://hbreare.com/app/warning?exception_id=288)。VIP 行动仍为 [任务 1715](https://hbreare.com/app/task/1715)。归属稽核当前没有真实异常，因为七类归属来源尚未全部就绪，不能伪造样本补验。
+- 人工抽查入口已更新：R001 [ID 276](https://hbreare.com/app/warning?exception_id=276)、[ID 277](https://hbreare.com/app/warning?exception_id=277)、[ID 278](https://hbreare.com/app/warning?exception_id=278)；R005 [ID 219](https://hbreare.com/app/warning?exception_id=219)、[ID 220](https://hbreare.com/app/warning?exception_id=220)、[ID 221](https://hbreare.com/app/warning?exception_id=221)；R006 [ID 283](https://hbreare.com/app/warning?exception_id=283)、[ID 284](https://hbreare.com/app/warning?exception_id=284)、[ID 285](https://hbreare.com/app/warning?exception_id=285)；R010 [ID 286](https://hbreare.com/app/warning?exception_id=286)、[ID 287](https://hbreare.com/app/warning?exception_id=287)、[ID 288](https://hbreare.com/app/warning?exception_id=288)；R023 当前仅有 [ID 289](https://hbreare.com/app/warning?exception_id=289)。VIP 行动仍为 [任务 1715](https://hbreare.com/app/task/1715)。归属稽核当前没有真实异常，因为七类归属来源尚未全部就绪，不能伪造样本补验。
 
 ## AI安全边界
 
@@ -51,7 +51,7 @@
 
 经营快照的库存指标读取当日 05:30 后最新快照；R006/R010 规则证据则固定记录经营日对应的历史库存 DWS，便于以后按原业务日复核。两者日期用途不同，验收时不得把历史规则证据误认为当日实时库存。毛利率状态已与自身来源状态统一：有销售且成本完整时为 `ready`，有销售但成本不完整时为 `estimated`，零销售时为 `pending_data`。
 
-2026-07-15 09:19 生产重算后，`/dashboard/overview?stat_date=2026-07-14` 返回毛利率 74.48%、状态 `ready`，退货金额状态 `ready`。上述 9 个异常 ID 的详情接口均返回 200，每条均有 1 条原始证据并能下钻到门店或库存；未登录访问证据接口返回 401。任务 1715 返回 200，状态仍为 `draft`、负责人为空，真实人工闭环状态未被技术验收改写。
+2026-07-15 09:19 生产重算后，`/dashboard/overview?stat_date=2026-07-14` 返回毛利率 74.48%、状态 `ready`，退货金额状态 `ready`。上述 13 个异常 ID 的详情接口均返回 200，每条均有 1 条原始证据并能下钻；未登录访问证据接口返回 401。任务 1715 返回 200，状态仍为 `draft`、负责人为空，真实人工闭环状态未被技术验收改写。
 
 第二轮来源审计补充：2026-07-14 八类费用覆盖率为 0，钉钉财务表仅有 3 条 6 月报销记录，其中 2 条仍在审批中，没有可用于 7 月14日的完整核准费用。归属七类来源中门店交易、跨店历史、退款记录 3 类为 `ready`；抖音订单级绑定、已核验责任导购、导购到门店排班、改单前后日志 4 类为 `pending_data`。这些缺口均是原始来源缺失，不以会员注册门店、考勤部门或最终小票结果推定责任人。
 
@@ -102,7 +102,7 @@
 | 人工验收项 | 当前状态 | 签字/日期 |
 | --- | --- | --- |
 | 30 秒经营判断 | 待验收 |  |
-| 抽查重大异常原始证据 | 待验收；R001 使用 ID 276/277/278，R006 使用 ID 283/284/285，R010 使用 ID 286/287/288，均可从上方直达 |  |
+| 抽查重大异常原始证据 | 待验收；R001、R005、R006、R010 各有 3 条直达样本；R023 当前仅 1 条真实样本 ID 289，未补造另外 2 条 |  |
 | 完成一条真实 VIP 任务全闭环 | 待验收；使用 [任务 1715](https://hbreare.com/app/task/1715) |  |
 | 归属稽核 | 待数据源就绪；当前真实归属异常为 0，不制造验收数据 |  |
 | 确认 Web 与移动同日指标一致 | 待验收 |  |
