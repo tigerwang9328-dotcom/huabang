@@ -20,8 +20,12 @@ async def generate_boss_daily(
     if not stat_date:
         stat_date = (date.today() - timedelta(days=1)).isoformat()
     from app.services.report_service import ReportService
+    from app.services.ai_business_advice_service import BusinessAdviceService
     svc = ReportService()
     result = await svc.generate_boss_daily(stat_date, db, force=force)
+    result = await BusinessAdviceService(db).attach_cached(
+        result, "overview", stat_date, None
+    )
     return ApiResponse.ok(data=result, message="老板日报生成成功")
 
 @router.get("/boss-daily/{report_date}", response_model=ApiResponse)
@@ -32,8 +36,12 @@ async def get_boss_daily(
 ):
     """获取指定日期老板日报"""
     from app.services.report_service import ReportService
+    from app.services.ai_business_advice_service import BusinessAdviceService
     svc = ReportService()
     result = await svc._get_existing_report(report_date, db)
+    result = await BusinessAdviceService(db).attach_cached(
+        result, "overview", report_date, None
+    )
     return ApiResponse.ok(data=result)
 
 @router.get("/boss-daily", response_model=ApiResponse)

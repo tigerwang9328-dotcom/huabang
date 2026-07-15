@@ -9,6 +9,7 @@ import pytest
 import app.services.ai_business_advice_service as advice_service_module
 import app.services.ai_engine as ai_engine_module
 from app.api.v1.ai_diagnosis import ConfirmTasksRequest
+from app.api.v1.report import generate_boss_daily, get_boss_daily
 from app.core.config import settings
 from app.models.ai import AiBusinessAdviceSnapshot
 from app.services.ai_business_advice_service import (
@@ -19,6 +20,7 @@ from app.services.ai_business_advice_service import (
     business_advice_input_hash,
 )
 from app.services.ai_engine import AIEngine, PROMPT_VERSION as ENGINE_PROMPT_VERSION
+from app.services.report_service import ReportService
 
 
 def test_business_advice_prompt_contract_uses_v2_everywhere():
@@ -192,3 +194,49 @@ def test_task_confirmation_revalidates_snapshot_hash_and_data_status():
     assert 'row.get("input_hash") != current_input_hash' in source
     assert '{"stale", "pending_data"}' in source
     assert 'action.get("requires_human_confirm") is not True' in source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", [get_boss_daily, generate_boss_daily])
+async def test_boss_daily_endpoints_attach_cached_company_overview_advice(monkeypatch, endpoint):
+    report = {
+        "report_date": "2026-07-14",
+        "command_conclusion": {"mode": "template"},
+    }
+    calls = []
+
+    async def fake_get_existing(_self, report_date, _db):
+        assert report_date == "2026-07-14"
+        return dict(report)
+
+    async def fake_generate(_self, report_date, _db, *, force=False):
+        assert report_date == "2026-07-14"
+        assert force is False
+        return dict(report)
+
+    async def fake_attach(_self, payload, module, stat_date, store_code):
+        calls.append((module, stat_date, store_code))
+        payload["command_conclusion"] = {
+            "mode": "model",
+            "model_used": "deepseek-v4-pro",
+        }
+        return payload
+
+    monkeypatch.setattr(ReportService, "_get_existing_report", fake_get_existing)
+    monkeypatch.setattr(ReportService, "generate_boss_daily", fake_generate)
+    monkeypatch.setattr(BusinessAdviceService, "attach_cached", fake_attach)
+
+    kwargs = {
+        "current_user": SimpleNamespace(id=1),
+        "db": object(),
+    }
+    if endpoint is get_boss_daily:
+        kwargs["report_date"] = "2026-07-14"
+    else:
+        kwargs["stat_date"] = "2026-07-14"
+        kwargs["force"] = False
+
+    response = await endpoint(**kwargs)
+
+    assert response.data["command_conclusion"]["mode"] == "model"
+    assert calls == [("overview", "2026-07-14", None)]
