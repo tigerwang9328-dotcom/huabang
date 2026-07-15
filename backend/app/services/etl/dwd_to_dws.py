@@ -286,8 +286,19 @@ class DwdToDws:
             print(f"[DwdToDws] inventory_daily 失败: {exc}")
             return 0
 
-    async def _agg_finance_daily(self, stat_date: str, db: AsyncSession, etl_log) -> int:
-        run_id = etl_log.start_task("dwd_to_dws_finance_daily", stat_date)
+    async def rebuild_finance_daily(self, stat_date: str, db: AsyncSession) -> int:
+        """Refresh finance metrics inside the caller's current transaction."""
+        return await self._agg_finance_daily(stat_date, db, etl_log=None, commit=False)
+
+    async def _agg_finance_daily(
+        self,
+        stat_date: str,
+        db: AsyncSession,
+        etl_log=None,
+        *,
+        commit: bool = True,
+    ) -> int:
+        run_id = etl_log.start_task("dwd_to_dws_finance_daily", stat_date) if etl_log else None
         try:
             target_date = date.fromisoformat(stat_date)
             sales = (await db.execute(text("""
@@ -376,11 +387,14 @@ class DwdToDws:
                       data_type=EXCLUDED.data_type,is_profit_complete=EXCLUDED.is_profit_complete,etl_at=NOW()
                 """), params)
                 count += 1
-            await db.commit()
-            etl_log.finish_task(run_id, output_rows=count)
+            if commit:
+                await db.commit()
+            if etl_log:
+                etl_log.finish_task(run_id, output_rows=count)
             return count
         except Exception as exc:
             await db.rollback()
-            etl_log.fail_task(run_id, str(exc))
+            if etl_log:
+                etl_log.fail_task(run_id, str(exc))
             print(f"[DwdToDws] finance_daily 失败: {exc}")
             raise

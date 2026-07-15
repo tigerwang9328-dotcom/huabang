@@ -57,6 +57,18 @@ def test_daily_command_center_rebuilds_dws_before_running_rules():
     assert command_source.index("await rebuild_confirmed_sales_dws") < command_source.index("engine = RuleEngine()")
 
 
+def test_daily_command_center_rebuilds_finance_after_confirmed_sales():
+    command_source = (BACKEND / "app" / "services" / "command_center_service.py").read_text(
+        encoding="utf-8"
+    )
+
+    confirmed_sales = command_source.index("await rebuild_confirmed_sales_dws")
+    finance = command_source.index("await DwdToDws().rebuild_finance_daily")
+    snapshot = command_source.index("await build_boss_snapshot", confirmed_sales)
+
+    assert confirmed_sales < finance < snapshot
+
+
 def test_daily_command_wrapper_forwards_manual_rebuild_arguments():
     wrapper = (BACKEND.parent / "scripts" / "generate_boss_command_center_daily.sh").read_text(
         encoding="utf-8"

@@ -87,7 +87,12 @@ def test_metric_statuses_follow_each_source_freshness():
 
 def test_zero_sales_keeps_gross_profit_ready_but_margin_pending():
     statuses = derive_metric_statuses(
-        sales={"etl_at": "2026-07-13T20:00:00Z", "is_cost_complete": True, "total_sales_amount": 0},
+        sales={
+            "etl_at": "2026-07-13T20:00:00Z",
+            "is_cost_complete": True,
+            "cost_coverage_rate": Decimal("0"),
+            "total_sales_amount": 0,
+        },
         ticket={"synced_at": "2026-07-13T20:00:00Z"},
         inventory={"updated_at": "2026-07-13T20:00:00Z", "age_unknown_qty": 0},
         members={"updated_at": "2026-07-13T20:00:00Z"},
@@ -102,6 +107,7 @@ def test_positive_company_sales_marks_gross_margin_with_cost_status():
         sales={
             "etl_at": "2026-07-13T20:00:00Z",
             "is_cost_complete": True,
+            "cost_coverage_rate": Decimal("1"),
             "total_sales_amount": 8521,
         },
         ticket={"synced_at": "2026-07-13T20:00:00Z"},
@@ -117,6 +123,7 @@ def test_incomplete_cost_marks_positive_sales_margin_estimated():
         sales={
             "etl_at": "2026-07-13T20:00:00Z",
             "is_cost_complete": False,
+            "cost_coverage_rate": Decimal("1"),
             "total_sales_amount": 8521,
         },
         ticket={"synced_at": "2026-07-13T20:00:00Z"},
