@@ -940,6 +940,41 @@ test('active replay of one other template creates exactly one additional ingest'
   assert.equal(harness.nativeFetchCalls.length, 1)
 })
 
+test('a 403 replay invalidates the template and later runs skip it', async () => {
+  const harness = createHarness({
+    ready: true,
+    fetchResponse(url) {
+      return {
+        ...jsonResponse({ code: 403 }, String(url)),
+        ok: false,
+        status: 403,
+      }
+    },
+  })
+
+  observeXhr(
+    harness,
+    summaryRequest(),
+    { code: 0, data: { contentSummary: { play_count: 10 } } },
+  )
+  await harness.flush()
+  const replayTimer = harness.intervals.find(
+    (entry) => entry.delay === 1_800_000,
+  )
+  assert.ok(replayTimer)
+
+  replayTimer.callback()
+  await waitFor(
+    () => Object.values(harness.storage.get('lifeDataTemplates') || {})[0]?.valid === false,
+    '403 template was not invalidated',
+  )
+  replayTimer.callback()
+  await harness.flush()
+
+  assert.equal(harness.nativeFetchCalls.length, 1)
+  assert.match(harness.panelText('.error'), /模板已失效|403/)
+})
+
 test('full collection menu replays video and learned non-video api templates', async () => {
   const harness = createHarness({
     fetchResponse(url, init) {

@@ -119,6 +119,7 @@ def derive_metric_statuses(
         "sales_detail": sales_detail_status,
         "returns": returns_status,
         "actual_pay": sales_status,
+        "deposit": sales_status,
         "gross_profit": gross_profit_status,
         "gross_margin": gross_margin_status,
         "online_sales": sales_status,
@@ -760,6 +761,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
                COALESCE(SUM(COALESCE(pay.online_sales_amount,0)),0) online_sales_amount,
                COALESCE(SUM(COALESCE(pay.offline_sales_amount,t.sales_amount)),0) offline_sales_amount,
                COALESCE(SUM(COALESCE(pay.actual_pay_amount,t.actual_pay_amount)),0)+(SELECT recharge_amount FROM recharge) actual_pay_amount,
+               (SELECT recharge_amount FROM recharge) recharge_amount,
                COALESCE(SUM(COALESCE(pay.refund_amount,0)),0) return_amount,
                COALESCE(SUM(COALESCE(pay.sales_amount,t.sales_amount)) FILTER (
                    WHERE COALESCE(NULLIF(BTRIM(t.vip_code::text), ''),
@@ -830,6 +832,9 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
     ))
     actual_pay_amount = _optional_decimal(preserve_trusted_value(
         ticket.get("actual_pay_amount"), source_ready=ticket_ready, previous=existing.get("actual_pay_amount")
+    ))
+    deposit_amount = _optional_decimal(preserve_trusted_value(
+        ticket.get("recharge_amount"), source_ready=ticket_ready, previous=existing.get("deposit_amount")
     ))
     vip_sales = _optional_decimal(preserve_trusted_value(
         ticket.get("vip_sales_amount"), source_ready=ticket_ready, previous=existing.get("vip_sales_amount")
@@ -908,6 +913,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         "offline_sales": offline_sales,
         "online_sales": online_sales,
         "actual_pay_amount": actual_pay_amount,
+        "deposit_amount": deposit_amount,
         "net_sales": (
             total_sales - return_amount
             if total_sales is not None and return_amount is not None
@@ -997,7 +1003,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         INSERT INTO dm.dm_boss_daily_report (
             report_date, total_sales, offline_sales, online_sales, net_sales,
             order_count, item_count, avg_order_value, items_per_order, avg_discount_rate,
-            actual_pay_amount, return_amount, return_rate, gross_profit, gross_margin, operating_profit_estimate,
+            actual_pay_amount, deposit_amount, return_amount, return_rate, gross_profit, gross_margin, operating_profit_estimate,
             total_inventory_amount, inventory_total_qty, age_90_plus_amount, age_180_plus_amount,
             inventory_age_unknown_qty, inventory_age_unknown_amount,
             vip_balance, vip_negative_balance_count, vip_negative_balance_amount, vip_sales_amount, vip_sales_ratio,
@@ -1007,7 +1013,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
         ) VALUES (
             :report_date, :total_sales, :offline_sales, :online_sales, :net_sales,
             :order_count, :item_count, :avg_order_value, :items_per_order, :avg_discount_rate,
-            :actual_pay_amount, :return_amount, :return_rate, :gross_profit, :gross_margin, :operating_profit_estimate,
+            :actual_pay_amount, :deposit_amount, :return_amount, :return_rate, :gross_profit, :gross_margin, :operating_profit_estimate,
             :total_inventory_amount, :inventory_total_qty, :age_90_plus_amount, :age_180_plus_amount,
             :inventory_age_unknown_qty, :inventory_age_unknown_amount,
             :vip_balance, :vip_negative_balance_count, :vip_negative_balance_amount, :vip_sales_amount, :vip_sales_ratio,
@@ -1019,9 +1025,8 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
             online_sales=EXCLUDED.online_sales, net_sales=EXCLUDED.net_sales, order_count=EXCLUDED.order_count,
             item_count=EXCLUDED.item_count, avg_order_value=EXCLUDED.avg_order_value,
             items_per_order=EXCLUDED.items_per_order, avg_discount_rate=EXCLUDED.avg_discount_rate,
-            actual_pay_amount=EXCLUDED.actual_pay_amount, return_amount=EXCLUDED.return_amount,
-            return_rate=EXCLUDED.return_rate, gross_profit=EXCLUDED.gross_profit,
-            gross_margin=EXCLUDED.gross_margin, operating_profit_estimate=EXCLUDED.operating_profit_estimate,
+            actual_pay_amount=EXCLUDED.actual_pay_amount, deposit_amount=EXCLUDED.deposit_amount, return_amount=EXCLUDED.return_amount,
+            return_rate=EXCLUDED.return_rate, gross_profit=EXCLUDED.gross_profit, gross_margin=EXCLUDED.gross_margin, operating_profit_estimate=EXCLUDED.operating_profit_estimate,
             total_inventory_amount=EXCLUDED.total_inventory_amount,
             inventory_total_qty=EXCLUDED.inventory_total_qty, age_90_plus_amount=EXCLUDED.age_90_plus_amount,
             inventory_age_unknown_qty=EXCLUDED.inventory_age_unknown_qty,
@@ -1056,6 +1061,7 @@ async def get_command_center_snapshot(db: AsyncSession, report_date: date) -> di
         "sales": build_metric(data.get("total_sales"), source="baison_pos", as_of=report_date, status=statuses.get("sales")),
         "offline_sales": build_metric(data.get("offline_sales"), source="baison_payment", as_of=report_date, status=statuses.get("sales")),
         "actual_pay": build_metric(data.get("actual_pay_amount"), source="baison_payment", as_of=report_date, status=statuses.get("actual_pay")),
+        "deposit": build_metric(data.get("deposit_amount"), source="baison_payment.recharge", as_of=report_date, status=statuses.get("deposit")),
         "orders": build_metric(data.get("order_count"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=0),
         "items": build_metric(data.get("item_count"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail"), decimals=0),
         "avg_order_value": build_metric(data.get("avg_order_value"), source="baison_pos", as_of=report_date, status=statuses.get("sales_detail")),

@@ -31,7 +31,7 @@ test('declares the required Tampermonkey metadata', () => {
   const source = fs.readFileSync(scriptPath, 'utf8')
 
   for (const line of [
-    '// @version      1.1.1',
+    '// @version      1.1.2',
     '// @match        https://www.life-data.cn/*',
     '// @run-at       document-start',
     '// @grant        GM_xmlhttpRequest',
@@ -50,6 +50,21 @@ test('collector panel reports learned api templates and full collection feedback
   assert.equal(source.includes('已登记模板'), true)
   assert.equal(source.includes('立即全量采集'), true)
   assert.equal(source.includes('采集中…'), true)
+})
+
+test('does not double every successful ingest with an immediate status request', () => {
+  const source = fs.readFileSync(scriptPath, 'utf8')
+  assert.equal(
+    source.includes("if (state.isLeader) void postCollectorStatus('online')"),
+    false,
+  )
+})
+
+test('recognizes only authentication failures as invalid replay templates', () => {
+  assert.equal(core.isInvalidReplayStatus(401), true)
+  assert.equal(core.isInvalidReplayStatus(403), true)
+  assert.equal(core.isInvalidReplayStatus(429), false)
+  assert.equal(core.isInvalidReplayStatus(500), false)
 })
 
 test('classifies the learned LifeData business paths into collection groups', () => {

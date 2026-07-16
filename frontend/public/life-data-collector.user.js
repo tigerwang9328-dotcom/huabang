@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.1.1
+// @version      1.1.2
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @updateURL     https://hbreare.com/life-data-collector.user.js
 // @downloadURL   https://hbreare.com/life-data-collector.user.js
@@ -508,6 +508,10 @@
     }
   }
 
+  function isInvalidReplayStatus(status) {
+    return status === 401 || status === 403
+  }
+
   function validateVideoPage(rank, total, offset, pageSize, seenIds) {
     if (!rank || !Array.isArray(rank.data)) {
       throw new Error(`offset ${offset} 缺少 itemRank`)
@@ -675,6 +679,7 @@
     mergeTemplateRegistry,
     missingFieldGuidance,
     isAllowedEndpoint,
+    isInvalidReplayStatus,
     nextLeaderLease,
     pickLifeDataHeaders,
     refreshRelativeDateRange,
@@ -958,7 +963,8 @@
       return Object.values(readTemplates())
         .filter(
           (template) =>
-            template && (template.kind === 'video' || template.isVideo === true),
+            template && template.valid !== false &&
+            (template.kind === 'video' || template.isVideo === true),
         )
         .sort((a, b) => Number(b.learnedAt) - Number(a.learnedAt))[0] || null
     }
@@ -966,8 +972,23 @@
     function otherTemplates() {
       return Object.values(readTemplates()).filter(
         (template) =>
-          template && template.kind !== 'video' && template.isVideo !== true,
+          template && template.valid !== false &&
+          template.kind !== 'video' && template.isVideo !== true,
       )
+    }
+
+    function invalidateTemplate(template, status) {
+      const key = templateFingerprint(template)
+      const registry = readTemplates()
+      if (!registry[key]) return
+      registry[key] = {
+        ...registry[key],
+        valid: false,
+        invalidAt: Date.now(),
+        invalidReason: `LifeData HTTP ${status}`,
+      }
+      setValue(KEYS.templates, registry)
+      updatePanel()
     }
     function parseRequestBody(body) {
       if (typeof body !== 'string') return null
@@ -1320,7 +1341,14 @@
             signal: controller.signal,
           },
         )
-        if (!response.ok) throw new Error(`LifeData HTTP ${response.status}`)
+        if (!response.ok) {
+          const error = new Error(`LifeData HTTP ${response.status}`)
+          error.httpStatus = response.status
+          if (isInvalidReplayStatus(response.status)) {
+            invalidateTemplate(template, response.status)
+          }
+          throw error
+        }
         const businessJson = await response.json()
         if (!isSuccessfulResponse(businessJson)) {
           throw new Error(
@@ -1407,6 +1435,7 @@
     function templateGroupCounts() {
       const counts = { video: 0, business: 0, advertising: 0, other: 0 }
       for (const template of Object.values(readTemplates())) {
+        if (!template || template.valid === false) continue
         const group = classifyTemplate(template)
         counts[group] += 1
       }
@@ -1582,7 +1611,6 @@
       try {
         await postPayload(payload)
         setStatus({ lastUpload: new Date().toISOString() })
-        if (state.isLeader) void postCollectorStatus('online')
         return { status: 'uploaded', dropped: false }
       } catch (error) {
         if (error.retryable === false) {
@@ -1745,6 +1773,7 @@
       if (!state.isLeader) return
       const attempted = new Set()
       const failed = new Map()
+      const succeeded = new Set()
       for (const template of otherTemplates()) {
         const group = classifyTemplate(template)
         attempted.add(group)
@@ -1755,17 +1784,24 @@
           )
           const response = await replayLifeData(template, request)
           const result = await publishCapture(template, request, response)
-          if (result.status === 'uploaded') setError('')
+          if (result.status === 'uploaded') {
+            succeeded.add(group)
+            setError('')
+          }
         } catch (error) {
           failed.set(group, error.message || '未知错误')
-          setError(`业务模板重放失败：${error.message || '未知错误'}`)
+          if (isInvalidReplayStatus(error.httpStatus)) {
+            setError(`模板已失效（HTTP ${error.httpStatus}），请重新登录并刷新对应生意经页面`)
+          } else {
+            setError(`业务模板重放失败：${error.message || '未知错误'}`)
+          }
         }
       }
       for (const group of attempted) {
         setGroupHealth(
           group,
-          failed.has(group) ? 'error' : 'healthy',
-          failed.get(group) || null,
+          succeeded.has(group) || !failed.has(group) ? 'healthy' : 'error',
+          succeeded.has(group) ? null : failed.get(group) || null,
         )
       }
     }
