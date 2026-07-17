@@ -273,7 +273,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
         label: "线下销售",
         key: "sales-offline",
         children: [
-          { path: "/app/store/overview", label: "门店总览" },
           { path: "/app/store", label: "单店分析" },
           { path: "/app/member", label: "会员运营" },
           { label: "导购销售", disabled: true, badge: "规划中" },

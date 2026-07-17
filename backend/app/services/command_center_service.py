@@ -763,7 +763,7 @@ async def build_boss_snapshot(db: AsyncSession, report_date: date, inventory_dat
                COALESCE(SUM(COALESCE(pay.actual_pay_amount,t.actual_pay_amount)),0)+(SELECT recharge_amount FROM recharge) actual_pay_amount,
                (SELECT recharge_amount FROM recharge) recharge_amount,
                COALESCE(SUM(COALESCE(pay.refund_amount,0)),0) return_amount,
-               COALESCE(SUM(COALESCE(pay.sales_amount,t.sales_amount)) FILTER (
+               COALESCE(SUM(t.sales_amount) FILTER (
                    WHERE COALESCE(NULLIF(BTRIM(t.vip_code::text), ''),
                                   NULLIF(BTRIM(t.customer_code::text), '')) IS NOT NULL
                ),0) vip_sales_amount,

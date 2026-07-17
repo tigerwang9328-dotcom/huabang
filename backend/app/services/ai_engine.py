@@ -74,11 +74,51 @@ SENSITIVE_TEXT_KEYWORDS = (
     "审批", "备注", "原始JSON", "raw_json", "cookie", "token", "secret",
 )
 FINANCE_CLAIM_TERMS = ("盈利", "亏损", "净利润", "经营利润", "赚钱", "赔钱", "净赚", "净亏", "盈亏")
-FINANCE_LIMITATION_TERMS = ("不能判断", "无法判断", "不可判断", "不判断", "尚不能判断")
+FINANCE_LIMITATION_TERMS = (
+    "不能判断", "无法判断", "不可判断", "不判断", "尚不能判断",
+    "无法评估", "不能评估", "不可评估", "无法计算", "不能计算",
+    "无法核实", "难以判断", "暂不能判断", "无法推断", "难以评估",
+)
+# 财务中性描述:不构成确定性盈亏结论,如"盈利能力较强"是描述商品毛利水平,不是判断公司盈亏
+# 校验时先剔除这些短语,避免被 FINANCE_CLAIM_TERMS 中的"盈利/亏损"误判
+FINANCE_NEUTRAL_PHRASES = (
+    "盈利能力", "盈利水平", "盈利状况", "盈利趋势", "盈利空间", "盈利质量",
+    "亏损风险", "亏损可能", "亏损概率", "亏损空间",
+    "毛利水平", "毛利率水平", "毛利率能力",
+)
 FORBIDDEN_POSITIVE_FINANCE_CLAIMS = (
     "赚钱", "赔钱", "净赚", "净亏", "已盈利", "已亏损", "实现盈利", "实现亏损",
     "盈利为", "亏损为", "利润为正", "利润为负",
 )
+
+
+# 业务中性词：常见业务短语中包含姓氏字符，避免被姓名模式误判为个人信息
+# 覆盖"任务执行/任务待执行/任务需执行"等多种组合
+_BUSINESS_NEUTRAL_TOKENS = (
+    "任务执行", "任务跟进", "任务处理", "任务复核", "任务确认", "任务联系", "任务负责",
+    "任务待执行", "任务待跟进", "任务待处理", "任务待复核", "任务待确认", "任务待联系", "任务待负责",
+    "任务需执行", "任务需跟进", "任务需处理", "任务需复核", "任务需确认", "任务需联系", "任务需负责",
+    "任务将执行", "任务将跟进", "任务将处理", "任务将复核", "任务将确认", "任务将联系", "任务将负责",
+    "工作执行", "工作跟进", "工作处理", "工作复核", "工作确认", "工作联系", "工作负责",
+    "工作待执行", "工作待跟进", "工作待处理", "工作待复核", "工作待确认", "工作待联系", "工作待负责",
+    "工作需执行", "工作需跟进", "工作需处理", "工作需复核", "工作需确认", "工作需联系", "工作需负责",
+    "事项执行", "事项跟进", "事项处理", "事项复核", "事项确认", "事项联系", "事项负责",
+    "事项待执行", "事项待跟进", "事项待处理", "事项待复核", "事项待确认", "事项待联系", "事项待负责",
+    "事项需执行", "事项需跟进", "事项需处理", "事项需复核", "事项需确认", "事项需联系", "事项需负责",
+)
+
+
+def _contains_name_action_pattern(value: str) -> bool:
+    """姓名+动作模式匹配,先剔除业务中性词避免误伤(如"任务执行"被识别为"任+务+执行")。"""
+    scrubbed = value
+    for token in _BUSINESS_NEUTRAL_TOKENS:
+        scrubbed = scrubbed.replace(token, "〇〇〇〇")
+    return bool(
+        re.search(
+            r"(?:赵|钱|孙|李|周|吴|郑|王|冯|陈|褚|卫|蒋|沈|韩|杨|朱|秦|尤|许|何|吕|施|张|孔|曹|严|华|金|魏|陶|姜|谢|邹|喻|柏|水|窦|章|云|苏|潘|葛|奚|范|彭|郎|鲁|韦|昌|马|苗|凤|花|方|俞|任|袁|柳|唐|罗|薛|雷|贺|倪|汤|滕|殷|段|郝|邬|安|常|乐|于|时|傅|皮|卞|齐|康|伍|余|元|卜|顾|孟|平|黄|和|穆|萧|尹)[\u4e00-\u9fff]{1,2}(?:负责|复核|处理|跟进|确认|执行|联系)",
+            scrubbed,
+        )
+    )
 
 
 def contains_sensitive_text(value: str) -> bool:
@@ -90,10 +130,7 @@ def contains_sensitive_text(value: str) -> bool:
         or re.search(r"[\{\}]|\"[^\"]+\"\s*:", value)
         or re.search(r"(?:员工|导购|负责人|会员)(?:姓名)?[：:为是]\s*[\u4e00-\u9fff]{2,4}", value)
         or re.search(r"请[\u4e00-\u9fff]{2,4}(?:复核|处理|跟进|确认|执行|联系)", value)
-        or re.search(
-            r"(?:赵|钱|孙|李|周|吴|郑|王|冯|陈|褚|卫|蒋|沈|韩|杨|朱|秦|尤|许|何|吕|施|张|孔|曹|严|华|金|魏|陶|姜|谢|邹|喻|柏|水|窦|章|云|苏|潘|葛|奚|范|彭|郎|鲁|韦|昌|马|苗|凤|花|方|俞|任|袁|柳|唐|罗|薛|雷|贺|倪|汤|滕|殷|段|郝|邬|安|常|乐|于|时|傅|皮|卞|齐|康|伍|余|元|卜|顾|孟|平|黄|和|穆|萧|尹)[\u4e00-\u9fff]{1,2}(?:负责|复核|处理|跟进|确认|执行|联系)",
-            value,
-        )
+        or _contains_name_action_pattern(value)
         or any(keyword.lower() in lowered for keyword in SENSITIVE_TEXT_KEYWORDS)
     )
 
@@ -280,7 +317,11 @@ def _validate_narrative(text: Any, *, finance_complete: bool) -> str:
     if not finance_complete:
         if any(term in value for term in FORBIDDEN_POSITIVE_FINANCE_CLAIMS):
             raise ValueError("费用不完整时禁止输出确定性盈亏结论")
-        clauses = re.split(r"[。！？；;!?，,]|但(?:是)?|然而|不过|却", value)
+        # 剔除中性财务描述(如"盈利能力较强"),避免被"盈利/亏损"误判为确定性盈亏结论
+        scrubbed = value
+        for phrase in FINANCE_NEUTRAL_PHRASES:
+            scrubbed = scrubbed.replace(phrase, "中性描述")
+        clauses = re.split(r"[。！？；;!?，,]|但(?:是)?|然而|不过|却", scrubbed)
         for clause in clauses:
             has_finance_claim = any(term in clause for term in FINANCE_CLAIM_TERMS)
             is_limitation = any(term in clause for term in FINANCE_LIMITATION_TERMS)
@@ -415,11 +456,13 @@ class AIEngine:
         system_prompt = """你是华邦经营顾问。只输出 json，不得输出 Markdown。
 模型只能解释服务端事实引用和提出候选行动；不得输出、改写或猜测任何金额、比例、件数、单数。
 除 due_in_days 外，所有叙述字段都不得出现阿拉伯数字、中文数字、日期、金额、比例、件数或数量单位；涉及指标时只写“见证据引用”。
+禁止使用“今天、昨天、本周、本月、近七天、近30天、X天前、X日后、180天、90天”等具体时间表述；改用“近期、最近、当期、上期、历史均值”等相对描述。
+禁止使用“翻番、翻倍、增长X成、提升X成”等带数字的修辞；改用“明显提升、有所改善、有所下滑”。
 叙述字段包括 executive_summary、key_findings 的 title/explanation、recommendations 的 title/reason/review_metric，以及 limitations。
 不得声称行动已经执行。费用不完整时不得判断盈利、亏损、经营利润或净利润。
-若输入 finance_complete=false，只能在 limitations 使用固定句“费用数据待接入，无法判断盈亏”；其他叙述字段禁止出现盈利、亏损、利润、赚钱、赔钱或盈亏。
+若输入 finance_complete=false，只能在 limitations 使用固定句“费用数据待接入，无法判断盈亏”；其他叙述字段禁止出现盈利、亏损、利润、赚钱、赔钱或盈亏，可使用“无法评估盈亏”等表述。
 引用 estimated 状态事实时 confidence 只能为 medium 或 low，禁止 high。
-所有 evidence_refs 必须逐字来自输入，责任角色和行动类型必须使用给定枚举。"""
+所有 evidence_refs 必须逐字来自输入（必须从 metrics.fact_id 或 rules.rule_id 列表中复制粘贴，禁止缩写或编造），责任角色和行动类型必须使用给定枚举。"""
         user_content = """请按以下 json 格式返回：
 {"executive_summary":"不含数字的简短结论","key_findings":[{"title":"标题","explanation":"解释","confidence":"high|medium|low","evidence_refs":["fact:或rule:引用"]}],"recommendations":[{"action_type":"受控类型","title":"行动","reason":"原因","priority":"high|medium|low","evidence_refs":["引用"],"responsible_role":"受控角色","due_in_days":1,"review_metric":"复查指标名"}],"limitations":["限制"]}
 受控行动类型：%s

@@ -435,9 +435,17 @@ class PosTicketService:
                 standard_amount = self._f(rec.get("bzje"))
                 gross_profit_source_amount = self._f(rec.get("mlje"))
                 details = rec.get("orderDetailGets") or []
-                discount_rate = round(sales_amount / standard_amount, 4) if standard_amount > 0 else None
+                discount_rate = round(abs(sales_amount) / abs(standard_amount), 4) if standard_amount != 0 else None
                 is_void = str(rec.get("zf") or "0") == "1"
                 is_pending = str(rec.get("gd") or "0") == "1"
+                is_return = str(rec.get("lx") or "").strip() == "lt"
+
+                # 零售退(lx='lt')退货单:金额取负,与正常零售区分
+                if is_return:
+                    sales_amount = -abs(sales_amount)
+                    sales_qty = -abs(sales_qty)
+                    standard_amount = -abs(standard_amount)
+                    gross_profit_source_amount = -abs(gross_profit_source_amount)
 
                 # 实收金额口径:收钱吧POS/扫码/胜券扫 + 现金 + 线上支付 + 充值金额 - 退款金额。
                 actual_pay_amount = 0.0

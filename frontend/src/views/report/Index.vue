@@ -49,6 +49,7 @@
           <div><span>库龄未知</span><strong>{{ number(report.inventory_age_unknown_qty) }} 件</strong></div>
           <div><span>VIP正余额</span><strong>{{ money(report.vip_balance) }}</strong></div>
           <div><span>VIP负余额人数</span><strong>{{ number(report.vip_negative_balance_count) }}</strong></div>
+          <div><span>充值金额</span><strong>{{ money(report.deposit_amount) }}</strong></div>
         </div>
       </div>
       <div class="panel">
@@ -74,6 +75,7 @@
         <el-table-column label="毛利额" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.gross_profit) }}</template></el-table-column>
         <el-table-column label="毛利率" width="80" align="right" header-align="right"><template #default="{ row }">{{ historyPercent(row.gross_margin) }}</template></el-table-column>
         <el-table-column label="VIP销售" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.vip_sales_amount) }}</template></el-table-column>
+        <el-table-column label="充值金额" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.deposit_amount) }}</template></el-table-column>
         <el-table-column label="成本状态" width="100"><template #default="{ row }"><el-tag :type="row.is_cost_complete ? 'success' : 'warning'" size="small">{{ row.is_cost_complete ? "已就绪" : "预估" }}</el-tag></template></el-table-column>
         <el-table-column label="数据状态" width="100"><template #default="{ row }"><el-tag :type="dataStatusType(row.data_quality_status)" size="small">{{ dataStatusLabel(row.data_quality_status) }}</el-tag></template></el-table-column>
       </el-table>

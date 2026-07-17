@@ -58,42 +58,47 @@ def _sql_codes(codes: tuple[str, ...]) -> str:
     return "(" + ", ".join(f"'{code}'" for code in codes) + ")"
 
 
+
+# 退货单(lx='lt')支付明细金额取负的符号因子
+_TICKET_SIGN = "(CASE WHEN t.raw_data->>'lx' = 'lt' THEN -1 ELSE 1 END)"
+_JE_SIGNED = "COALESCE(NULLIF(p->>'je','')::numeric, 0) * " + _TICKET_SIGN
+
 PAY_DETAIL_SQL = f"""
     SELECT t.ticket_no,
            SUM(CASE
                  WHEN p->>'jsdm' IN {_sql_codes(SALES_PAYMENT_CODES)}
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                  AND {_JE_SIGNED} > 0
+                 THEN {_JE_SIGNED}
                  ELSE 0
                END) AS sales_amount,
            SUM(CASE
                  WHEN p->>'jsdm' IN {_sql_codes(tuple(code for code in SALES_PAYMENT_CODES if code != ONLINE_PAYMENT_CODE))}
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                  AND {_JE_SIGNED} > 0
+                 THEN {_JE_SIGNED}
                  ELSE 0
                END) AS offline_sales_amount,
            SUM(CASE
                  WHEN p->>'jsdm' = '{ONLINE_PAYMENT_CODE}'
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                  AND {_JE_SIGNED} > 0
+                 THEN {_JE_SIGNED}
                  ELSE 0
                END) AS online_sales_amount,
            SUM(CASE
                  WHEN p->>'jsdm' IN {_sql_codes(ACTUAL_RECEIPT_PAYMENT_CODES)}
-                  AND COALESCE(NULLIF(p->>'je','')::numeric, 0) > 0
-                 THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                  AND {_JE_SIGNED} > 0
+                 THEN {_JE_SIGNED}
                  ELSE 0
                END)
            + SUM(CASE
                    WHEN p->>'jsdm' IN {_sql_codes(SALES_PAYMENT_CODES)}
-                    AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
-                   THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                    AND {_JE_SIGNED} < 0
+                   THEN {_JE_SIGNED}
                    ELSE 0
                  END) AS actual_pay_amount,
            -SUM(CASE
                   WHEN p->>'jsdm' IN {_sql_codes(SALES_PAYMENT_CODES)}
-                   AND COALESCE(NULLIF(p->>'je','')::numeric, 0) < 0
-                  THEN COALESCE(NULLIF(p->>'je','')::numeric, 0)
+                   AND {_JE_SIGNED} < 0
+                  THEN {_JE_SIGNED}
                   ELSE 0
                 END) AS refund_amount
     FROM dwd.dwd_pos_ticket t
