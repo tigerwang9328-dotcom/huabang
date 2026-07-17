@@ -15,11 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.life_data import (
     InvestmentDecisionRun,
+    InvestmentEnvironmentSummaryDaily,
+    InvestmentExecutionRecord,
     InvestmentMetricSnapshot,
+    InvestmentOutcomeSnapshot,
     InvestmentRecommendation,
 )
 from app.models.log import LogAiCall
-from app.schemas.investment_decision import DeepSeekInvestmentPayload
+from app.schemas.investment_decision import (
+    DeepSeekInvestmentPayload,
+    InvestmentDecisionRequest,
+    InvestmentExecutionRequest,
+)
 from app.services.ai_engine import AIEngine
 
 
@@ -376,6 +383,201 @@ class InvestmentDecisionService:
         await self.db.commit()
         return DecisionResult(int(run.id), status, model_used, tuple(recommendations))
 
+    async def overview(self, account_id: str) -> dict[str, Any]:
+        run = (
+            await self.db.execute(
+                select(InvestmentDecisionRun)
+                .where(InvestmentDecisionRun.account_id == account_id)
+                .order_by(InvestmentDecisionRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if run is None:
+            return {
+                "recommendation_source": "rules",
+                "latest_run": None,
+                "latest_recommendation": None,
+                "environment_summary": None,
+            }
+        recommendation = (
+            await self.db.execute(
+                select(InvestmentRecommendation)
+                .where(InvestmentRecommendation.decision_run_id == run.id)
+                .order_by(InvestmentRecommendation.id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        environment = (
+            await self.db.execute(
+                select(InvestmentEnvironmentSummaryDaily)
+                .where(InvestmentEnvironmentSummaryDaily.account_id == account_id)
+                .order_by(InvestmentEnvironmentSummaryDaily.summary_date.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return {
+            "recommendation_source": (
+                "deepseek" if run.status == "generated" and run.model_used != "deterministic_rules" else "rules"
+            ),
+            "latest_run": _run_dict(run),
+            "latest_recommendation": (
+                _recommendation_dict(recommendation) if recommendation else None
+            ),
+            "environment_summary": _environment_dict(environment) if environment else None,
+        }
+
+    async def history(self, account_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        runs = list(
+            (
+                await self.db.execute(
+                    select(InvestmentDecisionRun)
+                    .where(InvestmentDecisionRun.account_id == account_id)
+                    .order_by(InvestmentDecisionRun.created_at.desc())
+                    .offset(offset)
+                    .limit(min(limit, 100))
+                )
+            ).scalars().all()
+        )
+        result = []
+        for run in runs:
+            recommendations = list(
+                (
+                    await self.db.execute(
+                        select(InvestmentRecommendation).where(
+                            InvestmentRecommendation.decision_run_id == run.id
+                        )
+                    )
+                ).scalars().all()
+            )
+            result.append({
+                **_run_dict(run),
+                "recommendations": [_recommendation_dict(item) for item in recommendations],
+            })
+        return result
+
+    async def detail(self, account_id: str, run_id: int) -> dict[str, Any] | None:
+        run = (
+            await self.db.execute(
+                select(InvestmentDecisionRun).where(
+                    InvestmentDecisionRun.id == run_id,
+                    InvestmentDecisionRun.account_id == account_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if run is None:
+            return None
+        recommendations = list(
+            (
+                await self.db.execute(
+                    select(InvestmentRecommendation).where(
+                        InvestmentRecommendation.decision_run_id == run.id
+                    )
+                )
+            ).scalars().all()
+        )
+        items = []
+        for recommendation in recommendations:
+            execution = (
+                await self.db.execute(
+                    select(InvestmentExecutionRecord).where(
+                        InvestmentExecutionRecord.recommendation_id == recommendation.id
+                    )
+                )
+            ).scalar_one_or_none()
+            outcomes = []
+            if execution:
+                outcomes = list(
+                    (
+                        await self.db.execute(
+                            select(InvestmentOutcomeSnapshot)
+                            .where(InvestmentOutcomeSnapshot.execution_record_id == execution.id)
+                            .order_by(InvestmentOutcomeSnapshot.window_hours)
+                        )
+                    ).scalars().all()
+                )
+            items.append({
+                **_recommendation_dict(recommendation),
+                "execution": _execution_dict(execution) if execution else None,
+                "outcomes": [_outcome_dict(item) for item in outcomes],
+            })
+        return {**_run_dict(run), "recommendations": items}
+
+    async def record_decision(
+        self,
+        recommendation_id: int,
+        user_id: int,
+        request: InvestmentDecisionRequest,
+    ) -> dict[str, Any]:
+        recommendation = await self.db.get(InvestmentRecommendation, recommendation_id)
+        if recommendation is None:
+            raise ValueError("投流建议不存在")
+        record = (
+            await self.db.execute(
+                select(InvestmentExecutionRecord).where(
+                    InvestmentExecutionRecord.recommendation_id == recommendation_id
+                )
+            )
+        ).scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if record is None:
+            record = InvestmentExecutionRecord(
+                recommendation_id=recommendation_id,
+                decision=request.decision,
+                confirmed_by=user_id,
+                confirmed_at=now,
+                execution_note=request.note,
+            )
+            self.db.add(record)
+        else:
+            record.decision = request.decision
+            record.confirmed_by = user_id
+            record.confirmed_at = now
+            record.execution_note = request.note
+        recommendation.executed = False
+        await self.db.commit()
+        return {
+            "recommendation_id": recommendation_id,
+            "decision": request.decision,
+            "executed": False,
+        }
+
+    async def record_execution(
+        self,
+        recommendation_id: int,
+        user_id: int,
+        request: InvestmentExecutionRequest,
+    ) -> dict[str, Any]:
+        recommendation = await self.db.get(InvestmentRecommendation, recommendation_id)
+        if recommendation is None:
+            raise ValueError("投流建议不存在")
+        record = (
+            await self.db.execute(
+                select(InvestmentExecutionRecord).where(
+                    InvestmentExecutionRecord.recommendation_id == recommendation_id
+                )
+            )
+        ).scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if record is None:
+            record = InvestmentExecutionRecord(
+                recommendation_id=recommendation_id,
+                decision="accepted",
+                confirmed_by=user_id,
+                confirmed_at=now,
+            )
+            self.db.add(record)
+        elif record.decision not in {"accepted", "partially_accepted"}:
+            raise ValueError("只有采纳或部分采纳的建议可以登记执行")
+        record.actual_budget_fen = request.actual_budget_fen
+        record.external_campaign_id = request.external_campaign_id
+        record.external_plan_id = request.external_plan_id
+        record.external_creative_id = request.external_creative_id
+        record.execution_note = request.note
+        record.executed_at = now
+        recommendation.executed = True
+        await self.db.commit()
+        return {"recommendation_id": recommendation_id, "executed": True}
+
 
 def _recommendation_dict(item: InvestmentRecommendation) -> dict[str, Any]:
     return {
@@ -394,4 +596,54 @@ def _recommendation_dict(item: InvestmentRecommendation) -> dict[str, Any]:
         "evidence_refs": item.evidence_refs,
         "requires_human_confirm": item.requires_human_confirm,
         "executed": item.executed,
+    }
+
+
+def _run_dict(run: InvestmentDecisionRun) -> dict[str, Any]:
+    return {
+        "id": int(run.id),
+        "stat_start": run.stat_start.isoformat(),
+        "stat_end": run.stat_end.isoformat(),
+        "trigger_type": run.trigger_type,
+        "attribution_quality": run.attribution_quality,
+        "status": run.status,
+        "provider": run.provider,
+        "model_used": run.model_used,
+        "rule_version": run.rule_version,
+        "prompt_version": run.prompt_version,
+        "fallback_reason": run.fallback_reason,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+    }
+
+
+def _execution_dict(item: InvestmentExecutionRecord) -> dict[str, Any]:
+    return {
+        "id": int(item.id),
+        "decision": item.decision,
+        "actual_budget_fen": item.actual_budget_fen,
+        "executed_at": item.executed_at.isoformat() if item.executed_at else None,
+        "execution_note": item.execution_note,
+    }
+
+
+def _outcome_dict(item: InvestmentOutcomeSnapshot) -> dict[str, Any]:
+    return {
+        "window_hours": item.window_hours,
+        "observed_at": item.observed_at.isoformat(),
+        "incremental_spend_fen": item.incremental_spend_fen,
+        "incremental_verified_gmv_fen": item.incremental_verified_gmv_fen,
+        "verified_roi": item.verified_roi,
+        "attribution_quality": item.attribution_quality,
+    }
+
+
+def _environment_dict(item: InvestmentEnvironmentSummaryDaily) -> dict[str, Any]:
+    return {
+        "summary_date": item.summary_date.isoformat(),
+        "lookback_days": item.lookback_days,
+        "patterns": item.patterns,
+        "risks": item.risks,
+        "sample_size": item.sample_size,
+        "confidence": item.confidence,
+        "evidence_refs": item.evidence_refs,
     }

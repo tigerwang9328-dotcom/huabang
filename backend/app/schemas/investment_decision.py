@@ -46,3 +46,20 @@ class DeepSeekInvestmentPayload(BaseModel):
     recommendations: list[DeepSeekInvestmentRecommendation] = Field(min_length=1, max_length=20)
     pattern_observations: list[str] = Field(default_factory=list, max_length=30)
     data_limitations: list[str] = Field(default_factory=list, max_length=30)
+
+
+class InvestmentDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["accepted", "rejected", "partially_accepted", "expired"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class InvestmentExecutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actual_budget_fen: int = Field(gt=0)
+    external_campaign_id: str | None = Field(default=None, max_length=128)
+    external_plan_id: str | None = Field(default=None, max_length=128)
+    external_creative_id: str | None = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=2000)
