@@ -91,7 +91,7 @@ def upgrade() -> None:
             name="ck_investment_decision_trigger_type",
         ),
         sa.CheckConstraint(
-            "status IN ('generated','fallback','blocked','failed')",
+            "status IN ('generated','fallback','blocked','failed','rate_limited')",
             name="ck_investment_decision_status",
         ),
         sa.CheckConstraint(

@@ -20,11 +20,16 @@ from app.services.ai_engine import AIEngine
 
 
 PROMPT_VERSION = "investment-environment-v1"
+ENVIRONMENT_SNAPSHOT_LIMIT = 500
 CAUSAL_TERMS = ("造成", "导致", "证明", "带来提升", "必然")
 
 
 class EnvironmentSummaryRejected(ValueError):
     pass
+
+
+def bounded_snapshot_rows(rows, *, limit: int = ENVIRONMENT_SNAPSHOT_LIMIT):
+    return list(rows)[:limit]
 
 
 def deterministic_insufficient_summary(*, sample_size: int, lookback_days: int) -> dict[str, Any]:
@@ -67,14 +72,15 @@ class InvestmentEnvironmentService:
         self, account_id: str, summary_date: date, lookback_days: int
     ) -> InvestmentEnvironmentSummaryDaily:
         start = summary_date - timedelta(days=lookback_days - 1)
-        snapshots = list(
+        snapshots = bounded_snapshot_rows(
             (
                 await self.db.execute(
                     select(InvestmentMetricSnapshot).where(
                         InvestmentMetricSnapshot.account_id == account_id,
                         InvestmentMetricSnapshot.stat_end >= start,
                         InvestmentMetricSnapshot.stat_end <= summary_date,
-                    )
+                    ).order_by(InvestmentMetricSnapshot.captured_at.desc())
+                    .limit(ENVIRONMENT_SNAPSHOT_LIMIT)
                 )
             ).scalars().all()
         )
@@ -83,6 +89,7 @@ class InvestmentEnvironmentService:
             "account_id": account_id,
             "summary_date": summary_date.isoformat(),
             "lookback_days": lookback_days,
+            "snapshot_limit": ENVIRONMENT_SNAPSHOT_LIMIT,
             "snapshots": [
                 {
                     "evidence_ref": f"snapshot:{int(item.id)}",

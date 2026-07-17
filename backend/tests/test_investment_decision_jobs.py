@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
+from app.jobs import investment_decision_jobs as jobs
 from app.jobs.investment_decision_jobs import due_outcome_windows
 
 
@@ -18,3 +19,10 @@ def test_future_or_unexecuted_records_have_no_due_windows():
 
     assert due_outcome_windows(None, now, existing=set()) == []
     assert due_outcome_windows(now + timedelta(hours=1), now, existing=set()) == []
+
+
+def test_each_outcome_window_has_its_own_snapshot_cutoff():
+    executed_at = datetime(2026, 7, 17, tzinfo=timezone.utc)
+
+    assert jobs.outcome_window_end(executed_at, 24) == executed_at + timedelta(hours=24)
+    assert jobs.outcome_window_end(executed_at, 72) == executed_at + timedelta(hours=72)

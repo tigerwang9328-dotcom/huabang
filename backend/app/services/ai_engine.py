@@ -638,22 +638,33 @@ class AIEngine:
         else:
             raise ValueError(f"AI提供商未配置或API Key为空: provider={provider}")
 
-    async def _call_business_advice(self, system_prompt: str, user_content: str) -> dict:
+    async def _call_business_advice(
+        self,
+        system_prompt: str,
+        user_content: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict:
         """经营建议固定走 DeepSeek 专用配置，不继承通用问答提供商。"""
         if not settings.DEEPSEEK_API_KEY:
             raise ValueError("DeepSeek API Key 未配置")
         return await self._call_openai_compatible(
             base_url=settings.DEEPSEEK_BASE_URL,
             api_key=settings.DEEPSEEK_API_KEY,
-            model=settings.AI_BUSINESS_ADVICE_MODEL,
+            model=model or settings.AI_BUSINESS_ADVICE_MODEL,
             system_prompt=system_prompt,
             user_content=user_content,
             json_mode=True,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
         )
 
     async def _call_openai_compatible(
         self, base_url: str, api_key: str, model: str,
-        system_prompt: str, user_content: str, json_mode: bool = False
+        system_prompt: str, user_content: str, json_mode: bool = False,
+        max_tokens: int | None = None, timeout_seconds: int | None = None,
     ) -> dict:
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -665,12 +676,14 @@ class AIEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            "max_tokens": 4000 if json_mode else 2000,
+            "max_tokens": max_tokens or (4000 if json_mode else 2000),
             "temperature": 0.1 if json_mode else 0.3,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        async with httpx.AsyncClient(timeout=settings.AI_BUSINESS_ADVICE_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout_seconds or settings.AI_BUSINESS_ADVICE_TIMEOUT_SECONDS
+        ) as client:
             resp = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()

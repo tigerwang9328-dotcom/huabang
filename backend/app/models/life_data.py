@@ -192,7 +192,7 @@ class InvestmentDecisionRun(Base):
             name="ck_investment_decision_trigger_type",
         ),
         CheckConstraint(
-            "status IN ('generated','fallback','blocked','failed')",
+            "status IN ('generated','fallback','blocked','failed','rate_limited')",
             name="ck_investment_decision_status",
         ),
         CheckConstraint(

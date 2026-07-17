@@ -126,6 +126,7 @@
         <el-table-column label="来源" width="130"><template #default="{ row }">{{ row.status === 'generated' ? 'DeepSeek' : '规则兜底' }}</template></el-table-column>
         <el-table-column label="建议"><template #default="{ row }">{{ row.recommendations?.[0]?.title || '补齐数据' }}</template></el-table-column>
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.recommendations?.[0]?.executed ? '已登记执行' : '待人工决定' }}</template></el-table-column>
+        <el-table-column label="结果" min-width="220"><template #default="{ row }">{{ outcomeSummary(row) }}</template></el-table-column>
       </el-table>
       <div class="outcome-windows"><span>24小时</span><span>72小时</span><span>7天结果</span></div>
     </section>
@@ -165,12 +166,22 @@ const collectorGroups = computed(() => {
     .map(([label, key]) => `${label}:${groups[key]?.status === 'healthy' ? '正常' : groups[key]?.status === 'error' ? '异常' : '待采集'}`)
     .join(' · ')
 })
+function outcomeSummary(row: any) {
+  const outcomes = row.recommendations?.[0]?.outcomes || []
+  if (!outcomes.length) return '尚未到结果窗口'
+  return outcomes.map((item: any) => `${item.window_hours}小时 核销ROI ${item.verified_roi == null ? '待数据' : Number(item.verified_roi).toFixed(2)}`).join('；')
+}
 const money = (fen: number | null | undefined) => fen == null ? '—' : `¥${(fen / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const ratio = (value: number | null | undefined) => value == null ? '—' : Number(value).toFixed(2)
 const percent = (value: number | null | undefined) => value == null ? '—' : `${(value * 100).toFixed(1)}%`
 const calcRatio = (a: number, b: number) => b ? a / b : null
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
-const actionLabel = (action?: string) => ({ increase_budget: '小步加投', maintain_and_observe: '维持观察', reduce_and_observe: '降低预算并观察', collect_more_data: '补齐数据' }[action || ''] || '等待判断')
+const actionLabel = (action?: string) => ({
+  increase_budget: '小步加投', small_increase: '小步加投', increase: '增加预算',
+  maintain_and_observe: '维持观察', maintain: '维持观察',
+  reduce_and_observe: '降低预算并观察', reduce: '降低预算并观察',
+  stop: '停止新增消耗', collect_more_data: '补齐数据',
+}[action || ''] || '等待判断')
 const materialLabel = (row: any) => { const roi = calcRatio(row.ad_pay_gmv_fen, row.ad_cost_fen); return roi == null ? '待观察' : roi >= 1.5 ? '值得验证' : roi >= 1 ? '继续观察' : '建议止损' }
 const materialType = (row: any) => { const roi = calcRatio(row.ad_pay_gmv_fen, row.ad_cost_fen); return roi != null && roi >= 1.5 ? 'success' : roi != null && roi < 1 ? 'danger' : 'warning' }
 const maxDemoCost = computed(() => Math.max(1, ...(data.value.demographics || []).flatMap((row: any) => [row.male_cost_fen || 0, row.female_cost_fen || 0])))

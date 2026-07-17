@@ -13,6 +13,11 @@ test('investment optimization page exposes verified-outcome decision UI', () => 
     assert.equal(source.includes(required), true, `missing: ${required}`)
   }
   assert.equal(source.includes('贵阳及周边消耗分布'), false)
+  assert.equal(source.includes('outcomeSummary(row)'), true)
+  assert.equal(source.includes('尚未到结果窗口'), true)
+  for (const action of ["small_increase: '小步加投'", "maintain: '维持观察'", "reduce: '降低预算并观察'", "stop: '停止新增消耗'"]) {
+    assert.equal(source.includes(action), true, `missing persisted action label: ${action}`)
+  }
 })
 
 test('investment API reads persisted history and records human workflow', () => {

@@ -66,3 +66,13 @@ def test_idempotency_constraints_are_named_for_operational_use():
         "uq_investment_outcome_window",
         "uq_investment_environment_summary_input",
     }.issubset(constraint_names)
+
+
+def test_decision_status_constraint_accepts_rate_limited_rule_fallback():
+    status_constraint = next(
+        constraint
+        for constraint in InvestmentDecisionRun.__table__.constraints
+        if constraint.name == "ck_investment_decision_status"
+    )
+
+    assert "rate_limited" in str(status_constraint.sqltext)

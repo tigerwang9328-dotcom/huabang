@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.services import investment_environment_service as environment_service
 from app.services.investment_environment_service import (
     EnvironmentSummaryRejected,
     deterministic_insufficient_summary,
@@ -42,3 +43,9 @@ def test_unknown_evidence_is_rejected():
             },
             allowed_evidence={"snapshot:1"},
         )
+
+
+def test_environment_prompt_has_a_bounded_snapshot_input():
+    rows = list(range(501))
+
+    assert environment_service.bounded_snapshot_rows(rows, limit=500) == rows[:500]

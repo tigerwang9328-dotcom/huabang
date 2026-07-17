@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 try:
     import fcntl
@@ -45,6 +45,10 @@ def due_outcome_windows(
         now = now.replace(tzinfo=timezone.utc)
     elapsed_hours = (now - executed_at).total_seconds() / 3600
     return [window for window in OUTCOME_WINDOWS if window <= elapsed_hours and window not in existing]
+
+
+def outcome_window_end(executed_at: datetime, window_hours: int) -> datetime:
+    return executed_at + timedelta(hours=window_hours)
 
 
 @contextmanager
@@ -121,24 +125,26 @@ async def capture_due_outcomes(now: datetime | None = None):
                         )
                     ).scalars().all()
                 )
-                latest = list(
-                    (
-                        await db.execute(
-                            select(InvestmentMetricSnapshot).where(
-                                InvestmentMetricSnapshot.account_id == run.account_id,
-                                InvestmentMetricSnapshot.dimension_type == "account",
-                                InvestmentMetricSnapshot.captured_at >= execution.executed_at,
-                            )
-                        )
-                    ).scalars().all()
-                )
-                spend = max(0, _metric_max(latest, "spend_fen") - _metric_max(baseline, "spend_fen"))
-                verified = max(0, _metric_max(latest, "verified_gmv_fen") - _metric_max(baseline, "verified_gmv_fen"))
-                ad_pay = max(0, _metric_max(latest, "ad_pay_gmv_fen") - _metric_max(baseline, "ad_pay_gmv_fen"))
-                refund = max(0, _metric_max(latest, "refund_gmv_fen") - _metric_max(baseline, "refund_gmv_fen"))
-                verified_count = max(0, _metric_max(latest, "verified_count") - _metric_max(baseline, "verified_count"))
-                source_ids = [int(item.id) for item in latest]
                 for window in windows:
+                    cutoff = outcome_window_end(execution.executed_at, window)
+                    latest = list(
+                        (
+                            await db.execute(
+                                select(InvestmentMetricSnapshot).where(
+                                    InvestmentMetricSnapshot.account_id == run.account_id,
+                                    InvestmentMetricSnapshot.dimension_type == "account",
+                                    InvestmentMetricSnapshot.captured_at >= execution.executed_at,
+                                    InvestmentMetricSnapshot.captured_at <= cutoff,
+                                )
+                            )
+                        ).scalars().all()
+                    )
+                    spend = max(0, _metric_max(latest, "spend_fen") - _metric_max(baseline, "spend_fen"))
+                    verified = max(0, _metric_max(latest, "verified_gmv_fen") - _metric_max(baseline, "verified_gmv_fen"))
+                    ad_pay = max(0, _metric_max(latest, "ad_pay_gmv_fen") - _metric_max(baseline, "ad_pay_gmv_fen"))
+                    refund = max(0, _metric_max(latest, "refund_gmv_fen") - _metric_max(baseline, "refund_gmv_fen"))
+                    verified_count = max(0, _metric_max(latest, "verified_count") - _metric_max(baseline, "verified_count"))
+                    source_ids = [int(item.id) for item in latest]
                     statement = (
                         pg_insert(InvestmentOutcomeSnapshot)
                         .values(

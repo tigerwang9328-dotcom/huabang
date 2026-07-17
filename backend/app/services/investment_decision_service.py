@@ -6,7 +6,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import func, select
@@ -129,14 +129,22 @@ def build_rule_envelope(snapshots: Iterable[Any]) -> RuleEnvelope:
     stat_end = max(item.stat_end for item in rows)
     account_id = str(rows[0].account_id)
     evidence_refs = frozenset(f"snapshot:{int(item.id)}" for item in rows)
-    spend = _maximum(rows, "spend_fen")
-    verified = _maximum(rows, "verified_gmv_fen")
+    account_rows = [item for item in rows if item.dimension_type == "account"]
+    exact_account_rows = [
+        item for item in account_rows
+        if item.attribution_quality == "exact"
+        and item.spend_fen is not None
+        and item.verified_gmv_fen is not None
+    ]
+    roi_rows = exact_account_rows or account_rows
+    spend = _maximum(roi_rows, "spend_fen")
+    verified = _maximum(roi_rows, "verified_gmv_fen")
     summary = {
         "spend_fen": spend,
-        "ad_pay_gmv_fen": _maximum(rows, "ad_pay_gmv_fen"),
+        "ad_pay_gmv_fen": _maximum(account_rows, "ad_pay_gmv_fen"),
         "verified_gmv_fen": verified,
-        "verified_count": _maximum(rows, "verified_count"),
-        "refund_gmv_fen": _maximum(rows, "refund_gmv_fen"),
+        "verified_count": _maximum(account_rows, "verified_count"),
+        "refund_gmv_fen": _maximum(account_rows, "refund_gmv_fen"),
     }
     if spend is None or verified is None or spend <= 0:
         reason = "缺少同周期投放消耗或实际核销"
@@ -150,11 +158,7 @@ def build_rule_envelope(snapshots: Iterable[Any]) -> RuleEnvelope:
             True, reason, (recommendation,), summary,
         )
 
-    quality = (
-        "exact"
-        if any(item.attribution_quality == "exact" for item in rows)
-        else "period_estimate"
-    )
+    quality = "exact" if exact_account_rows else "period_estimate"
     roi = round(verified / spend, 2)
     if roi >= 1.5:
         allowed = frozenset({"maintain", "small_increase", "increase"})
@@ -200,6 +204,20 @@ def investment_input_hash(snapshots: Iterable[Any]) -> str:
     }
     encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def is_model_call_rate_limited(
+    last_completed_at: datetime | None,
+    now: datetime,
+    min_interval_minutes: int,
+) -> bool:
+    if last_completed_at is None:
+        return False
+    if last_completed_at.tzinfo is None:
+        last_completed_at = last_completed_at.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now < last_completed_at + timedelta(minutes=min_interval_minutes)
 
 
 def validate_model_payload(
@@ -291,6 +309,16 @@ class InvestmentDecisionService:
             tuple(_recommendation_dict(item) for item in recommendations), True,
         )
 
+    async def _last_model_completed_at(self, account_id: str) -> datetime | None:
+        return (
+            await self.db.execute(
+                select(func.max(InvestmentDecisionRun.completed_at)).where(
+                    InvestmentDecisionRun.account_id == account_id,
+                    InvestmentDecisionRun.model_used != "deterministic_rules",
+                )
+            )
+        ).scalar_one_or_none()
+
     async def generate_for_latest_period(self, account_id: str) -> DecisionResult:
         snapshots = await self._latest_snapshots(account_id)
         input_hash = investment_input_hash(snapshots)
@@ -312,12 +340,25 @@ class InvestmentDecisionService:
         recommendations = envelope.rule_recommendations
         usage: dict[str, Any] = {}
 
-        if not envelope.block_model and settings.INVESTMENT_AI_ENABLED:
+        now = datetime.now(timezone.utc)
+        rate_limited = is_model_call_rate_limited(
+            await self._last_model_completed_at(account_id),
+            now,
+            settings.INVESTMENT_AI_MIN_INTERVAL_MINUTES,
+        )
+        if not envelope.block_model and settings.INVESTMENT_AI_ENABLED and rate_limited:
+            status = "rate_limited"
+            fallback_reason = (
+                f"DeepSeek调用间隔不足{settings.INVESTMENT_AI_MIN_INTERVAL_MINUTES}分钟，使用规则建议"
+            )
+        elif not envelope.block_model and settings.INVESTMENT_AI_ENABLED:
             try:
                 model_result = await AIEngine(self.db)._call_business_advice(
                     INVESTMENT_SYSTEM_PROMPT,
                     json.dumps(_model_context(envelope), ensure_ascii=False, sort_keys=True),
+                    model=settings.INVESTMENT_AI_MODEL,
                     max_tokens=2500,
+                    timeout_seconds=settings.INVESTMENT_AI_TIMEOUT_SECONDS,
                 )
                 payload = DeepSeekInvestmentPayload.model_validate_json(model_result["content"])
                 recommendations = validate_model_payload(
@@ -438,22 +479,39 @@ class InvestmentDecisionService:
                 )
             ).scalars().all()
         )
-        result = []
-        for run in runs:
-            recommendations = list(
-                (
-                    await self.db.execute(
-                        select(InvestmentRecommendation).where(
-                            InvestmentRecommendation.decision_run_id == run.id
-                        )
+        if not runs:
+            return []
+        run_ids = [int(run.id) for run in runs]
+        recommendations = list(
+            (
+                await self.db.execute(
+                    select(InvestmentRecommendation).where(
+                        InvestmentRecommendation.decision_run_id.in_(run_ids)
                     )
-                ).scalars().all()
-            )
-            result.append({
-                **_run_dict(run),
-                "recommendations": [_recommendation_dict(item) for item in recommendations],
-            })
-        return result
+                )
+            ).scalars().all()
+        )
+        recommendation_ids = [int(item.id) for item in recommendations]
+        executions = list(
+            (
+                await self.db.execute(
+                    select(InvestmentExecutionRecord).where(
+                        InvestmentExecutionRecord.recommendation_id.in_(recommendation_ids)
+                    )
+                )
+            ).scalars().all()
+        ) if recommendation_ids else []
+        execution_ids = [int(item.id) for item in executions]
+        outcomes = list(
+            (
+                await self.db.execute(
+                    select(InvestmentOutcomeSnapshot).where(
+                        InvestmentOutcomeSnapshot.execution_record_id.in_(execution_ids)
+                    )
+                )
+            ).scalars().all()
+        ) if execution_ids else []
+        return build_history_rows(runs, recommendations, executions, outcomes)
 
     async def daily_patterns(self, account_id: str, limit: int = 30) -> list[dict[str, Any]]:
         rows = list(
@@ -651,6 +709,43 @@ def _outcome_dict(item: InvestmentOutcomeSnapshot) -> dict[str, Any]:
         "verified_roi": item.verified_roi,
         "attribution_quality": item.attribution_quality,
     }
+
+
+def build_history_rows(
+    runs: Iterable[InvestmentDecisionRun],
+    recommendations: Iterable[InvestmentRecommendation],
+    executions: Iterable[InvestmentExecutionRecord],
+    outcomes: Iterable[InvestmentOutcomeSnapshot],
+) -> list[dict[str, Any]]:
+    outcomes_by_execution: dict[int, list[InvestmentOutcomeSnapshot]] = {}
+    for outcome in outcomes:
+        outcomes_by_execution.setdefault(int(outcome.execution_record_id), []).append(outcome)
+    execution_by_recommendation = {
+        int(execution.recommendation_id): execution for execution in executions
+    }
+    recommendations_by_run: dict[int, list[InvestmentRecommendation]] = {}
+    for recommendation in recommendations:
+        recommendations_by_run.setdefault(int(recommendation.decision_run_id), []).append(
+            recommendation
+        )
+
+    result = []
+    for run in runs:
+        recommendation_rows = []
+        for recommendation in recommendations_by_run.get(int(run.id), []):
+            execution = execution_by_recommendation.get(int(recommendation.id))
+            recommendation_row = _recommendation_dict(recommendation)
+            recommendation_row["execution"] = _execution_dict(execution) if execution else None
+            recommendation_row["outcomes"] = sorted(
+                (
+                    _outcome_dict(item)
+                    for item in outcomes_by_execution.get(int(execution.id), [])
+                ) if execution else [],
+                key=lambda item: item["window_hours"],
+            )
+            recommendation_rows.append(recommendation_row)
+        result.append({**_run_dict(run), "recommendations": recommendation_rows})
+    return result
 
 
 def _environment_dict(item: InvestmentEnvironmentSummaryDaily) -> dict[str, Any]:
