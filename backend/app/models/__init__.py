@@ -40,6 +40,12 @@ from app.models.dingtalk_hr_finance import (
 )
 from app.models.baison_ods import (OdsBaisonProductApi, OdsBaisonSkuApi, OdsBaisonWarehouseApi, OdsBaisonInventoryApi, DwdInventoryBalance)
 from app.models.life_data import (
+    InvestmentDecisionRun,
+    InvestmentEnvironmentSummaryDaily,
+    InvestmentExecutionRecord,
+    InvestmentMetricSnapshot,
+    InvestmentOutcomeSnapshot,
+    InvestmentRecommendation,
     LifeDataAlertEvent,
     LifeDataCapture,
     LifeDataCollectorState,
