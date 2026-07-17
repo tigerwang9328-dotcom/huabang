@@ -83,7 +83,9 @@ def test_builds_verified_roi_and_manual_ai_recommendation():
     assert result["ai_recommendation"]["action"] == "reduce_and_observe"
     assert result["ai_recommendation"]["requires_human_confirm"] is True
     assert result["demographics"][0]["age"] == "31-40"
-    assert result["regions"][0]["name"] == "贵阳市"
+    assert result["regions"]["city"][0]["name"] == "贵阳市"
+    assert result["regions"]["province"] == []
+    assert result["regions"]["supports_effectiveness_decision"] is False
     assert result["trends"][0]["date"] == "2026-07-06"
     assert result["materials"][0]["play_count"] == 1000
     assert result["collector"]["template_count"] == 7

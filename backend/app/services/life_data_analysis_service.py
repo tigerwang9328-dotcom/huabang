@@ -423,10 +423,12 @@ def _materials(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return sorted(result.values(), key=lambda item: item["ad_cost_fen"], reverse=True)[:50]
 
 
-def _regions(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _region_level(
+    rows: Iterable[Mapping[str, Any]], label_key: str
+) -> list[dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for row in rows:
-        name = row.get("city_resident") or row.get("province_resident") or row.get("province")
+        name = row.get(label_key)
         cost = _number(row.get("sub_ad_cost"))
         if not name or cost is None:
             continue
@@ -435,6 +437,16 @@ def _regions(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
         if key not in result or candidate["ad_cost_fen"] > result[key]["ad_cost_fen"]:
             result[key] = candidate
     return sorted(result.values(), key=lambda item: item["ad_cost_fen"], reverse=True)[:30]
+
+
+def _regions(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    materialized = list(rows)
+    return {
+        "province": _region_level(materialized, "province_resident"),
+        "city": _region_level(materialized, "city_resident"),
+        "meaning": "投放触达人群居住地的广告消耗分布",
+        "supports_effectiveness_decision": False,
+    }
 
 
 def _trends(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
