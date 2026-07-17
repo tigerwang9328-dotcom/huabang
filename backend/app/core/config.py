@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     AI_BUSINESS_ADVICE_BATCH_TIME: str = "06:45"
     AI_BUSINESS_ADVICE_REFRESH_WINDOW_SECONDS: int = 600
 
+    # 投流决策历史与 DeepSeek 增强
+    INVESTMENT_AI_ENABLED: bool = True
+    INVESTMENT_AI_MODEL: str = "deepseek-chat"
+    INVESTMENT_AI_TIMEOUT_SECONDS: int = 45
+    INVESTMENT_AI_MIN_INTERVAL_MINUTES: int = 60
+    INVESTMENT_AI_MAX_BUDGET_FEN: int = 30000
+
     # AI 默认提供商
     AI_PROVIDER: str = "deepseek"
 
