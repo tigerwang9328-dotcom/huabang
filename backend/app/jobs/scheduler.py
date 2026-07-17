@@ -27,6 +27,11 @@ def setup_jobs():
         cleanup_life_data_captures,
         mark_stale_life_data_collectors_offline,
     )
+    from app.jobs.investment_decision_jobs import (
+        capture_due_outcomes,
+        run_daily_investment_summary,
+        run_investment_period_generation,
+    )
     from app.jobs.command_center_health_jobs import run_command_center_health_monitor
 
     # 每天凌晨1:00 - 同步百盛数据 + ETL
@@ -159,6 +164,39 @@ def setup_jobs():
         name="LifeData采集器离线检查",
         replace_existing=True,
         misfire_grace_time=300,
+        coalesce=True,
+        max_instances=1,
+    )
+
+    scheduler.add_job(
+        run_investment_period_generation,
+        CronTrigger(minute=50, timezone="Asia/Shanghai"),
+        id="investment_period_generation",
+        name="投流周期建议生成",
+        replace_existing=True,
+        misfire_grace_time=900,
+        coalesce=True,
+        max_instances=1,
+    )
+
+    scheduler.add_job(
+        capture_due_outcomes,
+        CronTrigger(minute="*/15", timezone="Asia/Shanghai"),
+        id="investment_outcomes",
+        name="投流执行结果窗口",
+        replace_existing=True,
+        misfire_grace_time=900,
+        coalesce=True,
+        max_instances=1,
+    )
+
+    scheduler.add_job(
+        run_daily_investment_summary,
+        CronTrigger(hour=6, minute=30, timezone="Asia/Shanghai"),
+        id="investment_daily_summary",
+        name="投流环境每日规律总结",
+        replace_existing=True,
+        misfire_grace_time=1800,
         coalesce=True,
         max_instances=1,
     )

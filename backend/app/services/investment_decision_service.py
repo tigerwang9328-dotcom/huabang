@@ -455,6 +455,22 @@ class InvestmentDecisionService:
             })
         return result
 
+    async def daily_patterns(self, account_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        rows = list(
+            (
+                await self.db.execute(
+                    select(InvestmentEnvironmentSummaryDaily)
+                    .where(InvestmentEnvironmentSummaryDaily.account_id == account_id)
+                    .order_by(
+                        InvestmentEnvironmentSummaryDaily.summary_date.desc(),
+                        InvestmentEnvironmentSummaryDaily.lookback_days,
+                    )
+                    .limit(min(limit, 90))
+                )
+            ).scalars().all()
+        )
+        return [_environment_dict(item) for item in rows]
+
     async def detail(self, account_id: str, run_id: int) -> dict[str, Any] | None:
         run = (
             await self.db.execute(

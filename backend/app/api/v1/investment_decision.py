@@ -40,6 +40,18 @@ async def history(
     return ApiResponse.ok(data=data)
 
 
+@router.get("/patterns/daily", response_model=ApiResponse)
+async def daily_patterns(
+    limit: int = Query(default=30, ge=1, le=90),
+    _current_user: SysUser = Depends(require_permission("dashboard:overview:view")),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    data = await InvestmentDecisionService(db).daily_patterns(
+        settings.LIFE_DATA_ACCOUNT_ID, limit
+    )
+    return ApiResponse.ok(data=data)
+
+
 @router.get("/{run_id}", response_model=ApiResponse)
 async def detail(
     run_id: int,

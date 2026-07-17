@@ -83,3 +83,24 @@ async def test_execution_registration_marks_executed_after_service_commit(monkey
     )
 
     assert response.data["executed"] is True
+
+
+@pytest.mark.asyncio
+async def test_daily_patterns_are_read_only(monkeypatch):
+    class FakeService:
+        def __init__(self, db):
+            pass
+
+        async def daily_patterns(self, account_id, limit):
+            assert limit == 9
+            return [{"lookback_days": 30, "confidence": "medium"}]
+
+    monkeypatch.setattr(investment_decision, "InvestmentDecisionService", FakeService)
+
+    response = await investment_decision.daily_patterns(
+        limit=9,
+        _current_user=SimpleNamespace(id=7),
+        db=object(),
+    )
+
+    assert response.data[0]["lookback_days"] == 30
