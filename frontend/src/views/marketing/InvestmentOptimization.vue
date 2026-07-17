@@ -34,7 +34,7 @@
 
     <section class="grid-main">
       <article class="ai-decision" :class="recommendation.action">
-        <div class="section-label">AI 下一步建议</div>
+        <div class="section-label">{{ recommendationSourceLabel }}</div>
         <h2>{{ recommendation.title || '等待完整数据' }}</h2>
         <p class="action-copy">建议动作：{{ actionLabel(recommendation.action) }}</p>
         <div class="budget" v-if="recommendation.budget">
@@ -46,7 +46,8 @@
         <div class="stop-loss"><b>止损条件</b>{{ recommendation.stop_loss }}</div>
         <div class="decision-foot">
           <span>置信度：{{ recommendation.confidence === 'medium' ? '中' : '低' }}</span>
-          <el-button type="primary" @click="confirmSuggestion">人工确认后执行</el-button>
+          <el-button type="primary" :disabled="!recommendation.id" @click="confirmSuggestion">人工决定</el-button>
+          <el-button v-if="recommendation.id" @click="registerExecution">登记实际执行</el-button>
         </div>
       </article>
 
@@ -92,9 +93,14 @@
 
     <section class="split-analysis">
       <article class="analysis-section">
-        <div class="section-head"><div><span>地域分析</span><h2>贵阳及周边消耗分布</h2></div><small>不虚构小区级数据</small></div>
-        <div v-if="data.regions?.length" class="region-list">
-          <div v-for="row in data.regions" :key="row.name" class="region-row">
+        <div class="section-head"><div><span>地域分析</span><h2>投放人群地域消耗分布（按居住地）</h2></div><small>不虚构小区级数据</small></div>
+        <div class="region-tabs">
+          <el-button size="small" :type="regionLevel === 'province' ? 'primary' : 'default'" @click="regionLevel = 'province'">省份</el-button>
+          <el-button size="small" :type="regionLevel === 'city' ? 'primary' : 'default'" @click="regionLevel = 'city'">城市</el-button>
+        </div>
+        <p class="region-meaning">仅代表广告消耗流向，不能单独判断地域效果</p>
+        <div v-if="activeRegions.length" class="region-list">
+          <div v-for="row in activeRegions" :key="row.name" class="region-row">
             <b>{{ row.name }}</b><div class="bar-track"><span class="region-bar" :style="{ width: regionWidth(row.ad_cost_fen) }"></span></div>
             <span>{{ money(row.ad_cost_fen) }}</span><em>{{ percent(row.cost_rate) }}</em>
           </div>
@@ -112,6 +118,29 @@
         <el-empty v-else description="等待每日趋势数据" :image-size="70" />
       </article>
     </section>
+
+    <section class="analysis-section">
+      <div class="section-head"><div><span>决策闭环</span><h2>决策历史</h2></div><small>建议 → 人工决定 → 实际执行 → 结果</small></div>
+      <el-table :data="decisionHistory" stripe empty-text="尚无已保存的投流建议">
+        <el-table-column prop="stat_end" label="周期" width="120" />
+        <el-table-column label="来源" width="130"><template #default="{ row }">{{ row.status === 'generated' ? 'DeepSeek' : '规则兜底' }}</template></el-table-column>
+        <el-table-column label="建议"><template #default="{ row }">{{ row.recommendations?.[0]?.title || '补齐数据' }}</template></el-table-column>
+        <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.recommendations?.[0]?.executed ? '已登记执行' : '待人工决定' }}</template></el-table-column>
+      </el-table>
+      <div class="outcome-windows"><span>24小时</span><span>72小时</span><span>7天结果</span></div>
+    </section>
+
+    <section class="analysis-section">
+      <div class="section-head"><div><span>DeepSeek 历史观察</span><h2>投流环境规律</h2></div><small>相关性不代表因果</small></div>
+      <div v-if="dailyPatterns.length" class="pattern-list">
+        <article v-for="item in dailyPatterns.slice(0, 3)" :key="`${item.summary_date}-${item.lookback_days}`">
+          <b>{{ item.lookback_days }}天窗口 · 置信度 {{ item.confidence }}</b>
+          <p v-for="pattern in item.patterns || []" :key="pattern">{{ pattern }}</p>
+          <p v-for="risk in item.risks || []" :key="risk" class="risk">{{ risk }}</p>
+        </article>
+      </div>
+      <el-empty v-else description="历史样本积累后生成每日规律总结" :image-size="70" />
+    </section>
   </div>
 </template>
 
@@ -122,8 +151,14 @@ import { lifeDataAnalysisApi } from '@/api/lifeDataAnalysis'
 
 const loading = ref(false)
 const data = ref<any>({ summary: {}, ai_recommendation: {}, data_quality: { missing: [] }, materials: [], demographics: [] })
+const decisionOverview = ref<any>({})
+const decisionHistory = ref<any[]>([])
+const dailyPatterns = ref<any[]>([])
+const regionLevel = ref<'province' | 'city'>('city')
 const summary = computed(() => data.value.summary || {})
-const recommendation = computed(() => data.value.ai_recommendation || {})
+const recommendation = computed(() => decisionOverview.value.latest_recommendation || data.value.ai_recommendation || {})
+const recommendationSourceLabel = computed(() => decisionOverview.value.recommendation_source === 'deepseek' ? 'DeepSeek 增强建议' : '规则兜底建议')
+const activeRegions = computed(() => (data.value.regions?.[regionLevel.value] || []).slice(0, 10))
 const collectorGroups = computed(() => {
   const groups = data.value.collector?.groups || {}
   return [['视频', 'video'], ['经营', 'business'], ['广告', 'advertising'], ['其他', 'other']]
@@ -140,19 +175,43 @@ const materialLabel = (row: any) => { const roi = calcRatio(row.ad_pay_gmv_fen, 
 const materialType = (row: any) => { const roi = calcRatio(row.ad_pay_gmv_fen, row.ad_cost_fen); return roi != null && roi >= 1.5 ? 'success' : roi != null && roi < 1 ? 'danger' : 'warning' }
 const maxDemoCost = computed(() => Math.max(1, ...(data.value.demographics || []).flatMap((row: any) => [row.male_cost_fen || 0, row.female_cost_fen || 0])))
 const barWidth = (value: number) => `${Math.max(2, (Number(value || 0) / maxDemoCost.value) * 100)}%`
-const maxRegionCost = computed(() => Math.max(1, ...(data.value.regions || []).map((row: any) => row.ad_cost_fen || 0)))
+const maxRegionCost = computed(() => Math.max(1, ...activeRegions.value.map((row: any) => row.ad_cost_fen || 0)))
 const regionWidth = (value: number) => `${Math.max(2, (Number(value || 0) / maxRegionCost.value) * 100)}%`
 const maxTrendValue = computed(() => Math.max(1, ...(data.value.trends || []).flatMap((row: any) => [row.ad_cost_fen || 0, row.ad_pay_gmv_fen || 0])))
 const trendWidth = (value: number) => `${Math.max(1, (Number(value || 0) / maxTrendValue.value) * 100)}%`
 
 async function load() {
   loading.value = true
-  try { const response = await lifeDataAnalysisApi.getOverview(); data.value = response.data.data }
+  try {
+    const [overview, decisions, history, patterns] = await Promise.allSettled([
+      lifeDataAnalysisApi.getOverview(),
+      lifeDataAnalysisApi.getDecisionOverview(),
+      lifeDataAnalysisApi.getDecisionHistory({ limit: 50 }),
+      lifeDataAnalysisApi.getDailyPatterns(30),
+    ])
+    if (overview.status !== 'fulfilled') throw overview.reason
+    data.value = overview.value.data.data
+    if (decisions.status === 'fulfilled') decisionOverview.value = decisions.value.data.data || {}
+    if (history.status === 'fulfilled') decisionHistory.value = history.value.data.data || []
+    if (patterns.status === 'fulfilled') dailyPatterns.value = patterns.value.data.data || []
+  }
   catch (_) { ElMessage.error('投流数据加载失败，请检查采集器状态') }
   finally { loading.value = false }
 }
 async function confirmSuggestion() {
-  await ElMessageBox.alert('第一阶段不会自动投放。请按建议人工创建小额测试，并在任务管理中反馈消耗、核销和退款。', '人工确认', { confirmButtonText: '我知道了' })
+  if (!recommendation.value.id) return
+  await ElMessageBox.confirm('采纳只记录人工决定，不会自动修改抖音预算。是否采纳该建议？', '人工决定', { confirmButtonText: '采纳', cancelButtonText: '取消' })
+  await lifeDataAnalysisApi.recordDecision(recommendation.value.id, { decision: 'accepted' })
+  ElMessage.success('已记录采纳；尚未登记实际执行')
+  await load()
+}
+async function registerExecution() {
+  if (!recommendation.value.id) return
+  const result = await ElMessageBox.prompt('请输入实际投放预算（元）', '登记实际执行', { inputPattern: /^\d+(\.\d{1,2})?$/, inputErrorMessage: '请输入有效金额' })
+  const actualBudgetFen = Math.round(Number(result.value) * 100)
+  await lifeDataAnalysisApi.recordExecution(recommendation.value.id, { actual_budget_fen: actualBudgetFen })
+  ElMessage.success('已登记实际执行，等待24/72/168小时结果')
+  await load()
 }
 onMounted(load)
 </script>
@@ -164,6 +223,7 @@ onMounted(load)
 .grid-main{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:16px}.ai-decision,.quality-panel,.analysis-section{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.035);padding:20px}.ai-decision{border-top:3px solid var(--orange)}.ai-decision.increase_budget{border-top-color:var(--green)}.ai-decision h2{font-size:22px;margin:8px 0 4px}.action-copy{color:#5f6875}.budget{display:flex;gap:16px;align-items:baseline;margin:16px 0;padding:12px 0;border-block:1px solid var(--line)}.budget strong{font-size:22px}.budget small{color:#6c7480}.ai-decision ul{padding-left:18px;line-height:1.7}.stop-loss{display:flex;gap:12px;padding:12px;background:#FFF7ED;color:#764116}.decision-foot{display:flex;justify-content:space-between;align-items:center;margin-top:16px}.quality-panel h3{font-size:18px}.quality-panel dl>div{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line)}.quality-panel dd{font-weight:750;font-variant-numeric:tabular-nums}
 .analysis-section{margin-top:16px}.section-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px}.section-head span{font-size:11px;letter-spacing:.08em;color:#6b7480}.section-head h2{margin:5px 0 0;font-size:19px}.section-head small{color:#7b838e}.demo-list{display:grid;gap:13px}.demo-row{display:grid;grid-template-columns:70px 1fr 120px 1fr 120px;gap:12px;align-items:center;font-size:13px}.bar-track{height:10px;background:#EEF2F7;overflow:hidden}.bar-track span{display:block;height:100%}.male{background:var(--blue)}.female{background:var(--orange)}
 .split-analysis{display:grid;grid-template-columns:1fr 1fr;gap:18px}.region-list,.trend-list{display:grid;gap:12px}.region-row{display:grid;grid-template-columns:90px 1fr 95px 55px;gap:10px;align-items:center;font-size:13px}.region-row em,.trend-row em{font-style:normal;color:#687386;text-align:right}.region-bar{background:var(--green)}.trend-row{display:grid;grid-template-columns:52px 1fr 165px;gap:10px;align-items:center;font-size:12px}.trend-bars{display:grid;gap:3px}.trend-bars i,.trend-bars b{display:block;height:5px;min-width:2px}.trend-bars i{background:var(--orange)}.trend-bars b{background:var(--green)}
+.region-tabs{display:flex;gap:8px;margin-bottom:8px}.region-meaning{margin:0 0 14px;color:#7b838e;font-size:12px}.outcome-windows{display:flex;gap:24px;margin-top:14px;color:#687386}.pattern-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.pattern-list article{border:1px solid var(--line);padding:14px}.pattern-list p{margin:8px 0;color:#5f6875}.pattern-list .risk{color:var(--orange)}
 @media(max-width:1100px){.decision-ledger{grid-template-columns:1fr 1fr}.arrow{display:none}.grid-main{grid-template-columns:1fr}.demo-row{grid-template-columns:60px 1fr 100px}.demo-row .bar-track:nth-of-type(2),.demo-row span:last-child{display:none}}
 @media(max-width:900px){.split-analysis{grid-template-columns:1fr}}
 @media(max-width:720px){.investment-page{padding:16px}.page-head{align-items:flex-start;flex-direction:column}.freshness{flex-wrap:wrap}.decision-ledger{grid-template-columns:1fr}.demo-row{grid-template-columns:55px 1fr 95px}.region-row{grid-template-columns:70px 1fr 85px}.region-row em{display:none}.trend-row{grid-template-columns:45px 1fr}.trend-row em{display:none}}
