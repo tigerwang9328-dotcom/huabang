@@ -24,9 +24,9 @@ from app.services.ai_engine import AIEngine, PROMPT_VERSION as ENGINE_PROMPT_VER
 from app.services.report_service import ReportService
 
 
-def test_business_advice_prompt_contract_uses_v3_everywhere():
-    assert SERVICE_PROMPT_VERSION == ENGINE_PROMPT_VERSION == "business-advice-v3"
-    assert AiBusinessAdviceSnapshot.__table__.c.prompt_version.default.arg == "business-advice-v3"
+def test_business_advice_prompt_contract_uses_v5_everywhere():
+    assert SERVICE_PROMPT_VERSION == ENGINE_PROMPT_VERSION == "business-advice-v5"
+    assert AiBusinessAdviceSnapshot.__table__.c.prompt_version.default.arg == "business-advice-v5"
 
 
 def test_business_advice_matrix_has_company_plus_seven_stores_and_nine_modules():
@@ -66,7 +66,7 @@ def test_business_advice_input_hash_is_order_stable_and_changes_with_facts(monke
     changed_rule = {**reordered_lists, "rules": [{"rule_id": "rule:c"}, {"rule_id": "rule:a"}]}
     assert business_advice_input_hash(unordered_lists) != business_advice_input_hash(changed_rule)
     original_hash = business_advice_input_hash(left)
-    monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", "business-advice-v4")
+    monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", "business-advice-v6")
     assert business_advice_input_hash(left) != original_hash
 
     monkeypatch.setattr(advice_service_module, "PROMPT_VERSION", SERVICE_PROMPT_VERSION)
@@ -191,8 +191,140 @@ def test_business_advice_prompt_forbids_every_narrative_number_except_due_days()
 
     assert "除 due_in_days 外" in source
     assert "阿拉伯数字、中文数字、日期" in source
+    assert "今天、昨天、本周、本月" in source
     assert "见证据引用" in source
     assert "只能在 limitations 使用固定句" in source
+
+
+
+
+def test_business_advice_sensitive_text_allows_neutral_task_phrasing():
+    assert ai_engine_module.contains_sensitive_text("任务执行进度需要主管复盘") is False
+    assert ai_engine_module.contains_sensitive_text("任务跟进状态需要继续观察") is False
+    assert ai_engine_module.contains_sensitive_text("张三负责复核异常") is True
+
+
+def test_business_advice_finance_limitations_allow_non_deterministic_assessment_terms():
+    assert ai_engine_module._validate_narrative(
+        "费用数据待接入，无法评估盈亏",
+        finance_complete=False,
+    ) == "费用数据待接入，无法评估盈亏"
+    assert ai_engine_module._validate_narrative(
+        "费用数据待接入，无法计算净利润",
+        finance_complete=False,
+    ) == "费用数据待接入，无法计算净利润"
+    with pytest.raises(ValueError, match="费用不完整"):
+        ai_engine_module._validate_narrative("经营利润已经改善", finance_complete=False)
+
+
+
+def test_business_advice_model_narrative_numbers_are_safely_coerced_without_changing_refs():
+    safe_context = {
+        "finance_complete": True,
+        "metrics": {"inventory_amount": {"fact_id": "fact:inventory_amount", "status": "ready"}},
+        "rules": [{"rule_id": "rule:risk", "level": "high"}],
+    }
+    payload = {
+        "executive_summary": "近30天库存压力上升",
+        "key_findings": [{
+            "title": "90天库存偏高",
+            "explanation": "有3款商品需要关注",
+            "confidence": "high",
+            "evidence_refs": ["rule:risk"],
+        }],
+        "recommendations": [{
+            "action_type": "review_inventory",
+            "title": "3天内复核库存",
+            "reason": "90天库存风险较高",
+            "priority": "high",
+            "evidence_refs": ["rule:risk"],
+            "responsible_role": "warehouse_manager",
+            "due_in_days": 1,
+            "review_metric": "90天库存复核状态",
+        }],
+        "limitations": [],
+    }
+
+    result = ai_engine_module.validate_model_business_advice(payload, safe_context=safe_context)
+
+    rendered = json.dumps(result, ensure_ascii=False)
+    assert "30" not in rendered
+    assert "90" not in rendered
+    assert "3款" not in rendered
+    assert result["key_findings"][0]["evidence_refs"] == ["rule:risk"]
+    assert result["recommendations"][0]["evidence_refs"] == ["rule:risk"]
+
+
+def test_business_advice_narrative_rejects_named_relative_dates():
+    with pytest.raises(ValueError, match="具体时间"):
+        ai_engine_module._validate_narrative("今天需要复盘库存风险", finance_complete=True)
+    with pytest.raises(ValueError, match="具体时间"):
+        ai_engine_module._validate_narrative("本周需要关注销售趋势", finance_complete=True)
+
+
+@pytest.mark.asyncio
+async def test_business_advice_large_rule_context_uses_compact_prompt_and_more_completion_tokens(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(settings, "AI_BUSINESS_ADVICE_MODEL", "deepseek-v4-pro", raising=False)
+    monkeypatch.setattr(settings, "AI_BUSINESS_ADVICE_ENABLED", True, raising=False)
+
+    class CapturingEngine(AIEngine):
+        async def _call_business_advice(self, system_prompt, user_content, *, max_tokens=4000):
+            captured["max_tokens"] = max_tokens
+            captured["user_content"] = user_content
+            return {
+                "content": json.dumps({
+                    "executive_summary": "库存压力需要优先复核",
+                    "key_findings": [{
+                        "title": "库存压力集中",
+                        "explanation": "见证据引用提示库存风险",
+                        "confidence": "high",
+                        "evidence_refs": ["rule:r00"],
+                    }],
+                    "recommendations": [{
+                        "action_type": "review_inventory",
+                        "title": "复核库存风险",
+                        "reason": "见证据引用提示库存压力",
+                        "priority": "high",
+                        "evidence_refs": ["rule:r00"],
+                        "responsible_role": "warehouse_manager",
+                        "due_in_days": 1,
+                        "review_metric": "库存风险复核状态",
+                    }],
+                    "limitations": [],
+                }, ensure_ascii=False),
+                "model": "deepseek-v4-pro",
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "total_tokens": 3,
+            }
+
+    rules = [
+        {
+            "id": f"r{i:02d}",
+            "title": f"库存风险规则{i:02d}",
+            "level": "critical" if i == 0 else "warning",
+            "evidence": ["见证据引用"],
+            "source": "rule_engine",
+        }
+        for i in range(40)
+    ]
+    result = await CapturingEngine(db=None).generate_command_conclusion({
+        "finance_complete": True,
+        "metrics": {
+            "inventory_amount": {
+                "value": 100,
+                "status": "ready",
+                "source": "dwd_inventory_balance",
+                "as_of": "2026-07-16",
+            },
+        },
+        "rules": rules,
+    })
+
+    assert result["mode"] == "model"
+    assert captured["max_tokens"] > 4000
+    assert captured["user_content"].count('"rule_id"') <= 15
 
 
 def test_skill_exporter_is_select_only_and_never_exposes_raw_business_rows():

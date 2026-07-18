@@ -29,11 +29,11 @@
     <section class="panel ai-advice-panel">
       <div class="panel-title">
         <div><h2>AI经营顾问</h2><span>{{ commandConclusion.executive_summary || "等待经营建议" }}</span></div>
-        <div class="ai-meta"><el-tag :type="commandConclusion.mode === 'model' ? 'success' : 'info'">{{ commandConclusion.mode === "model" ? "大模型建议" : "确定性模板" }}</el-tag><span>{{ commandConclusion.model_used || report.ai_model_used || "deterministic_rules" }} · {{ shortTime(commandConclusion.generated_at || report.ai_generated_at) }}</span></div>
+        <div class="ai-meta"><el-tag :type="commandConclusion.mode === 'model' ? 'success' : 'info'">{{ commandConclusion.mode === "model" ? "大模型建议" : "确定性模板" }}</el-tag><span>{{ engineLabel(commandConclusion.model_used || report.ai_model_used || "deterministic_rules") }} · {{ shortTime(commandConclusion.generated_at || report.ai_generated_at) }}</span></div>
       </div>
       <div class="advice-grid">
         <div><h3>关键发现</h3><ul><li v-for="item in commandConclusion.key_findings || []" :key="item.title"><strong>{{ item.title }} · {{ confidenceLabel(item.confidence) }}</strong><p>{{ item.explanation }}</p><small v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</small></li></ul><el-empty v-if="!(commandConclusion.key_findings || []).length" description="暂无模型关键发现" :image-size="50" /></div>
-        <div><h3>优先行动</h3><ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><strong>{{ item.title }}</strong><p>{{ item.reason }} · {{ item.responsible_role || "待主管确认" }}</p><small v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</small></li></ul><el-empty v-if="!(commandConclusion.recommendations || []).length" description="暂无候选行动" :image-size="50" /></div>
+        <div><h3>优先行动</h3><ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><strong>{{ item.title }}</strong><p>{{ item.reason }} · {{ roleLabel(item.responsible_role) }}</p><small v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</small></li></ul><el-empty v-if="!(commandConclusion.recommendations || []).length" description="暂无候选行动" :image-size="50" /></div>
         <div class="limitations"><h3>数据限制</h3><ul><li v-for="item in commandConclusion.limitations || []" :key="item">{{ item }}</li></ul><p v-if="commandConclusion.fallback_reason">回退原因：{{ commandConclusion.fallback_reason }}</p></div>
       </div>
     </section>
@@ -49,7 +49,6 @@
           <div><span>库龄未知</span><strong>{{ number(report.inventory_age_unknown_qty) }} 件</strong></div>
           <div><span>VIP正余额</span><strong>{{ money(report.vip_balance) }}</strong></div>
           <div><span>VIP负余额人数</span><strong>{{ number(report.vip_negative_balance_count) }}</strong></div>
-          <div><span>充值金额</span><strong>{{ money(report.deposit_amount) }}</strong></div>
         </div>
       </div>
       <div class="panel">
@@ -75,7 +74,6 @@
         <el-table-column label="毛利额" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.gross_profit) }}</template></el-table-column>
         <el-table-column label="毛利率" width="80" align="right" header-align="right"><template #default="{ row }">{{ historyPercent(row.gross_margin) }}</template></el-table-column>
         <el-table-column label="VIP销售" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.vip_sales_amount) }}</template></el-table-column>
-        <el-table-column label="充值金额" width="108" align="right" header-align="right"><template #default="{ row }">{{ historyMoney(row.deposit_amount) }}</template></el-table-column>
         <el-table-column label="成本状态" width="100"><template #default="{ row }"><el-tag :type="row.is_cost_complete ? 'success' : 'warning'" size="small">{{ row.is_cost_complete ? "已就绪" : "预估" }}</el-tag></template></el-table-column>
         <el-table-column label="数据状态" width="100"><template #default="{ row }"><el-tag :type="dataStatusType(row.data_quality_status)" size="small">{{ dataStatusLabel(row.data_quality_status) }}</el-tag></template></el-table-column>
       </el-table>
@@ -87,6 +85,7 @@
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { dashboardApi } from "@/api/dashboard";
+import { engineLabel, evidenceFallbackLabel, readinessLabel, roleLabel, sourceLabel } from "@/utils/businessDisplay";
 
 const loading = ref(false);
 const report = ref<any>({});
@@ -115,9 +114,9 @@ function statusName(key: string) { return ({ sales: "销售", actual_pay: "实�
 function confidenceLabel(value: string) { return ({ high: "高置信", medium: "中置信", low: "低置信" } as any)[value] || "待核验"; }
 function evidenceLabel(ref: string) {
   const fact = (commandConclusion.value.facts || []).find((item: any) => item.fact_id === ref);
-  if (fact) return `${fact.label}：${fact.value}（${fact.status}）`;
+  if (fact) return `${fact.label}：${fact.value}（${readinessLabel(fact.status || fact.note) || "已记录"}）`;
   const risk = (commandConclusion.value.risks || []).find((item: any) => item.rule_id === ref);
-  return risk ? `${risk.title}（${risk.source}）` : ref;
+  return risk ? `${risk.title}（${sourceLabel(risk.source, "规则证据")}）` : evidenceFallbackLabel(ref);
 }
 
 const metrics = computed(() => [

@@ -1,6 +1,19 @@
 import logging
-import fcntl
 from datetime import date, timedelta
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows-only test/runtime fallback.
+    class _NoopFcntl:
+        LOCK_EX = 1
+        LOCK_NB = 2
+        LOCK_UN = 8
+
+        @staticmethod
+        def flock(*_args, **_kwargs):
+            return None
+
+    fcntl = _NoopFcntl()
 
 logger = logging.getLogger(__name__)
 

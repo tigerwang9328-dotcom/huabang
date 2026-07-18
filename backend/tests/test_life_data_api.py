@@ -477,7 +477,7 @@ def test_status_reuses_redis_rate_limit(client, valid_token, monkeypatch):
         status_payload(status="error", last_error="   "),
         status_payload(status="offline"),
         status_payload(queue_depth=-1),
-        status_payload(queue_depth=101),
+        status_payload(queue_depth=501),
         status_payload(last_error="x" * 501),
         status_payload(extra_field="forbidden"),
         status_payload(schema_version="1.1"),
@@ -496,6 +496,18 @@ def test_status_schema_requires_error_text_and_allows_online_without_it():
 
     assert error.last_error == "network timeout"
     assert online.last_error is None
+
+
+def test_ingest_and_status_schema_accept_full_collector_queue_depth():
+    ingest = LifeDataIngestRequest.model_validate(
+        payload(queue_depth=500)
+    )
+    status = LifeDataCollectorStatusRequest.model_validate(
+        status_payload(queue_depth=500)
+    )
+
+    assert ingest.queue_depth == 500
+    assert status.queue_depth == 500
 
 
 def test_status_schema_accepts_bounded_group_health():

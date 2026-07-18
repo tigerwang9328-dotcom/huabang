@@ -64,7 +64,7 @@ ALLOWED_RESPONSIBLE_ROLES = {
 }
 ALLOWED_PRIORITIES = {"high", "medium", "low"}
 ALLOWED_CONFIDENCE = {"high", "medium", "low"}
-PROMPT_VERSION = "business-advice-v3"
+PROMPT_VERSION = "business-advice-v5"
 FORBIDDEN_INCOMPLETE_FINANCE_CLAIMS = (
     "公司盈利", "公司亏损", "最终盈利", "最终亏损", "实现盈利", "实现亏损",
     "利润为正", "利润为负", "经营利润为", "净利润为",
@@ -89,6 +89,10 @@ FINANCE_NEUTRAL_PHRASES = (
 FORBIDDEN_POSITIVE_FINANCE_CLAIMS = (
     "赚钱", "赔钱", "净赚", "净亏", "已盈利", "已亏损", "实现盈利", "实现亏损",
     "盈利为", "亏损为", "利润为正", "利润为负",
+)
+
+FORBIDDEN_RELATIVE_DATE_TERMS = (
+    "今天", "昨天", "本周", "本月", "上周", "上月", "明天",
 )
 
 
@@ -303,6 +307,8 @@ def _validate_narrative(text: Any, *, finance_complete: bool) -> str:
         )
     ):
         raise ValueError("AI经营建议不得自行书写指标数值")
+    if any(term in value for term in FORBIDDEN_RELATIVE_DATE_TERMS):
+        raise ValueError("AI经营建议不得使用具体时间表述")
     if any(pattern in value for pattern in FORBIDDEN_CONCLUSIONS):
         raise ValueError("AI经营建议不得声称已执行")
     action_terms = r"(?:采购|下单|改价|调拨|调库存|联系|派发|建单|创建|处理|执行|复核|任务|工作)"
@@ -333,6 +339,21 @@ def _validate_narrative(text: Any, *, finance_complete: bool) -> str:
     return value
 
 
+COERCIBLE_MODEL_NARRATIVE_ERRORS = {
+    "AI经营建议不得自行书写指标数值",
+    "AI经营建议不得使用具体时间表述",
+}
+
+
+def _validate_model_narrative(text: Any, *, finance_complete: bool, fallback: str) -> str:
+    try:
+        return _validate_narrative(text, finance_complete=finance_complete)
+    except ValueError as exc:
+        if str(exc) not in COERCIBLE_MODEL_NARRATIVE_ERRORS:
+            raise
+        return _validate_narrative(fallback, finance_complete=finance_complete)
+
+
 def validate_model_business_advice(
     payload: dict[str, Any], *, safe_context: dict[str, Any]
 ) -> dict[str, Any]:
@@ -354,7 +375,11 @@ def validate_model_business_advice(
     }
 
     result = {
-        "executive_summary": _validate_narrative(payload.get("executive_summary"), finance_complete=finance_complete),
+        "executive_summary": _validate_model_narrative(
+            payload.get("executive_summary"),
+            finance_complete=finance_complete,
+            fallback="经营表现需要关注，具体指标见证据引用",
+        ),
         "key_findings": [],
         "recommendations": [],
         "limitations": [],
@@ -371,8 +396,16 @@ def validate_model_business_advice(
         if confidence == "high" and any(metric_status.get(ref) == "estimated" for ref in refs):
             raise ValueError("预估事实最高只能给中等置信度")
         result["key_findings"].append({
-            "title": _validate_narrative(item.get("title"), finance_complete=finance_complete),
-            "explanation": _validate_narrative(item.get("explanation"), finance_complete=finance_complete),
+            "title": _validate_model_narrative(
+                item.get("title"),
+                finance_complete=finance_complete,
+                fallback="经营信号需关注",
+            ),
+            "explanation": _validate_model_narrative(
+                item.get("explanation"),
+                finance_complete=finance_complete,
+                fallback="该判断依据证据引用，具体指标由页面展示",
+            ),
             "confidence": confidence,
             "evidence_refs": refs,
         })
@@ -397,19 +430,59 @@ def validate_model_business_advice(
             raise ValueError("AI建议期限非法")
         result["recommendations"].append({
             "action_type": item["action_type"],
-            "title": _validate_narrative(item.get("title"), finance_complete=finance_complete),
-            "reason": _validate_narrative(item.get("reason"), finance_complete=finance_complete),
+            "title": _validate_model_narrative(
+                item.get("title"),
+                finance_complete=finance_complete,
+                fallback="复核经营问题",
+            ),
+            "reason": _validate_model_narrative(
+                item.get("reason"),
+                finance_complete=finance_complete,
+                fallback="依据证据引用复核，不改写事实指标",
+            ),
             "priority": item["priority"],
             "evidence_refs": refs,
             "responsible_role": item["responsible_role"],
             "due_in_days": due_in_days,
-            "review_metric": _validate_narrative(item.get("review_metric"), finance_complete=finance_complete),
+            "review_metric": _validate_model_narrative(
+                item.get("review_metric"),
+                finance_complete=finance_complete,
+                fallback="证据引用对应指标",
+            ),
         })
     result["limitations"] = [
-        _validate_narrative(item, finance_complete=finance_complete)
+        _validate_model_narrative(
+            item,
+            finance_complete=finance_complete,
+            fallback="数据限制见系统提示",
+        )
         for item in payload["limitations"][:20]
     ]
     return result
+
+
+_RULE_PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "warning": 3, "low": 4}
+MODEL_CONTEXT_RULE_LIMIT = 15
+
+
+def _compact_model_context_for_business_advice(context: dict[str, Any]) -> dict[str, Any]:
+    """Keep template facts/risks intact while sending a focused rule set to the model."""
+    rules = list(context.get("rules") or [])
+    if len(rules) <= MODEL_CONTEXT_RULE_LIMIT:
+        return context
+
+    def sort_key(rule: dict[str, Any]) -> tuple[int, str, str]:
+        level = str(rule.get("level") or "warning")
+        stable = json.dumps(rule, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        return (
+            _RULE_PRIORITY_ORDER.get(level, _RULE_PRIORITY_ORDER["warning"]),
+            str(rule.get("rule_id") or rule.get("id") or ""),
+            stable,
+        )
+
+    compact = dict(context)
+    compact["rules"] = sorted(rules, key=sort_key)[:MODEL_CONTEXT_RULE_LIMIT]
+    return compact
 
 
 def _candidate_actions(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -453,6 +526,10 @@ class AIEngine:
         if not model_enabled:
             return template
 
+        model_context = _compact_model_context_for_business_advice(safe_context)
+        large_rule_context = len(safe_context.get("rules") or []) > len(model_context.get("rules") or [])
+        advice_max_tokens = 6000 if large_rule_context else 4000
+
         system_prompt = """你是华邦经营顾问。只输出 json，不得输出 Markdown。
 模型只能解释服务端事实引用和提出候选行动；不得输出、改写或猜测任何金额、比例、件数、单数。
 除 due_in_days 外，所有叙述字段都不得出现阿拉伯数字、中文数字、日期、金额、比例、件数或数量单位；涉及指标时只写“见证据引用”。
@@ -470,7 +547,7 @@ class AIEngine:
 服务端脱敏事实上下文：%s""" % (
             ",".join(sorted(ALLOWED_ACTION_TYPES)),
             ",".join(sorted(ALLOWED_RESPONSIBLE_ROLES)),
-            json.dumps(safe_context, ensure_ascii=False, sort_keys=True, default=str),
+            json.dumps(model_context, ensure_ascii=False, sort_keys=True, default=str),
         )
         last_error: Exception | None = None
         attempt_user_content = user_content
@@ -480,13 +557,14 @@ class AIEngine:
                 response = await self._call_business_advice(
                     system_prompt,
                     attempt_user_content,
+                    max_tokens=advice_max_tokens,
                 )
                 content = (response.get("content") or "").strip()
                 if not content:
                     raise ValueError("AI返回空内容")
                 if response.get("model") != settings.AI_BUSINESS_ADVICE_MODEL:
                     raise ValueError("经营建议模型与配置不一致")
-                model_payload = validate_model_business_advice(json.loads(content), safe_context=safe_context)
+                model_payload = validate_model_business_advice(json.loads(content), safe_context=model_context)
                 latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
                 return {
                     **template,
@@ -507,7 +585,7 @@ class AIEngine:
                 }
             except Exception as exc:
                 last_error = exc
-                logger.warning("AI经营建议校验/调用失败，第%s次: %s", _attempt + 1, type(exc).__name__)
+                logger.warning("AI经营建议校验/调用失败，第%s次: %s: %s", _attempt + 1, type(exc).__name__, exc)
                 if _attempt == 0:
                     if isinstance(exc, ValueError):
                         retry_reason = str(exc)[:160]
@@ -517,8 +595,10 @@ class AIEngine:
                         f"{user_content}\n\n上次输出未通过校验：{retry_reason}。"
                         "请重新生成完整 json，并只修正该错误；不得放宽任何事实、数字、隐私或执行边界。"
                     )
-        template["fallback_reason"] = f"模型结果未通过校验：{type(last_error).__name__ if last_error else 'unknown'}"
-        template["error_code"] = type(last_error).__name__ if last_error else "unknown"
+        error_code = type(last_error).__name__ if last_error else "unknown"
+        error_detail = str(last_error)[:160] if last_error else ""
+        template["fallback_reason"] = f"模型结果未通过校验：{error_code}" + (f"：{error_detail}" if error_detail else "")
+        template["error_code"] = error_code
         return template
 
     async def ask(
@@ -638,7 +718,7 @@ class AIEngine:
         else:
             raise ValueError(f"AI提供商未配置或API Key为空: provider={provider}")
 
-    async def _call_business_advice(self, system_prompt: str, user_content: str) -> dict:
+    async def _call_business_advice(self, system_prompt: str, user_content: str, *, max_tokens: int = 4000) -> dict:
         """经营建议固定走 DeepSeek 专用配置，不继承通用问答提供商。"""
         if not settings.DEEPSEEK_API_KEY:
             raise ValueError("DeepSeek API Key 未配置")
@@ -649,11 +729,13 @@ class AIEngine:
             system_prompt=system_prompt,
             user_content=user_content,
             json_mode=True,
+            max_tokens=max_tokens,
         )
 
     async def _call_openai_compatible(
         self, base_url: str, api_key: str, model: str,
-        system_prompt: str, user_content: str, json_mode: bool = False
+        system_prompt: str, user_content: str, json_mode: bool = False,
+        max_tokens: int | None = None,
     ) -> dict:
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -665,7 +747,7 @@ class AIEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            "max_tokens": 4000 if json_mode else 2000,
+            "max_tokens": max_tokens if max_tokens is not None else (4000 if json_mode else 2000),
             "temperature": 0.1 if json_mode else 0.3,
         }
         if json_mode:

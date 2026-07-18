@@ -51,7 +51,7 @@
         <el-tag :type="dataQuality.is_complete ? 'success' : 'warning'">{{ dataQuality.is_complete ? "数据完整" : "数据需补齐" }}</el-tag>
       </div>
       <p class="summary-text">{{ commandConclusion.executive_summary || summary.ai_summary || fallbackSummary }}</p>
-      <div class="source-line">数据来源：{{ (dataQuality.source_tables || []).join(" / ") || "规则诊断服务" }}</div>
+      <div class="source-line">数据来源：{{ sourceLabel(dataQuality.source_tables, "规则诊断服务") }}</div>
     </section>
 
     <section v-if="commandConclusion.facts?.length || commandConclusion.limitations?.length" class="panel">
@@ -59,13 +59,13 @@
         <div><p>CONSTRAINED CONCLUSION</p><h2>受约束经营结论</h2></div>
         <div class="model-meta">
           <el-tag :type="commandConclusion.mode === 'model' ? 'success' : 'info'">{{ commandConclusion.mode === "model" ? "大模型建议" : "确定性模板" }}</el-tag>
-          <span>{{ commandConclusion.model_used || "deterministic_rules" }} · {{ shortTime(commandConclusion.generated_at) }}</span>
+          <span>{{ engineLabel(commandConclusion.model_used || "deterministic_rules") }} · {{ shortTime(commandConclusion.generated_at) }}</span>
         </div>
       </div>
       <div class="conclusion-grid">
         <div class="conclusion-block">
           <h3>确定事实</h3>
-          <ul><li v-for="fact in commandConclusion.facts || []" :key="fact.key"><b>{{ fact.label }}</b> {{ fact.value }} <span>{{ fact.note }} · {{ fact.source }}</span></li></ul>
+          <ul><li v-for="fact in commandConclusion.facts || []" :key="fact.key"><b>{{ fact.label }}</b> {{ fact.value }} <span>{{ factMeta(fact) }}</span></li></ul>
         </div>
         <div class="conclusion-block">
           <h3>模型关键发现</h3>
@@ -73,11 +73,11 @@
         </div>
         <div class="conclusion-block">
           <h3>候选行动</h3>
-          <ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.reason }} · {{ item.responsible_role }} · {{ item.due_in_days }}天内</span><em v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</em></li></ul>
+          <ul><li v-for="item in commandConclusion.recommendations || []" :key="item.title"><b>{{ item.title }}</b><span>{{ item.reason }} · {{ roleLabel(item.responsible_role) }} · {{ item.due_in_days }}天内</span><em v-for="ref in item.evidence_refs || []" :key="ref">{{ evidenceLabel(ref) }}</em></li></ul>
         </div>
         <div class="conclusion-block">
           <h3>行动草稿（人工确认后才建单）</h3>
-          <ul><li v-for="item in commandConclusion.actions || []" :key="item.suggestion_key"><b>{{ item.title }}</b><span>{{ item.owner }} · 待选择真实负责人和期限</span><el-button size="small" type="primary" @click="openConfirm(item)">确认任务</el-button></li></ul>
+          <ul><li v-for="item in commandConclusion.actions || []" :key="item.suggestion_key"><b>{{ item.title }}</b><span>{{ roleLabel(item.owner) }} · 待选择真实负责人和期限</span><el-button size="small" type="primary" @click="openConfirm(item)">确认任务</el-button></li></ul>
         </div>
         <div class="conclusion-block limitations">
           <h3>数据限制</h3>
@@ -98,7 +98,7 @@
             <ul>
               <li><b>可能原因：</b>{{ d.possible_reason }}</li>
               <li><b>建议动作：</b>{{ d.suggested_action }}</li>
-              <li><b>责任人：</b>{{ d.suggested_owner_role }}</li>
+              <li><b>责任人：</b>{{ roleLabel(d.suggested_owner_role) }}</li>
               <li><b>截止时间：</b>{{ d.deadline_suggestion }}</li>
               <li><b>复查指标：</b>{{ d.review_metric }}</li>
             </ul>
@@ -133,12 +133,14 @@
         <el-table-column prop="description" label="问题描述" min-width="260" show-overflow-tooltip />
         <el-table-column label="数据依据" min-width="240">
           <template #default="{ row }">
-            <div class="evidence"><span v-for="e in row.evidence || []" :key="e">{{ e }}</span></div>
+            <div class="evidence"><span v-for="e in row.evidence || []" :key="e">{{ evidenceFallbackLabel(e) }}</span></div>
           </template>
         </el-table-column>
         <el-table-column prop="possible_reason" label="可能原因" min-width="220" show-overflow-tooltip />
         <el-table-column prop="suggested_action" label="建议动作" min-width="260" show-overflow-tooltip />
-        <el-table-column prop="suggested_owner_role" label="责任人建议" width="150" />
+        <el-table-column label="责任人建议" width="150">
+          <template #default="{ row }">{{ roleLabel(row.suggested_owner_role) }}</template>
+        </el-table-column>
         <el-table-column prop="deadline_suggestion" label="截止时间" width="140" />
         <el-table-column prop="review_metric" label="复查指标" min-width="220" show-overflow-tooltip />
       </el-table>
@@ -167,7 +169,9 @@
         <el-table-column prop="task_no" label="任务编号" width="150" />
         <el-table-column prop="problem_type" label="问题类型" min-width="180" />
         <el-table-column prop="today_action" label="今日动作" min-width="260" show-overflow-tooltip />
-        <el-table-column prop="owner" label="责任人" width="150" />
+        <el-table-column label="责任人" width="150">
+          <template #default="{ row }">{{ roleLabel(row.owner) }}</template>
+        </el-table-column>
         <el-table-column prop="deadline" label="截止时间" width="150" />
         <el-table-column prop="priority" label="优先级" width="100" />
         <el-table-column prop="feedback_requirement" label="反馈要求" min-width="260" show-overflow-tooltip />
@@ -183,6 +187,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { aiDiagnosisApi } from "@/api/ai";
+import { engineLabel, evidenceFallbackLabel, factMeta, readinessLabel, roleLabel, sourceLabel } from "@/utils/businessDisplay";
 
 const route = useRoute();
 const modules = [
@@ -228,9 +233,9 @@ const formatLocalDate = (value: Date) => {
 const confidenceLabel = (value: string) => ({ high: "高置信", medium: "中置信", low: "低置信" } as any)[value] || "待核验";
 const evidenceLabel = (ref: string) => {
   const fact = (commandConclusion.value.facts || []).find((item: any) => item.fact_id === ref);
-  if (fact) return `${fact.label}：${fact.value}（${fact.status}）`;
+  if (fact) return `${fact.label}：${fact.value}（${readinessLabel(fact.status || fact.note) || "已记录"}）`;
   const risk = (commandConclusion.value.risks || []).find((item: any) => item.rule_id === ref);
-  return risk ? `${risk.title}（${risk.source}）` : ref;
+  return risk ? `${risk.title}（${sourceLabel(risk.source, "规则证据")}）` : evidenceFallbackLabel(ref);
 };
 const disablePast = (value: Date) => value.getTime() < new Date(new Date().toDateString()).getTime();
 

@@ -31,7 +31,13 @@ from app.models.log import (
     LogDataSync, LogDataQuality, LogAiCall, LogDingtalkPush,
     LogUserLogin, LogUserOperation, LogExport, LogError
 )
-from app.models.ai import AiBusinessAdviceSnapshot, AiDiagnosisResult, AiRuleMatch
+from app.models.ai import (
+    AiAssistantConversation,
+    AiAssistantMessage,
+    AiBusinessAdviceSnapshot,
+    AiDiagnosisResult,
+    AiRuleMatch,
+)
 from app.models.dingtalk_event import DingtalkEvent
 from app.models.dingtalk_attendance import DingtalkAttendanceRecord
 from app.models.dingtalk_hr_finance import (

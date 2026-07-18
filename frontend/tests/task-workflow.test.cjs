@@ -27,13 +27,22 @@ test("task API sends request ids for feedback and review idempotency", () => {
   assert.match(source, /retry-notification/);
 });
 
-test("task routes menu and workflow actions are permission gated", () => {
+test("task routes menu under human resources and workflow actions are permission gated", () => {
   const router = read("src/router/index.ts");
   const layout = read("src/layouts/MainLayout.vue");
   const list = read("src/views/task/Index.vue");
   const detail = read("src/views/task/Detail.vue");
   assert.match(router, /\["\/app\/task", "task:view"\]/);
-  assert.match(layout, /path: "\/app\/task",[\s\S]*?permission: "task:view"/);
+
+  const aiDiagnosisStart = layout.indexOf('label: "AI经营诊断"');
+  const topNavigationBlock = layout.slice(0, aiDiagnosisStart);
+  assert.doesNotMatch(topNavigationBlock, /path: "\/app\/task",[\s\S]*?label: "任务管理"/);
+
+  const hrStart = layout.indexOf('label: "人力资源"');
+  const knowledgeStart = layout.indexOf('label: "知识中枢"', hrStart);
+  const hrBlock = layout.slice(hrStart, knowledgeStart);
+  assert.match(hrBlock, /path: "\/app\/task",[\s\S]*?label: "任务管理"[\s\S]*?permission: "task:view"/);
+
   for (const permission of ["task:create", "task:approve", "task:feedback"]) {
     assert.ok(list.includes(`authStore.hasPermission('${permission}')`));
   }
