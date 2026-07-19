@@ -153,6 +153,8 @@
           <el-button type="primary" :loading="passwordSubmitting" @click="submitChangePassword">确认修改</el-button>
         </template>
       </el-dialog>
+
+      <BossAiFloatingAssistant />
     </div>
   </div>
 </template>
@@ -162,6 +164,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { authApi } from "@/api/auth";
+import BossAiFloatingAssistant from "@/components/ai/BossAiFloatingAssistant.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   ArrowRight,
@@ -273,6 +276,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
         label: "线下销售",
         key: "sales-offline",
         children: [
+          { path: "/app/store/overview", label: "门店总览" },
           { path: "/app/store", label: "单店分析" },
           { path: "/app/member", label: "会员运营" },
           { label: "导购销售", disabled: true, badge: "规划中" },

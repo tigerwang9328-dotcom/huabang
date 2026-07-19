@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦 LifeData 主动采集器
 // @namespace    https://hbreare.com/
-// @version      1.1.2
+// @version      1.2.0
 // @description  在已登录的生意经页面内采集白名单业务 JSON
 // @updateURL     https://hbreare.com/life-data-collector.user.js
 // @downloadURL   https://hbreare.com/life-data-collector.user.js
@@ -10,6 +10,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @connect      hbreare.com
@@ -401,9 +402,364 @@
     return next.slice(Math.max(0, next.length - max))
   }
 
+  const QUEUE_HIGH_WATER_COUNT = 500
+  const QUEUE_LOW_WATER_COUNT = 300
+  const QUEUE_MAX_BYTES = 50 * 1024 * 1024
+
+  function jsonByteLength(value) {
+    const text = JSON.stringify(value)
+    if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).length
+    return unescape(encodeURIComponent(text)).length
+  }
+
+  function queueStats(queue) {
+    const records = Array.isArray(queue) ? queue : []
+    return { count: records.length, bytes: records.reduce((total, record) => total +
+      (Number(record && record.__bytes) || jsonByteLength(record)), 0) }
+  }
+
+  function shouldPauseAutoCollection(stats, paused = false) {
+    const value = stats && typeof stats === 'object' ? stats : {}
+    if (paused) return Number(value.count || 0) > QUEUE_LOW_WATER_COUNT || Number(value.bytes || 0) >= QUEUE_MAX_BYTES
+    return Number(value.count || 0) >= QUEUE_HIGH_WATER_COUNT || Number(value.bytes || 0) >= QUEUE_MAX_BYTES
+  }
+
+  function enqueueQueueEntry(queue, entry, options = {}) {
+    const records = Array.isArray(queue) ? queue : []
+    const maxEntries = Number(options.maxEntries || QUEUE_HIGH_WATER_COUNT)
+    const maxBytes = Number(options.maxBytes || QUEUE_MAX_BYTES)
+    const appended = [...records, entry]
+    const stats = queueStats(appended)
+    if (stats.count <= maxEntries && stats.bytes <= maxBytes) {
+      return { status: 'queued', queue: appended, stats }
+    }
+    if (options.passive && entry && entry.capabilityKey) {
+      let mergeIndex = -1
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        const candidate = records[index]
+        if (candidate && !candidate.claimedBy && candidate.capabilityKey === entry.capabilityKey) {
+          mergeIndex = index
+          break
+        }
+      }
+      if (mergeIndex >= 0) {
+        const merged = records.slice()
+        merged[mergeIndex] = entry
+        const mergedStats = queueStats(merged)
+        if (mergedStats.count <= maxEntries && mergedStats.bytes <= maxBytes) {
+          return { status: 'merged', queue: merged, stats: mergedStats }
+        }
+      }
+    }
+    return { status: 'queue_full', queue: records, stats: queueStats(records) }
+  }
+
+  function selectOldestDue(queue, now) {
+    return (Array.isArray(queue) ? queue : [])
+      .filter((item) => item && Number(item.nextAttemptAt || 0) <= Number(now) &&
+        (!item.claimedBy || Number(item.claimExpiresAt || 0) <= Number(now)))
+      .sort((a, b) => Number(a.nextAttemptAt || 0) - Number(b.nextAttemptAt || 0) ||
+        String(a.payload && a.payload.captured_at || '').localeCompare(String(b.payload && b.payload.captured_at || '')))[0] || null
+  }
+
+  function cloneQueue(value) {
+    return typeof structuredClone === 'function'
+      ? structuredClone(value)
+      : JSON.parse(JSON.stringify(value))
+  }
+
+  function stableCaptureValue(value) {
+    if (Array.isArray(value)) return value.map(stableCaptureValue)
+    if (!value || typeof value !== 'object') return value
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableCaptureValue(value[key])]))
+  }
+
+  async function captureDedupeKey(payload, cryptoApi = (typeof globalThis !== 'undefined' ? globalThis.crypto : null)) {
+    const safe = sanitizeBusinessJson({
+      endpoint: payload && payload.endpoint,
+      request_payload: payload && payload.request_payload,
+      response_payload: payload && payload.response_payload,
+    })
+    const text = JSON.stringify(stableCaptureValue(safe))
+    const domainText = `huabang-life-data-capture-v1\u0000${text.length}\u0000${text}`
+    try {
+      if (!cryptoApi || !cryptoApi.subtle || typeof cryptoApi.subtle.digest !== 'function' || typeof TextEncoder !== 'function') return null
+      const digest = await cryptoApi.subtle.digest('SHA-256', new TextEncoder().encode(domainText))
+      const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+      return /^[0-9a-f]{64}$/.test(hex) ? `${hex}:${text.length}` : null
+    } catch (_error) {
+      return null
+    }
+  }
+
+  function createMemoryQueueStore(initial = [], onCommit = null) {
+    let records = cloneQueue(Array.isArray(initial) ? initial : [])
+    let permits = []
+    let dedupe = []
+    let pending = Promise.resolve()
+    return {
+      async snapshot() { return cloneQueue(records) },
+      async transaction(mutator) {
+        const run = async () => {
+          const mutation = await mutator(cloneQueue(records), { permits: cloneQueue(permits), dedupe: cloneQueue(dedupe) })
+          const next = mutation && mutation.records
+          if (!Array.isArray(next)) throw new Error('invalid queue transaction')
+          const committed = cloneQueue(next)
+          if (typeof onCommit === 'function' && onCommit(cloneQueue(committed)) === false) {
+            throw new Error('queue commit rejected')
+          }
+          records = committed
+          permits = cloneQueue(Array.isArray(mutation.permits) ? mutation.permits : permits)
+          dedupe = cloneQueue(Array.isArray(mutation.dedupe) ? mutation.dedupe : dedupe)
+          return { records: cloneQueue(records), value: mutation.value }
+        }
+        const result = pending.then(run, run)
+        pending = result.then(() => undefined, () => undefined)
+        return result
+      },
+    }
+  }
+
+  function createGmQueueStore(gm, options = {}) {
+    const prefix = options.prefix || 'lifeDataQueue'
+    const metaKey = `${prefix}:meta`
+    const pendingKey = `${prefix}:pending`
+    const emptyMeta = () => ({ version: 1, count: 0, totalBytes: 0, entries: [], permits: [], dedupe: [] })
+    const readMeta = () => {
+      const value = gm.get(metaKey, emptyMeta())
+      return value && Array.isArray(value.entries) ? value : emptyMeta()
+    }
+    let generation = 0
+    const cryptoApi = typeof globalThis !== 'undefined' && globalThis.crypto
+    const tabNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    const generateVersionToken = typeof options.generateVersionToken === 'function'
+      ? options.generateVersionToken
+      : () => cryptoApi && typeof cryptoApi.randomUUID === 'function'
+        ? cryptoApi.randomUUID()
+        : `${tabNonce}-${generation += 1}`
+    const nextRecordKey = (id, oldKey = null) => {
+      for (let attempt = 0; attempt < 16; attempt += 1) {
+        const token = String(generateVersionToken())
+        const key = `${prefix}:event:${encodeURIComponent(id)}:${token}`
+        if (key !== oldKey && gm.get(key, undefined) === undefined) return key
+      }
+      throw new Error('unable to allocate unique queue record version')
+    }
+    const summary = (record, bytes, key) => ({
+      id: String(record.payload.event_id), key, bytes,
+      due: Number(record.nextAttemptAt || 0), attempt: Number(record.attempt || 0),
+      claimedBy: record.claimedBy || null, claimExpiresAt: Number(record.claimExpiresAt || 0),
+      capabilityKey: record.capabilityKey || null,
+      capturedAt: String(record.payload.captured_at || ''), updatedAt: Date.now(),
+    })
+    const stub = (item) => ({
+      payload: { event_id: item.id, captured_at: item.capturedAt },
+      attempt: item.attempt, nextAttemptAt: item.due,
+      claimedBy: item.claimedBy || undefined,
+      claimExpiresAt: item.claimExpiresAt || undefined,
+      capabilityKey: item.capabilityKey || null,
+      __bytes: item.bytes,
+    })
+    const comparable = (record) => JSON.stringify({
+      due: Number(record.nextAttemptAt || 0), attempt: Number(record.attempt || 0),
+      claimedBy: record.claimedBy || null, claimExpiresAt: Number(record.claimExpiresAt || 0),
+      capabilityKey: record.capabilityKey || null,
+    })
+    const sameMeta = (left, right) => JSON.stringify(left) === JSON.stringify(right)
+    const cleanup = (keys) => {
+      for (const key of keys) gm.delete(key)
+    }
+    const recover = async () => {
+      const pending = gm.get(pendingKey, null)
+      if (!pending || !pending.oldMeta || !pending.newMeta) return { status: 'clean' }
+      const current = readMeta()
+      if (sameMeta(current, pending.newMeta)) {
+        cleanup(pending.oldKeys || [])
+        gm.delete(pendingKey)
+        return { status: 'completed' }
+      }
+      if (!sameMeta(current, pending.oldMeta)) gm.set(metaKey, pending.oldMeta)
+      cleanup(pending.newKeys || [])
+      gm.delete(pendingKey)
+      return { status: 'rolled_back' }
+    }
+    return {
+      recover,
+      async snapshot() { return readMeta().entries.map(stub) },
+      async transaction(mutator) {
+        await recover()
+        const beforeMeta = readMeta()
+        const before = beforeMeta.entries.map(stub)
+        const mutation = await mutator(cloneQueue(before), {
+          permits: cloneQueue(Array.isArray(beforeMeta.permits) ? beforeMeta.permits : []),
+          dedupe: cloneQueue(Array.isArray(beforeMeta.dedupe) ? beforeMeta.dedupe : []),
+        })
+        const next = mutation && mutation.records
+        if (!Array.isArray(next)) throw new Error('invalid queue transaction')
+        const oldById = new Map(beforeMeta.entries.map((item) => [item.id, item]))
+        const nextById = new Map(next.map((record) => [String(record.payload.event_id), record]))
+        const nextEntries = []
+        const changed = []
+        for (const record of next) {
+          const id = String(record.payload.event_id)
+          const old = oldById.get(id)
+          const hasPayload = !record.__bytes
+          if (!old || hasPayload || comparable(record) !== comparable(stub(old))) {
+            const oldRecord = old && !hasPayload ? gm.get(old.key, {}) : null
+            const persisted = old && !hasPayload
+              ? { ...oldRecord, ...record, payload: oldRecord.payload }
+              : record
+            const bytes = jsonByteLength(persisted)
+            const key = nextRecordKey(id, old && old.key)
+            changed.push([key, persisted])
+            nextEntries.push(summary(persisted, bytes, key))
+          } else nextEntries.push(old)
+        }
+        const deleted = beforeMeta.entries.filter((item) => !nextById.has(item.id))
+        const nextMeta = { version: 1, count: nextEntries.length,
+          totalBytes: nextEntries.reduce((total, item) => total + item.bytes, 0), entries: nextEntries,
+          permits: cloneQueue(Array.isArray(mutation.permits) ? mutation.permits : (beforeMeta.permits || [])),
+          dedupe: cloneQueue(Array.isArray(mutation.dedupe) ? mutation.dedupe : (beforeMeta.dedupe || [])) }
+        const changedIds = new Set(nextEntries.filter((item) =>
+          !oldById.has(item.id) || oldById.get(item.id).key !== item.key).map((item) => item.id))
+        const oldKeys = beforeMeta.entries.filter((item) =>
+          deleted.some((entry) => entry.id === item.id) || changedIds.has(item.id)).map((item) => item.key)
+        const newKeys = changed.map(([key]) => key)
+        try {
+          for (const [key, record] of changed) gm.set(key, record)
+          gm.set(pendingKey, { version: 1, oldMeta: beforeMeta, newMeta: nextMeta, oldKeys, newKeys })
+        } catch (error) {
+          try { cleanup(newKeys) } catch (_cleanupError) { /* best effort before journal exists */ }
+          throw error
+        }
+        gm.set(metaKey, nextMeta)
+        cleanup(oldKeys)
+        gm.delete(pendingKey)
+        let value = mutation.value
+        if (value && value.item && value.item.payload) {
+          const id = String(value.item.payload.event_id)
+          const item = nextEntries.find((entry) => entry.id === id)
+          value = { ...value, item: item ? gm.get(item.key, value.item) : value.item }
+        }
+        return { records: nextEntries.map(stub), value }
+      },
+    }
+  }
+
+  async function migrateLegacyQueue(store, legacy) {
+    const records = legacy.read()
+    if (!Array.isArray(records) || records.length === 0) return { status: 'empty' }
+    try {
+      await store.transaction(async (current) => {
+        const ids = new Set(current.map((entry) => entry && entry.payload && entry.payload.event_id))
+        const additions = records.filter((entry) => entry && entry.payload && !ids.has(entry.payload.event_id))
+        const next = [...current, ...additions]
+        const stats = queueStats(next)
+        if (stats.count > QUEUE_HIGH_WATER_COUNT || stats.bytes > QUEUE_MAX_BYTES) {
+          throw new Error('legacy queue exceeds capacity')
+        }
+        return { records: next }
+      })
+      legacy.clear()
+      return { status: 'migrated' }
+    } catch (_error) {
+      return { status: 'failed' }
+    }
+  }
+
   function retryDelayForAttempt(attempt) {
     const index = Math.max(0, Math.floor(Number(attempt) || 0))
     return RETRY_DELAYS[Math.min(index, RETRY_DELAYS.length - 1)]
+  }
+
+  function nextRateLimitDelay(timestamps, now, limit, windowMs) {
+    const current = Number(now)
+    const window = Math.max(1, Number(windowMs))
+    const ceiling = Math.max(1, Math.floor(Number(limit)))
+    const live = (Array.isArray(timestamps) ? timestamps : [])
+      .map(Number)
+      .filter((timestamp) => Number.isFinite(timestamp) && timestamp > current - window && timestamp <= current)
+      .sort((a, b) => a - b)
+    if (live.length < ceiling) return 0
+    return Math.max(1, live[live.length - ceiling] + window - current)
+  }
+
+  function effectiveRateLimit(rateState, now, threshold = 2) {
+    const state = rateState && typeof rateState === 'object' ? rateState : {}
+    return state.reducedMode === true || (
+      Number(state.consecutive429 || 0) >= Number(threshold) &&
+      Number(state.reducedUntil || 0) > 0
+    ) ? 20 : 40
+  }
+
+  function estimateQueueDrainMs(queueDepth, ratePerMinute) {
+    const depth = Math.max(0, Math.floor(Number(queueDepth) || 0))
+    const rate = Math.max(1, Number(ratePerMinute) || 0)
+    return depth === 0 ? 0 : Math.ceil((depth / rate) * 60_000)
+  }
+
+  function sanitizeStatusError(message) {
+    const source = String(message || '')
+    const sensitiveKey = (key) => {
+      const compact = String(key).toLowerCase().replace(/[^a-z0-9]/g, '')
+      return compact.includes('cookie') || compact.includes('authorization') ||
+        compact.includes('session') || compact.includes('token') ||
+        compact.includes('signature') || compact === 'sign' ||
+        compact.includes('secret') || compact.includes('password')
+    }
+    const containerKey = (key) => ['header', 'headers', 'requestbody', 'requestpayload', 'body']
+      .includes(String(key).toLowerCase().replace(/[^a-z0-9]/g, ''))
+    try {
+      const parsed = JSON.parse(source)
+      if (parsed && typeof parsed === 'object') {
+        let visited = 0
+        const sanitizeStructured = (value, depth = 0) => {
+          visited += 1
+          if (depth > 8 || visited > 200) return '[redacted]'
+          if (Array.isArray(value)) {
+            return value.slice(0, 100).map((item) => sanitizeStructured(item, depth + 1))
+          }
+          if (!value || typeof value !== 'object') return value
+          return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, child]) => [
+            key,
+            containerKey(key) || sensitiveKey(key)
+              ? '[redacted]'
+              : sanitizeStructured(child, depth + 1),
+          ]))
+        }
+        return JSON.stringify(sanitizeStructured(parsed)).slice(0, 500)
+      }
+    } catch (_error) {
+      // Fall through to conservative text sanitization for malformed JSON.
+    }
+    const redacted = source
+      .replace(/(["']?(?:headers?|request[_-]?(?:body|payload)|request\s+(?:body|payload)|body)["']?\s*[:=]\s*)[\s\S]*/gi, '$1[redacted]')
+      .replace(/bearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+      .replace(/(["'](?:cookie|authorization|x-tt-ls-session-id|root-life-account-id|life-account-id|access[_-]?token|refresh[_-]?token|token|signature|sign|secret|password)["']\s*:\s*)(?:"[^"]*"|'[^']*'|[^,}\s]+)/gi, '$1"[redacted]"')
+      .replace(/(cookie|authorization|x-tt-ls-session-id|root-life-account-id|life-account-id|access[_-]?token|refresh[_-]?token|token|signature|sign|secret|password)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1=[redacted]')
+    return (redacted.trim() || '采集器错误').slice(0, 500)
+  }
+
+  function nextUploadRateState(rateState, outcome, now, threshold = 2, consecutiveWindowMs = 300_000) {
+    const state = rateState && typeof rateState === 'object' ? rateState : {}
+    const current = Number(now)
+    const httpStatus = Number(outcome && outcome.httpStatus) || 0
+    if (httpStatus === 429) {
+      const last429At = Number(state.last429At || 0)
+      const consecutive429 = last429At > 0 && current - last429At <= consecutiveWindowMs
+        ? Number(state.consecutive429 || 0) + 1
+        : 1
+      return { ...state, consecutive429, last429At: current, cooldownUntil: current + 60_000,
+        reducedMode: state.reducedMode === true || consecutive429 >= Number(threshold), reducedUntil: 0 }
+    }
+    if (outcome && outcome.ok === true) {
+      const reduced = effectiveRateLimit(state, current, threshold) === 20
+      const recovered = reduced && current >= Number(state.cooldownUntil || 0)
+      return recovered
+        ? { ...state, consecutive429: 0, last429At: 0, cooldownUntil: 0, reducedMode: false, reducedUntil: 0 }
+        : { ...state, consecutive429: 0, last429At: 0 }
+    }
+    return { ...state, consecutive429: 0, last429At: 0 }
   }
 
   function findNestedFieldValue(root, names) {
@@ -546,7 +902,7 @@
       account_id: ACCOUNT_ID,
       page_path: String(options.pagePath || '/'),
       queue_depth: Math.min(
-        100,
+        500,
         Math.max(0, Math.floor(Number(options.queueDepth) || 0)),
       ),
       endpoint: normalizeEndpoint(options.endpoint),
@@ -554,6 +910,18 @@
       response_payload: sanitizeBusinessJson(options.responsePayload),
       captured_at: String(options.capturedAt),
     }
+  }
+
+  function isCapturePersistedSuccess(result) {
+    return Boolean(result && [
+      'uploaded', 'queued', 'merged', 'coalesced',
+    ].includes(result.status))
+  }
+
+  function requiredCollectionGroupsHealthy(groups) {
+    return ['video', 'business', 'advertising'].every(
+      (group) => groups && groups[group] && groups[group].status === 'healthy',
+    )
   }
 
   const VOLATILE_TEMPLATE_KEYS = new Set([
@@ -596,6 +964,95 @@
     return JSON.stringify(normalized)
   }
 
+  function normalizedCanonicalFields(template) {
+    return [...new Set(
+      (Array.isArray(template && template.canonicalFields)
+        ? template.canonicalFields
+        : [])
+        .map((field) => String(field).trim())
+        .filter(Boolean),
+    )].sort()
+  }
+
+  function templateCapabilityIdentity(template) {
+    return JSON.stringify({
+      group: String(template && template.group || classifyTemplate(template)),
+      moduleIdentity: String(template && template.moduleIdentity || ''),
+      endpoint: normalizeEndpoint(template && template.endpoint) || String(template && template.endpoint || ''),
+      canonicalFields: normalizedCanonicalFields(template),
+    })
+  }
+
+  function templateTimestamp(template, key) {
+    const value = template && template[key]
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) return numeric
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+
+  function compareTemplatePriority(left, right) {
+    return (
+      templateTimestamp(right, 'lastSuccessfulAt') - templateTimestamp(left, 'lastSuccessfulAt') ||
+      templateTimestamp(right, 'learnedAt') - templateTimestamp(left, 'learnedAt') ||
+      templateCapabilityIdentity(left).localeCompare(templateCapabilityIdentity(right))
+    )
+  }
+
+  function selectMinimalTemplates(templates, targetFields) {
+    const targets = [...new Set(
+      (Array.isArray(targetFields) ? targetFields : [])
+        .map((field) => String(field).trim())
+        .filter(Boolean),
+    )]
+    const targetSet = new Set(targets)
+    const bestByIdentity = new Map()
+    for (const template of Array.isArray(templates) ? templates : []) {
+      if (!template || template.valid === false) continue
+      const identity = templateCapabilityIdentity(template)
+      const existing = bestByIdentity.get(identity)
+      if (!existing || compareTemplatePriority(template, existing) < 0) {
+        bestByIdentity.set(identity, template)
+      }
+    }
+
+    const missing = new Set(targets)
+    const selected = []
+    const candidates = [...bestByIdentity.values()]
+    while (missing.size > 0) {
+      const ranked = candidates
+        .map((template) => ({
+          template,
+          gain: normalizedCanonicalFields(template)
+            .filter((field) => targetSet.has(field) && missing.has(field)).length,
+        }))
+        .filter((candidate) => candidate.gain > 0)
+        .sort((left, right) =>
+          right.gain - left.gain || compareTemplatePriority(left.template, right.template),
+        )
+      if (ranked.length === 0) break
+      const winner = ranked[0].template
+      selected.push(winner)
+      for (const field of normalizedCanonicalFields(winner)) missing.delete(field)
+      candidates.splice(candidates.indexOf(winner), 1)
+    }
+
+    const groupOrder = new Map(
+      ['business', 'advertising', 'video', 'other'].map((group, index) => [group, index]),
+    )
+    selected.sort((left, right) =>
+      (groupOrder.get(String(left.group || classifyTemplate(left))) ?? 3) -
+        (groupOrder.get(String(right.group || classifyTemplate(right))) ?? 3) ||
+      compareTemplatePriority(left, right),
+    )
+    return {
+      selected,
+      skipped: (Array.isArray(templates) ? templates.length : 0) - selected.length,
+      covered: targets.filter((field) => !missing.has(field)),
+      missing: targets.filter((field) => missing.has(field)),
+    }
+  }
+
   function hasMeaningfulBusinessData(response, group) {
     if (!response || Number(response.code) !== 0) return false
     if (group === 'video') return Boolean(extractItemRank(response))
@@ -615,6 +1072,43 @@
       }
     }
     return false
+  }
+
+  async function runWorkerPool(items, options) {
+    const values = Array.isArray(items) ? items : []
+    const concurrency = Math.max(1, Math.floor(Number(options.concurrency) || 1))
+    const startGapMs = Math.max(0, Number(options.startGapMs) || 0)
+    const now = options.now || Date.now
+    const wait = options.wait || (
+      (delay) => new Promise((resolve) => setTimeout(resolve, delay))
+    )
+    const results = new Array(values.length)
+    const active = new Set()
+    let lastStartedAt = null
+    for (let index = 0; index < values.length; index += 1) {
+      if (active.size >= concurrency) await Promise.race(active)
+      if (lastStartedAt !== null) {
+        const remaining = startGapMs - (now() - lastStartedAt)
+        if (remaining > 0) await wait(remaining)
+      }
+      lastStartedAt = now()
+      let work
+      try {
+        work = options.worker(values[index], index)
+      } catch (error) {
+        work = Promise.reject(error)
+      }
+      let task
+      task = Promise.resolve(work)
+        .then(
+          (value) => { results[index] = { status: 'fulfilled', value } },
+          (reason) => { results[index] = { status: 'rejected', reason } },
+        )
+        .finally(() => active.delete(task))
+      active.add(task)
+    }
+    await Promise.all(active)
+    return results
   }
 
   function mergeTemplateRegistry(current, learned) {
@@ -672,8 +1166,12 @@
     buildPageOffsets,
     buildVideoRequest,
     classifyUploadResponse,
+    captureDedupeKey,
     classifyTemplate,
+    createGmQueueStore,
+    createMemoryQueueStore,
     enqueueBounded,
+    enqueueQueueEntry,
     extractItemRank,
     hasMeaningfulBusinessData,
     mergeTemplateRegistry,
@@ -681,15 +1179,30 @@
     isAllowedEndpoint,
     isInvalidReplayStatus,
     nextLeaderLease,
+    nextRateLimitDelay,
+    effectiveRateLimit,
+    estimateQueueDrainMs,
+    nextUploadRateState,
     pickLifeDataHeaders,
+    queueStats,
+    jsonByteLength,
     refreshRelativeDateRange,
     resolveGroupId,
     retryDelayForAttempt,
+    selectOldestDue,
+    shouldPauseAutoCollection,
+    migrateLegacyQueue,
+    sanitizeStatusError,
     sanitizeBusinessJson,
     scanCanonicalFields,
     templateCapabilities,
+    templateCapabilityIdentity,
     templateFingerprint,
+    selectMinimalTemplates,
+    runWorkerPool,
     validateVideoPage,
+    isCapturePersistedSuccess,
+    requiredCollectionGroupsHealthy,
   }
 
   if (typeof module === 'object' && module.exports) {
@@ -713,6 +1226,7 @@
       headers: 'lifeDataSessionHeaders',
       templates: 'lifeDataTemplates',
       queue: 'lifeDataQueue',
+      rate: 'lifeDataRateState',
       leader: 'lifeDataLeader',
       minimized: 'lifeDataPanelMinimized',
     }
@@ -720,7 +1234,10 @@
     const STATUS_URL = 'https://hbreare.com/api/v1/life-data/status'
     const VIDEO_PATH = '/flow/content/analysis/video'
     const VIDEO_INTERVAL = 300_000
-    const OTHER_INTERVAL = 1_800_000
+    const CORE_INTERVAL = 3_600_000
+    const INITIAL_COLLECTION_DELAY = 30_000
+    const LIFE_DATA_CONCURRENCY = 3
+    const LIFE_DATA_START_GAP = 1_000
     const REPLAY_FETCH_TIMEOUT = 20_000
     const OBSERVED_LOCK_WAIT_TIMEOUT = 30_000
     const OBSERVED_LOCK_WAITER_LIMIT = 20
@@ -733,20 +1250,27 @@
       isLeader: false,
       collecting: false,
       fullCollecting: false,
-      flushing: false,
+      activeWorkers: 0,
+      autoCollectionPaused: false,
       leaderTimer: null,
       videoTimer: null,
       otherTimer: null,
+      initialCollectionTimer: null,
       queueTimer: null,
       statusTimer: null,
       statusErrorTimer: null,
       observedLockWaiters: 0,
       triggeredTemplateAt: 0,
+      startupReady: false,
       lastCapture: '',
       lastUpload: '',
       videoCount: null,
       lastFullResult: '',
       lastFullSuccessAt: null,
+      nextVideoRunAt: null,
+      nextCoreRunAt: null,
+      selectedTemplateCount: 0,
+      skippedTemplateCount: 0,
       groupHealth: {
         video: { status: 'missing', lastSuccessAt: null, lastError: null },
         business: { status: 'missing', lastSuccessAt: null, lastError: null },
@@ -756,6 +1280,15 @@
       error: '',
       panel: null,
     }
+    const injectedQueueStore = page.__huabangLifeDataQueueStore || null
+    let queueCache = injectedQueueStore
+      ? (Array.isArray(getValue(KEYS.queue, [])) ? getValue(KEYS.queue, []) : [])
+      : []
+    const queueStore = injectedQueueStore || createGmQueueStore({
+      get: (key, fallback) => getValue(key, fallback),
+      set: (key, value) => { if (!setValue(key, value)) throw new Error('GM_setValue failed') },
+      delete: (key) => GM_deleteValue(key),
+    })
 
     function getValue(key, fallback) {
       try {
@@ -783,7 +1316,7 @@
     }
 
     function setError(message) {
-      state.error = String(message || '')
+      state.error = message ? sanitizeStatusError(message) : ''
       updatePanel()
       if (state.error) {
         scheduleStatusError(state.error)
@@ -1276,23 +1809,30 @@
         response,
       )
       setStatus({ lastCapture: payload.captured_at, error: '' })
-      if (!state.ready || !synchronizeLeadership()) return
+      if (!state.ready) return
+      if (!synchronizeLeadership()) {
+        const queued = await queuePayload(payload, { passive: true, capabilityKey: templateCapabilityIdentity(template) })
+        if (queued.status === 'queued' && !queued.dropped) {
+          setError('当前为待命标签，事件已进入共享离线队列')
+        }
+        return
+      }
       const result = await runExclusiveAction(
         async () => {
           if (!hasConfirmedLeaderLease()) {
             applyLeadership(false)
-            const queued = await queuePayload(payload)
+            const queued = await queuePayload(payload, { passive: true, capabilityKey: templateCapabilityIdentity(template) })
             if (queued.status === 'queued' && !queued.dropped) {
               setError('主标签已切换，事件已进入离线队列')
             }
             return queued
           }
-          return uploadOrQueue(payload)
+          return uploadOrQueue(payload, { passive: true, capabilityKey: templateCapabilityIdentity(template) })
         },
         'observed',
       )
       if (result && result.status === 'lock_unavailable') {
-        const queued = await queuePayload(payload)
+        const queued = await queuePayload(payload, { passive: true, capabilityKey: templateCapabilityIdentity(template) })
         if (queued.status === 'queued' && !queued.dropped) {
           setError(`${result.message}，事件已进入离线队列`)
         }
@@ -1373,41 +1913,29 @@
     }
 
     function readQueue() {
-      const queue = getValue(KEYS.queue, [])
-      return Array.isArray(queue) ? queue : []
-    }
-
-    function writeQueue(queue) {
-      if (!setValue(KEYS.queue, queue)) {
-        setError('离线队列写入失败，事件状态未保存')
-        return false
-      }
-      updatePanel()
-      return true
+      return queueCache
     }
 
     async function mutateQueueExclusive(mutator) {
-      const mutate = () => {
-        const before = readQueue()
-        let mutation
+      const mutate = async () => {
+        let committed
         try {
-          mutation = mutator(before)
+          committed = await queueStore.transaction((before, metadata) => {
+            const mutation = mutator(before, metadata || { permits: [] })
+            const next = mutation && mutation.queue
+            if (!Array.isArray(next)) throw new Error('invalid queue transaction')
+            return { records: next, permits: mutation.permits, dedupe: mutation.dedupe, value: mutation.value }
+          })
         } catch (_error) {
-          setError('离线队列更新失败，事件状态未保存')
-          return { status: 'queue_failed', queue: before, value: null }
+          setError('离线队列写入失败，事件状态未保存')
+          return { status: 'queue_failed', queue: readQueue(), value: null }
         }
-        const next = mutation && mutation.queue
-        if (!Array.isArray(next)) {
-          setError('离线队列更新结果无效，事件状态未保存')
-          return { status: 'queue_failed', queue: before, value: null }
-        }
-        if (!writeQueue(next)) {
-          return { status: 'queue_failed', queue: before, value: null }
-        }
+        queueCache = committed.records
+        updatePanel()
         return {
           status: 'mutated',
-          queue: next,
-          value: mutation.value,
+          queue: queueCache,
+          value: committed.value,
         }
       }
 
@@ -1423,13 +1951,6 @@
         setError('离线队列互斥锁获取失败，事件状态未保存')
         return { status: 'queue_failed', queue: readQueue(), value: null }
       }
-    }
-
-    function sanitizeStatusError(message) {
-      const redacted = String(message || '')
-        .replace(/bearer\s+[^\s]+/gi, 'Bearer [redacted]')
-        .replace(/(cookie|authorization|x-tt-ls-session-id|root-life-account-id|life-account-id)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
-      return (redacted.trim() || '采集器错误').slice(0, 500)
     }
 
     function templateGroupCounts() {
@@ -1473,7 +1994,7 @@
         schema_version: '1.0',
         account_id: ACCOUNT_ID,
         status,
-        queue_depth: Math.min(100, readQueue().length),
+        queue_depth: Math.min(500, readQueue().length),
         last_error:
           status === 'error' ? sanitizeStatusError(lastError) : null,
         template_count: Object.keys(readTemplates()).length,
@@ -1539,7 +2060,7 @@
       }
       const outgoingPayload = {
         ...payload,
-        queue_depth: Math.min(100, readQueue().length),
+        queue_depth: Math.min(500, readQueue().length),
       }
       return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -1565,12 +2086,12 @@
               return
             }
             reject(
-              uploadError(
+              Object.assign(uploadError(
                 classification.retryable
                   ? `中台暂时不可用（HTTP ${response.status}）`
                   : `中台永久拒绝事件（HTTP ${response.status}）`,
                 classification.retryable,
-              ),
+              ), { httpStatus: Number(response.status) }),
             )
           },
           ontimeout() {
@@ -1583,46 +2104,43 @@
       })
     }
 
-    async function queuePayload(payload) {
-      const mutation = await mutateQueueExclusive((before) => {
-        const dropped = before.length >= 100
+    async function queuePayload(payload, options = {}) {
+      const dedupeKey = options.passive ? await captureDedupeKey(payload, page.crypto) : null
+      const mutation = await mutateQueueExclusive((before, metadata) => {
+        const now = Date.now()
+        const liveDedupe = (Array.isArray(metadata.dedupe) ? metadata.dedupe : [])
+          .filter((item) => item && Number(item.expiresAt) > now)
+        if (dedupeKey && liveDedupe.some((item) => item.key === dedupeKey)) {
+          return { queue: before, dedupe: liveDedupe, value: { status: 'coalesced' } }
+        }
+        const result = enqueueQueueEntry(before, {
+          payload,
+          attempt: 0,
+          nextAttemptAt: Date.now(),
+          capabilityKey: options.capabilityKey || null,
+        }, { passive: Boolean(options.passive) })
         return {
-          queue: enqueueBounded(
-            before,
-            {
-              payload,
-              attempt: 0,
-              nextAttemptAt: Date.now() + retryDelayForAttempt(0),
-            },
-            100,
-          ),
-          value: { dropped },
+          queue: result.queue,
+          dedupe: dedupeKey && ['queued', 'merged'].includes(result.status)
+            ? [...liveDedupe, { key: dedupeKey, expiresAt: now + 60_000 }].slice(-500)
+            : liveDedupe,
+          value: { status: result.status },
         }
       })
       if (mutation.status === 'queue_failed') {
         return { status: 'queue_failed', dropped: false }
       }
-      const dropped = Boolean(mutation.value && mutation.value.dropped)
-      if (dropped) setError('离线队列已满，已丢弃最旧事件')
-      return { status: 'queued', dropped }
+      const status = mutation.value && mutation.value.status
+      if (status === 'queue_full') {
+        setError('离线队列已满，事件未保存')
+        return { status: 'queue_full', dropped: false }
+      }
+      wakeUploadWorkers()
+      return { status, dropped: false }
     }
 
-    async function uploadOrQueue(payload) {
-      try {
-        await postPayload(payload)
-        setStatus({ lastUpload: new Date().toISOString() })
-        return { status: 'uploaded', dropped: false }
-      } catch (error) {
-        if (error.retryable === false) {
-          setError(`永久上传错误：${error.message}`)
-          return { status: 'discarded', dropped: false }
-        }
-        const result = await queuePayload(payload)
-        if (result.status === 'queued' && !result.dropped) {
-          setError('上传失败，事件已进入离线队列')
-        }
-        return result
-      }
+    async function uploadOrQueue(payload, options) {
+      return queuePayload(payload, options)
     }
 
     function buildCapturePayload(
@@ -1648,60 +2166,154 @@
         responsePayload,
       )
       setStatus({ lastCapture: payload.captured_at })
-      return uploadOrQueue(payload)
+      return uploadOrQueue(payload, { capabilityKey: templateCapabilityIdentity(template) })
     }
-    async function flushQueue() {
-      if (!state.isLeader || state.flushing) return
-      const queue = readQueue()
-      const index = queue.findIndex(
-        (item) => item && Number(item.nextAttemptAt) <= Date.now(),
-      )
-      if (index < 0) return
-      state.flushing = true
-      const item = queue[index]
+    function readRateState() {
+      const value = getValue(KEYS.rate, {})
+      return value && typeof value === 'object' ? value : {}
+    }
+
+    async function claimNextUpload(workerId) {
+      const now = Date.now()
+      return mutateQueueExclusive((queue, metadata) => {
+        const rate = readRateState()
+        const timestamps = (Array.isArray(rate.timestamps) ? rate.timestamps : [])
+          .map(Number).filter((timestamp) => timestamp > now - 60_000 && timestamp <= now)
+        const cooldownDelay = Math.max(0, Number(rate.cooldownUntil || 0) - now)
+        const limit = effectiveRateLimit(rate, now, 2)
+        const rateDelay = nextRateLimitDelay(timestamps, now, limit, 60_000)
+        const livePermits = (Array.isArray(metadata.permits) ? metadata.permits : [])
+          .filter((permit) => permit && Number(permit.expiresAt) > now)
+        if (cooldownDelay > 0 || rateDelay > 0) {
+          return { queue, permits: livePermits, value: { item: null, delay: Math.max(cooldownDelay, rateDelay), blocked: true } }
+        }
+        if (livePermits.length >= 2) return { queue, permits: livePermits, value: { item: null, delay: 5_000, blocked: true } }
+        const selectedItem = selectOldestDue(queue, now)
+        if (!selectedItem) return { queue, permits: livePermits, value: { item: null, delay: 0 } }
+        const selected = { item: selectedItem, index: queue.indexOf(selectedItem) }
+        const claimed = { ...selectedItem, claimedBy: workerId, claimExpiresAt: now + 30_000 }
+        const next = queue.slice()
+        next[selected.index] = claimed
+        if (!setValue(KEYS.rate, { ...rate, timestamps: [...timestamps, now] })) {
+          return { queue, permits: livePermits, value: { item: null, delay: 5_000 } }
+        }
+        return { queue: next, permits: [...livePermits, {
+          workerId, eventId: String(claimed.payload.event_id), expiresAt: claimed.claimExpiresAt,
+        }], value: { item: claimed, delay: 0 } }
+      })
+    }
+
+    function updateRateAfterUploadLocked(error) {
+      const now = Date.now()
+      const rate = readRateState()
+      setValue(KEYS.rate, nextUploadRateState(rate,
+        error ? { httpStatus: Number(error.httpStatus) || 0 } : { ok: true }, now))
+    }
+
+    function scheduleWorkerWake(delay) {
+      page.setTimeout(() => wakeUploadWorkers(), Math.max(1, Math.min(Number(delay) || 5_000, 60_000)))
+    }
+
+    function wakeUploadWorkers() {
+      if (!state.isLeader) return
+      while (state.activeWorkers < 2) {
+        state.activeWorkers += 1
+        const workerId = `${tabId}:worker-${state.activeWorkers}:${Date.now()}`
+        void uploadWorker(workerId).then((outcome) => {
+          state.activeWorkers -= 1
+          if (outcome !== 'blocked' && readQueue().some((item) => item && Number(item.nextAttemptAt || 0) <= Date.now() &&
+            (!item.claimedBy || Number(item.claimExpiresAt || 0) <= Date.now()))) {
+            queueMicrotask(() => wakeUploadWorkers())
+          }
+        }, () => {
+          state.activeWorkers -= 1
+        })
+      }
+    }
+
+    async function uploadWorker(workerId) {
+      const claimed = await claimNextUpload(workerId)
+      if (claimed.status === 'queue_failed') return 'blocked'
+      const item = claimed.value && claimed.value.item
+      if (!item) {
+        if (claimed.value && claimed.value.delay > 0) scheduleWorkerWake(claimed.value.delay)
+        return claimed.value && claimed.value.blocked ? 'blocked' : 'empty'
+      }
       try {
         await postPayload(item.payload)
-        const mutation = await mutateQueueExclusive((latest) => ({
-          queue: latest.filter(
-            (queued) => queued.payload.event_id !== item.payload.event_id,
-          ),
-          value: null,
-        }))
+        const mutation = await mutateQueueExclusive((latest, metadata) => {
+          updateRateAfterUploadLocked(null)
+          const ownsPermit = (metadata.permits || []).some((permit) =>
+            permit.workerId === workerId && permit.eventId === String(item.payload.event_id))
+          return { queue: ownsPermit ? latest.filter(
+            (queued) => queued.payload.event_id !== item.payload.event_id || queued.claimedBy !== workerId,
+          ) : latest, permits: (metadata.permits || []).filter((permit) =>
+            permit.workerId !== workerId || permit.eventId !== String(item.payload.event_id)), value: null }
+        })
         if (mutation.status === 'queue_failed') return
         setStatus({ lastUpload: new Date().toISOString() })
         if (mutation.queue.length === 0) setError('')
       } catch (error) {
         if (error.retryable === false) {
-          const mutation = await mutateQueueExclusive((latest) => ({
-            queue: latest.filter(
-              (queued) => queued.payload.event_id !== item.payload.event_id,
-            ),
-            value: null,
-          }))
+          const mutation = await mutateQueueExclusive((latest, metadata) => {
+            updateRateAfterUploadLocked(error)
+            const ownsPermit = (metadata.permits || []).some((permit) =>
+              permit.workerId === workerId && permit.eventId === String(item.payload.event_id))
+            return { queue: ownsPermit ? latest.filter(
+              (queued) => queued.payload.event_id !== item.payload.event_id || queued.claimedBy !== workerId,
+            ) : latest, permits: (metadata.permits || []).filter((permit) =>
+              permit.workerId !== workerId || permit.eventId !== String(item.payload.event_id)), value: null }
+          })
           if (mutation.status === 'queue_failed') return
           setError(`永久上传错误，事件已移出队列：${error.message}`)
         } else {
-          const mutation = await mutateQueueExclusive((latest) => ({
-            queue: latest.map((queued) => {
+          const mutation = await mutateQueueExclusive((latest, metadata) => {
+            updateRateAfterUploadLocked(error)
+            return { queue: latest.map((queued) => {
               if (queued.payload.event_id !== item.payload.event_id) {
                 return queued
               }
+              if (queued.claimedBy !== workerId) return queued
               const attempt = Number(queued.attempt || 0) + 1
               return {
                 ...queued,
                 attempt,
                 nextAttemptAt:
                   Date.now() + retryDelayForAttempt(attempt),
+                claimedBy: undefined,
+                claimExpiresAt: undefined,
               }
-            }),
-            value: null,
-          }))
+            }), permits: (metadata.permits || []).filter((permit) =>
+              permit.workerId !== workerId || permit.eventId !== String(item.payload.event_id)), value: null }
+          })
           if (mutation.status === 'queue_failed') return
-          setError('离线队列重试失败，将按退避时间继续')
+          if (mutation.queue.length < 500) {
+            setError('离线队列重试失败，将按退避时间继续')
+          }
         }
-      } finally {
-        state.flushing = false
       }
+      return 'processed'
+    }
+
+    function flushQueue() {
+      wakeUploadWorkers()
+    }
+
+    async function runScheduledCollection(action) {
+      try {
+        queueCache = await queueStore.snapshot()
+      } catch (_error) {
+        setError('离线队列读取失败，自动采集已暂停')
+        return false
+      }
+      state.autoCollectionPaused = shouldPauseAutoCollection(
+        queueStats(queueCache), state.autoCollectionPaused,
+      )
+      if (state.autoCollectionPaused) {
+        setError('离线队列达到高水位，自动采集已暂停')
+        return false
+      }
+      return action()
     }
 
     async function collectVideo() {
@@ -1753,7 +2365,7 @@
             capture.request,
             capture.response,
           )
-          if (result.status !== 'uploaded') allUploaded = false
+          if (!isCapturePersistedSuccess(result)) allUploaded = false
         }
         setStatus({ videoCount: total })
         if (allUploaded) {
@@ -1769,12 +2381,31 @@
         state.collecting = false
       }
     }
-    async function replayOtherTemplates() {
+    async function collectCoreTemplates() {
       if (!state.isLeader) return
+      const templates = otherTemplates()
+      const optionalTargets = missingFieldGuidance(readTemplates())
+        .map((item) => item.field)
+        .filter((field) => !MANDATORY_FIELDS.includes(field))
+      const selection = selectMinimalTemplates(
+        templates,
+        [...new Set([
+          ...MANDATORY_FIELDS,
+          'plays', 'pay_gmv_fen', 'refund_gmv_fen', 'verified_count',
+          'ad_orders', 'ad_pay_gmv_fen',
+          ...optionalTargets,
+        ])],
+      )
+      state.selectedTemplateCount = selection.selected.length
+      state.skippedTemplateCount = selection.skipped
+      updatePanel()
       const attempted = new Set()
       const failed = new Map()
       const succeeded = new Set()
-      for (const template of otherTemplates()) {
+      const wait = (delay) => new Promise(
+        (resolve) => page.setTimeout(resolve, delay),
+      )
+      const replayTemplate = async (template) => {
         const group = classifyTemplate(template)
         attempted.add(group)
         try {
@@ -1784,7 +2415,7 @@
           )
           const response = await replayLifeData(template, request)
           const result = await publishCapture(template, request, response)
-          if (result.status === 'uploaded') {
+          if (isCapturePersistedSuccess(result)) {
             succeeded.add(group)
             setError('')
           }
@@ -1797,6 +2428,21 @@
           }
         }
       }
+      const stages = ['business', 'advertising', 'other']
+        .map((group) => selection.selected.filter(
+          (template) => classifyTemplate(template) === group,
+        ))
+        .filter((stage) => stage.length > 0)
+      for (let index = 0; index < stages.length; index += 1) {
+        if (index > 0) await wait(LIFE_DATA_START_GAP)
+        await runWorkerPool(stages[index], {
+          concurrency: LIFE_DATA_CONCURRENCY,
+          startGapMs: LIFE_DATA_START_GAP,
+          now: () => Date.now(),
+          wait,
+          worker: replayTemplate,
+        })
+      }
       for (const group of attempted) {
         setGroupHealth(
           group,
@@ -1805,6 +2451,8 @@
         )
       }
     }
+
+    const replayOtherTemplates = collectCoreTemplates
 
     async function runFullCollection() {
       if (state.fullCollecting) return
@@ -1816,11 +2464,7 @@
         await replayOtherTemplates()
         state.lastFullResult = `完成，共 ${Object.keys(readTemplates()).length} 个模板`
         const required = serializedGroupHealth()
-        if (
-          required.video.status === 'healthy' &&
-          required.business.status === 'healthy' &&
-          required.advertising.status === 'healthy'
-        ) {
+        if (requiredCollectionGroupsHealthy(required)) {
           state.lastFullSuccessAt = new Date().toISOString()
         }
         void postCollectorStatus('online')
@@ -1831,7 +2475,7 @@
     }
 
     function maybeCollectNewTemplate() {
-      if (!state.isLeader) return
+      if (!state.isLeader || !state.startupReady) return
       const template = latestVideoTemplate()
       if (!template || Number(template.learnedAt) <= state.triggeredTemplateAt) return
       void runExclusiveAction(() => {
@@ -1845,19 +2489,40 @@
 
     function startLeaderTimers() {
       if (state.videoTimer !== null) return
+      state.startupReady = false
       state.videoTimer = page.setInterval(() => {
         if (synchronizeLeadership()) {
-          void runExclusiveAction(() => collectVideo())
+          state.nextVideoRunAt = Date.now() + VIDEO_INTERVAL
+          updatePanel()
+          void runExclusiveAction(() => runScheduledCollection(() => collectVideo()))
         }
       }, VIDEO_INTERVAL)
       state.otherTimer = page.setInterval(
         () => {
           if (synchronizeLeadership()) {
-            void runExclusiveAction(() => replayOtherTemplates())
+            state.nextCoreRunAt = Date.now() + CORE_INTERVAL
+            updatePanel()
+            void runExclusiveAction(() => runScheduledCollection(() => collectCoreTemplates()))
           }
         },
-        OTHER_INTERVAL,
+        CORE_INTERVAL,
       )
+      state.nextVideoRunAt = Date.now() + VIDEO_INTERVAL
+      state.nextCoreRunAt = Date.now() + CORE_INTERVAL
+      updatePanel()
+      state.initialCollectionTimer = page.setTimeout(function initialCollectionCallback() {
+        state.initialCollectionTimer = null
+        if (!synchronizeLeadership()) return
+        state.startupReady = true
+        state.triggeredTemplateAt = Math.max(
+          state.triggeredTemplateAt,
+          Number(latestVideoTemplate() && latestVideoTemplate().learnedAt) || 0,
+        )
+        void runExclusiveAction(() => runScheduledCollection(async () => {
+          await collectVideo()
+          await collectCoreTemplates()
+        }))
+      }, INITIAL_COLLECTION_DELAY)
       state.queueTimer = page.setInterval(() => {
         if (synchronizeLeadership()) {
           void runExclusiveAction(() => flushQueue())
@@ -1875,6 +2540,7 @@
     }
 
     function stopLeaderTimers() {
+      state.startupReady = false
       for (const key of [
         'videoTimer',
         'otherTimer',
@@ -1887,6 +2553,10 @@
       if (state.statusErrorTimer !== null) {
         page.clearTimeout(state.statusErrorTimer)
         state.statusErrorTimer = null
+      }
+      if (state.initialCollectionTimer !== null) {
+        page.clearTimeout(state.initialCollectionTimer)
+        state.initialCollectionTimer = null
       }
     }
 
@@ -1929,6 +2599,12 @@
       refs.upload.textContent = formatTime(state.lastUpload)
       refs.video.textContent = state.videoCount == null ? '—' : String(state.videoCount)
       refs.templates.textContent = String(Object.keys(readTemplates()).length)
+      refs.nextVideo.textContent = formatTime(state.nextVideoRunAt)
+      refs.nextCore.textContent = formatTime(state.nextCoreRunAt)
+      refs.templateSelection.textContent = `${state.selectedTemplateCount}/${state.skippedTemplateCount}`
+      refs.invalidTemplates.textContent = String(
+        Object.values(readTemplates()).filter((template) => template && template.valid === false).length,
+      )
       const groups = serializedGroupHealth()
       refs.groups.textContent = [
         ['视频', groups.video],
@@ -1949,8 +2625,16 @@
           ? `必需字段已覆盖；可选维度待补 ${optional.slice(0, 5).map((item) => item.field).join('、')}；${optional[0].message}`
           : '必需字段已覆盖；可选维度已覆盖'
       refs.fullResult.textContent = state.lastFullResult || '等待全量采集'
-      refs.queue.textContent = String(readQueue().length)
-      refs.error.textContent = state.error || '无'
+      const queueDepth = readQueue().length
+      refs.queue.textContent = String(queueDepth)
+      const drainMs = estimateQueueDrainMs(
+        queueDepth,
+        effectiveRateLimit(getValue(KEYS.rate, {}), Date.now()),
+      )
+      refs.queueDrain.textContent = drainMs === 0
+        ? '已排空'
+        : `约 ${Math.ceil(drainMs / 60_000)} 分钟`
+      refs.error.textContent = state.error ? sanitizeStatusError(state.error) : '无'
       refs.collect.disabled = state.fullCollecting
       refs.collect.textContent = state.fullCollecting ? '采集中…' : '立即全量采集'
     }
@@ -1979,10 +2663,15 @@
             <div class="row"><span>最近上传</span><span class="value upload"></span></div>
             <div class="row"><span>视频数</span><span class="value video"></span></div>
             <div class="row"><span>已登记模板</span><span class="value templates"></span></div>
+            <div class="row"><span>下次视频采集</span><span class="value next-video"></span></div>
+            <div class="row"><span>下次核心采集</span><span class="value next-core"></span></div>
+            <div class="row"><span>本轮模板</span><span class="value template-selection"></span></div>
+            <div class="row"><span>失效模板</span><span class="value invalid-templates"></span></div>
             <div class="row"><span>分组状态</span><span class="value groups"></span></div>
             <div class="row"><span>缺少字段</span><span class="value missing-fields"></span></div>
             <div class="row"><span>全量结果</span><span class="value full-result"></span></div>
             <div class="row"><span>队列数</span><span class="value queue"></span></div>
+            <div class="row"><span>队列排空预计</span><span class="value queue-drain"></span></div>
             <div class="row"><span>错误</span><span class="value error"></span></div>
             <button class="collect" type="button">立即全量采集</button>
           </div>
@@ -2013,10 +2702,15 @@
         upload: shadow.querySelector('.upload'),
         video: shadow.querySelector('.video'),
         templates: shadow.querySelector('.templates'),
+        nextVideo: shadow.querySelector('.next-video'),
+        nextCore: shadow.querySelector('.next-core'),
+        templateSelection: shadow.querySelector('.template-selection'),
+        invalidTemplates: shadow.querySelector('.invalid-templates'),
         groups: shadow.querySelector('.groups'),
         missingFields: shadow.querySelector('.missing-fields'),
         fullResult: shadow.querySelector('.full-result'),
         queue: shadow.querySelector('.queue'),
+        queueDrain: shadow.querySelector('.queue-drain'),
         error: shadow.querySelector('.error'),
         collect: shadow.querySelector('.collect'),
       }
@@ -2046,12 +2740,34 @@
       return false
     }
 
-    function startAfterDomReady() {
-      createPanel()
+    async function initializeQueueStorage() {
+      await queueStore.recover()
+      const migration = await migrateLegacyQueue(queueStore, {
+        read: () => getValue(KEYS.queue, []),
+        clear: () => GM_deleteValue(KEYS.queue),
+      })
+      if (migration.status === 'failed') {
+        setError('旧版离线队列迁移失败，原数据已保留')
+      }
+      queueCache = await queueStore.snapshot()
+    }
+
+    function finishStartup() {
       state.ready = true
       ensureToken(false)
       maintenanceTick()
       state.leaderTimer = page.setInterval(maintenanceTick, 10_000)
+    }
+
+    function startAfterDomReady() {
+      createPanel()
+      if (injectedQueueStore) {
+        finishStartup()
+        return
+      }
+      void initializeQueueStorage().then(finishStartup, () => {
+        setError('GM 离线队列初始化失败')
+      })
     }
 
     function maintenanceTick() {

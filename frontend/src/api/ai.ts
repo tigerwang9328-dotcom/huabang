@@ -5,6 +5,30 @@ export const aiApi = {
     request.post("/ai/ask", { question, context_data: contextData }),
 };
 
+export const aiAssistantApi = {
+  getBrief: (params?: { route?: string; stat_date?: string; store_code?: string }) =>
+    request.get("/ai-assistant/brief", { params, silentError: true }),
+  listConversations: () =>
+    request.get("/ai-assistant/conversations", { silentError: true }),
+  createConversation: (contextData?: { route?: string; stat_date?: string; store_code?: string }) =>
+    request.post("/ai-assistant/conversations", contextData || {}, { silentError: true }),
+  getMessages: (conversationId: number) =>
+    request.get(`/ai-assistant/conversations/${conversationId}/messages`, { silentError: true }),
+  sendMessage: (
+    conversationId: number,
+    question: string,
+    contextData?: { route?: string; stat_date?: string; store_code?: string },
+    signal?: AbortSignal,
+  ) =>
+    request.post(`/ai-assistant/conversations/${conversationId}/messages`, {
+      question,
+      web_mode: "auto",
+      ...(contextData || {}),
+    }, { signal }),
+  archiveConversation: (conversationId: number) =>
+    request.delete(`/ai-assistant/conversations/${conversationId}`),
+};
+
 export const aiDiagnosisApi = {
   getModule: (module = "overview", params?: { stat_date?: string; store_code?: string }) =>
     request.get(`/ai-diagnosis/${module}`, { params }),

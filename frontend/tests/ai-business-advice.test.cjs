@@ -30,3 +30,24 @@ test("boss report shows model identity generated time findings actions and fallb
   ]) assert.ok(page.includes(token), `missing ${token}`);
   assert.ok(page.includes("@media(max-width:700px)"));
 });
+
+test("AI advice pages translate internal sources and role codes before display", () => {
+  const diagnosis = read("src/views/diagnosis/Index.vue");
+  const report = read("src/views/report/Index.vue");
+  const helper = read("src/utils/businessDisplay.ts");
+
+  assert.ok(helper.includes('dws_product_daily: "商品销售汇总"'));
+  assert.ok(helper.includes('dwd_inventory_balance: "库存余额"'));
+  assert.ok(helper.includes('product_manager: "商品负责人"'));
+  assert.ok(helper.includes('deterministic_rules: "确定性规则模板"'));
+
+  for (const page of [diagnosis, report]) {
+    assert.ok(page.includes("sourceLabel("), "missing source display formatter");
+    assert.ok(page.includes("roleLabel("), "missing role display formatter");
+    assert.ok(page.includes("evidenceFallbackLabel("), "missing safe evidence fallback");
+    assert.ok(!page.includes("{{ fact.note }} · {{ fact.source }}"), "raw fact source is exposed");
+    assert.ok(!page.includes("{{ item.responsible_role"), "raw recommendation role is exposed");
+    assert.ok(!page.includes("{{ item.owner }}"), "raw action owner is exposed");
+    assert.ok(!page.includes("{{ risk.source }}"), "raw risk source is exposed");
+  }
+});

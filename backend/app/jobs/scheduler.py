@@ -33,6 +33,7 @@ def setup_jobs():
         run_investment_period_generation,
     )
     from app.jobs.command_center_health_jobs import run_command_center_health_monitor
+    from app.jobs.ai_assistant_jobs import cleanup_ai_assistant_conversations
 
     # 每天凌晨1:00 - 同步百盛数据 + ETL
     scheduler.add_job(
@@ -156,6 +157,17 @@ def setup_jobs():
         max_instances=1,
     )
 
+    # 每天03:30 - 物理清理超过保留期且已归档的老板AI助手会话
+    scheduler.add_job(
+        cleanup_ai_assistant_conversations,
+        CronTrigger(hour=3, minute=30, timezone="Asia/Shanghai"),
+        id="ai_assistant_conversation_cleanup",
+        name="老板AI助手归档会话清理",
+        replace_existing=True,
+        misfire_grace_time=3600,
+        coalesce=True,
+        max_instances=1,
+    )
     # 每5分钟检查采集器心跳，超过15分钟未上报即标记离线
     scheduler.add_job(
         mark_stale_life_data_collectors_offline,

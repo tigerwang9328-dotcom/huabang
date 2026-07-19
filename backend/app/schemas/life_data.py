@@ -81,7 +81,7 @@ class LifeDataIngestRequest(BaseModel):
     request_payload: dict[str, Any]
     response_payload: dict[str, Any]
     captured_at: datetime
-    queue_depth: int = Field(default=0, ge=0, le=100)
+    queue_depth: int = Field(default=0, ge=0, le=500)
 
     @field_validator("request_payload", "response_payload")
     @classmethod
@@ -134,7 +134,7 @@ class LifeDataCollectorStatusRequest(BaseModel):
     schema_version: Literal["1.0"]
     account_id: str = Field(min_length=1, max_length=32)
     status: Literal["online", "error"]
-    queue_depth: int = Field(default=0, ge=0, le=100)
+    queue_depth: int = Field(default=0, ge=0, le=500)
     last_error: str | None = Field(default=None, max_length=500)
     template_count: int = Field(default=0, ge=0, le=80)
     last_full_success_at: datetime | None = None
