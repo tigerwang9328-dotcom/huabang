@@ -48,6 +48,8 @@ async def get_account_balances(
     account_set_code: str,
     period: str,
     keyword: str | None = None,
+    statement_type: str | None = Query(None, pattern="^(balance_sheet|profit|cashflow)$"),
+    statement_line_code: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     _current_user: SysUser = Depends(require_permission("finance:profit:view")),
@@ -55,6 +57,7 @@ async def get_account_balances(
 ):
     return ApiResponse.ok(data=await KingdeeFinanceQueryService(db).account_balances(
         account_set_code=account_set_code, period=period, keyword=keyword,
+        statement_type=statement_type, statement_line_code=statement_line_code,
         page=page, page_size=page_size,
     ))
 
@@ -64,6 +67,7 @@ async def list_vouchers(
     account_set_code: str,
     period: str | None = None,
     keyword: str | None = None,
+    account_code: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     _current_user: SysUser = Depends(require_permission("finance:profit:view")),
@@ -71,6 +75,7 @@ async def list_vouchers(
 ):
     return ApiResponse.ok(data=await KingdeeFinanceQueryService(db).vouchers(
         account_set_code=account_set_code, period=period, keyword=keyword,
+        account_code=account_code,
         page=page, page_size=page_size,
     ))
 

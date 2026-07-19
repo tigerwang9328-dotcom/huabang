@@ -68,3 +68,36 @@ async def test_voucher_detail_is_explicitly_read_only():
     )
 
     assert response.data["read_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_balance_endpoint_passes_statement_drilldown_filters():
+    response = await kingdee_finance.get_account_balances(
+        account_set_code="AIS1",
+        period="2026-01",
+        keyword=None,
+        statement_type="profit",
+        statement_line_code="P10",
+        page=1,
+        page_size=50,
+        _current_user=SimpleNamespace(id=1),
+        db=object(),
+    )
+
+    assert response.data["filters"]["statement_line_code"] == "P10"
+
+
+@pytest.mark.asyncio
+async def test_voucher_endpoint_passes_account_drilldown_filter():
+    response = await kingdee_finance.list_vouchers(
+        account_set_code="AIS1",
+        period="2026-01",
+        keyword=None,
+        account_code="6601",
+        page=1,
+        page_size=50,
+        _current_user=SimpleNamespace(id=1),
+        db=object(),
+    )
+
+    assert response.data["filters"]["account_code"] == "6601"

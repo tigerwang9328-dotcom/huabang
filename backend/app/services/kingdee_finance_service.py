@@ -3,7 +3,7 @@
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kingdee_finance import (
@@ -198,13 +198,27 @@ class KingdeeFinanceQueryService:
             "status": row.status,
         } for row in rows], "issues": [] if status == "ready" else [status]}
 
-    async def account_balances(self, account_set_code: str, period: str, page: int, page_size: int, keyword: str | None = None):
+    async def account_balances(
+        self, account_set_code: str, period: str, page: int, page_size: int,
+        keyword: str | None = None, statement_type: str | None = None,
+        statement_line_code: str | None = None,
+    ):
         entity = await self._entity(account_set_code)
         if not entity:
             return {"items": [], "total": 0, "page": page, "page_size": page_size}
         base = select(DwdGlBalanceMonthly, DimFinanceAccount).join(
             DimFinanceAccount, DimFinanceAccount.id == DwdGlBalanceMonthly.finance_account_id
         ).where(DwdGlBalanceMonthly.legal_entity_id == entity.id, DwdGlBalanceMonthly.period == period)
+        if statement_type and statement_line_code:
+            base = base.join(
+                DimFinanceStatementMapping,
+                DimFinanceStatementMapping.finance_account_id == DimFinanceAccount.id,
+            ).where(
+                DimFinanceStatementMapping.legal_entity_id == entity.id,
+                DimFinanceStatementMapping.statement_type == statement_type,
+                DimFinanceStatementMapping.line_code == statement_line_code,
+                DimFinanceStatementMapping.mapping_status == "confirmed",
+            )
         if keyword:
             base = base.where(
                 DimFinanceAccount.account_code.ilike(f"%{keyword}%") |
@@ -225,7 +239,10 @@ class KingdeeFinanceQueryService:
             "closing_credit": _number(balance.closing_credit),
         } for balance, account in rows], "total": total, "page": page, "page_size": page_size}
 
-    async def vouchers(self, account_set_code: str, period: str | None, page: int, page_size: int, keyword: str | None = None):
+    async def vouchers(
+        self, account_set_code: str, period: str | None, page: int, page_size: int,
+        keyword: str | None = None, account_code: str | None = None,
+    ):
         entity = await self._entity(account_set_code)
         if not entity:
             return {"items": [], "total": 0, "page": page, "page_size": page_size}
@@ -235,6 +252,17 @@ class KingdeeFinanceQueryService:
             query = query.where(DwdGlVoucher.fiscal_year == year, DwdGlVoucher.fiscal_period == month)
         if keyword:
             query = query.where(DwdGlVoucher.voucher_no.ilike(f"%{keyword}%"))
+        if account_code:
+            account_entry = (
+                select(DwdGlVoucherEntry.id)
+                .join(DimFinanceAccount, DimFinanceAccount.id == DwdGlVoucherEntry.finance_account_id)
+                .where(
+                    DwdGlVoucherEntry.voucher_id == DwdGlVoucher.id,
+                    DimFinanceAccount.legal_entity_id == entity.id,
+                    DimFinanceAccount.account_code == account_code,
+                )
+            )
+            query = query.where(exists(account_entry))
         total = (await self.db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
         rows = (await self.db.execute(query.order_by(DwdGlVoucher.voucher_date.desc(), DwdGlVoucher.id.desc()).offset((page - 1) * page_size).limit(page_size))).scalars().all()
         return {"items": [{

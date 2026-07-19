@@ -51,8 +51,8 @@
         <el-table :data="statement.items" stripe>
           <el-table-column prop="line_code" label="行次" width="100" />
           <el-table-column prop="line_name" label="项目" min-width="240" />
-          <el-table-column label="本期金额" min-width="150" align="right"><template #default="scope">{{ money(scope.row.current_amount) }}</template></el-table-column>
-          <el-table-column label="本年累计" min-width="150" align="right"><template #default="scope">{{ money(scope.row.year_to_date_amount) }}</template></el-table-column>
+          <el-table-column label="本期金额" min-width="150" align="right"><template #default="scope"><el-button link type="primary" @click="drillStatement(scope.row)">{{ money(scope.row.current_amount) }}</el-button></template></el-table-column>
+          <el-table-column label="本年累计" min-width="150" align="right"><template #default="scope"><el-button link type="primary" @click="drillStatement(scope.row)">{{ money(scope.row.year_to_date_amount) }}</el-button></template></el-table-column>
         </el-table>
       </template>
 
@@ -61,8 +61,8 @@
         <el-table-column prop="account_name" label="科目名称" min-width="200" fixed />
         <el-table-column label="期初借" width="130" align="right"><template #default="scope">{{ money(scope.row.opening_debit) }}</template></el-table-column>
         <el-table-column label="期初贷" width="130" align="right"><template #default="scope">{{ money(scope.row.opening_credit) }}</template></el-table-column>
-        <el-table-column label="本期借" width="130" align="right"><template #default="scope">{{ money(scope.row.period_debit) }}</template></el-table-column>
-        <el-table-column label="本期贷" width="130" align="right"><template #default="scope">{{ money(scope.row.period_credit) }}</template></el-table-column>
+        <el-table-column label="本期借" width="130" align="right"><template #default="scope"><el-button link type="primary" @click="drillBalance(scope.row)">{{ money(scope.row.period_debit) }}</el-button></template></el-table-column>
+        <el-table-column label="本期贷" width="130" align="right"><template #default="scope"><el-button link type="primary" @click="drillBalance(scope.row)">{{ money(scope.row.period_credit) }}</el-button></template></el-table-column>
         <el-table-column label="期末借" width="130" align="right"><template #default="scope">{{ money(scope.row.closing_debit) }}</template></el-table-column>
         <el-table-column label="期末贷" width="130" align="right"><template #default="scope">{{ money(scope.row.closing_credit) }}</template></el-table-column>
       </el-table>
@@ -144,6 +144,9 @@ const voucherDetail = ref<VoucherDetail | null>(null);
 const voucherDrawer = ref(false);
 const loading = ref(false);
 const page = ref(1);
+const statementLineCode = ref("");
+const balanceStatementType = ref("");
+const voucherAccountCode = ref("");
 
 const needsPeriod = computed(() => activeTab.value === "statements" || activeTab.value === "account-balances");
 const showPagination = computed(() => activeTab.value === "account-balances" || activeTab.value === "vouchers");
@@ -176,8 +179,8 @@ const loadActiveView = async () => {
   try {
     if (activeTab.value === "account-sets") await loadAccountSets();
     if (activeTab.value === "statements") await loadStatements();
-    if (activeTab.value === "account-balances" && accountSetCode.value && period.value) balances.value = unwrap(await kingdeeFinanceApi.getAccountBalances({ account_set_code: accountSetCode.value, period: period.value, keyword: keyword.value || undefined, page: page.value, page_size: 50 }));
-    if (activeTab.value === "vouchers" && accountSetCode.value) vouchers.value = unwrap(await kingdeeFinanceApi.getVouchers({ account_set_code: accountSetCode.value, period: period.value || undefined, keyword: keyword.value || undefined, page: page.value, page_size: 50 }));
+    if (activeTab.value === "account-balances" && accountSetCode.value && period.value) balances.value = unwrap(await kingdeeFinanceApi.getAccountBalances({ account_set_code: accountSetCode.value, period: period.value, keyword: keyword.value || undefined, statement_type: balanceStatementType.value || undefined, statement_line_code: statementLineCode.value || undefined, page: page.value, page_size: 50 }));
+    if (activeTab.value === "vouchers" && accountSetCode.value) vouchers.value = unwrap(await kingdeeFinanceApi.getVouchers({ account_set_code: accountSetCode.value, period: period.value || undefined, keyword: keyword.value || undefined, account_code: voucherAccountCode.value || undefined, page: page.value, page_size: 50 }));
     if (activeTab.value === "data-quality") {
       quality.value = unwrap(await kingdeeFinanceApi.getDataQuality(accountSetCode.value || undefined));
       batches.value = unwrap(await kingdeeFinanceApi.getImportBatches());
@@ -189,10 +192,12 @@ const loadActiveView = async () => {
   }
 };
 
-const accountSetChanged = async () => { page.value = 1; await loadPeriods(); await loadActiveView(); };
-const search = () => { page.value = 1; loadActiveView(); };
+const accountSetChanged = async () => { page.value = 1; statementLineCode.value = ""; balanceStatementType.value = ""; voucherAccountCode.value = ""; await loadPeriods(); await loadActiveView(); };
+const search = () => { page.value = 1; statementLineCode.value = ""; balanceStatementType.value = ""; voucherAccountCode.value = ""; loadActiveView(); };
 const changeTab = (name: string | number) => router.push(`/app/fin/history/${String(name)}`);
 const openVoucher = async (row: VoucherListItem) => { voucherDetail.value = unwrap(await kingdeeFinanceApi.getVoucher(row.id)); voucherDrawer.value = true; };
+const drillStatement = (row: { line_code: string }) => { statementLineCode.value = row.line_code; balanceStatementType.value = statementType.value; page.value = 1; router.push("/app/fin/history/account-balances"); };
+const drillBalance = (row: AccountBalance) => { voucherAccountCode.value = row.account_code; page.value = 1; router.push("/app/fin/history/vouchers"); };
 
 watch(() => route.meta.financeTab, async () => {
   activeTab.value = routeTab();
