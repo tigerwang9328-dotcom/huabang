@@ -1,5 +1,6 @@
 """Guardrail tests for persisted DeepSeek investment decisions."""
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -10,14 +11,40 @@ from app.schemas.investment_decision import DeepSeekInvestmentPayload
 from app.services.ai_engine import AIEngine
 from app.services import investment_decision_service as decision_service
 from app.services.investment_decision_service import (
+    INVESTMENT_SYSTEM_PROMPT,
     ModelAdviceRejected,
+    PROMPT_VERSION,
     build_rule_envelope,
     investment_input_hash,
+    parse_deepseek_payload,
     validate_model_payload,
 )
 
 
 ACCOUNT_ID = "1798826701211732"
+
+
+def test_deepseek_prompt_declares_the_exact_wrapper_contract():
+    assert PROMPT_VERSION == "investment-decision-v4"
+    for field in (
+        "decision_summary", "recommendations", "pattern_observations", "data_limitations",
+        "budget_min_fen", "review_window_hours", "stop_loss", "evidence_refs",
+    ):
+        assert field in INVESTMENT_SYSTEM_PROMPT
+    assert "只输出一个 JSON 对象" in INVESTMENT_SYSTEM_PROMPT
+    assert "stop_loss 必须是" in INVESTMENT_SYSTEM_PROMPT
+    assert "最多引用五十项" in INVESTMENT_SYSTEM_PROMPT
+
+
+def test_deepseek_narrative_strings_are_normalized_without_relaxing_recommendations():
+    raw = payload().model_dump()
+    raw["pattern_observations"] = "近期消耗与核销表现不稳定"
+    raw["data_limitations"] = "核销归因为同期估算"
+
+    parsed = parse_deepseek_payload(json.dumps(raw, ensure_ascii=False))
+
+    assert parsed.pattern_observations == ["近期消耗与核销表现不稳定"]
+    assert parsed.data_limitations == ["核销归因为同期估算"]
 
 
 def snapshot(snapshot_id: int, **metrics):

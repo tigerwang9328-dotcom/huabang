@@ -31,16 +31,32 @@ from app.services.ai_engine import AIEngine
 
 
 RULE_VERSION = "investment-rules-v1"
-PROMPT_VERSION = "investment-decision-v1"
+PROMPT_VERSION = "investment-decision-v4"
 SCHEMA_VERSION = "investment-decision-json-v1"
 
 INVESTMENT_SYSTEM_PROMPT = """你是华邦投流决策分析器。只能使用输入中的标准化生意经事实和 evidence_refs。
 实际核销是第一结果口径。不得补数、不得升级归因质量、不得声称已执行投放。
-严格输出符合约定的 JSON；所有金额使用整数分。"""
+只输出一个 JSON 对象，不得输出 Markdown 或额外说明。顶层必须且只能包含：
+decision_summary、recommendations、pattern_observations、data_limitations。
+recommendations 必须是数组，每项必须且只能包含：action、target_type、target_key、title、reasoning、
+budget_min_fen、budget_max_fen、review_window_hours、stop_loss、confidence、evidence_refs。
+action 只能取 collect_more_data、stop、reduce、maintain、small_increase、increase；
+confidence 只能取 low、medium、high；所有金额使用整数分；没有预算时使用 null。
+stop_loss 必须是描述人工止损条件的中文字符串，禁止填写数字或对象。
+evidence_refs 必须直接复制输入里的 snapshot 引用，不得自行生成，每条建议最多引用五十项。"""
 
 
 class ModelAdviceRejected(ValueError):
     """DeepSeek output violated a deterministic business guardrail."""
+
+
+def parse_deepseek_payload(content: str) -> DeepSeekInvestmentPayload:
+    raw = json.loads(content)
+    if isinstance(raw, dict):
+        for field in ("pattern_observations", "data_limitations"):
+            if isinstance(raw.get(field), str):
+                raw[field] = [raw[field]]
+    return DeepSeekInvestmentPayload.model_validate(raw)
 
 
 @dataclass(frozen=True)
@@ -360,7 +376,7 @@ class InvestmentDecisionService:
                     max_tokens=2500,
                     timeout_seconds=settings.INVESTMENT_AI_TIMEOUT_SECONDS,
                 )
-                payload = DeepSeekInvestmentPayload.model_validate_json(model_result["content"])
+                payload = parse_deepseek_payload(model_result["content"])
                 recommendations = validate_model_payload(
                     payload, envelope,
                     max_budget_fen=settings.INVESTMENT_AI_MAX_BUDGET_FEN,
