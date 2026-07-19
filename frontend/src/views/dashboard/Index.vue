@@ -190,6 +190,7 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
 import VChart from "vue-echarts";
 import { dashboardApi } from "@/api/dashboard";
+import { isRouteRequestCanceled } from "@/api/request";
 import { shanghaiDateOffset } from "@/utils/shanghaiDate.mjs";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
@@ -301,6 +302,7 @@ const apiCards = computed(() => [
   { label: "毛利率", value: ccDisplay("gross_margin", "percent"), note: metricNote("gross_margin", "百胜成本"), tone: "gold" },
   { label: "库存金额", value: ccDisplay("inventory_amount", "money"), note: metricNote("inventory_amount", "外穿衣物库存"), tone: "blue" },
   { label: "90天以上库存", value: ccDisplay("age_90_amount", "money"), note: metricNote("age_90_amount", "FIFO库龄"), tone: "muted" },
+  { label: "180天以上库存", value: ccDisplay("age_180_amount", "money"), note: metricNote("age_180_amount", "FIFO库龄"), tone: "muted" },
   { label: "VIP余额", value: ccDisplay("vip_balance", "money"), note: metricNote("vip_balance", "CZ_DQJE"), tone: "green" },
   { label: "VIP销售", value: ccDisplay("vip_sales", "money"), note: metricNote("vip_sales", "百胜会员小票"), tone: "slate" },
 ]);
@@ -376,6 +378,7 @@ async function fetchData() {
     trend.value = r2.data.data?.trend || [];
     storeRank.value = r3.data.data?.rank || [];
   } catch (e) {
+    if (isRouteRequestCanceled(e)) return;
     console.error("经营概览数据加载失败", e);
   } finally {
     loading.value = false;

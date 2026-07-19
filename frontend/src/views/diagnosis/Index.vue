@@ -187,6 +187,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { aiDiagnosisApi } from "@/api/ai";
+import { isRouteRequestCanceled } from "@/api/request";
 import { engineLabel, evidenceFallbackLabel, factMeta, readinessLabel, roleLabel, sourceLabel } from "@/utils/businessDisplay";
 
 const route = useRoute();
@@ -330,6 +331,7 @@ const loadData = async () => {
     const res = await aiDiagnosisApi.getModule(apiModuleKey.value, params);
     payload.value = res.data.data || {};
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     payload.value = { summary: {}, risks: [], diagnoses: [], action_suggestions: [], data_quality: { warnings: [e?.message || "AI诊断接口暂时不可用"] } };
   } finally {
     loading.value = false;
@@ -359,8 +361,14 @@ const generateTasks = async () => {
 };
 
 const loadUsers = async () => {
-  const res = await aiDiagnosisApi.getAssigneeOptions({ store_code: filters.store_code || undefined });
-  users.value = res.data.data || [];
+  try {
+    const res = await aiDiagnosisApi.getAssigneeOptions({ store_code: filters.store_code || undefined });
+    users.value = res.data.data || [];
+    return true;
+  } catch (e) {
+    if (isRouteRequestCanceled(e)) return false;
+    throw e;
+  }
 };
 
 const openConfirm = async (item?: any) => {
@@ -370,7 +378,7 @@ const openConfirm = async (item?: any) => {
   confirmation.diagnosis_ids = item ? [] : actions.value.filter((x: any) => x.status === "建议任务").map((x: any) => x.diagnosis_id);
   confirmation.assignee_id = undefined;
   confirmation.due_date = formatLocalDate(tomorrow);
-  await loadUsers();
+  if (!await loadUsers()) return;
   confirmDialog.value = true;
 };
 

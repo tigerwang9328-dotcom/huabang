@@ -317,6 +317,7 @@ import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Download, Refresh, Search } from "@element-plus/icons-vue";
 import { memberApi } from "@/api/member";
+import { isRouteRequestCanceled } from "@/api/request";
 import { useAuthStore } from "@/stores/auth";
 
 type Preset = "latest" | "last7" | "last30" | "custom";
@@ -466,6 +467,7 @@ async function fetchMemberActions() {
     actionRows.value = listResponse.data.data?.items || [];
     actionTotal.value = listResponse.data.data?.total || 0;
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "会员行动加载失败");
   } finally {
     actionOverviewLoading.value = false;
@@ -485,6 +487,7 @@ async function rebuildActions() {
     actionPage.value = 1;
     await fetchMemberActions();
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "今日行动生成失败");
   } finally {
     actionRebuilding.value = false;
@@ -544,6 +547,7 @@ async function fetchOverview() {
     }
     if (!dateRange.value[0] && summary.value.latest_ticket_date) applyPreset();
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "会员概览加载失败");
   } finally {
     overviewLoading.value = false;
@@ -558,6 +562,7 @@ async function fetchSegmentOverview() {
     if (!data?.success) throw new Error(data?.message || "会员分层概览加载失败");
     segmentOverview.value = data.data || { summary: {}, labels: {}, risks: {} };
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     segmentError.value = e?.message || "会员分层概览加载失败";
   } finally {
     segmentOverviewLoading.value = false;
@@ -580,6 +585,7 @@ async function fetchSegmentKind(kind: "segments" | "risks" | "wakeups") {
     if (kind === "risks") { riskRows.value = payload.items || []; riskTotal.value = payload.total || 0; }
     if (kind === "wakeups") { wakeupRows.value = payload.items || []; wakeupTotal.value = payload.total || 0; }
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     segmentError.value = e?.message || "会员名单加载失败";
   } finally {
     loading.value = false;
@@ -600,6 +606,7 @@ async function rebuildSegments() {
     await fetchSegmentOverview();
     await fetchActiveTab();
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "会员分层重算失败");
   } finally {
     segmentRebuilding.value = false;
@@ -620,6 +627,7 @@ async function exportSegmentData() {
     link.remove();
     URL.revokeObjectURL(url);
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "会员数据导出失败");
   }
 }
@@ -631,6 +639,8 @@ async function fetchAssets() {
     if (keyword.value.trim()) params.keyword = keyword.value.trim();
     const { data } = await memberApi.listAssets(params);
     assetRows.value = data?.data?.items || []; assetTotal.value = data?.data?.total || 0;
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) throw e;
   } finally { assetLoading.value = false; }
 }
 
@@ -643,6 +653,8 @@ async function fetchTransactions() {
     if (keyword.value.trim()) params.keyword = keyword.value.trim();
     const { data } = await memberApi.listAssetTransactions(params);
     transactionRows.value = data?.data?.items || []; transactionTotal.value = data?.data?.total || 0;
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) throw e;
   } finally { transactionLoading.value = false; }
 }
 
@@ -655,7 +667,9 @@ async function fetchSalesAnalysis() {
     const { data } = await memberApi.getSalesAnalysis(params);
     if (!data?.success) return ElMessage.error(data?.message || "VIP销售分析加载失败");
     vipSales.value = data.data || { summary: {}, stores: [], trend: [] };
-  } catch (e: any) { ElMessage.error(e?.message || "VIP销售分析加载失败"); }
+  } catch (e: any) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error(e?.message || "VIP销售分析加载失败");
+  }
   finally { salesLoading.value = false; }
 }
 
@@ -705,6 +719,7 @@ async function fetchPosMembers() {
       dateRange.value = [payload.date_range.start_date, payload.date_range.end_date];
     }
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "会员线索加载失败");
   } finally {
     posLoading.value = false;
@@ -720,6 +735,8 @@ async function fetchProfiles() {
     const payload = data?.success ? (data.data || {}) : {};
     profileRows.value = payload.items || [];
     profileTotal.value = payload.total || 0;
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) throw e;
   } finally {
     profileLoading.value = false;
   }
@@ -730,6 +747,8 @@ async function fetchVisits() {
   try {
     const { data } = await memberApi.listVisits({ page: 1, page_size: 100 });
     visitRows.value = data?.success ? (data.data?.items || []) : [];
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) throw e;
   } finally {
     visitLoading.value = false;
   }

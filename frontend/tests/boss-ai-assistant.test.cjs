@@ -51,7 +51,7 @@ test("floating assistant has drag minimize fullscreen and management role gate",
 
   for (const token of [
     "boss-ai-floating",
-    "minimized = ref(false)",
+    "minimized = ref(true)",
     "dragging",
     "router.push('/app/ai')",
     "hasPermission(\"knowledge:ai:view\")",

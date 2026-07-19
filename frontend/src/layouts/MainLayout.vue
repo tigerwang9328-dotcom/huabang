@@ -245,12 +245,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
     permission: "dashboard:overview:view",
   },
   {
-    path: "/app/task",
-    label: "任务管理",
-    icon: Bell,
-    permission: "task:view",
-  },
-  {
     label: "AI经营诊断",
     icon: ChatDotRound,
     permission: "diagnosis:overall:view",
@@ -276,7 +270,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
         label: "线下销售",
         key: "sales-offline",
         children: [
-          { path: "/app/store/overview", label: "门店总览" },
           { path: "/app/store", label: "单店分析" },
           { path: "/app/member", label: "会员运营" },
           { label: "导购销售", disabled: true, badge: "规划中" },
@@ -353,6 +346,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
     permission: "hr:overview:view",
     items: [
       { path: "/app/hr/overview", icon: UserFilled, label: "人事首页" },
+      { path: "/app/task", icon: Bell, label: "任务管理", permission: "task:view" },
       { path: "/app/hr/employees", icon: Avatar, label: "员工档案" },
       { path: "/app/hr/attendance", icon: List, label: "考勤管理" },
       { path: "/app/hr/leaves", icon: Bell, label: "请假外出" },

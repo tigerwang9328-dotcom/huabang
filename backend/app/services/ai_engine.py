@@ -554,11 +554,17 @@ class AIEngine:
         for _attempt in range(2):
             started = datetime.now(timezone.utc)
             try:
-                response = await self._call_business_advice(
-                    system_prompt,
-                    attempt_user_content,
-                    max_tokens=advice_max_tokens,
-                )
+                if advice_max_tokens > 4000:
+                    response = await self._call_business_advice(
+                        system_prompt,
+                        attempt_user_content,
+                        max_tokens=advice_max_tokens,
+                    )
+                else:
+                    response = await self._call_business_advice(
+                        system_prompt,
+                        attempt_user_content,
+                    )
                 content = (response.get("content") or "").strip()
                 if not content:
                     raise ValueError("AI返回空内容")

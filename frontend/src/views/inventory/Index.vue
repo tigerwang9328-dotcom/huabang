@@ -171,6 +171,7 @@ import { onMounted, ref, reactive } from "vue";
 import { ElMessage } from "element-plus";
 import { useRouter } from "vue-router";
 import { inventoryApi } from "@/api/inventory";
+import { isRouteRequestCanceled } from "@/api/request";
 
 const activeTab = ref("overview");
 const router = useRouter();
@@ -204,7 +205,9 @@ async function fetchOverview() {
     summaryCards.value[5].value = summary.out_of_stock_sku_count?.display || "0";
     summaryCards.value[6].value = `${Number(summary.standard_purchase_price_coverage_rate?.value || 0).toFixed(1)}%`;
     whSummary.value = overviewRes?.data?.by_warehouse || [];
-  } catch (_) { ElMessage.error("库存总览查询失败"); }
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("库存总览查询失败");
+  }
   finally { ovLoading.value = false; }
 }
 
@@ -227,7 +230,9 @@ async function fetchBalance() {
       const times = balanceList.value.map((x: any) => x.synced_at).filter(Boolean).sort();
       if (times.length) bLastSync.value = fmtTs(times[times.length - 1]);
     }
-  } catch (e: any) { ElMessage.error("查询失败"); }
+  } catch (e: any) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("查询失败");
+  }
   finally { bLoading.value = false; }
 }
 function resetBalance() { bf.keyword = ""; bf.warehouse_code = ""; bf.product_code = ""; bf.onlyPositive = true; bPage.value = 1; fetchBalance(); }
@@ -254,7 +259,9 @@ async function fetchWarehouses() {
       const enabled = whList.value.filter((x: any) => x.is_enabled).length;
       summaryCards.value[1].value = String(enabled);
     }
-  } catch (e: any) { ElMessage.error("查询失败"); }
+  } catch (e: any) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("查询失败");
+  }
   finally { wLoading.value = false; }
 }
 async function loadWOpts() {
@@ -283,7 +290,9 @@ async function fetchWarnings() {
     warningTotal.value = data?.data?.total || 0;
     warningDate.value = data?.data?.warning_date || "";
     summaryCards.value[7] = { label: "当前预警", value: String(warningTotal.value), isPending: false };
-  } catch (_) { ElMessage.error("库存预警加载失败"); }
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("库存预警加载失败");
+  }
   finally { warningLoading.value = false; }
 }
 async function createWarningTask(row: any) {

@@ -85,6 +85,7 @@
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { dashboardApi } from "@/api/dashboard";
+import { isRouteRequestCanceled } from "@/api/request";
 import { engineLabel, evidenceFallbackLabel, readinessLabel, roleLabel, sourceLabel } from "@/utils/businessDisplay";
 
 const loading = ref(false);
@@ -137,12 +138,18 @@ async function loadReport() {
   try {
     const { data } = await dashboardApi.getBossDaily(selectedDate.value);
     report.value = data?.data || {};
-  } catch (_) { ElMessage.error("经营日报加载失败"); }
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("经营日报加载失败");
+  }
   finally { loading.value = false; }
 }
 async function loadHistory() {
-  const { data } = await dashboardApi.listBossDaily({ days: 14 });
-  history.value = data?.data?.items || [];
+  try {
+    const { data } = await dashboardApi.listBossDaily({ days: 14 });
+    history.value = data?.data?.items || [];
+  } catch (e) {
+    if (!isRouteRequestCanceled(e)) throw e;
+  }
 }
 function selectHistory(row: any) { selectedDate.value = row.report_date; loadReport(); }
 onMounted(async () => { await Promise.all([loadReport(), loadHistory()]); });

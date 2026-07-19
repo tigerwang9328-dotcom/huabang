@@ -1,10 +1,19 @@
 import axios from "axios";
 import type { AxiosResponse } from "axios";
 import { ElMessage } from "element-plus";
+import {
+  isRouteRequestCanceled,
+  RouteRequestLifecycle,
+  shouldScopeRouteRequest,
+} from "./routeRequestLifecycle";
+
+export { isRouteRequestCanceled } from "./routeRequestLifecycle";
 
 declare module "axios" {
   interface AxiosRequestConfig {
     silentError?: boolean;
+    persistAcrossRoutes?: boolean;
+    routeScoped?: boolean;
   }
 }
 
@@ -16,6 +25,11 @@ export interface ApiResponse<T = any> {
 }
 
 let isSessionRedirecting = false;
+const routeRequests = new RouteRequestLifecycle();
+
+export const cancelRouteRequests = () => {
+  routeRequests.cancel();
+};
 
 const isLoginRequest = (url?: string) => url?.includes("/auth/login") === true;
 
@@ -36,6 +50,15 @@ const request = axios.create({
 
 // 请求拦截：注入JWT Token
 request.interceptors.request.use((config) => {
+  if (shouldScopeRouteRequest(
+    config.method,
+    window.location.pathname,
+    config.persistAcrossRoutes,
+    Boolean(config.signal),
+  )) {
+    config.signal = routeRequests.signal;
+    config.routeScoped = true;
+  }
   const token = localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -62,6 +85,7 @@ request.interceptors.response.use(
     return response;
   },
   (error) => {
+    if (isRouteRequestCanceled(error)) return Promise.reject(error);
     const status = error.response?.status;
     const code = error.response?.data?.code;
     if (status === 401 || code === 401) {

@@ -209,6 +209,7 @@ import { BarChart, LineChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import VChart from "vue-echarts";
 import { storeApi } from "@/api/store";
+import { isRouteRequestCanceled } from "@/api/request";
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent]);
 
@@ -316,6 +317,7 @@ async function fetchData() {
       dateRange.value = [payload.date_range.start_date, payload.date_range.end_date];
     }
   } catch (e: any) {
+    if (isRouteRequestCanceled(e)) return;
     ElMessage.error(e?.message || "门店销售数据加载失败");
   } finally {
     loading.value = false;

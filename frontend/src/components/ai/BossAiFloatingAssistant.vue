@@ -27,17 +27,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { ChatDotRound, Clock, FullScreen, Minus, Plus } from "@element-plus/icons-vue";
-import BossAiChat from "@/components/ai/BossAiChat.vue";
+
+const BossAiChat = defineAsyncComponent(() => import("@/components/ai/BossAiChat.vue"));
 
 const router = useRouter();
 const authStore = useAuthStore();
-const minimized = ref(false);
+const minimized = ref(true);
 const dragging = ref(false);
-const chatRef = ref<InstanceType<typeof BossAiChat>>();
+const chatRef = ref<{ startNewConversation: () => void | Promise<void> }>();
 const position = ref({ right: 24, bottom: 24 });
 let dragStart = { x: 0, y: 0, right: 24, bottom: 24 };
 

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { cancelRouteRequests } from "@/api/request";
 
 const routes = [
   // ====== 公开品牌官网（单页，无需登录） ======
@@ -176,6 +177,10 @@ router.beforeEach((to, _, next) => {
     return next(getPermissionHomePath(authStore));
   }
   next();
+});
+
+router.afterEach((to, from, failure) => {
+  if (!failure && to.path !== from.path) cancelRouteRequests();
 });
 
 export default router;

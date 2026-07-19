@@ -78,6 +78,7 @@ def test_metric_statuses_follow_each_source_freshness():
         "sales_detail": "stale",
         "returns": "stale",
         "actual_pay": "stale",
+        "deposit": "stale",
         "gross_profit": "estimated",
         "gross_margin": "pending_data",
         "online_sales": "stale",

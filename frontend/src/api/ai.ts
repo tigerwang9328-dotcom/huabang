@@ -7,13 +7,13 @@ export const aiApi = {
 
 export const aiAssistantApi = {
   getBrief: (params?: { route?: string; stat_date?: string; store_code?: string }) =>
-    request.get("/ai-assistant/brief", { params, silentError: true }),
+    request.get("/ai-assistant/brief", { params, silentError: true, persistAcrossRoutes: true }),
   listConversations: () =>
-    request.get("/ai-assistant/conversations", { silentError: true }),
+    request.get("/ai-assistant/conversations", { silentError: true, persistAcrossRoutes: true }),
   createConversation: (contextData?: { route?: string; stat_date?: string; store_code?: string }) =>
-    request.post("/ai-assistant/conversations", contextData || {}, { silentError: true }),
+    request.post("/ai-assistant/conversations", contextData || {}, { silentError: true, persistAcrossRoutes: true }),
   getMessages: (conversationId: number) =>
-    request.get(`/ai-assistant/conversations/${conversationId}/messages`, { silentError: true }),
+    request.get(`/ai-assistant/conversations/${conversationId}/messages`, { silentError: true, persistAcrossRoutes: true }),
   sendMessage: (
     conversationId: number,
     question: string,
@@ -24,9 +24,9 @@ export const aiAssistantApi = {
       question,
       web_mode: "auto",
       ...(contextData || {}),
-    }, { signal }),
+    }, { signal, persistAcrossRoutes: true }),
   archiveConversation: (conversationId: number) =>
-    request.delete(`/ai-assistant/conversations/${conversationId}`),
+    request.delete(`/ai-assistant/conversations/${conversationId}`, { persistAcrossRoutes: true }),
 };
 
 export const aiDiagnosisApi = {

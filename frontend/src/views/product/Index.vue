@@ -184,6 +184,7 @@
 import { onMounted, ref, reactive } from "vue";
 import { ElMessage } from "element-plus";
 import { productApi } from "@/api/product";
+import { isRouteRequestCanceled } from "@/api/request";
 
 const activeTab = ref("products");
 
@@ -277,7 +278,9 @@ async function fetchProducts() {
       const times = productList.value.map((x: any) => x.synced_at).filter(Boolean).sort();
       if (times.length) pLastSync.value = fmtTs(times[times.length - 1]);
     }
-  } catch (e: any) { ElMessage.error("查询失败"); }
+  } catch (e: any) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("查询失败");
+  }
   finally { pLoading.value = false; }
 }
 async function loadPOpts() {
@@ -325,7 +328,9 @@ async function fetchSkus() {
       const times = skuList.value.map((x: any) => x.synced_at).filter(Boolean).sort();
       if (times.length) sLastSync.value = fmtTs(times[times.length - 1]);
     }
-  } catch (e: any) { ElMessage.error("查询失败"); }
+  } catch (e: any) {
+    if (!isRouteRequestCanceled(e)) ElMessage.error("查询失败");
+  }
   finally { sLoading.value = false; }
 }
 async function loadSOpts() {
