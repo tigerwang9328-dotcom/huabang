@@ -20,6 +20,11 @@ _LIFE_DATA_MIGRATION = (
 _GROUP_HEALTH_MIGRATION = (
     _ALEMBIC_DIR / "versions" / "a2b3c4d5e6f7_life_data_group_health.py"
 )
+_INVESTMENT_MERGE_MIGRATION = (
+    _ALEMBIC_DIR
+    / "versions"
+    / "2b0f6a7b8c94_merge_investment_and_ai_assistant_heads.py"
+)
 
 
 def _unique_column_sets(model):
@@ -128,8 +133,15 @@ def test_life_data_migration_has_one_resolvable_head():
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["2a0f6a7b8c93"]
-    assert script.get_current_head() == "2a0f6a7b8c93"
+    assert script.get_heads() == ["2b0f6a7b8c94"]
+    assert script.get_current_head() == "2b0f6a7b8c94"
+
+
+def test_investment_merge_revision_preserves_both_existing_heads():
+    migration = run_path(str(_INVESTMENT_MERGE_MIGRATION))
+
+    assert migration["revision"] == "2b0f6a7b8c94"
+    assert set(migration["down_revision"]) == {"299f6a7b8c92", "2a0f6a7b8c93"}
 
 
 def test_group_health_migration_follows_life_data_collector():
