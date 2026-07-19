@@ -57,3 +57,23 @@ from app.models.life_data import (
     LifeDataCollectorState,
     LifeDataVideoSnapshot,
 )
+from app.models.kingdee_finance import (
+    DimFinanceAccount,
+    DimFinanceStatementMapping,
+    DimLegalEntity,
+    DimSourceOrgMapping,
+    DmFinanceStatementMonthly,
+    DwdGlBalanceMonthly,
+    DwdGlVoucher,
+    DwdGlVoucherEntry,
+    KingdeeAccount,
+    KingdeeAuxItem,
+    KingdeeBalance,
+    KingdeeCurrency,
+    KingdeeDepartment,
+    KingdeeEmployee,
+    KingdeeImportBatch,
+    KingdeeSupplier,
+    KingdeeVoucher,
+    KingdeeVoucherEntry,
+)
