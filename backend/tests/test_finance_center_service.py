@@ -37,6 +37,7 @@ async def _seed_kingdee_source(
     *,
     negative_debit_correction: bool = False,
     duplicate_voucher_no_next_period: bool = False,
+    signed_credit_closing_balance: bool = False,
 ) -> tuple[str, int]:
     account_set_code = f"AIS{prefix}"
     entity = DimLegalEntity(
@@ -250,10 +251,10 @@ async def _seed_kingdee_source(
                 currency_code="CNY",
                 opening_debit=Decimal("0.00"),
                 opening_credit=Decimal("5.00"),
-                period_debit=Decimal("0.00"),
-                period_credit=Decimal("100.00"),
+                period_debit=Decimal("146.00") if signed_credit_closing_balance else Decimal("0.00"),
+                period_credit=Decimal("141.00") if signed_credit_closing_balance else Decimal("100.00"),
                 closing_debit=Decimal("0.00"),
-                closing_credit=Decimal("105.00"),
+                closing_credit=Decimal("0.00") if signed_credit_closing_balance else Decimal("105.00"),
                 source_system="kingdee",
                 source_database=account_set_code,
                 source_pk=f"{account_set_code}:balance:4001:2026-01",
@@ -373,6 +374,28 @@ async def test_import_allows_same_kingdee_voucher_number_in_different_periods():
         ).scalars().all()
         assert [row.voucher_no for row in vouchers] == [f"记-{prefix}", f"记-{prefix}"]
         assert [row.period for row in vouchers] == ["2026-01", "2026-02"]
+
+
+async def test_import_preserves_signed_closing_ledger_balances():
+    prefix = uuid4().hex[:10]
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            account_set_code, _ = await _seed_kingdee_source(db, prefix, signed_credit_closing_balance=True)
+
+        service = FinanceCenterService(db)
+        await service.import_kingdee_history_to_formal_ledger(account_set_code)
+        balance = (
+            await db.execute(
+                select(FinLedgerBalance)
+                .join(FinAccount, FinAccount.id == FinLedgerBalance.account_id)
+                .where(FinLedgerBalance.source_pk == f"{account_set_code}:balance:4001:2026-01")
+            )
+        ).scalar_one()
+
+        assert balance.balance_direction == "credit"
+        assert balance.period_debit == Decimal("146.0000")
+        assert balance.period_credit == Decimal("141.0000")
+        assert balance.closing_amount == Decimal("-5.0000")
 
 
 async def test_revises_posted_kingdee_history_voucher_with_audited_version_and_recomputed_ledger():

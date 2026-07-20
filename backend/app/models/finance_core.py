@@ -350,7 +350,7 @@ class FinLedgerBalance(_TimestampMixin, Base):
             name="ck_fin_ledger_direction",
         ),
         CheckConstraint(
-            "opening_amount >= 0 AND period_debit >= 0 AND period_credit >= 0 AND closing_amount >= 0",
+            "period_debit >= 0 AND period_credit >= 0",
             name="ck_fin_ledger_nonnegative",
         ),
         CheckConstraint(
