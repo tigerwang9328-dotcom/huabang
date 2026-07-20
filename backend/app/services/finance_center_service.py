@@ -52,6 +52,18 @@ def _balance_amount(direction: str, debit, credit) -> Decimal:
     return debit_amount - credit_amount if direction == "debit" else credit_amount - debit_amount
 
 
+def _formal_kingdee_entry_amounts(debit, credit) -> tuple[Decimal, Decimal]:
+    debit_amount = _decimal(debit)
+    credit_amount = _decimal(credit)
+    if debit_amount < 0 and credit_amount == 0:
+        return Decimal("0.0000"), -debit_amount
+    if credit_amount < 0 and debit_amount == 0:
+        return -credit_amount, Decimal("0.0000")
+    if debit_amount < 0 or credit_amount < 0:
+        raise FinanceCenterError("Kingdee entry has unsupported signed debit and credit amounts")
+    return debit_amount, credit_amount
+
+
 class FinanceCenterService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -752,6 +764,28 @@ class FinanceCenterService:
             if existing:
                 continue
             period = f"{row.fiscal_year:04d}-{row.fiscal_period:02d}"
+            source_entries = (
+                await self.db.execute(
+                    select(DwdGlVoucherEntry)
+                    .where(DwdGlVoucherEntry.voucher_id == row.id)
+                    .order_by(DwdGlVoucherEntry.line_no, DwdGlVoucherEntry.id)
+                )
+            ).scalars().all()
+            formal_entries = []
+            total_debit = Decimal("0.0000")
+            total_credit = Decimal("0.0000")
+            for entry in source_entries:
+                debit_amount, credit_amount = _formal_kingdee_entry_amounts(
+                    entry.debit_amount,
+                    entry.credit_amount,
+                )
+                if (debit_amount > 0 and credit_amount > 0) or (debit_amount == 0 and credit_amount == 0):
+                    raise FinanceCenterError("each Kingdee voucher entry must resolve to one debit or credit amount")
+                total_debit += debit_amount
+                total_credit += credit_amount
+                formal_entries.append((entry, debit_amount, credit_amount))
+            if formal_entries and total_debit != total_credit:
+                raise FinanceCenterError(f"Kingdee voucher is not balanced after normalization: {row.source_pk}")
             voucher = FinVoucher(
                 book_id=book_id,
                 period_id=period_map[period],
@@ -762,8 +796,8 @@ class FinanceCenterService:
                 status="draft",
                 origin_kind="kingdee_history",
                 source_status=row.source_status,
-                total_debit=_decimal(row.total_debit),
-                total_credit=_decimal(row.total_credit),
+                total_debit=total_debit,
+                total_credit=total_credit,
                 prepared_name=row.preparer_name,
                 source_system=row.source_system,
                 source_database=row.source_database,
@@ -782,22 +816,15 @@ class FinanceCenterService:
                 row.import_batch_id,
                 {"dwd_gl_voucher_id": row.id},
             )
-            entries = (
-                await self.db.execute(
-                    select(DwdGlVoucherEntry)
-                    .where(DwdGlVoucherEntry.voucher_id == row.id)
-                    .order_by(DwdGlVoucherEntry.line_no, DwdGlVoucherEntry.id)
-                )
-            ).scalars().all()
-            for line_no, entry in enumerate(entries, 1):
+            for line_no, (entry, debit_amount, credit_amount) in enumerate(formal_entries, 1):
                 formal_entry = FinVoucherEntry(
                     book_id=book_id,
                     voucher_id=voucher.id,
                     line_no=line_no,
                     account_id=account_map[entry.finance_account_id],
                     summary=entry.summary or "",
-                    debit_amount=_decimal(entry.debit_amount),
-                    credit_amount=_decimal(entry.credit_amount),
+                    debit_amount=debit_amount,
+                    credit_amount=credit_amount,
                     currency_code=entry.currency_code or "CNY",
                     exchange_rate=entry.exchange_rate or Decimal("1"),
                     quantity=entry.quantity,
@@ -923,6 +950,8 @@ class FinanceCenterService:
         for entry in entries:
             debit = _decimal(entry.get("debit_amount"))
             credit = _decimal(entry.get("credit_amount"))
+            if debit < 0 or credit < 0:
+                raise FinanceCenterError("voucher entry amounts cannot be negative")
             if (debit > 0 and credit > 0) or (debit == 0 and credit == 0):
                 raise FinanceCenterError("each voucher entry must have exactly one debit or credit amount")
             total_debit += debit

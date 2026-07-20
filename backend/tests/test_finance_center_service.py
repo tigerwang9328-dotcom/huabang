@@ -31,7 +31,7 @@ from app.services.finance_center_service import FinanceCenterService
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
-async def _seed_kingdee_source(db, prefix: str) -> tuple[str, int]:
+async def _seed_kingdee_source(db, prefix: str, *, negative_debit_correction: bool = False) -> tuple[str, int]:
     account_set_code = f"AIS{prefix}"
     entity = DimLegalEntity(
         entity_code=f"ENT{prefix}",
@@ -95,8 +95,8 @@ async def _seed_kingdee_source(db, prefix: str) -> tuple[str, int]:
         is_checked=True,
         is_posted=True,
         preparer_name="Kingdee",
-        total_debit=Decimal("100.00"),
-        total_credit=Decimal("100.00"),
+        total_debit=Decimal("60.00") if negative_debit_correction else Decimal("100.00"),
+        total_credit=Decimal("60.00") if negative_debit_correction else Decimal("100.00"),
         source_system="kingdee",
         source_database=account_set_code,
         source_pk=f"{account_set_code}:voucher:1",
@@ -104,40 +104,62 @@ async def _seed_kingdee_source(db, prefix: str) -> tuple[str, int]:
     )
     db.add(voucher)
     await db.flush()
-    db.add_all(
-        [
+    voucher_entries = [
+        DwdGlVoucherEntry(
+            voucher_id=voucher.id,
+            legal_entity_id=entity.id,
+            line_no=1,
+            finance_account_id=debit_account.id,
+            account_code="1001",
+            summary="Kingdee import debit",
+            debit_amount=Decimal("100.00"),
+            credit_amount=Decimal("0.00"),
+            currency_code="CNY",
+            exchange_rate=Decimal("1.00000000"),
+            source_system="kingdee",
+            source_database=account_set_code,
+            source_pk=f"{account_set_code}:voucher:1:entry:1",
+            import_batch_id=f"batch-{prefix}",
+        ),
+        DwdGlVoucherEntry(
+            voucher_id=voucher.id,
+            legal_entity_id=entity.id,
+            line_no=2,
+            finance_account_id=credit_account.id,
+            account_code="4001",
+            summary="Kingdee import credit",
+            debit_amount=Decimal("0.00"),
+            credit_amount=Decimal("60.00") if negative_debit_correction else Decimal("100.00"),
+            currency_code="CNY",
+            exchange_rate=Decimal("1.00000000"),
+            source_system="kingdee",
+            source_database=account_set_code,
+            source_pk=f"{account_set_code}:voucher:1:entry:2",
+            import_batch_id=f"batch-{prefix}",
+        ),
+    ]
+    if negative_debit_correction:
+        voucher_entries.append(
             DwdGlVoucherEntry(
                 voucher_id=voucher.id,
                 legal_entity_id=entity.id,
-                line_no=1,
-                finance_account_id=debit_account.id,
-                account_code="1001",
-                summary="Kingdee import debit",
-                debit_amount=Decimal("100.00"),
+                line_no=3,
+                finance_account_id=credit_account.id,
+                account_code="4001",
+                summary="Kingdee import negative debit correction",
+                debit_amount=Decimal("-40.00"),
                 credit_amount=Decimal("0.00"),
                 currency_code="CNY",
                 exchange_rate=Decimal("1.00000000"),
                 source_system="kingdee",
                 source_database=account_set_code,
-                source_pk=f"{account_set_code}:voucher:1:entry:1",
+                source_pk=f"{account_set_code}:voucher:1:entry:3",
                 import_batch_id=f"batch-{prefix}",
-            ),
-            DwdGlVoucherEntry(
-                voucher_id=voucher.id,
-                legal_entity_id=entity.id,
-                line_no=2,
-                finance_account_id=credit_account.id,
-                account_code="4001",
-                summary="Kingdee import credit",
-                debit_amount=Decimal("0.00"),
-                credit_amount=Decimal("100.00"),
-                currency_code="CNY",
-                exchange_rate=Decimal("1.00000000"),
-                source_system="kingdee",
-                source_database=account_set_code,
-                source_pk=f"{account_set_code}:voucher:1:entry:2",
-                import_batch_id=f"batch-{prefix}",
-            ),
+            )
+        )
+    db.add_all(
+        [
+            *voucher_entries,
             DwdGlBalanceMonthly(
                 legal_entity_id=entity.id,
                 finance_account_id=debit_account.id,
@@ -228,6 +250,39 @@ async def test_imports_kingdee_history_into_writable_formal_ledger_idempotently(
         assert (
             await db.execute(select(func.count(FinSourceLink.id)).where(FinSourceLink.book_id == voucher.book_id))
         ).scalar_one() >= 5
+
+
+async def test_import_normalizes_kingdee_negative_debit_lines_to_formal_credit_side():
+    prefix = uuid4().hex[:10]
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            account_set_code, _ = await _seed_kingdee_source(db, prefix, negative_debit_correction=True)
+
+        service = FinanceCenterService(db)
+        result = await service.import_kingdee_history_to_formal_ledger(account_set_code)
+
+        assert result["created"]["voucher_entries"] == 3
+        voucher = (
+            await db.execute(
+                select(FinVoucher).where(
+                    FinVoucher.source_database == account_set_code,
+                    FinVoucher.source_pk == f"{account_set_code}:voucher:1",
+                )
+            )
+        ).scalar_one()
+        entries = (
+            await db.execute(
+                select(FinVoucherEntry).where(FinVoucherEntry.voucher_id == voucher.id).order_by(FinVoucherEntry.line_no)
+            )
+        ).scalars().all()
+
+        assert voucher.total_debit == Decimal("100.0000")
+        assert voucher.total_credit == Decimal("100.0000")
+        assert [(row.debit_amount, row.credit_amount) for row in entries] == [
+            (Decimal("100.0000"), Decimal("0.0000")),
+            (Decimal("0.0000"), Decimal("60.0000")),
+            (Decimal("0.0000"), Decimal("40.0000")),
+        ]
 
 
 async def test_revises_posted_kingdee_history_voucher_with_audited_version_and_recomputed_ledger():
