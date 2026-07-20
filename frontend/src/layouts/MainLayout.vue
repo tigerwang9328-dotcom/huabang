@@ -165,6 +165,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { authApi } from "@/api/auth";
 import BossAiFloatingAssistant from "@/components/ai/BossAiFloatingAssistant.vue";
+import { financeCenterModules } from "@/config/financeCenterModules";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   ArrowRight,
@@ -329,30 +330,14 @@ const menuGroups = computed<MenuGroup[]>(() => [
     ],
   },
   {
-    label: "财务利润",
+    label: "财务中心",
     icon: Money,
-    items: [
-      { path: "/app/fin/overview", icon: Money, label: "财务首页", permission: "finance:overview:view" },
-      { path: "/app/finance", icon: TrendCharts, label: "利润分析", permission: "finance:profit:view" },
-      { path: "/app/fin/reimbursements", icon: List, label: "报销管理", permission: "finance:reimbursement:view" },
-      { path: "/app/fin/payments", icon: Money, label: "付款申请", permission: "finance:payment:view" },
-      { path: "/app/fin/expense-analysis", icon: DataLine, label: "费用分析", permission: "finance:expense:view" },
-      { path: "/app/fin/formal-ledger", icon: Money, label: "正式账簿", permission: "finance:voucher:write" },
-      {
-        icon: List,
-        label: "历史财务",
-        key: "finance-history",
-        permission: "finance:profit:view",
-        children: [
-          { path: "/app/fin/history/account-sets", label: "历史账套" },
-          { path: "/app/fin/history/statements", label: "财务报表" },
-          { path: "/app/fin/history/account-balances", label: "科目余额" },
-          { path: "/app/fin/history/vouchers", label: "凭证查询" },
-          { path: "/app/fin/history/data-quality", label: "数据质量" },
-        ],
-      },
-      { label: "现金安全", icon: Warning, disabled: true, badge: "规划中", permission: "finance:cash:view" },
-    ],
+    items: financeCenterModules.map((item) => ({
+      path: item.path,
+      icon: item.icon,
+      label: item.label,
+      permission: "finance:profit:view",
+    })),
   },
   {
     label: "人力资源",

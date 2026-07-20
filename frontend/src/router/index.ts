@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { financeCenterModules } from "@/config/financeCenterModules";
 import { useAuthStore } from "@/stores/auth";
 import { cancelRouteRequests } from "@/api/request";
 
@@ -58,6 +59,12 @@ const routes = [
       { path: "fin/payments", name: "Payments", component: () => import("@/views/finance/Payments.vue"), meta: { title: "付款申请" } },
       { path: "fin/expense-analysis", name: "ExpenseAnalysis", component: () => import("@/views/finance/ExpenseAnalysis.vue"), meta: { title: "费用分析" } },
       { path: "fin/formal-ledger", name: "FormalLedger", component: () => import("@/views/finance/FormalLedger.vue"), meta: { title: "正式账簿" } },
+      ...financeCenterModules.map((item) => ({
+        path: `finance-center/${item.key}`,
+        name: `FinanceCenter${item.key.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("")}`,
+        component: () => import("@/views/finance/FinanceCenterModule.vue"),
+        meta: { title: item.label, financeModuleKey: item.key },
+      })),
       { path: "fin/history/account-sets", name: "FinanceAccountSets", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "历史账套", financeTab: "account-sets" } },
       { path: "fin/history/statements", name: "FinanceStatements", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "财务报表", financeTab: "statements" } },
       { path: "fin/history/account-balances", name: "FinanceAccountBalances", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "科目余额", financeTab: "account-balances" } },
