@@ -77,3 +77,33 @@ from app.models.kingdee_finance import (
     KingdeeVoucher,
     KingdeeVoucherEntry,
 )
+from app.models.finance_core import (
+    FinAccount,
+    FinAuxCategory,
+    FinAuxItem,
+    FinBook,
+    FinLedgerBalance,
+    FinOperationLog,
+    FinPeriod,
+    FinSourceLink,
+    FinStatementLine,
+    FinStatementMapping,
+    FinVoucher,
+    FinVoucherEntry,
+    FinVoucherVersion,
+)
+from app.models.finance_operations import (
+    FinAutoEntryRule,
+    FinAutoEntryRun,
+    FinBankTransaction,
+    FinCashAccount,
+    FinDepreciation,
+    FinFixedAsset,
+    FinInvoice,
+    FinPayable,
+    FinPayroll,
+    FinReceivable,
+    FinReconciliation,
+    FinSettlement,
+    FinTaxRecord,
+)
