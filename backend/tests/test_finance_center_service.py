@@ -31,7 +31,13 @@ from app.services.finance_center_service import FinanceCenterService
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
-async def _seed_kingdee_source(db, prefix: str, *, negative_debit_correction: bool = False) -> tuple[str, int]:
+async def _seed_kingdee_source(
+    db,
+    prefix: str,
+    *,
+    negative_debit_correction: bool = False,
+    duplicate_voucher_no_next_period: bool = False,
+) -> tuple[str, int]:
     account_set_code = f"AIS{prefix}"
     entity = DimLegalEntity(
         entity_code=f"ENT{prefix}",
@@ -104,6 +110,28 @@ async def _seed_kingdee_source(db, prefix: str, *, negative_debit_correction: bo
     )
     db.add(voucher)
     await db.flush()
+    duplicate_voucher = None
+    if duplicate_voucher_no_next_period:
+        duplicate_voucher = DwdGlVoucher(
+            legal_entity_id=entity.id,
+            voucher_no=voucher.voucher_no,
+            voucher_group=voucher.voucher_group,
+            voucher_date=date(2026, 2, 15),
+            fiscal_year=2026,
+            fiscal_period=2,
+            source_status="posted",
+            is_checked=True,
+            is_posted=True,
+            preparer_name="Kingdee",
+            total_debit=Decimal("20.00"),
+            total_credit=Decimal("20.00"),
+            source_system="kingdee",
+            source_database=account_set_code,
+            source_pk=f"{account_set_code}:voucher:2",
+            import_batch_id=f"batch-{prefix}",
+        )
+        db.add(duplicate_voucher)
+        await db.flush()
     voucher_entries = [
         DwdGlVoucherEntry(
             voucher_id=voucher.id,
@@ -156,6 +184,43 @@ async def _seed_kingdee_source(db, prefix: str, *, negative_debit_correction: bo
                 source_pk=f"{account_set_code}:voucher:1:entry:3",
                 import_batch_id=f"batch-{prefix}",
             )
+        )
+    if duplicate_voucher:
+        voucher_entries.extend(
+            [
+                DwdGlVoucherEntry(
+                    voucher_id=duplicate_voucher.id,
+                    legal_entity_id=entity.id,
+                    line_no=1,
+                    finance_account_id=debit_account.id,
+                    account_code="1001",
+                    summary="Kingdee duplicate no debit",
+                    debit_amount=Decimal("20.00"),
+                    credit_amount=Decimal("0.00"),
+                    currency_code="CNY",
+                    exchange_rate=Decimal("1.00000000"),
+                    source_system="kingdee",
+                    source_database=account_set_code,
+                    source_pk=f"{account_set_code}:voucher:2:entry:1",
+                    import_batch_id=f"batch-{prefix}",
+                ),
+                DwdGlVoucherEntry(
+                    voucher_id=duplicate_voucher.id,
+                    legal_entity_id=entity.id,
+                    line_no=2,
+                    finance_account_id=credit_account.id,
+                    account_code="4001",
+                    summary="Kingdee duplicate no credit",
+                    debit_amount=Decimal("0.00"),
+                    credit_amount=Decimal("20.00"),
+                    currency_code="CNY",
+                    exchange_rate=Decimal("1.00000000"),
+                    source_system="kingdee",
+                    source_database=account_set_code,
+                    source_pk=f"{account_set_code}:voucher:2:entry:2",
+                    import_batch_id=f"batch-{prefix}",
+                ),
+            ]
         )
     db.add_all(
         [
@@ -283,6 +348,31 @@ async def test_import_normalizes_kingdee_negative_debit_lines_to_formal_credit_s
             (Decimal("0.0000"), Decimal("60.0000")),
             (Decimal("0.0000"), Decimal("40.0000")),
         ]
+
+
+async def test_import_allows_same_kingdee_voucher_number_in_different_periods():
+    prefix = uuid4().hex[:10]
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            account_set_code, _ = await _seed_kingdee_source(
+                db,
+                prefix,
+                duplicate_voucher_no_next_period=True,
+            )
+
+        service = FinanceCenterService(db)
+        result = await service.import_kingdee_history_to_formal_ledger(account_set_code)
+
+        assert result["created"]["periods"] == 2
+        assert result["created"]["vouchers"] == 2
+        assert result["created"]["voucher_entries"] == 4
+        vouchers = (
+            await db.execute(
+                select(FinVoucher).where(FinVoucher.source_database == account_set_code).order_by(FinVoucher.period)
+            )
+        ).scalars().all()
+        assert [row.voucher_no for row in vouchers] == [f"记-{prefix}", f"记-{prefix}"]
+        assert [row.period for row in vouchers] == ["2026-01", "2026-02"]
 
 
 async def test_revises_posted_kingdee_history_voucher_with_audited_version_and_recomputed_ledger():

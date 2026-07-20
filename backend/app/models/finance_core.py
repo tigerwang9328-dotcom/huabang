@@ -186,7 +186,13 @@ class FinAuxItem(_LineageMixin, _TimestampMixin, Base):
 class FinVoucher(_LineageMixin, _TimestampMixin, Base):
     __tablename__ = "voucher"
     __table_args__ = (
-        UniqueConstraint("book_id", "voucher_no", name="uq_fin_voucher_book_no"),
+        UniqueConstraint(
+            "book_id",
+            "period_id",
+            "voucher_group",
+            "voucher_no",
+            name="uq_fin_voucher_book_period_group_no",
+        ),
         UniqueConstraint("book_id", "id", name="uq_fin_voucher_book_id"),
         ForeignKeyConstraint(
             ["book_id", "period_id"],
