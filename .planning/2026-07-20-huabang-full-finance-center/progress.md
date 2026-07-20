@@ -32,3 +32,6 @@
 - Added audited history-voucher revision flow: posted Kingdee history vouchers are temporarily staged as draft for entry replacement, restored to posted status, versioned, operation-logged, and ledger balances are recomputed.
 - Added manual voucher lifecycle flow for open periods: create draft voucher, post balanced voucher, create/post reversal voucher, mark the original as reversed, and recompute ledger balances.
 - Verified Task 4 service checks against the isolated PostgreSQL 16 container: `test_finance_center_service.py` passed 3 tests, and combined finance/Kingdee related tests passed 25 tests.
+- Added statement mapping service methods for versioned statement lines and confirmed account-to-line mappings.
+- Added monthly statement generation from formal `fin` ledger balances into `dm.dm_finance_statement_monthly`; missing confirmed mappings return `pending_mapping` with account-level issues and do not emit fake zero rows.
+- Verified Task 5 statement checks against the isolated PostgreSQL 16 container: `test_finance_center_service.py` passed 4 tests, and combined finance/Kingdee related tests passed 26 tests.

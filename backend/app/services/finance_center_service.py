@@ -17,6 +17,8 @@ from app.models.finance_core import (
     FinOperationLog,
     FinPeriod,
     FinSourceLink,
+    FinStatementLine,
+    FinStatementMapping,
     FinVoucher,
     FinVoucherEntry,
     FinVoucherVersion,
@@ -24,6 +26,7 @@ from app.models.finance_core import (
 from app.models.kingdee_finance import (
     DimFinanceAccount,
     DimLegalEntity,
+    DmFinanceStatementMonthly,
     DwdGlBalanceMonthly,
     DwdGlVoucher,
     DwdGlVoucherEntry,
@@ -270,6 +273,180 @@ class FinanceCenterService:
         )
         await self.db.commit()
         return {"status": "posted", "voucher_id": created["voucher_id"], "reversal_of_id": original.id}
+
+    async def upsert_statement_line(
+        self,
+        template_code: str,
+        template_version: int,
+        statement_type: str,
+        line_code: str,
+        line_name: str,
+        display_order: int,
+    ) -> dict:
+        row = (
+            await self.db.execute(
+                select(FinStatementLine).where(
+                    FinStatementLine.template_code == template_code,
+                    FinStatementLine.template_version == template_version,
+                    FinStatementLine.statement_type == statement_type,
+                    FinStatementLine.line_code == line_code,
+                )
+            )
+        ).scalar_one_or_none()
+        if row:
+            row.line_name = line_name
+            row.display_order = display_order
+        else:
+            row = FinStatementLine(
+                template_code=template_code,
+                template_version=template_version,
+                statement_type=statement_type,
+                line_code=line_code,
+                line_name=line_name,
+                display_order=display_order,
+            )
+            self.db.add(row)
+        await self.db.commit()
+        return {"statement_line_id": row.id, "line_code": row.line_code}
+
+    async def map_account_to_statement(
+        self,
+        book_id: int,
+        account_id: int,
+        statement_line_id: int,
+        amount_sign: int,
+        actor_name: str,
+    ) -> dict:
+        line = await self.db.get(FinStatementLine, statement_line_id)
+        if not line:
+            raise FinanceCenterError(f"statement line not found: {statement_line_id}")
+        account = await self.db.get(FinAccount, account_id)
+        if not account or account.book_id != book_id:
+            raise FinanceCenterError("account does not belong to the requested book")
+        mapping = (
+            await self.db.execute(
+                select(FinStatementMapping).where(
+                    FinStatementMapping.book_id == book_id,
+                    FinStatementMapping.account_id == account_id,
+                    FinStatementMapping.statement_line_id == statement_line_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if mapping:
+            mapping.amount_sign = amount_sign
+            mapping.status = "confirmed"
+            mapping.confirmed_at = datetime.now(timezone.utc)
+            mapping.version = int(mapping.version or 1) + 1
+        else:
+            mapping = FinStatementMapping(
+                book_id=book_id,
+                account_id=account_id,
+                statement_line_id=statement_line_id,
+                statement_type=line.statement_type,
+                amount_sign=amount_sign,
+                status="confirmed",
+                mapping_source="manual",
+                confirmed_at=datetime.now(timezone.utc),
+            )
+            self.db.add(mapping)
+        self.db.add(
+            FinOperationLog(
+                book_id=book_id,
+                actor_name=actor_name,
+                action="statement.mapping.confirm",
+                target_type="statement_mapping",
+                target_id=str(statement_line_id),
+                reason="confirmed account statement mapping",
+                after_data={
+                    "account_id": account_id,
+                    "statement_line_id": statement_line_id,
+                    "amount_sign": amount_sign,
+                },
+            )
+        )
+        await self.db.commit()
+        return {"mapping_id": mapping.id, "status": mapping.status}
+
+    async def generate_statement_monthly(self, book_id: int, period: str, statement_type: str) -> dict:
+        book = await self.db.get(FinBook, book_id)
+        if not book:
+            raise FinanceCenterError(f"book not found: {book_id}")
+        balance_rows = (
+            await self.db.execute(
+                select(FinLedgerBalance, FinAccount)
+                .join(FinAccount, FinAccount.id == FinLedgerBalance.account_id)
+                .where(FinLedgerBalance.book_id == book_id, FinLedgerBalance.period == period)
+                .order_by(FinAccount.account_code)
+            )
+        ).all()
+        if not balance_rows:
+            return {"status": "pending_data", "items": [], "issues": [{"code": "missing_balances", "period": period}]}
+        mapped_account_ids = set(
+            (
+                await self.db.execute(
+                    select(FinStatementMapping.account_id)
+                    .where(
+                        FinStatementMapping.book_id == book_id,
+                        FinStatementMapping.statement_type == statement_type,
+                        FinStatementMapping.status == "confirmed",
+                    )
+                    .distinct()
+                )
+            ).scalars()
+        )
+        balance_account_ids = {account.id for _, account in balance_rows}
+        missing_accounts = [
+            {"code": "unmapped_account", "account_code": account.account_code, "account_name": account.account_name}
+            for _, account in balance_rows
+            if account.id not in mapped_account_ids
+        ]
+        if missing_accounts:
+            return {"status": "pending_mapping", "items": [], "issues": missing_accounts}
+
+        rows = (
+            await self.db.execute(
+                select(FinStatementMapping, FinStatementLine, FinLedgerBalance, FinAccount)
+                .join(FinStatementLine, FinStatementLine.id == FinStatementMapping.statement_line_id)
+                .join(FinLedgerBalance, FinLedgerBalance.account_id == FinStatementMapping.account_id)
+                .join(FinAccount, FinAccount.id == FinStatementMapping.account_id)
+                .where(
+                    FinStatementMapping.book_id == book_id,
+                    FinStatementMapping.statement_type == statement_type,
+                    FinStatementMapping.status == "confirmed",
+                    FinLedgerBalance.book_id == book_id,
+                    FinLedgerBalance.period == period,
+                    FinStatementMapping.account_id.in_(balance_account_ids),
+                )
+                .order_by(FinStatementLine.display_order, FinStatementLine.line_code)
+            )
+        ).all()
+        grouped: dict[str, dict] = {}
+        for mapping, line, balance, account in rows:
+            value = self._statement_amount(statement_type, balance, account) * int(mapping.amount_sign or 1)
+            current = grouped.setdefault(
+                line.line_code,
+                {
+                    "line": line,
+                    "amount": Decimal("0.0000"),
+                },
+            )
+            current["amount"] += value
+
+        items = []
+        for line_code, payload in grouped.items():
+            line = payload["line"]
+            amount = _decimal(payload["amount"])
+            await self._upsert_dm_statement_row(book, period, statement_type, line, amount, "ready", [])
+            items.append(
+                {
+                    "line_code": line_code,
+                    "line_name": line.line_name,
+                    "current_amount": float(amount),
+                    "status": "ready",
+                }
+            )
+        await self.db.commit()
+        return {"status": "ready", "items": items, "issues": []}
 
     async def import_kingdee_history_to_formal_ledger(self, account_set_code: str) -> dict:
         entity = (
@@ -821,3 +998,57 @@ class FinanceCenterService:
             else:
                 balance.closing_amount = balance.opening_amount + balance.period_credit - balance.period_debit
             balance.version = int(balance.version or 1) + 1
+
+    def _statement_amount(self, statement_type: str, balance: FinLedgerBalance, account: FinAccount) -> Decimal:
+        if statement_type == "balance_sheet":
+            return _decimal(balance.closing_amount)
+        if account.balance_direction == "debit":
+            return _decimal(balance.period_debit) - _decimal(balance.period_credit)
+        return _decimal(balance.period_credit) - _decimal(balance.period_debit)
+
+    async def _upsert_dm_statement_row(
+        self,
+        book: FinBook,
+        period: str,
+        statement_type: str,
+        line: FinStatementLine,
+        amount: Decimal,
+        status: str,
+        issues: list[dict],
+    ) -> None:
+        row = (
+            await self.db.execute(
+                select(DmFinanceStatementMonthly).where(
+                    DmFinanceStatementMonthly.legal_entity_id == book.legal_entity_id,
+                    DmFinanceStatementMonthly.period == period,
+                    DmFinanceStatementMonthly.statement_type == statement_type,
+                    DmFinanceStatementMonthly.line_code == line.line_code,
+                )
+            )
+        ).scalar_one_or_none()
+        values = {
+            "line_name": line.line_name,
+            "display_order": line.display_order,
+            "current_amount": amount,
+            "year_to_date_amount": amount,
+            "status": status,
+            "quality_issues": issues,
+            "import_batch_id": "finance-center",
+            "source_system": "finance_center",
+            "source_database": book.book_code,
+            "source_pk": f"fin:{book.id}:{period}:{statement_type}:{line.line_code}",
+            "source_updated_at": datetime.now(timezone.utc),
+        }
+        if row:
+            for key, value in values.items():
+                setattr(row, key, value)
+        else:
+            self.db.add(
+                DmFinanceStatementMonthly(
+                    legal_entity_id=book.legal_entity_id,
+                    period=period,
+                    statement_type=statement_type,
+                    line_code=line.line_code,
+                    **values,
+                )
+            )

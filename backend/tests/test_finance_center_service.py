@@ -11,6 +11,8 @@ from app.models.finance_core import (
     FinBook,
     FinLedgerBalance,
     FinSourceLink,
+    FinStatementLine,
+    FinStatementMapping,
     FinVoucher,
     FinVoucherEntry,
     FinVoucherVersion,
@@ -18,6 +20,7 @@ from app.models.finance_core import (
 from app.models.kingdee_finance import (
     DimFinanceAccount,
     DimLegalEntity,
+    DmFinanceStatementMonthly,
     DwdGlBalanceMonthly,
     DwdGlVoucher,
     DwdGlVoucherEntry,
@@ -353,3 +356,78 @@ async def test_manual_voucher_can_be_posted_and_reversed_with_ledger_audit():
         assert debit_balance.period_debit == Decimal("30.0000")
         assert debit_balance.period_credit == Decimal("30.0000")
         assert debit_balance.closing_amount == Decimal("0.0000")
+
+
+async def test_statement_generation_requires_confirmed_mapping_and_persists_monthly_rows():
+    prefix = uuid4().hex[:10]
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            account_set_code, _ = await _seed_kingdee_source(db, prefix)
+        service = FinanceCenterService(db)
+        await service.import_kingdee_history_to_formal_ledger(account_set_code)
+        book = (
+            await db.execute(select(FinBook).where(FinBook.book_code == account_set_code))
+        ).scalar_one()
+        accounts = {
+            row.account_code: row.id
+            for row in (
+                await db.execute(select(FinAccount).where(FinAccount.book_id == book.id))
+            ).scalars()
+        }
+
+        pending = await service.generate_statement_monthly(book.id, "2026-01", "income_statement")
+        assert pending["status"] == "pending_mapping"
+        assert pending["items"] == []
+        assert {issue["account_code"] for issue in pending["issues"]} == {"1001", "4001"}
+
+        revenue_line = await service.upsert_statement_line(
+            template_code="hb-small-enterprise",
+            template_version=1,
+            statement_type="income_statement",
+            line_code="revenue",
+            line_name="Revenue",
+            display_order=10,
+        )
+        await service.map_account_to_statement(
+            book.id,
+            accounts["4001"],
+            revenue_line["statement_line_id"],
+            amount_sign=1,
+            actor_name="finance-user",
+        )
+        cash_line = await service.upsert_statement_line(
+            template_code="hb-small-enterprise",
+            template_version=1,
+            statement_type="income_statement",
+            line_code="cash_movement",
+            line_name="Cash Movement",
+            display_order=20,
+        )
+        await service.map_account_to_statement(
+            book.id,
+            accounts["1001"],
+            cash_line["statement_line_id"],
+            amount_sign=1,
+            actor_name="finance-user",
+        )
+
+        ready = await service.generate_statement_monthly(book.id, "2026-01", "income_statement")
+
+        assert ready["status"] == "ready"
+        assert ready["items"] == [
+            {"line_code": "revenue", "line_name": "Revenue", "current_amount": 100.0, "status": "ready"},
+            {"line_code": "cash_movement", "line_name": "Cash Movement", "current_amount": 100.0, "status": "ready"},
+        ]
+        persisted = (
+            await db.execute(
+                select(DmFinanceStatementMonthly)
+                .where(
+                    DmFinanceStatementMonthly.legal_entity_id == book.legal_entity_id,
+                    DmFinanceStatementMonthly.period == "2026-01",
+                    DmFinanceStatementMonthly.statement_type == "income_statement",
+                )
+                .order_by(DmFinanceStatementMonthly.display_order)
+            )
+        ).scalars().all()
+        assert [row.status for row in persisted] == ["ready", "ready"]
+        assert [row.current_amount for row in persisted] == [Decimal("100.0000"), Decimal("100.0000")]
