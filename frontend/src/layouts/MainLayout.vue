@@ -332,12 +332,34 @@ const menuGroups = computed<MenuGroup[]>(() => [
   {
     label: "财务中心",
     icon: Money,
-    items: financeCenterModules.map((item) => ({
-      path: item.path,
-      icon: item.icon,
-      label: item.label,
-      permission: "finance:profit:view",
-    })),
+    items: [
+      ...financeCenterModules.map((item) => ({
+        path: item.path,
+        icon: item.icon,
+        label: item.label,
+        permission: "finance:profit:view",
+      })),
+      {
+        icon: List,
+        label: "原财务模块",
+        key: "finance-legacy",
+        permission: "finance:profit:view",
+        children: [
+          { path: "/app/fin/overview", label: "财务首页", permission: "finance:overview:view" },
+          { path: "/app/finance", label: "利润分析", permission: "finance:profit:view" },
+          { path: "/app/fin/reimbursements", label: "报销管理", permission: "finance:reimbursement:view" },
+          { path: "/app/fin/payments", label: "付款申请", permission: "finance:payment:view" },
+          { path: "/app/fin/expense-analysis", label: "费用分析", permission: "finance:expense:view" },
+          { path: "/app/fin/formal-ledger", label: "正式账簿", permission: "finance:voucher:write" },
+          { path: "/app/fin/history/account-sets", label: "历史账套" },
+          { path: "/app/fin/history/statements", label: "历史财务报表" },
+          { path: "/app/fin/history/account-balances", label: "历史科目余额" },
+          { path: "/app/fin/history/vouchers", label: "历史凭证查询" },
+          { path: "/app/fin/history/data-quality", label: "历史数据质量" },
+          { label: "现金安全", disabled: true, badge: "规划中", permission: "finance:cash:view" },
+        ],
+      },
+    ],
   },
   {
     label: "人力资源",
