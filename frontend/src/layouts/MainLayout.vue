@@ -337,6 +337,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
       { path: "/app/fin/reimbursements", icon: List, label: "报销管理", permission: "finance:reimbursement:view" },
       { path: "/app/fin/payments", icon: Money, label: "付款申请", permission: "finance:payment:view" },
       { path: "/app/fin/expense-analysis", icon: DataLine, label: "费用分析", permission: "finance:expense:view" },
+      { path: "/app/fin/formal-ledger", icon: Money, label: "正式账簿", permission: "finance:voucher:write" },
       {
         icon: List,
         label: "历史财务",

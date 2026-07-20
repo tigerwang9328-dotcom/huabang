@@ -35,3 +35,6 @@
 - Added statement mapping service methods for versioned statement lines and confirmed account-to-line mappings.
 - Added monthly statement generation from formal `fin` ledger balances into `dm.dm_finance_statement_monthly`; missing confirmed mappings return `pending_mapping` with account-level issues and do not emit fake zero rows.
 - Verified Task 5 statement checks against the isolated PostgreSQL 16 container: `test_finance_center_service.py` passed 4 tests, and combined finance/Kingdee related tests passed 26 tests.
+- Added writable `/api/v1/finance-center` API for Kingdee-history ledger import, period opening, voucher creation/posting/reversal/history revision, statement mapping, and monthly statement generation.
+- Added front-end `FormalLedger.vue` and `financeCenterApi`; mounted it at `/app/fin/formal-ledger` under the finance menu with `finance:voucher:write` route permission.
+- Verified API/front-end checks: finance-center and Kingdee related backend tests passed 34 tests, `npm run type-check` passed, and `npm run build` passed with only existing Vite/Rollup dependency warnings.
