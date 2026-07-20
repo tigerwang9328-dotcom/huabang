@@ -448,6 +448,39 @@ class FinanceCenterService:
         await self.db.commit()
         return {"status": "ready", "items": items, "issues": []}
 
+    async def get_statement_monthly(self, book_id: int, period: str, statement_type: str) -> dict:
+        book = await self.db.get(FinBook, book_id)
+        if not book:
+            raise FinanceCenterError(f"book not found: {book_id}")
+        rows = (
+            await self.db.execute(
+                select(DmFinanceStatementMonthly)
+                .where(
+                    DmFinanceStatementMonthly.legal_entity_id == book.legal_entity_id,
+                    DmFinanceStatementMonthly.period == period,
+                    DmFinanceStatementMonthly.statement_type == statement_type,
+                    DmFinanceStatementMonthly.source_system == "finance_center",
+                )
+                .order_by(DmFinanceStatementMonthly.display_order, DmFinanceStatementMonthly.line_code)
+            )
+        ).scalars().all()
+        if not rows:
+            return {"status": "pending_data", "items": [], "issues": [{"code": "statement_not_generated"}]}
+        status = "ready" if all(row.status == "ready" for row in rows) else "pending_mapping"
+        return {
+            "status": status,
+            "items": [
+                {
+                    "line_code": row.line_code,
+                    "line_name": row.line_name,
+                    "current_amount": float(row.current_amount) if row.current_amount is not None else None,
+                    "status": row.status,
+                }
+                for row in rows
+            ],
+            "issues": [issue for row in rows for issue in (row.quality_issues or [])],
+        }
+
     async def import_kingdee_history_to_formal_ledger(self, account_set_code: str) -> dict:
         entity = (
             await self.db.execute(

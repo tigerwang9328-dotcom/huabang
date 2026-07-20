@@ -47,6 +47,9 @@ class FakeFinanceCenterService:
     async def generate_statement_monthly(self, book_id, period, statement_type):
         return {"status": "ready", "book_id": book_id, "period": period, "statement_type": statement_type}
 
+    async def get_statement_monthly(self, book_id, period, statement_type):
+        return {"status": "pending_data", "book_id": book_id, "period": period, "statement_type": statement_type}
+
 
 @pytest.fixture(autouse=True)
 def fake_service(monkeypatch):
@@ -111,3 +114,16 @@ async def test_statement_generation_endpoint_does_not_hide_pending_status():
 
     assert response.data["status"] == "ready"
     assert response.data["statement_type"] == "income_statement"
+
+
+@pytest.mark.asyncio
+async def test_statement_get_endpoint_is_read_only():
+    response = await finance_center.get_statement_monthly(
+        book_id=1,
+        period="2026-01",
+        statement_type="income_statement",
+        current_user=SimpleNamespace(id=3, username="finance"),
+        db=object(),
+    )
+
+    assert response.data["status"] == "pending_data"

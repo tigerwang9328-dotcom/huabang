@@ -38,3 +38,4 @@
 - Added writable `/api/v1/finance-center` API for Kingdee-history ledger import, period opening, voucher creation/posting/reversal/history revision, statement mapping, and monthly statement generation.
 - Added front-end `FormalLedger.vue` and `financeCenterApi`; mounted it at `/app/fin/formal-ledger` under the finance menu with `finance:voucher:write` route permission.
 - Verified API/front-end checks: finance-center and Kingdee related backend tests passed 34 tests, `npm run type-check` passed, and `npm run build` passed with only existing Vite/Rollup dependency warnings.
+- Self-review fixed `GET /finance-center/statements` to be read-only; statement generation remains an explicit POST write path. Backend related tests now pass 35 tests.

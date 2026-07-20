@@ -218,5 +218,5 @@ async def get_statement_monthly(
     current_user: SysUser = Depends(require_permission("finance:profit:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    data = await FinanceCenterService(db).generate_statement_monthly(book_id, period, statement_type)
+    data = await FinanceCenterService(db).get_statement_monthly(book_id, period, statement_type)
     return ApiResponse.ok(data=data)
