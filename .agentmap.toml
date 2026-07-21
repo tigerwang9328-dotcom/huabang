@@ -1,0 +1,248 @@
+# ============================================================================
+# 华邦 AI 中台 — Agent 层级上下文映射
+# 维护说明:语义事实(职责/边界/契约/不变量)写在本文件;易变证据(行数/
+# 文件清单/git 指纹)由源码扫描产出,存入 .agents/state/*.json,不要写回这里。
+# 生成器只管理 AGENTS.md 中 <!-- agentmap:generated:* --> 之间的块。
+# ============================================================================
+
+project_name = "huabang-ai-center"
+project_root = "/srv/huabang-ai-center"
+description = "华邦服装公司 AI 经营中台:对接百胜 E3ERP/钉钉/金蝶,经 ETL(ODS→DWD→DWS→DM)落 PostgreSQL,向老板与门店提供经营日报、诊断、指挥台、投流决策与正式财务账簿。"
+primary_language = "python"
+max_agent_lines = 220
+max_agent_bytes = 9000
+max_chain_bytes = 26000
+
+# ----------------------------------------------------------------------------
+# 模块定义
+# id           — 稳定唯一标识
+# path         — 相对项目根的目录
+# parent       — 父模块 id(root 无 parent)
+# leaf         — 是否叶子(无受管子模块)
+# purpose      — 职责一句话
+# out_of_scope — 不负责什么
+# entrypoints  — 验证过的入口文件(相对模块路径)
+# invariants   — 模块级不变量(违反即 bug)
+# validation   — 本地校验命令
+# relations    — 跨模块契约 [id, direction, contract]
+# ----------------------------------------------------------------------------
+
+[[modules]]
+id = "root"
+path = "."
+parent = ""
+leaf = false
+purpose = "项目根:中台整体目的、权威数据/控制流、全局不变量、顶层模块摘要。"
+out_of_scope = ["具体业务实现细节", "单文件级导航(放叶子)"]
+entrypoints = ["deploy/systemd/", "scripts/crontab"]
+
+[[modules]]
+id = "backend"
+path = "backend"
+parent = "root"
+leaf = false
+purpose = "FastAPI 后端:HTTP API、业务服务、ETL、第三方集成、调度任务、ORM 模型。"
+out_of_scope = ["前端 Vue 页面", "纯 shell 同步脚本(scripts/)"]
+entrypoints = ["app/main.py", "alembic.ini", "requirements.txt"]
+invariants = [
+  "uvicorn 监听 127.0.0.1:8000,由 Nginx 反代 /api/;不放公网直连。",
+  "所有路由前缀 /api/v1;鉴权在 app/api/v1/deps.py + app/core/security.py。",
+  "数据库为 PostgreSQL 16(asyncpg),schema 按层划分:ods/dim/dwd/dws/dm/fin/kingdee/sys/log/app/ai/life。",
+  "Alembic 单一 head;迁移不可回灌生产,变更必须 alembic upgrade head。",
+]
+validation = [
+  "cd /srv/huabang-ai-center/backend && .venv/bin/python -m pytest -q",
+  "cd /srv/huabang-ai-center/backend && .venv/bin/alembic heads",
+]
+
+[[modules]]
+id = "backend_api"
+path = "backend/app/api/v1"
+parent = "backend"
+leaf = true
+purpose = "HTTP API 层:28 个路由模块,负责参数校验、鉴权、调用 service、组装响应。"
+out_of_scope = ["业务逻辑实现(放 services)", "ORM 定义(放 models)", "外部 API 调用(放 integrations)"]
+entrypoints = ["router.py", "deps.py", "auth.py"]
+invariants = [
+  "所有路由注册在 router.py 的 api_router(prefix=/api/v1);新增路由必须在此 include。",
+  "受保护接口依赖 deps.py 的 get_current_user / require_permission;匿名接口显式标注。",
+  "数据范围通过 core/data_scope.get_data_scope 限定,不可在路由层绕过白名单。",
+  "字段级权限通过 core/field_permissions.apply_field_permissions 在返回前应用。",
+]
+relations = [
+  ["backend_services", "down", "路由调用 service 层完成业务"],
+  ["backend_core", "down", "依赖 deps/config/security/data_scope/field_permissions"],
+]
+
+[[modules]]
+id = "backend_core"
+path = "backend/app/core"
+parent = "backend"
+leaf = true
+purpose = "核心基础设施:配置、异步数据库会话、Redis、JWT 安全、门店/仓库白名单、数据范围、字段权限、标准进价、异常处理、日志。"
+out_of_scope = ["业务 service", "ORM 模型定义", "HTTP 路由"]
+entrypoints = ["config.py", "database.py", "security.py", "store_whitelist.py", "data_scope.py", "field_permissions.py"]
+invariants = [
+  "store_whitelist.ALLOWED_STORE_CODES = 7 个销售门店;ALLOWED_INVENTORY_CODES = 7 门店 + GZ001/GZ002/GYNG。销售/收款只走门店白名单,库存走库存白名单。",
+  "ACTUAL_PAY_CODES 定义实收口径支付方式(000/666/971/003/004/011);VIP 卡消费(004)进销售额也进实收,但不进充值。",
+  "gz002 小写必须按 GZ002 匹配;维度表保留全量以供审计。",
+  "AppSecret/JWT 密钥/DB 密码绝不进日志、不进请求参数(config.py 由 pydantic-settings 从 .env 注入)。",
+  "DB 会话通过 get_db 依赖注入,自动 commit/rollback;禁止 service 层裸 commit 跨边界。",
+]
+relations = [
+  ["backend_models", "down", "Base = DeclarativeBase 供所有模型继承"],
+  ["backend_api", "up", "向 API 层提供 deps/config/security/scope"],
+]
+
+[[modules]]
+id = "backend_models"
+path = "backend/app/models"
+parent = "backend"
+leaf = true
+purpose = "SQLAlchemy ORM 模型,按数据仓库分层:sys/log/app/ods/dim/dwd/dws/dm/fin/kingdee/dingtalk/ai/life。"
+out_of_scope = ["业务查询逻辑", "API 序列化"]
+entrypoints = ["__init__.py(统一导出)", "dwd.py", "dws.py", "dm.py", "finance_core.py", "kingdee_finance.py", "sys.py"]
+invariants = [
+  "分层契约:ods=原始落档(只增不改)/ dim=维度 / dwd=明细 / dws=日汇总 / dm=老板看板与诊断。同层不跨层写。",
+  "金蝶历史只读链路:kingdee_finance.py 表只由迁移脚本写入,正式账簿写入 fin.* 表(finance_core/finance_operations)。",
+  "dwd_pos_ticket:ls=正常销售(正数),lt=退货(负数:sales_amount/sales_qty/standard_amount/gross_profit_source_amount 取负)。ETL 必须按 lx 字段处理。",
+  "__init__.py 统一导出所有模型,Alembic autogenerate 依赖此导入。",
+  "新增表必须配 Alembic 迁移;禁止裸 SQL 建表入生产。",
+]
+relations = [
+  ["backend_services_etl", "up", "ETL 各阶段读写对应层模型"],
+  ["backend_integrations_baison", "up", "同步服务写入 ods/dwd 表"],
+]
+
+[[modules]]
+id = "backend_services"
+path = "backend/app/services"
+parent = "backend"
+leaf = false
+purpose = "业务服务层:30+ service,覆盖经营概览/报告/会员/商品/库存/投流/任务/AI 诊断/指挥台/规则引擎/财务中心/金蝶/钉钉/利润/尺码墙。"
+out_of_scope = ["HTTP 路由处理", "第三方 API 原始封装(放 integrations)", "调度注册(放 jobs)"]
+entrypoints = ["report_service.py", "command_center_service.py", "finance_center_service.py", "kingdee_finance_service.py", "ai_engine.py", "rule_engine.py", "profit_service.py"]
+invariants = [
+  "service 只通过 get_db 注入的 AsyncSession 操作 DB;不自行 create_engine。",
+  "金蝶历史源只读;正式可写财务走 finance_center_service → fin.* 表,不写回金蝶服务器与原始快照。",
+  "月度报表缺映射返回 pending_mapping,不把缺失显示为 0 或 ready。",
+  "AI 经营建议与投流决策对事实层只读;LLM 输出不直接落 dws/dm 事实表,仅落 ai.* 快照。",
+]
+
+[[modules]]
+id = "backend_services_etl"
+path = "backend/app/services/etl"
+parent = "backend_services"
+leaf = true
+purpose = "ETL 管线:ods_to_dwd → dwd_to_dws → dws_to_dm,带 etl_log 记录每步行数与状态。"
+out_of_scope = ["从第三方 API 拉数到 ods(放 integrations/baison)", "调度触发(放 jobs)"]
+entrypoints = ["pipeline.py", "ods_to_dwd.py", "dwd_to_dws.py", "dws_to_dm.py", "etl_log.py"]
+invariants = [
+  "STEP_ORDER = [ods_to_dwd, dwd_to_dws, dws_to_dm];不可乱序,前步失败后步不跑。",
+  "dwd_to_dws 必须按 store_whitelist 过滤;退货(lt)在 dwd 已取负,dws 直接 SUM。",
+  "dws_to_dm 重建 dm_boss_daily_report 时按 stat_date 幂等覆盖,不累积。",
+  "etl_log 记录 run_id/step/rows/status;失败必须 rollback 并 fail_task。",
+]
+relations = [
+  ["backend_models", "up", "读写 ods/dim/dwd/dws/dm 模型"],
+  ["backend_core", "up", "依赖 store_whitelist 过滤口径"],
+]
+
+[[modules]]
+id = "backend_integrations_baison"
+path = "backend/app/integrations/baison"
+parent = "backend"
+leaf = true
+purpose = "百胜 E3ERP 开放平台集成:签名/客户端/配置 + 15 个业务同步服务(小票/销售商品/库存/会员/储值/商品/入库/调拨/门店/仓库/SKU/目标)。"
+out_of_scope = ["业务汇总逻辑(放 services)", "HTTP 路由"]
+entrypoints = ["client.py", "auth.py", "config.py", "services/pos_ticket_service.py", "services/inventory_service.py"]
+invariants = [
+  "百胜 v2.0 公共参数:method/format=json/key/timestamp/v=2.0/sign_method=md5/data;业务参数 JSON 紧凑序列化进 data,不平铺根参数。",
+  "AppSecret 只本地签名,绝不进请求参数、绝不进日志(client.py mask_params 脱敏)。",
+  "timestamp 必须北京时间(Asia/Shanghai)。",
+  "pos_ticket_service._save_batch 必须按 lx 字段处理:lt=退货取负(ls=正常销售正数);遗漏会导致销售额虚高。",
+  "inventory_service._list_store_codes 返回 10 个库存白名单编码;销售商品/小票汇总只过滤 7 个销售门店。",
+  "重试只对网络/5xx,不对业务错误码重试(TRANSPORT_RETRY_DELAYS)。",
+]
+relations = [
+  ["backend_models", "down", "拉到的数据写入 ods/dwd 表"],
+  ["backend_core", "up", "依赖 config/store_whitelist"],
+]
+
+[[modules]]
+id = "backend_modules_dingtalk"
+path = "backend/app/modules/dingtalk"
+parent = "backend"
+leaf = true
+purpose = "钉钉 Stream 入站事件消费(独立进程,systemd 单实例):收事件→dispatcher 落库→快速 ACK;含审批/考勤/员工/财务/HR 同步。"
+out_of_scope = ["FastAPI 路由内调用", "出站推送(放 services/dingtalk.py + jobs/push_jobs)"]
+entrypoints = ["runner.py", "stream_client.py", "dispatcher.py", "sync/runner.py"]
+invariants = [
+  "只允许一个实例运行(systemd huabang-dingtalk-stream.service);多实例重复消费争抢连接。",
+  "EventHandler 必须 STATUS_OK 快速 ACK,失败也 ACK 防重投;异常在 handler 内捕获并落日志。",
+  "凭证 DINGTALK_CLIENT_ID/SECRET 来自 .env;缺凭证抛错但不打印密钥值。",
+  "事件先落 dingtalk_event 原始档,再由 sync/* 解析入业务表;幂等键防止重复处理。",
+]
+validation = [
+  "systemctl status huabang-dingtalk-stream.service",
+]
+relations = [
+  ["backend_models", "down", "写入 dingtalk_event/attendance/hr_finance 表"],
+  ["backend_core", "up", "依赖 config/logger"],
+]
+
+[[modules]]
+id = "backend_jobs"
+path = "backend/app/jobs"
+parent = "backend"
+leaf = true
+purpose = "APScheduler 定时任务注册与执行:每日同步、早报、健康检查、会员回访、补货、钉钉同步、投流、AI 助手清理。"
+out_of_scope = ["任务业务实现(放 services)", "shell 脚本调度(放 scripts/)"]
+entrypoints = ["scheduler.py", "sync_jobs.py", "report_jobs.py", "push_jobs.py", "command_center_health_jobs.py"]
+invariants = [
+  "scheduler 时区 Asia/Shanghai;MemoryJobStore(重启即丢,任务幂等设计)。",
+  "setup_jobs() 在 FastAPI lifespan 启动时调用;每个任务 replace_existing=True。",
+  "任务失败不阻塞调度器;关键任务 misfire_grace_time 兜底。",
+  "命令中心健康检查只生成待人工确认的幂等任务草稿,不依赖钉钉开关。",
+]
+relations = [
+  ["backend_services", "down", "任务调用 service 执行业务"],
+  ["backend_services_etl", "down", "sync_jobs 触发 ETL 管线"],
+]
+
+[[modules]]
+id = "frontend"
+path = "frontend"
+parent = "root"
+leaf = true
+purpose = "Vue3 + Element Plus + Pinia + ECharts 前端:20 个业务视图目录,经 Nginx 静态部署,API 走 /api/v1。"
+out_of_scope = ["后端业务逻辑", "DB/第三方集成"]
+entrypoints = ["src/main.ts", "src/router/index.ts", "src/App.vue", "package.json", "vite.config.ts"]
+invariants = [
+  "构建产物 frontend/dist 由 Nginx 提供;index.html 必须 Cache-Control no-cache(防 chunk 失效 404)。",
+  "所有 API 请求经 src/api/request.ts(axios),前缀 /api/v1;不直连 8000 端口。",
+  "路由权限在 router/index.ts 守卫 + 后端 require_permission 双重校验。",
+]
+validation = [
+  "cd /srv/huabang-ai-center/frontend && npm run type-check",
+  "cd /srv/huabang-ai-center/frontend && npm run build",
+]
+
+[[modules]]
+id = "scripts"
+path = "scripts"
+parent = "root"
+leaf = true
+purpose = "crontab 调度的 shell 脚本:数据同步、备份、快照生成、健康检查。"
+out_of_scope = ["Python 业务逻辑(放 backend)", "前端构建"]
+entrypoints = ["sync_pos_tickets_daily.sh", "sync_baison_inventory_daily.sh", "pg_backup.sh", "git_daily_backup.sh", "generate_boss_command_center_daily.sh"]
+invariants = [
+  "并发敏感脚本必须用 flock -n 加锁(库存/会员/入库/储值/目标/尺码墙/指挥台/AI 建议)。",
+  "crontab 时区为服务器 UTC;北京时间 = UTC + 8(如 0 20 * * * = 北京 04:00)。",
+  "脚本以 xiaohu 身份运行,路径硬编码 /srv/huabang-ai-center/。",
+  "pg_backup 每日 03:00 UTC(北京 11:00)备份;git_daily_backup 03:30 UTC。",
+]
+relations = [
+  ["backend_integrations_baison", "down", "调用 backend 同步脚本"],
+  ["backend_services", "down", "生成指挥台/尺码墙/AI 建议快照"],
+]
