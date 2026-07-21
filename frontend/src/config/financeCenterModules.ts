@@ -27,6 +27,17 @@ export interface FinanceCenterModule {
   currentScope: string;
 }
 
+export interface FinanceNavigationItem {
+  path?: string;
+  label: string;
+  icon?: unknown;
+  key?: string;
+  permission?: string;
+  disabled?: boolean;
+  badge?: string;
+  children?: FinanceNavigationItem[];
+}
+
 export const financeCenterModules: FinanceCenterModule[] = [
   {
     key: "data-cockpit",
@@ -163,3 +174,45 @@ export const financeCenterModules: FinanceCenterModule[] = [
 export const financeCenterModuleMap = Object.fromEntries(
   financeCenterModules.map((item) => [item.key, item]),
 ) as Record<string, FinanceCenterModule>;
+
+export const financeLegacyModules: FinanceNavigationItem[] = [
+  { path: "/app/fin/overview", icon: Money, label: "财务首页", permission: "finance:overview:view" },
+  { path: "/app/finance", icon: DataLine, label: "利润分析", permission: "finance:profit:view" },
+  { path: "/app/fin/reimbursements", icon: List, label: "报销管理", permission: "finance:reimbursement:view" },
+  { path: "/app/fin/payments", icon: Money, label: "付款申请", permission: "finance:payment:view" },
+  { path: "/app/fin/expense-analysis", icon: DataAnalysis, label: "费用分析", permission: "finance:expense:view" },
+  { path: "/app/fin/formal-ledger", icon: Money, label: "正式账簿", permission: "finance:voucher:write" },
+];
+
+export const financeHistoryModules: FinanceNavigationItem = {
+  icon: Files,
+  label: "历史财务",
+  key: "finance-history",
+  permission: "finance:profit:view",
+  children: [
+    { path: "/app/fin/history/account-sets", label: "历史账套" },
+    { path: "/app/fin/history/statements", label: "财务报表" },
+    { path: "/app/fin/history/account-balances", label: "科目余额" },
+    { path: "/app/fin/history/vouchers", label: "凭证查询" },
+    { path: "/app/fin/history/data-quality", label: "数据质量" },
+  ],
+};
+
+export const mirroredFinanceCenterNavigation: FinanceNavigationItem = {
+  icon: Money,
+  label: "财务中心",
+  key: "finance-center",
+  permission: "finance:profit:view",
+  children: financeCenterModules.map((item) => ({
+    path: item.path,
+    label: item.label,
+    permission: "finance:profit:view",
+  })),
+};
+
+export const financeProfitNavigation: FinanceNavigationItem[] = [
+  ...financeLegacyModules,
+  financeHistoryModules,
+  mirroredFinanceCenterNavigation,
+  { label: "现金安全", icon: Box, disabled: true, badge: "规划中", permission: "finance:cash:view" },
+];

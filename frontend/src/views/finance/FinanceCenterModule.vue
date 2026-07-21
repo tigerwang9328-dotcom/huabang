@@ -2,7 +2,7 @@
   <div class="finance-module">
     <header class="module-header">
       <div>
-        <p class="module-kicker">财务中心</p>
+        <p class="module-kicker">财务利润 / 财务中心</p>
         <h1>{{ module.label }}</h1>
       </div>
       <el-tag :type="statusMeta.type" effect="plain">{{ statusMeta.label }}</el-tag>
