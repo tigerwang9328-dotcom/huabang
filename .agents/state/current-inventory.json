@@ -1,0 +1,4484 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-22T06:13:28+00:00",
+  "project": {
+    "name": "huabang-ai-center",
+    "root": "D:\\huabang\\worktrees\\kingdee-finance-local",
+    "git_head": "e33ec03b401b9bee836a2bfa42bea8d85f52c583",
+    "config": "D:\\huabang\\worktrees\\kingdee-finance-local\\.agentmap.toml"
+  },
+  "files": {
+    ".agentmap.toml": {
+      "path": ".agentmap.toml",
+      "lines": 241,
+      "size": 12590,
+      "language": "TOML",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "61cbe9ad259c16a4ca6575760133cc6055b07790adb464912ddd40d79552c7bb"
+    },
+    "backend/alembic/env.py": {
+      "path": "backend/alembic/env.py",
+      "lines": 38,
+      "size": 1418,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "624ba12892d4c775d357b68d9d841653db6a113ab7f5035f65ed92b4d82d6aae"
+    },
+    "backend/alembic/versions/0a8b9c0d1e2f_vip_negative_balance_amount.py": {
+      "path": "backend/alembic/versions/0a8b9c0d1e2f_vip_negative_balance_amount.py",
+      "lines": 27,
+      "size": 586,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f3da19db21c24ee3e548a0fbbea6b44158583fd9b0898eb16b3fa5204e849e4f"
+    },
+    "backend/alembic/versions/0a9b0c1d2e3f_inventory_warning_evidence.py": {
+      "path": "backend/alembic/versions/0a9b0c1d2e3f_inventory_warning_evidence.py",
+      "lines": 48,
+      "size": 2051,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "86b18131e10ecbb758ebdd9a5dfcbd5d90b75ea96e06fe667bcf6997802f74c7"
+    },
+    "backend/alembic/versions/0b8c9d0e1f2a_business_exception_evidence.py": {
+      "path": "backend/alembic/versions/0b8c9d0e1f2a_business_exception_evidence.py",
+      "lines": 122,
+      "size": 5698,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5c2a87d9adaa335eea4d19cdf70e8fd961b433231ec7b3ddbd55b29507d6dd66"
+    },
+    "backend/alembic/versions/1b10a07bbe68_add_dingtalk_finance_hr_tables.py": {
+      "path": "backend/alembic/versions/1b10a07bbe68_add_dingtalk_finance_hr_tables.py",
+      "lines": 138,
+      "size": 8224,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5e43395597dec7c5b214d081519e146d31fcad0389249e04607a4c9daa6a1896"
+    },
+    "backend/alembic/versions/1c9d0e1f2a3b_profit_foundation.py": {
+      "path": "backend/alembic/versions/1c9d0e1f2a3b_profit_foundation.py",
+      "lines": 82,
+      "size": 4242,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f98a60c2508b6e4af118d2e19932cfa329fa023398608487d699955890b82d67"
+    },
+    "backend/alembic/versions/1d0e1f2a3b4c_profit_rule_config.py": {
+      "path": "backend/alembic/versions/1d0e1f2a3b4c_profit_rule_config.py",
+      "lines": 84,
+      "size": 3500,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f16f557b533bf914c1f6bc5d03a54c697a6022ac3a1ffd712437972ae4b4715d"
+    },
+    "backend/alembic/versions/1e0f1a2b3c4d_member_segments.py": {
+      "path": "backend/alembic/versions/1e0f1a2b3c4d_member_segments.py",
+      "lines": 95,
+      "size": 5016,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e89b13181e171d227c4f54f853ec86725ea2467c8cb3d9473b72b81ec5bb5924"
+    },
+    "backend/alembic/versions/1f0a2b3c4d5e_task_workflow_notifications.py": {
+      "path": "backend/alembic/versions/1f0a2b3c4d5e_task_workflow_notifications.py",
+      "lines": 285,
+      "size": 13439,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f3e4625b800d4dc0f77ce84dcf414124082c655a2732ff5d68e0bedc49b59dd5"
+    },
+    "backend/alembic/versions/200b3c4d5e6f_task_notification_outbox.py": {
+      "path": "backend/alembic/versions/200b3c4d5e6f_task_notification_outbox.py",
+      "lines": 34,
+      "size": 1343,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b4c4ac5e88bfa412cdb3d5a069f3fb32583065ec84f40055d2b2d0071f6d78c8"
+    },
+    "backend/alembic/versions/211c4d5e6f70_task_notification_retry_audit.py": {
+      "path": "backend/alembic/versions/211c4d5e6f70_task_notification_retry_audit.py",
+      "lines": 27,
+      "size": 970,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d6b9f82fdb4ee1f1291e7a106d84be8e00c977ebdf1649b5a610ff95887ef2ab"
+    },
+    "backend/alembic/versions/222d5e6f7081_task_notification_recipient_outbox.py": {
+      "path": "backend/alembic/versions/222d5e6f7081_task_notification_recipient_outbox.py",
+      "lines": 76,
+      "size": 3295,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7da4dbd83d3ba2ee527301c02ab5546ce23a9fc8d0ba227f798fab1232884d5e"
+    },
+    "backend/alembic/versions/233e6f708192_standard_purchase_price.py": {
+      "path": "backend/alembic/versions/233e6f708192_standard_purchase_price.py",
+      "lines": 69,
+      "size": 2200,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5f93dddd47b2736cff30953b4d9f7f1eda7fda85d934dbd2e2c384c3b41e2d7a"
+    },
+    "backend/alembic/versions/244f6a7b8c9d_ai_business_advice_snapshot.py": {
+      "path": "backend/alembic/versions/244f6a7b8c9d_ai_business_advice_snapshot.py",
+      "lines": 72,
+      "size": 3582,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c637afa771d91565299478a6d5f385974c28b88ffd42a18aaa0ba84a2cfedcd1"
+    },
+    "backend/alembic/versions/255f6a7b8c9e_business_advice_prompt_v2.py": {
+      "path": "backend/alembic/versions/255f6a7b8c9e_business_advice_prompt_v2.py",
+      "lines": 30,
+      "size": 622,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "692d3d67a0e9f97e1d769e5a226d41a3a2d4c2c9d9de85205f8130a4127f433a"
+    },
+    "backend/alembic/versions/266f6a7b8c9f_business_advice_prompt_v3.py": {
+      "path": "backend/alembic/versions/266f6a7b8c9f_business_advice_prompt_v3.py",
+      "lines": 30,
+      "size": 622,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "09cff85f1d55d9062bde608392c60cb64f14910e3e66c44f4b04f4b93a01b359"
+    },
+    "backend/alembic/versions/277f6a7b8c90_business_advice_prompt_v4.py": {
+      "path": "backend/alembic/versions/277f6a7b8c90_business_advice_prompt_v4.py",
+      "lines": 30,
+      "size": 622,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "8ba1c6a1ba59d6cff02c69843f90d79c5ae798e065eab7770c296977193db5c8"
+    },
+    "backend/alembic/versions/288f6a7b8c91_business_advice_prompt_v5.py": {
+      "path": "backend/alembic/versions/288f6a7b8c91_business_advice_prompt_v5.py",
+      "lines": 30,
+      "size": 622,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "72eeb8299815eab0544d3089806c1e46b3457678c2c6cfcb14604a462f891554"
+    },
+    "backend/alembic/versions/299f6a7b8c92_ai_assistant_conversation.py": {
+      "path": "backend/alembic/versions/299f6a7b8c92_ai_assistant_conversation.py",
+      "lines": 69,
+      "size": 3353,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a11618ae8cf89138cdb6894b2977c305c06f5e270d1bd6d26de817cce123170b"
+    },
+    "backend/alembic/versions/2a0f6a7b8c93_investment_decision_history.py": {
+      "path": "backend/alembic/versions/2a0f6a7b8c93_investment_decision_history.py",
+      "lines": 254,
+      "size": 12734,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "301aecc9e3f0d81ebb727d325d8b6bdb092ab0e7e59f387adc4867343e0abe65"
+    },
+    "backend/alembic/versions/2b0f6a7b8c94_merge_investment_and_ai_assistant_heads.py": {
+      "path": "backend/alembic/versions/2b0f6a7b8c94_merge_investment_and_ai_assistant_heads.py",
+      "lines": 18,
+      "size": 331,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7dba6733ff9da59642f68412673c4e3af6326e83a444ed6c84dac69c41e60c1b"
+    },
+    "backend/alembic/versions/2c1f6a7b8c95_kingdee_historical_finance.py": {
+      "path": "backend/alembic/versions/2c1f6a7b8c95_kingdee_historical_finance.py",
+      "lines": 55,
+      "size": 1936,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "849f0955b519ae758e3192c4299a4e20079f347e5d76f2891d1885641b33e5da"
+    },
+    "backend/alembic/versions/2d1f6a7b8c96_finance_lineage_columns.py": {
+      "path": "backend/alembic/versions/2d1f6a7b8c96_finance_lineage_columns.py",
+      "lines": 61,
+      "size": 2772,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cd787a3089bff41caa5a0ba5e8d3a3f290310c8a0e98785df2b3b99644ba60cf"
+    },
+    "backend/alembic/versions/344f7a8192a3_persist_ai_command_conclusion.py": {
+      "path": "backend/alembic/versions/344f7a8192a3_persist_ai_command_conclusion.py",
+      "lines": 26,
+      "size": 551,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "31c81d433c134b554040a1edca383779dd288d991dedb58251ceec576a11c959"
+    },
+    "backend/alembic/versions/3e1f6a7b8c97_full_finance_center.py": {
+      "path": "backend/alembic/versions/3e1f6a7b8c97_full_finance_center.py",
+      "lines": 1067,
+      "size": 47862,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d4c482e3b8d6646b8e8741d49e53341c450335f4bfb82c7110287d11b715fef2"
+    },
+    "backend/alembic/versions/4a9c2d1e7b30_relax_fin_voucher_number_scope.py": {
+      "path": "backend/alembic/versions/4a9c2d1e7b30_relax_fin_voucher_number_scope.py",
+      "lines": 34,
+      "size": 839,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f2d65f53519138bb10009a1bf4616ff484ceb9d36168b1223328f6913095819a"
+    },
+    "backend/alembic/versions/5b8d3f0c9a21_allow_signed_ledger_balances.py": {
+      "path": "backend/alembic/versions/5b8d3f0c9a21_allow_signed_ledger_balances.py",
+      "lines": 34,
+      "size": 895,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ad91edca744319cb6bb96656d5f3866ab1e06fa4439ce4e22c7f83954c4938bf"
+    },
+    "backend/alembic/versions/6c1e4a7d2f09_remove_ledger_amount_sign_check.py": {
+      "path": "backend/alembic/versions/6c1e4a7d2f09_remove_ledger_amount_sign_check.py",
+      "lines": 27,
+      "size": 576,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "683758696bca600e122a183ade2992ef333d407c917e28c48d10020d3831e954"
+    },
+    "backend/alembic/versions/8fb17272a066_add_dingtalk_attendance_records.py": {
+      "path": "backend/alembic/versions/8fb17272a066_add_dingtalk_attendance_records.py",
+      "lines": 54,
+      "size": 2921,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b7026905a72c2dac1c70a12c0e9396807e7a1659bdef1f37b000970917769a44"
+    },
+    "backend/alembic/versions/9a1b2c3d4e5f_system_settings_rbac_security.py": {
+      "path": "backend/alembic/versions/9a1b2c3d4e5f_system_settings_rbac_security.py",
+      "lines": 44,
+      "size": 3945,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "dca02c7081e4258845a223729e6c8853e84b01453412fb58e476f81c2f6fe7e3"
+    },
+    "backend/alembic/versions/a1b2c3d4e5f6_diagnosis_integrity.py": {
+      "path": "backend/alembic/versions/a1b2c3d4e5f6_diagnosis_integrity.py",
+      "lines": 36,
+      "size": 1686,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d9b82ca393714fe7d4b909e1ca6b4e9902bcecdbc5785a0a3f603de2aa7042c6"
+    },
+    "backend/alembic/versions/a2b3c4d5e6f7_life_data_group_health.py": {
+      "path": "backend/alembic/versions/a2b3c4d5e6f7_life_data_group_health.py",
+      "lines": 38,
+      "size": 1089,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f10372d9bdcdb3ad3bc52cf10415c0eadaf3c53fdeb71ab01fce906f7325a373"
+    },
+    "backend/alembic/versions/a5b6c7d8e9f0_warehouse_baison_api.py": {
+      "path": "backend/alembic/versions/a5b6c7d8e9f0_warehouse_baison_api.py",
+      "lines": 62,
+      "size": 2841,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f0accfa90cfbb675026db8bfaa4112a2c92d315925c5054900d78da005d9f70f"
+    },
+    "backend/alembic/versions/ac7a05414061_add_dingtalk_events_table.py": {
+      "path": "backend/alembic/versions/ac7a05414061_add_dingtalk_events_table.py",
+      "lines": 51,
+      "size": 2785,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9d5e3d51e89ac71625976d39e5caa81f86f702870204ef746786a94c7692a0ac"
+    },
+    "backend/alembic/versions/b2c3d4e5f6a7_size_wall_candidates.py": {
+      "path": "backend/alembic/versions/b2c3d4e5f6a7_size_wall_candidates.py",
+      "lines": 67,
+      "size": 3037,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e8333982bb5a279bb1229009ae162aeaf44297c871e5fbe72749e44a1d5aad25"
+    },
+    "backend/alembic/versions/b6c7d8e9f0a1_inventory_baison_api.py": {
+      "path": "backend/alembic/versions/b6c7d8e9f0a1_inventory_baison_api.py",
+      "lines": 75,
+      "size": 3558,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "0b8409dfdeb268996525f376e23e0067aeb945ac116ecdca7daef9cbea6f1db0"
+    },
+    "backend/alembic/versions/c1d2e3f4a5b6_add_dim_baison_shop.py": {
+      "path": "backend/alembic/versions/c1d2e3f4a5b6_add_dim_baison_shop.py",
+      "lines": 53,
+      "size": 2660,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1e3ae157c439a979564884d818024a9535ec13903f0f009f7efdc39648b59ecb"
+    },
+    "backend/alembic/versions/c3d4e5f6a7b8_expand_size_wall_sizes.py": {
+      "path": "backend/alembic/versions/c3d4e5f6a7b8_expand_size_wall_sizes.py",
+      "lines": 46,
+      "size": 2154,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "21a24c942bdc87097c1634bf1fac52aec832f2a9886fe0326709cd8c9c973d91"
+    },
+    "backend/alembic/versions/c7d8e9f0a1b2_pos_ticket_baison_api.py": {
+      "path": "backend/alembic/versions/c7d8e9f0a1b2_pos_ticket_baison_api.py",
+      "lines": 80,
+      "size": 3071,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "8ff926e4484cfa40f8b1006350349a8f4740262bba69a619241f1b36ba56ee06"
+    },
+    "backend/alembic/versions/d2e3f4a5b6c7_extend_dim_store_multisource.py": {
+      "path": "backend/alembic/versions/d2e3f4a5b6c7_extend_dim_store_multisource.py",
+      "lines": 48,
+      "size": 1962,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "04ba0f3497349800d855e70bf04173b78d2071181ded884cb288732911ab57cd"
+    },
+    "backend/alembic/versions/d4e5f6a7b8c9_apparel_inventory_scope.py": {
+      "path": "backend/alembic/versions/d4e5f6a7b8c9_apparel_inventory_scope.py",
+      "lines": 63,
+      "size": 2279,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ef7fd667792a67e4a93cfc9e602374f18f74fdcdb198e2d6c09e239e538b57c3"
+    },
+    "backend/alembic/versions/d5e6f7a8b9c0_exclude_edge_sizes.py": {
+      "path": "backend/alembic/versions/d5e6f7a8b9c0_exclude_edge_sizes.py",
+      "lines": 34,
+      "size": 1195,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cb613bde45025235d32956631dbbbcca9d8124d99ac367a4481ca2b6394db98e"
+    },
+    "backend/alembic/versions/d8e9f0a1b2c3_baison_product_inbound.py": {
+      "path": "backend/alembic/versions/d8e9f0a1b2c3_baison_product_inbound.py",
+      "lines": 41,
+      "size": 2091,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "51315e1532931af040c87a9e40b5e860fc097c66158766ef146439ba691fd5d6"
+    },
+    "backend/alembic/versions/e3f4a5b6c7d8_product_baison_api.py": {
+      "path": "backend/alembic/versions/e3f4a5b6c7d8_product_baison_api.py",
+      "lines": 73,
+      "size": 3542,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f9134d2d022eb33d3644da97d5fd12a0cb2100edab3f05eab59cf5c7d530b56c"
+    },
+    "backend/alembic/versions/e5f6a7b8c9d0_expand_apparel_inventory_categories.py": {
+      "path": "backend/alembic/versions/e5f6a7b8c9d0_expand_apparel_inventory_categories.py",
+      "lines": 73,
+      "size": 2541,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "781f00f0180c2a6578df3096a8315f5f0a8836affae7f12fcf5a518ef3e79d0d"
+    },
+    "backend/alembic/versions/e6f7a8b9c0d1_boss_command_center.py": {
+      "path": "backend/alembic/versions/e6f7a8b9c0d1_boss_command_center.py",
+      "lines": 132,
+      "size": 6249,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "add819fa7f27f5ee8c134842410eca7678c865cf1a246a4cbb8c74b210b0dddf"
+    },
+    "backend/alembic/versions/e9f0a1b2c3d4_member_deposit_detail.py": {
+      "path": "backend/alembic/versions/e9f0a1b2c3d4_member_deposit_detail.py",
+      "lines": 43,
+      "size": 2191,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "fca46ec28dabf9a8bec7fe035d5554ddeb6fdee96d46c2010a27f285c9ad31d8"
+    },
+    "backend/alembic/versions/f0a1b2c3d4e5_store_targets.py": {
+      "path": "backend/alembic/versions/f0a1b2c3d4e5_store_targets.py",
+      "lines": 14,
+      "size": 734,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "95cb61d4266962770690a5fc76b745ef41802d4144b9f84901e63acf75d757ae"
+    },
+    "backend/alembic/versions/f1b2c3d4e5f6_life_data_collector.py": {
+      "path": "backend/alembic/versions/f1b2c3d4e5f6_life_data_collector.py",
+      "lines": 127,
+      "size": 4137,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "3ae660362dd3556abe5ab44e6d011f6c5490fe0c55184ab8abfb53d9c8300a94"
+    },
+    "backend/alembic/versions/f4a5b6c7d8e9_sku_baison_api.py": {
+      "path": "backend/alembic/versions/f4a5b6c7d8e9_sku_baison_api.py",
+      "lines": 78,
+      "size": 3852,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a387cda3d52ebda48247b2869faa895b3cb5b46dbab61ee865c0427bf74a0983"
+    },
+    "backend/alembic/versions/f7a8b9c0d1e2_baison_transfer_inbound.py": {
+      "path": "backend/alembic/versions/f7a8b9c0d1e2_baison_transfer_inbound.py",
+      "lines": 45,
+      "size": 1586,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cf4568c51fa9744ff993e51ea4b697da7a4186dbdcf493f7073cc4f68c07a523"
+    },
+    "backend/app/__init__.py": {
+      "path": "backend/app/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "972ff6ed28a20161afdbc6643d730e4861e87f68ebfb4df7e6421c070189c802"
+    },
+    "backend/app/api/__init__.py": {
+      "path": "backend/app/api/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "05e9eebb7dcbd86e6e072790366c71f9197a25e6aec42d831e1c4ecea3142f1b"
+    },
+    "backend/app/api/v1/__init__.py": {
+      "path": "backend/app/api/v1/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b8ade48a3a01d218a65211a4f4480c07f1443dfdb889fb85f0b26a7b74c965cc"
+    },
+    "backend/app/api/v1/acceptance.py": {
+      "path": "backend/app/api/v1/acceptance.py",
+      "lines": 643,
+      "size": 30171,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 24,
+      "digest": "9959caa3252ef17d812011d0fbc55eeea2892eaf211f3bf978e10870be7d61ce"
+    },
+    "backend/app/api/v1/ai.py": {
+      "path": "backend/app/api/v1/ai.py",
+      "lines": 34,
+      "size": 1115,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 2,
+      "digest": "06849865bfcfe88b5d5fabc8af5256bf8b703fa786feefad94fbb7d582762ebc"
+    },
+    "backend/app/api/v1/ai_assistant.py": {
+      "path": "backend/app/api/v1/ai_assistant.py",
+      "lines": 157,
+      "size": 5498,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 12,
+      "digest": "6e71beb0e3b09b930e9d859d0bad17fc54c591762a0908764c72052ce56bc6a2"
+    },
+    "backend/app/api/v1/ai_diagnosis.py": {
+      "path": "backend/app/api/v1/ai_diagnosis.py",
+      "lines": 217,
+      "size": 9730,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 14,
+      "digest": "a7b16274339a9abfc219d7957cd6def6a94212807172c0977965bfe7f66b05cb"
+    },
+    "backend/app/api/v1/audit.py": {
+      "path": "backend/app/api/v1/audit.py",
+      "lines": 277,
+      "size": 12397,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 14,
+      "digest": "9241fcc55c85559db8decc8db2855045efe913c81cc8e262c323eadb192eba48"
+    },
+    "backend/app/api/v1/auth.py": {
+      "path": "backend/app/api/v1/auth.py",
+      "lines": 250,
+      "size": 13184,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 10,
+      "digest": "76ba87e7741a608876dcacb658d76da2e7bca29676ff0f72274bc1d92aaf3468"
+    },
+    "backend/app/api/v1/baison.py": {
+      "path": "backend/app/api/v1/baison.py",
+      "lines": 493,
+      "size": 20911,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 2,
+      "route_handlers": 16,
+      "digest": "55602a8493cf0d923fa5975b228b58e20596c2e9df4171f7c2fdf1a78f012bc2"
+    },
+    "backend/app/api/v1/dashboard.py": {
+      "path": "backend/app/api/v1/dashboard.py",
+      "lines": 228,
+      "size": 10128,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 8,
+      "digest": "41193d283c5fe2e6d4153718bd19fc2ca77bb552ee74f7256f06cd984e7346f9"
+    },
+    "backend/app/api/v1/deps.py": {
+      "path": "backend/app/api/v1/deps.py",
+      "lines": 99,
+      "size": 3904,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5ea144a90df5191ab8815dce445fff2dde438c2270d9b44521edd5da2b4ccf2a"
+    },
+    "backend/app/api/v1/dingtalk.py": {
+      "path": "backend/app/api/v1/dingtalk.py",
+      "lines": 292,
+      "size": 11424,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 1,
+      "route_handlers": 12,
+      "digest": "4db405b277195c89fd5e003e47dc2afefd05b5a7cf5c18fc6fab5e079a3766b4"
+    },
+    "backend/app/api/v1/dingtalk_finance.py": {
+      "path": "backend/app/api/v1/dingtalk_finance.py",
+      "lines": 112,
+      "size": 6082,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 8,
+      "digest": "9b66f7d5bc62eff4123af357991c2baaa0dcaa83cf3bae0db6e40b955649bd50"
+    },
+    "backend/app/api/v1/etl.py": {
+      "path": "backend/app/api/v1/etl.py",
+      "lines": 88,
+      "size": 3623,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 6,
+      "digest": "a0cc4a4aac010b9e9142410f63a61992b623bc97f2fa5f1bdd5f1f99c769fbc7"
+    },
+    "backend/app/api/v1/finance.py": {
+      "path": "backend/app/api/v1/finance.py",
+      "lines": 434,
+      "size": 20565,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 12,
+      "digest": "710fc1407cc3df29970422dc0ccc48f89ef8be4c523db777fc0b6f1f21179acb"
+    },
+    "backend/app/api/v1/finance_center.py": {
+      "path": "backend/app/api/v1/finance_center.py",
+      "lines": 222,
+      "size": 7634,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 20,
+      "digest": "06455641b8e0c9b020bf4921b565a470bc8cea162f8949892150d06be7effe23"
+    },
+    "backend/app/api/v1/hr.py": {
+      "path": "backend/app/api/v1/hr.py",
+      "lines": 364,
+      "size": 17125,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 18,
+      "digest": "2ebec7e12e99232458a18b60f21fe3a38eae07f5557374ccbe7e0791bd673e9a"
+    },
+    "backend/app/api/v1/inventory.py": {
+      "path": "backend/app/api/v1/inventory.py",
+      "lines": 354,
+      "size": 17003,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 16,
+      "digest": "387f1f4997b37a9aae00aeed04e0335aae6ff3527efcf37c40c68852df3e8ea7"
+    },
+    "backend/app/api/v1/investment_decision.py": {
+      "path": "backend/app/api/v1/investment_decision.py",
+      "lines": 90,
+      "size": 3361,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 12,
+      "digest": "d280308c7bc5cbfd521e7c9139fbec134ed8151cea56f73fa3c596e95978838e"
+    },
+    "backend/app/api/v1/kingdee_finance.py": {
+      "path": "backend/app/api/v1/kingdee_finance.py",
+      "lines": 107,
+      "size": 4119,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 16,
+      "digest": "034af86e9bcfc73e677501e391f8f5595a2f18411c28188c77d21113df82d05b"
+    },
+    "backend/app/api/v1/life_data.py": {
+      "path": "backend/app/api/v1/life_data.py",
+      "lines": 160,
+      "size": 5696,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 4,
+      "digest": "9a879f19d4612251990176629046c30c0e3422c33c4f4ecf9782f0a1971b1e6f"
+    },
+    "backend/app/api/v1/life_data_analysis.py": {
+      "path": "backend/app/api/v1/life_data_analysis.py",
+      "lines": 22,
+      "size": 857,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 2,
+      "digest": "54f6631369131405bd78f75bad832c48f0a8ebd8dc2abd51fa54b63c78970c21"
+    },
+    "backend/app/api/v1/member.py": {
+      "path": "backend/app/api/v1/member.py",
+      "lines": 924,
+      "size": 46215,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 34,
+      "digest": "dc61f94cfaee9031a3d8fb1a424834163d767ae31e58e368670f2ca537226321"
+    },
+    "backend/app/api/v1/mobile.py": {
+      "path": "backend/app/api/v1/mobile.py",
+      "lines": 306,
+      "size": 15558,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 12,
+      "digest": "b794a49fff380c7bb08e465f7fea390fee3afc31f5feec7a1ddf476e0f930cc6"
+    },
+    "backend/app/api/v1/product.py": {
+      "path": "backend/app/api/v1/product.py",
+      "lines": 723,
+      "size": 35907,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 16,
+      "digest": "5cbd52ac2fb6916bb4cf337d7c67864f2bbae87514dee042a072f6be65073945"
+    },
+    "backend/app/api/v1/report.py": {
+      "path": "backend/app/api/v1/report.py",
+      "lines": 96,
+      "size": 4489,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 6,
+      "digest": "dd38287f5d9a56f89b0758cfa176e8ba03680bcca4a258cf274fa829241187fd"
+    },
+    "backend/app/api/v1/router.py": {
+      "path": "backend/app/api/v1/router.py",
+      "lines": 34,
+      "size": 1643,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1c4363bf229252f384bd6c023252edd56a74aae02dba838c99c737a4aed65e47"
+    },
+    "backend/app/api/v1/rules.py": {
+      "path": "backend/app/api/v1/rules.py",
+      "lines": 113,
+      "size": 4760,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 12,
+      "digest": "5a3d9b2ff54b15c821a22d8a6beefffb08fecebc428ad3ff86917896f97f7d7f"
+    },
+    "backend/app/api/v1/store.py": {
+      "path": "backend/app/api/v1/store.py",
+      "lines": 474,
+      "size": 25422,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 4,
+      "digest": "4891428d9e6b11ca6ce7ad0ff7f85908c999bf6e7f32b19026f2889de5d9417b"
+    },
+    "backend/app/api/v1/sync.py": {
+      "path": "backend/app/api/v1/sync.py",
+      "lines": 253,
+      "size": 9677,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 10,
+      "digest": "f9b0786f82839e99f439c8b76c3246ad01b36e4c1f788eb09c4e9949b664e471"
+    },
+    "backend/app/api/v1/system.py": {
+      "path": "backend/app/api/v1/system.py",
+      "lines": 650,
+      "size": 40614,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 62,
+      "digest": "239d5da46fcfd0052c9392ffda4fd04734ae8a804a08149a10b78d487b302cc7"
+    },
+    "backend/app/api/v1/task.py": {
+      "path": "backend/app/api/v1/task.py",
+      "lines": 815,
+      "size": 34934,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 18,
+      "digest": "317e4ccb8df8a883631d9747cc46585d003e2c514e78d9693a8a656f542d3e28"
+    },
+    "backend/app/core/__init__.py": {
+      "path": "backend/app/core/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "92b4fcd5066d4e6752d19350f2bc11d1230e0ea9fdb4fe2ff7342d1143ebfc13"
+    },
+    "backend/app/core/config.py": {
+      "path": "backend/app/core/config.py",
+      "lines": 148,
+      "size": 4691,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6325621b46861c9f59f2023891881f6a60f91c121454e97f9b116cbea457d7c7"
+    },
+    "backend/app/core/data_scope.py": {
+      "path": "backend/app/core/data_scope.py",
+      "lines": 35,
+      "size": 2055,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "089434ac8563b45f1b544f853c8aceba5b630947c1782004318f482d42cdc5c1"
+    },
+    "backend/app/core/database.py": {
+      "path": "backend/app/core/database.py",
+      "lines": 50,
+      "size": 1270,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5cc01a410994250a4c0697398551ab12b18d8be9a8890eb8e361193aa7c241cb"
+    },
+    "backend/app/core/exceptions.py": {
+      "path": "backend/app/core/exceptions.py",
+      "lines": 81,
+      "size": 2442,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ee4767a9e24ad67852ae056bda9aed19758b71f4ef9d913ebad0aa81185d2893"
+    },
+    "backend/app/core/field_permissions.py": {
+      "path": "backend/app/core/field_permissions.py",
+      "lines": 58,
+      "size": 2299,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "43253b7ee47c07fbfa0460ddd54bb7c6daed563737e9ff689cf4a21fedef3060"
+    },
+    "backend/app/core/logger.py": {
+      "path": "backend/app/core/logger.py",
+      "lines": 39,
+      "size": 1157,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "faf5245403a5245ad548cc5b9068ee0e4b0a170b80a72efd09fd8a0192927bfa"
+    },
+    "backend/app/core/redis.py": {
+      "path": "backend/app/core/redis.py",
+      "lines": 55,
+      "size": 1559,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1917dcf50b7539aa52f41202de571beba8c080dacb9aa6715bccfe00b83aae3a"
+    },
+    "backend/app/core/security.py": {
+      "path": "backend/app/core/security.py",
+      "lines": 37,
+      "size": 1399,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4130983100db6092236d1cb7a50b48417a6eb4d22501357ea0f7f51f70cc32c2"
+    },
+    "backend/app/core/standard_purchase_price.py": {
+      "path": "backend/app/core/standard_purchase_price.py",
+      "lines": 89,
+      "size": 2778,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f9b3f6af8504e77a02e67b11b864e8e56e8c9900136c1f9654c9f30ad0984317"
+    },
+    "backend/app/core/store_whitelist.py": {
+      "path": "backend/app/core/store_whitelist.py",
+      "lines": 67,
+      "size": 2902,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "60ba10eb8cd84b8964cedfb117db5ac975e63c9eae9f274a3fbfb7312dedd35d"
+    },
+    "backend/app/integrations/__init__.py": {
+      "path": "backend/app/integrations/__init__.py",
+      "lines": 1,
+      "size": 38,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c8c8572a565465f2bf5ae103b6652c70408c2501dede3a41de5250524f97115b"
+    },
+    "backend/app/integrations/baison/__init__.py": {
+      "path": "backend/app/integrations/baison/__init__.py",
+      "lines": 5,
+      "size": 190,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "73436d47fde26c52d61a5fb0886ab2fa7b20c623921d76145806c2c875e844a7"
+    },
+    "backend/app/integrations/baison/auth.py": {
+      "path": "backend/app/integrations/baison/auth.py",
+      "lines": 45,
+      "size": 1913,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7a762a95115902f66caa3a26694376c943195bc1027e529ec7d576578f0a7427"
+    },
+    "backend/app/integrations/baison/client.py": {
+      "path": "backend/app/integrations/baison/client.py",
+      "lines": 168,
+      "size": 7382,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a0160e7d7ea0d29922eea8e78f7e23dd17845b1db9f0713ea48357742729f9b7"
+    },
+    "backend/app/integrations/baison/config.py": {
+      "path": "backend/app/integrations/baison/config.py",
+      "lines": 34,
+      "size": 1316,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "74efa69f659edf416d63be57e6ab08d3c7123d2773cbc30fe0e480a2620c3b03"
+    },
+    "backend/app/integrations/baison/exceptions.py": {
+      "path": "backend/app/integrations/baison/exceptions.py",
+      "lines": 21,
+      "size": 633,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "72ef58e2153b5ba2a52d019140108e9911a727abea60a17173f87bcc20a92f2f"
+    },
+    "backend/app/integrations/baison/services/__init__.py": {
+      "path": "backend/app/integrations/baison/services/__init__.py",
+      "lines": 1,
+      "size": 39,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "57ce6821d0376500bf6bcf8424c7d3ea9afe6d33589629eb1f420b05d5f2867d"
+    },
+    "backend/app/integrations/baison/services/inventory_service.py": {
+      "path": "backend/app/integrations/baison/services/inventory_service.py",
+      "lines": 263,
+      "size": 12292,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "778491aac11143b7b6f77d280c95fef6621fd9591e273cd3982aa98fdae8b140"
+    },
+    "backend/app/integrations/baison/services/member_deposit_service.py": {
+      "path": "backend/app/integrations/baison/services/member_deposit_service.py",
+      "lines": 187,
+      "size": 8355,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c5fdddd6f8e30161c757ee3c6bf96a5f089781ed2a844d6ad964005d88d1bd7f"
+    },
+    "backend/app/integrations/baison/services/member_service.py": {
+      "path": "backend/app/integrations/baison/services/member_service.py",
+      "lines": 300,
+      "size": 12383,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "805b762c9e5e7e589ad3345a78eb17f3e9faea7b37a2f438a2e0b9d9bdda81b6"
+    },
+    "backend/app/integrations/baison/services/pos_sale_goods_service.py": {
+      "path": "backend/app/integrations/baison/services/pos_sale_goods_service.py",
+      "lines": 467,
+      "size": 24400,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9ca185dbd14d2ccd8ea9935f9176ec7850f8ac6a5dcce2db56513680f095d98e"
+    },
+    "backend/app/integrations/baison/services/pos_ticket_service.py": {
+      "path": "backend/app/integrations/baison/services/pos_ticket_service.py",
+      "lines": 744,
+      "size": 37188,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9c131318bdd634ae6e2fc26269bdb3512399b7d5dd4119633f99e006edc8abba"
+    },
+    "backend/app/integrations/baison/services/product_image_service.py": {
+      "path": "backend/app/integrations/baison/services/product_image_service.py",
+      "lines": 203,
+      "size": 7737,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "10f15aa40265556283c231129cfa8362812ad0139a458b0882aa501968e9ef87"
+    },
+    "backend/app/integrations/baison/services/product_inbound_service.py": {
+      "path": "backend/app/integrations/baison/services/product_inbound_service.py",
+      "lines": 255,
+      "size": 11367,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6515e36dfa70bae262a487eb5d026d9279f9f4d88cc4dbd2cfbd62fc9f127637"
+    },
+    "backend/app/integrations/baison/services/product_service.py": {
+      "path": "backend/app/integrations/baison/services/product_service.py",
+      "lines": 369,
+      "size": 16456,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "adb342bc38559fd8c3836b095a1891f933d494c6e4e60194c6699b937fc21a98"
+    },
+    "backend/app/integrations/baison/services/product_transfer_inbound_service.py": {
+      "path": "backend/app/integrations/baison/services/product_transfer_inbound_service.py",
+      "lines": 181,
+      "size": 7952,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c03f04ad68a759253454f8567b3a8afd3c953a878b65464a3662986c3d348999"
+    },
+    "backend/app/integrations/baison/services/shop_service.py": {
+      "path": "backend/app/integrations/baison/services/shop_service.py",
+      "lines": 249,
+      "size": 10617,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5eeb40a3a4a29e7c485785cdf530cf01c55c48d6a5ef37c73d01cfce8ed2cc43"
+    },
+    "backend/app/integrations/baison/services/sku_service.py": {
+      "path": "backend/app/integrations/baison/services/sku_service.py",
+      "lines": 338,
+      "size": 15336,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6a6801a6e43a1df1ed515fc80b747cf1dfcddad5b7b2fe072ecec42c1ba1c483"
+    },
+    "backend/app/integrations/baison/services/store_mapping_service.py": {
+      "path": "backend/app/integrations/baison/services/store_mapping_service.py",
+      "lines": 81,
+      "size": 3142,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "698b9eec47976def4b1bc28e3e6e3d563b0b85acd245b9a46a8a93a995b3f0c0"
+    },
+    "backend/app/integrations/baison/services/store_target_service.py": {
+      "path": "backend/app/integrations/baison/services/store_target_service.py",
+      "lines": 60,
+      "size": 3336,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d229af492d2ae25d55c54378b3d565496354cd930f5a72329481088a9aeb8d60"
+    },
+    "backend/app/integrations/baison/services/warehouse_service.py": {
+      "path": "backend/app/integrations/baison/services/warehouse_service.py",
+      "lines": 297,
+      "size": 13087,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b20d6ac3710d0cc8b00d80d6c6985f8a3a65924fe5c095e1487ed1e858501c1f"
+    },
+    "backend/app/jobs/__init__.py": {
+      "path": "backend/app/jobs/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "57f4060911274096a82b5cfff183fbaaaeae5e319af3131b14f0b7da96dc0fac"
+    },
+    "backend/app/jobs/ai_assistant_jobs.py": {
+      "path": "backend/app/jobs/ai_assistant_jobs.py",
+      "lines": 14,
+      "size": 459,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ba64317e1f8aedcb79058c9066bcc889069dfc48d55b074a06f1d6b0c4601473"
+    },
+    "backend/app/jobs/command_center_health_jobs.py": {
+      "path": "backend/app/jobs/command_center_health_jobs.py",
+      "lines": 22,
+      "size": 698,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "8d915102fa572e1869cfc33dea3b97a6f29bf6fe0bda4627cb7182cd021a4ea3"
+    },
+    "backend/app/jobs/investment_decision_jobs.py": {
+      "path": "backend/app/jobs/investment_decision_jobs.py",
+      "lines": 188,
+      "size": 8275,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "0d45a6ca67e5cf6d4cf9c9f50e830ef5b818a585b9b124a3910a656cd3cc0a25"
+    },
+    "backend/app/jobs/life_data_jobs.py": {
+      "path": "backend/app/jobs/life_data_jobs.py",
+      "lines": 75,
+      "size": 2321,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cb6ef7b6622db3f1f4a49a26937b15fe4a74ef603fab5c6e068015425c7973e8"
+    },
+    "backend/app/jobs/push_jobs.py": {
+      "path": "backend/app/jobs/push_jobs.py",
+      "lines": 208,
+      "size": 9308,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f49db10952135cc9e392ca1efcbe42eae4aa9a51363dd5feeef0fb0b14dd98c2"
+    },
+    "backend/app/jobs/report_jobs.py": {
+      "path": "backend/app/jobs/report_jobs.py",
+      "lines": 30,
+      "size": 1218,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "205877655abb40d1d66e802005fe87d5e5baade755eb3e80c20e84225f7605b1"
+    },
+    "backend/app/jobs/review_jobs.py": {
+      "path": "backend/app/jobs/review_jobs.py",
+      "lines": 10,
+      "size": 312,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "749b403a7dfcba83e66b5f4f0896fa0377241c30cf2d81714d56e937f1624c7f"
+    },
+    "backend/app/jobs/scheduler.py": {
+      "path": "backend/app/jobs/scheduler.py",
+      "lines": 216,
+      "size": 7057,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d588c9c5fb075986bef9cd080530a12d5e581fa9d9b9df450e4abdadc42b85a4"
+    },
+    "backend/app/jobs/sync_jobs.py": {
+      "path": "backend/app/jobs/sync_jobs.py",
+      "lines": 99,
+      "size": 3909,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d489cb30048ff2dc486ac9b0def03d014796417a3f56dcd5abaade37fe405432"
+    },
+    "backend/app/main.py": {
+      "path": "backend/app/main.py",
+      "lines": 99,
+      "size": 3318,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 2,
+      "digest": "d2769e44f6c0f2b98dbdf02a7b4b81d316da22d8dfdf2fb9a8c1fe9e92282a82"
+    },
+    "backend/app/models/__init__.py": {
+      "path": "backend/app/models/__init__.py",
+      "lines": 109,
+      "size": 3305,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "352474be44e3dd2b0b84038125a64105f1e4ae7f15395dda471f41a6d7a1f429"
+    },
+    "backend/app/models/ai.py": {
+      "path": "backend/app/models/ai.py",
+      "lines": 155,
+      "size": 7230,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4e56a2817f228510b1e89e0d715971e4171bf086100a8f3110c206e61b5f8c71"
+    },
+    "backend/app/models/app.py": {
+      "path": "backend/app/models/app.py",
+      "lines": 208,
+      "size": 10564,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4572bd3331203486cc3a22768cb4eb74425ad381c621f8d607e59454d65d1a4d"
+    },
+    "backend/app/models/baison_dwd.py": {
+      "path": "backend/app/models/baison_dwd.py",
+      "lines": 34,
+      "size": 1442,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1932d43e53c7d4f802d2187db0a69391b870d5c5aaff3429ff64dd56147daa8a"
+    },
+    "backend/app/models/baison_ods.py": {
+      "path": "backend/app/models/baison_ods.py",
+      "lines": 163,
+      "size": 8130,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6a4a2425a6d15511ad45d2b4f1ea150c25c04f9c0061d82eea90cd59e1e20a29"
+    },
+    "backend/app/models/dim.py": {
+      "path": "backend/app/models/dim.py",
+      "lines": 254,
+      "size": 12397,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "fb09df789d845b0c803e649a49dc105147db949fa3ed3448442c0f248b18a2fe"
+    },
+    "backend/app/models/dingtalk_attendance.py": {
+      "path": "backend/app/models/dingtalk_attendance.py",
+      "lines": 34,
+      "size": 1861,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "deba46507ce50f1ba8ab5f5be2628d5bbad21e4e5d4bcd07521cbf787369b759"
+    },
+    "backend/app/models/dingtalk_event.py": {
+      "path": "backend/app/models/dingtalk_event.py",
+      "lines": 28,
+      "size": 1590,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b72d11a199025ce7eab3c9d5a1e620152d09f875ba84eee5de28bdced636dc7b"
+    },
+    "backend/app/models/dingtalk_hr_finance.py": {
+      "path": "backend/app/models/dingtalk_hr_finance.py",
+      "lines": 112,
+      "size": 6162,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6eb3a39962211bc534036182b5bebad72bdfdc6651fbe4cfcafb514b838f7c12"
+    },
+    "backend/app/models/dm.py": {
+      "path": "backend/app/models/dm.py",
+      "lines": 355,
+      "size": 16732,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5fc717744304d7ca7ac34fe2440928ce7826a34d47aa5d6334648e36a8fcf249"
+    },
+    "backend/app/models/dwd.py": {
+      "path": "backend/app/models/dwd.py",
+      "lines": 127,
+      "size": 6110,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "3627c5fd1c0eabbc398fa0a107038bbfe8df2133d29056ef4682667a0f11d8b8"
+    },
+    "backend/app/models/dws.py": {
+      "path": "backend/app/models/dws.py",
+      "lines": 157,
+      "size": 7975,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "61154885a1ee18ecaac0db14a7bdb042eafc0329d055ec6c24d0291e2712d562"
+    },
+    "backend/app/models/finance_core.py": {
+      "path": "backend/app/models/finance_core.py",
+      "lines": 468,
+      "size": 19542,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "95e51442e8c8611e1d258ac6ad558d046d92643193e4ee6af9b2edbbd2d65938"
+    },
+    "backend/app/models/finance_operations.py": {
+      "path": "backend/app/models/finance_operations.py",
+      "lines": 369,
+      "size": 21337,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "99c315cfec9cc68ece83cf041826d048bf05194de2e57542c7d1168b3c961632"
+    },
+    "backend/app/models/kingdee_finance.py": {
+      "path": "backend/app/models/kingdee_finance.py",
+      "lines": 364,
+      "size": 17829,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9a3c5557c00c6884b333149f2111e0165704553995ba7e89927425ff9596f5c0"
+    },
+    "backend/app/models/life_data.py": {
+      "path": "backend/app/models/life_data.py",
+      "lines": 377,
+      "size": 14892,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7c91857878e19163ffb66472506e889a9f29e85fd8ed140b00b0f0abdd1c3d31"
+    },
+    "backend/app/models/log.py": {
+      "path": "backend/app/models/log.py",
+      "lines": 167,
+      "size": 7526,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "793a5e17401fbfe0b63d35500aa9995a67399477ebc9c751f965b02826e896bc"
+    },
+    "backend/app/models/ods.py": {
+      "path": "backend/app/models/ods.py",
+      "lines": 292,
+      "size": 13614,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9964facdeaed31ae91ad52a0d5e24dcb3b4691a4795c0944596f0f0c9523f17d"
+    },
+    "backend/app/models/sys.py": {
+      "path": "backend/app/models/sys.py",
+      "lines": 270,
+      "size": 12825,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5b805867110f9c6652b97ceab2761960ce66db92b2c604979dc01ca823e14ffd"
+    },
+    "backend/app/modules/dingtalk/__init__.py": {
+      "path": "backend/app/modules/dingtalk/__init__.py",
+      "lines": 1,
+      "size": 102,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "467f3345290d0b63102133a5d25b9bce327e6e0e8b7c40d9495d4369174a3f30"
+    },
+    "backend/app/modules/dingtalk/attendance_sync.py": {
+      "path": "backend/app/modules/dingtalk/attendance_sync.py",
+      "lines": 220,
+      "size": 8606,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "71e9db05b97cd12ccf48306c4f18395124d1c9d1b9d5dd40079f50e806364430"
+    },
+    "backend/app/modules/dingtalk/dispatcher.py": {
+      "path": "backend/app/modules/dingtalk/dispatcher.py",
+      "lines": 26,
+      "size": 930,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d85d51ddd83d65fc1db05fc554e9ba2a770c8e0e34164d88e0c1146be977cde1"
+    },
+    "backend/app/modules/dingtalk/repository.py": {
+      "path": "backend/app/modules/dingtalk/repository.py",
+      "lines": 72,
+      "size": 2555,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f25560f37110374b106f42c8fe66c3774477edd6b2a77a5dffdc0a632adc9bb5"
+    },
+    "backend/app/modules/dingtalk/runner.py": {
+      "path": "backend/app/modules/dingtalk/runner.py",
+      "lines": 52,
+      "size": 1747,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e9d62ec62696160c2c424410f78bc1703e0034bc586ab4d4461d95ee04006d78"
+    },
+    "backend/app/modules/dingtalk/stream_client.py": {
+      "path": "backend/app/modules/dingtalk/stream_client.py",
+      "lines": 52,
+      "size": 2223,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "519f16a7a36dd85c950f65917907a4d6420a414d9b21c49680a56b79b8b485c8"
+    },
+    "backend/app/modules/dingtalk/sync/__init__.py": {
+      "path": "backend/app/modules/dingtalk/sync/__init__.py",
+      "lines": 1,
+      "size": 107,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cf93aaa581f711f9df71472f9ebd163ff07eafebf5311f33f331a36ff396d645"
+    },
+    "backend/app/modules/dingtalk/sync/_common.py": {
+      "path": "backend/app/modules/dingtalk/sync/_common.py",
+      "lines": 124,
+      "size": 4589,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7ce40e4778c72d20d1bca3f72081eca7a3a15bc313c9fef0b874a2ac73cc9ae9"
+    },
+    "backend/app/modules/dingtalk/sync/approvals.py": {
+      "path": "backend/app/modules/dingtalk/sync/approvals.py",
+      "lines": 206,
+      "size": 9241,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "95da7e6a20822fbcae8f59f616b307e3e67ee91cdb18359319131c3520a35b51"
+    },
+    "backend/app/modules/dingtalk/sync/attendance.py": {
+      "path": "backend/app/modules/dingtalk/sync/attendance.py",
+      "lines": 199,
+      "size": 8519,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "850261a8a26990da18ff49326b8198c5b814a4c8713423f08d1ed803f88410ae"
+    },
+    "backend/app/modules/dingtalk/sync/employees.py": {
+      "path": "backend/app/modules/dingtalk/sync/employees.py",
+      "lines": 109,
+      "size": 4799,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ed5bb27f962cdd9ae0a5ef7673c2dcba8d52314964c4d78625fa089761e3703d"
+    },
+    "backend/app/modules/dingtalk/sync/finance_parser.py": {
+      "path": "backend/app/modules/dingtalk/sync/finance_parser.py",
+      "lines": 108,
+      "size": 3740,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "60d6e29eb94b33547f1762afa640031194e7b190da49b95c86b337ead2208218"
+    },
+    "backend/app/modules/dingtalk/sync/hr_parser.py": {
+      "path": "backend/app/modules/dingtalk/sync/hr_parser.py",
+      "lines": 27,
+      "size": 948,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d5cb537690348e00f907e68817d1eba0904bb3c271eb9175fea00365bafce793"
+    },
+    "backend/app/modules/dingtalk/sync/runner.py": {
+      "path": "backend/app/modules/dingtalk/sync/runner.py",
+      "lines": 53,
+      "size": 2154,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e17ee000f3bb087de1bbe489adc8a08cae5a781e4d4f389a934dddea982956e4"
+    },
+    "backend/app/schemas/__init__.py": {
+      "path": "backend/app/schemas/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ddac0199ab0956afeac78648543d0bdd9ce24bcaef110aa13fd8dbc3c645b512"
+    },
+    "backend/app/schemas/common.py": {
+      "path": "backend/app/schemas/common.py",
+      "lines": 56,
+      "size": 1637,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "074e0dacb9089443dcff250147e5a6d46222f98e4038e976e65d5e6f571bc4b9"
+    },
+    "backend/app/schemas/investment_decision.py": {
+      "path": "backend/app/schemas/investment_decision.py",
+      "lines": 65,
+      "size": 2505,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "01f2b69ab1a06d619f081caba4cf3a5e3e2608584dfd4ee95f1ac08ec22eb7ce"
+    },
+    "backend/app/schemas/life_data.py": {
+      "path": "backend/app/schemas/life_data.py",
+      "lines": 164,
+      "size": 5782,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "2176a6b39f57f1cd171607eeccedc8ca5c947c127daa414bf8f76b157c5bbbf5"
+    },
+    "backend/app/services/__init__.py": {
+      "path": "backend/app/services/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "fee4e703a6a6af259c6ee7a743c0e5af2ce36af80278ce26ab07a6d3be3f7fc2"
+    },
+    "backend/app/services/ai_assistant_service.py": {
+      "path": "backend/app/services/ai_assistant_service.py",
+      "lines": 702,
+      "size": 30494,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e76d8e1a4b1771f6a7b448c24821736848189ac2591aec90211a23265413375c"
+    },
+    "backend/app/services/ai_business_advice_service.py": {
+      "path": "backend/app/services/ai_business_advice_service.py",
+      "lines": 353,
+      "size": 15986,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c3648406f2fb955b30a696da59629425e223fd431a5736bee86f40a000e4f25a"
+    },
+    "backend/app/services/ai_diagnosis_service.py": {
+      "path": "backend/app/services/ai_diagnosis_service.py",
+      "lines": 1681,
+      "size": 106982,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "994757a8f111b94a233b4e5a7b20763a137193de3327d2303301e138788f996b"
+    },
+    "backend/app/services/ai_engine.py": {
+      "path": "backend/app/services/ai_engine.py",
+      "lines": 856,
+      "size": 41678,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4660040709ec031d6103faee5e0576554c75aa7199a07e36b36cdf7d7acbe2cc"
+    },
+    "backend/app/services/baison_import.py": {
+      "path": "backend/app/services/baison_import.py",
+      "lines": 284,
+      "size": 10437,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4a9a090a3b6684a9c8f2a66658ee3fa49e2de0b1df392b5531f56ca1d7d804b3"
+    },
+    "backend/app/services/business_overview_service.py": {
+      "path": "backend/app/services/business_overview_service.py",
+      "lines": 666,
+      "size": 34876,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5954f87b4b01b550f2102055ab8707c2e40e1d4588e6039ab4902a71b8713b7e"
+    },
+    "backend/app/services/command_center_health_service.py": {
+      "path": "backend/app/services/command_center_health_service.py",
+      "lines": 204,
+      "size": 8543,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "19f27a2e7629695f6c3ef493f6eaa4b3fd4db58a053b5684bf0dac76e8e5b279"
+    },
+    "backend/app/services/command_center_service.py": {
+      "path": "backend/app/services/command_center_service.py",
+      "lines": 1206,
+      "size": 66181,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "828d124c0fd6fb5a69a7ea079df93a68ff739bb619b0619c5282b54f9c3b6ee7"
+    },
+    "backend/app/services/dingtalk.py": {
+      "path": "backend/app/services/dingtalk.py",
+      "lines": 439,
+      "size": 18419,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "205ce340f137b3a58f04383597af7c4ef3b3c33501c5e5fd8eb5f84d4e1012de"
+    },
+    "backend/app/services/dingtalk_budget_service.py": {
+      "path": "backend/app/services/dingtalk_budget_service.py",
+      "lines": 106,
+      "size": 3787,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "48801e931ef98a44c6509f8b3b1168a5c5d3c85584a653f9c32a9839e43850ab"
+    },
+    "backend/app/services/etl/__init__.py": {
+      "path": "backend/app/services/etl/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "32703b427c696e0f32591a59389a5180208c279815fcb9a823ab1b31245d084d"
+    },
+    "backend/app/services/etl/dwd_to_dws.py": {
+      "path": "backend/app/services/etl/dwd_to_dws.py",
+      "lines": 400,
+      "size": 23234,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c5b87e889d88b298a09ff9c905417aadec884b05eb56b855f48f213ced2db056"
+    },
+    "backend/app/services/etl/dws_to_dm.py": {
+      "path": "backend/app/services/etl/dws_to_dm.py",
+      "lines": 371,
+      "size": 21268,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "81fc9cf1dee7426d5ed6dad9ade71f3470211488e3102eb177770add14aaa318"
+    },
+    "backend/app/services/etl/etl_log.py": {
+      "path": "backend/app/services/etl/etl_log.py",
+      "lines": 130,
+      "size": 3960,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5bfe3435422f74c6dde84e6e8f5165b2d37d1b372005eeeed66ad625c9b82683"
+    },
+    "backend/app/services/etl/ods_to_dwd.py": {
+      "path": "backend/app/services/etl/ods_to_dwd.py",
+      "lines": 246,
+      "size": 11736,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "81e5d0f6a30c4c23e8a16ba965dca8b6ee64a01fa33d06949dbaffb6b2fb297a"
+    },
+    "backend/app/services/etl/pipeline.py": {
+      "path": "backend/app/services/etl/pipeline.py",
+      "lines": 57,
+      "size": 2462,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "632c3741079130f90c3338d1a2f9c9e6b06f441c7b7585541b8b5f7823b5dc21"
+    },
+    "backend/app/services/exception_rule_service.py": {
+      "path": "backend/app/services/exception_rule_service.py",
+      "lines": 354,
+      "size": 18662,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "42b2f88d46cd9715b314b12240351e5f2e96265687932113029b3ef8bbe24415"
+    },
+    "backend/app/services/finance_center_service.py": {
+      "path": "backend/app/services/finance_center_service.py",
+      "lines": 1116,
+      "size": 45944,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9dc34d8904704ed34f695583ad5a700ff6b628867688625be3ecaae14bc74fe0"
+    },
+    "backend/app/services/inventory_analysis_service.py": {
+      "path": "backend/app/services/inventory_analysis_service.py",
+      "lines": 388,
+      "size": 19022,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "fc7485282b96279f18eb475c6bd1b9cc68961841a2c6f086c10390bea96ff9a3"
+    },
+    "backend/app/services/investment_decision_service.py": {
+      "path": "backend/app/services/investment_decision_service.py",
+      "lines": 776,
+      "size": 31629,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "19985831641f1399f98176da6aba9f2ee5cb773fbe728e19bc668422c212bc91"
+    },
+    "backend/app/services/investment_environment_service.py": {
+      "path": "backend/app/services/investment_environment_service.py",
+      "lines": 181,
+      "size": 7637,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "fc21261aa6b5cc45a9d79f551741bfacd06c6bba7ef059523a128aa441f5ae06"
+    },
+    "backend/app/services/investment_metric_service.py": {
+      "path": "backend/app/services/investment_metric_service.py",
+      "lines": 234,
+      "size": 8233,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5689bc434a0fe32261698bc409dcc871012d551ad5e4c6953927b40938fbfbc4"
+    },
+    "backend/app/services/kingdee_finance_service.py": {
+      "path": "backend/app/services/kingdee_finance_service.py",
+      "lines": 338,
+      "size": 15802,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e71beea9c0f769fc1bdf8d9de13bddd916f7256df9df759989f4d5c53928d333"
+    },
+    "backend/app/services/life_data_analysis_service.py": {
+      "path": "backend/app/services/life_data_analysis_service.py",
+      "lines": 600,
+      "size": 25092,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "34a2ca491410583a025334eb9167bc7674d24ce87f168345f6bb54cc8044fa44"
+    },
+    "backend/app/services/life_data_service.py": {
+      "path": "backend/app/services/life_data_service.py",
+      "lines": 825,
+      "size": 29450,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7edc125b978adc4f16e3a1a725b9a9149f8ca5c8e8398c0462778335ecb2a0ca"
+    },
+    "backend/app/services/member_action_service.py": {
+      "path": "backend/app/services/member_action_service.py",
+      "lines": 431,
+      "size": 22161,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b549716e8fe22aada988e21ca1f10f3d8f51aa5c993f0ff3596c3ed7368fc25b"
+    },
+    "backend/app/services/member_sales_service.py": {
+      "path": "backend/app/services/member_sales_service.py",
+      "lines": 184,
+      "size": 9535,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b7f82dd562b46411c73a204e664f880a990e3846122dfa1cc573b9f5aec4d31d"
+    },
+    "backend/app/services/member_segment_service.py": {
+      "path": "backend/app/services/member_segment_service.py",
+      "lines": 677,
+      "size": 36346,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "daca86d297b4affa7db6a717661c175d29594fb61ca641d94475b27fcb166ea6"
+    },
+    "backend/app/services/metrics.py": {
+      "path": "backend/app/services/metrics.py",
+      "lines": 243,
+      "size": 11685,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e42cf6d086bb84c200afd248cc58bc65196834f3649441fc84121e441ef0614a"
+    },
+    "backend/app/services/performance_attribution_service.py": {
+      "path": "backend/app/services/performance_attribution_service.py",
+      "lines": 343,
+      "size": 13655,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "2f0a4b21021651e4d00a37c673d7c800c5b8c50f56d3cd8fb4b958f3958a3664"
+    },
+    "backend/app/services/product_analysis_service.py": {
+      "path": "backend/app/services/product_analysis_service.py",
+      "lines": 173,
+      "size": 6873,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "aa223a6bc8ca06e44ffd4bd9f1902cb5125b7024bbc3072b3e36050bf683ae99"
+    },
+    "backend/app/services/profit_service.py": {
+      "path": "backend/app/services/profit_service.py",
+      "lines": 177,
+      "size": 6318,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "174cd48547880da0360456e77944e8b1a547c133b53cbec24cec7ab5c627102d"
+    },
+    "backend/app/services/report_service.py": {
+      "path": "backend/app/services/report_service.py",
+      "lines": 522,
+      "size": 28341,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "83d9b58a0c84e73308c0427fa314c9d66dd084bce927d402bd101aa4c2107ce1"
+    },
+    "backend/app/services/rule_engine.py": {
+      "path": "backend/app/services/rule_engine.py",
+      "lines": 464,
+      "size": 24909,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "22b9530c35c8dfc3a45234b5011e7336869aabda0c79a03440516c764aebda00"
+    },
+    "backend/app/services/sales_metric_service.py": {
+      "path": "backend/app/services/sales_metric_service.py",
+      "lines": 268,
+      "size": 10861,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7aceffef6d9a4a5d97efc0df1a8bc97ca74eae26cff441c48aeae53fff38a554"
+    },
+    "backend/app/services/size_wall_service.py": {
+      "path": "backend/app/services/size_wall_service.py",
+      "lines": 637,
+      "size": 36424,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "feb04cfb974b721b29ed2cb0d49e85de494113d208d8b6642e78650def53db85"
+    },
+    "backend/app/services/store_analysis_service.py": {
+      "path": "backend/app/services/store_analysis_service.py",
+      "lines": 116,
+      "size": 4367,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c5ef55eaf6077e8e6f30e4d2a69b3699421e5c7fb1de6643abb89d96bb59bbb2"
+    },
+    "backend/app/services/task_notification_service.py": {
+      "path": "backend/app/services/task_notification_service.py",
+      "lines": 578,
+      "size": 27629,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "196dfee25422c6e4d381908441deba30f63e0503e655a321c4a554158a4dc0f7"
+    },
+    "backend/app/services/task_workflow_service.py": {
+      "path": "backend/app/services/task_workflow_service.py",
+      "lines": 77,
+      "size": 2468,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c35f6330b1098a7e291524c40e06d09bca51eb074887fedcdc8f3079b37f23b1"
+    },
+    "backend/app/services/validation_service.py": {
+      "path": "backend/app/services/validation_service.py",
+      "lines": 324,
+      "size": 16039,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "75a4775b95e57dce373a754cfdd37ed1642595202693f04c391f7017d1d331db"
+    },
+    "backend/app/utils/__init__.py": {
+      "path": "backend/app/utils/__init__.py",
+      "lines": 0,
+      "size": 0,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "3d8289eb50accb06c8d38f34a47689fabb9206f58a59b07d6271c483124a50f1"
+    },
+    "backend/scripts/backfill_investment_metrics.py": {
+      "path": "backend/scripts/backfill_investment_metrics.py",
+      "lines": 50,
+      "size": 1829,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "114247065cb3e081f23e0cdef1b6b511509bc75992b66e6e63d6eae9957dbf84"
+    },
+    "backend/scripts/export_ai_business_advice_context.py": {
+      "path": "backend/scripts/export_ai_business_advice_context.py",
+      "lines": 79,
+      "size": 3339,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "edd39169d787659a6aa640d22343ddbbaf8ab1f7fbe78fa1defa785dea970b51"
+    },
+    "backend/scripts/generate_ai_business_advice.py": {
+      "path": "backend/scripts/generate_ai_business_advice.py",
+      "lines": 33,
+      "size": 1051,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "2efe069a8c3b9306a414590c955df1998527acd9dccd0e53efa7ab8742606c4a"
+    },
+    "backend/scripts/generate_boss_command_center.py": {
+      "path": "backend/scripts/generate_boss_command_center.py",
+      "lines": 68,
+      "size": 2442,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6c7cfb47073dea036cc3a02b05e55f6f1516bae0f0bf4ed904741a64195fb830"
+    },
+    "backend/scripts/generate_size_wall_snapshot.py": {
+      "path": "backend/scripts/generate_size_wall_snapshot.py",
+      "lines": 33,
+      "size": 978,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "2b22cf605e48db8048fd31e76d060724a85e22c0c29d1093ea25b5b8cc61391a"
+    },
+    "backend/scripts/import_kingdee_finance.py": {
+      "path": "backend/scripts/import_kingdee_finance.py",
+      "lines": 509,
+      "size": 26074,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "866ff10611b13035c332e4e058be9ceb3490720f22cf04912a6cbb91f2b07b1d"
+    },
+    "backend/scripts/init_db.py": {
+      "path": "backend/scripts/init_db.py",
+      "lines": 134,
+      "size": 7193,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b7eb2b0fa996337ba1f120ef3c4ae6dd6f4c364586c0d97af4f22324f50dfdc6"
+    },
+    "backend/scripts/prepare_kingdee_test_db.py": {
+      "path": "backend/scripts/prepare_kingdee_test_db.py",
+      "lines": 46,
+      "size": 1542,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c3490dcf17f9eb3a95c20e3e01acade231d3f477bd98121e9655eb0301e6878f"
+    },
+    "backend/scripts/seed_module_permissions.py": {
+      "path": "backend/scripts/seed_module_permissions.py",
+      "lines": 235,
+      "size": 12855,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4d1fc9fe2feb6e3697026286d9b891774285d7f5f9619aa90ffb2804917d37f1"
+    },
+    "backend/scripts/sync_baison_member_deposits.py": {
+      "path": "backend/scripts/sync_baison_member_deposits.py",
+      "lines": 76,
+      "size": 3203,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "918ec98de2e86ca45b33b8bd8eac1e68e7cbf31454b082198b58946745bd30c3"
+    },
+    "backend/scripts/sync_baison_members.py": {
+      "path": "backend/scripts/sync_baison_members.py",
+      "lines": 47,
+      "size": 1829,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "31d411c595f493fb95007ff10a239f22026dfe0e26a832ef48fb6f23cbdc23f0"
+    },
+    "backend/scripts/sync_baison_product_inbound.py": {
+      "path": "backend/scripts/sync_baison_product_inbound.py",
+      "lines": 66,
+      "size": 2617,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1bb4589822f9b59667d77e3f595c03141de2274beb8a1745599b896daf333d44"
+    },
+    "backend/scripts/sync_baison_store_targets.py": {
+      "path": "backend/scripts/sync_baison_store_targets.py",
+      "lines": 13,
+      "size": 675,
+      "language": "Python",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "186cce2ef479c7d4af8ed659bd5d764bc6e32a917a4527f8116f50fa337d5827"
+    },
+    "backend/tests/fixtures/life_data_video_response.json": {
+      "path": "backend/tests/fixtures/life_data_video_response.json",
+      "lines": 44,
+      "size": 1407,
+      "language": "JSON",
+      "is_test": true,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "44e09a049aab4d985b149c048bb3ce673b2408292ddc942673a0cacf41413f0e"
+    },
+    "backend/tests/test_ai_assistant_api_contract.py": {
+      "path": "backend/tests/test_ai_assistant_api_contract.py",
+      "lines": 27,
+      "size": 950,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "56a6136c40ae2ba8ae89d9edf3e661b16fb0f57170da8d013ae61d52eec22ff6"
+    },
+    "backend/tests/test_ai_assistant_service.py": {
+      "path": "backend/tests/test_ai_assistant_service.py",
+      "lines": 303,
+      "size": 12168,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 14,
+      "route_handlers": 0,
+      "digest": "713cc3ab1b3b96de989b14821a2fbc77978b70098efa01d6f074a4472a57a46d"
+    },
+    "backend/tests/test_ai_business_advice.py": {
+      "path": "backend/tests/test_ai_business_advice.py",
+      "lines": 421,
+      "size": 17514,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 17,
+      "route_handlers": 0,
+      "digest": "1cda1387886da31fc4c16d666650cc3ef958ec92937a87d4214b7aa66496526f"
+    },
+    "backend/tests/test_ai_command_center_guardrails.py": {
+      "path": "backend/tests/test_ai_command_center_guardrails.py",
+      "lines": 578,
+      "size": 22708,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 20,
+      "route_handlers": 0,
+      "digest": "454abc11f23c10fffef54008aff1d07973dcb24c93879fb2b0753ee605fe4403"
+    },
+    "backend/tests/test_ai_diagnosis_finance.py": {
+      "path": "backend/tests/test_ai_diagnosis_finance.py",
+      "lines": 26,
+      "size": 877,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "fc8d44d8900bd112bb094dc4f990f4f09801d68923f829ae35bc2338b27f16da"
+    },
+    "backend/tests/test_ai_diagnosis_finance_complete.py": {
+      "path": "backend/tests/test_ai_diagnosis_finance_complete.py",
+      "lines": 23,
+      "size": 738,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "f5b84bc8d466bbceef77482d80c8714bbf09cd44d65e5e7e3e0c90e86d98d73a"
+    },
+    "backend/tests/test_ai_diagnosis_hr.py": {
+      "path": "backend/tests/test_ai_diagnosis_hr.py",
+      "lines": 22,
+      "size": 667,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "b2ac4bdd706d8a7e40da82488c52da89c64048d41512cb5adf031540ef97f6b0"
+    },
+    "backend/tests/test_ai_diagnosis_inventory.py": {
+      "path": "backend/tests/test_ai_diagnosis_inventory.py",
+      "lines": 20,
+      "size": 590,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "2ba6716620fc15ffccd4a0e80223bcf2a6a408e26ee59ceeedd9f9fc7aa76b08"
+    },
+    "backend/tests/test_ai_diagnosis_inventory_complete.py": {
+      "path": "backend/tests/test_ai_diagnosis_inventory_complete.py",
+      "lines": 71,
+      "size": 2434,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "bd00aa1c77bd2314623d1dcc6ad4562d68842c2980ec7f0c4359c620e3360b42"
+    },
+    "backend/tests/test_ai_diagnosis_member_deposit.py": {
+      "path": "backend/tests/test_ai_diagnosis_member_deposit.py",
+      "lines": 46,
+      "size": 2063,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "8ba684bdfb5c32c32c13f83082ef7ecca8025b6927a767184431817d2aa7dc1d"
+    },
+    "backend/tests/test_ai_diagnosis_members.py": {
+      "path": "backend/tests/test_ai_diagnosis_members.py",
+      "lines": 37,
+      "size": 1235,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "7568021ab5a58122c6bd74de9f25fcca5c2fb766d9cfa3197bb74f1f90f95964"
+    },
+    "backend/tests/test_ai_diagnosis_products.py": {
+      "path": "backend/tests/test_ai_diagnosis_products.py",
+      "lines": 77,
+      "size": 2664,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "849bd15167a80db9b5832cd6f7d474a4b1603482c658c2e79d6179dab899e717"
+    },
+    "backend/tests/test_ai_diagnosis_review_fixes.py": {
+      "path": "backend/tests/test_ai_diagnosis_review_fixes.py",
+      "lines": 144,
+      "size": 6142,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 9,
+      "route_handlers": 0,
+      "digest": "ee8edcfe958b9de31ef91ea3c55056e873de7cc4bec7e03cbd388b56f68d702f"
+    },
+    "backend/tests/test_ai_diagnosis_sales_target.py": {
+      "path": "backend/tests/test_ai_diagnosis_sales_target.py",
+      "lines": 15,
+      "size": 674,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "9b50aaaa7ce33ebb07547bc209c03ecdda5b25521a66c7815b44709c6d4fa614"
+    },
+    "backend/tests/test_apparel_inventory_consumers.py": {
+      "path": "backend/tests/test_apparel_inventory_consumers.py",
+      "lines": 38,
+      "size": 1345,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "d55b766e27808e00de16ef3d704f47c5c38db95dcf4b96394e3c77e36d71213d"
+    },
+    "backend/tests/test_apparel_inventory_scope.py": {
+      "path": "backend/tests/test_apparel_inventory_scope.py",
+      "lines": 60,
+      "size": 2623,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "cd610510336f58be5ab0ead6caefa0d606401f547265c5522ff71bd6e9756042"
+    },
+    "backend/tests/test_baison_auth.py": {
+      "path": "backend/tests/test_baison_auth.py",
+      "lines": 51,
+      "size": 1712,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "593d978615b4e05dd12298db806a1c1b1009e6edd8e03fd7dc68371a13ba1870"
+    },
+    "backend/tests/test_baison_client_retry.py": {
+      "path": "backend/tests/test_baison_client_retry.py",
+      "lines": 98,
+      "size": 2788,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "4ed36178cd5480ab5e71efff74900bf17956f75e408afb404fb595f4e757c263"
+    },
+    "backend/tests/test_baison_member_deposit_service.py": {
+      "path": "backend/tests/test_baison_member_deposit_service.py",
+      "lines": 128,
+      "size": 4562,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "3433cba84361f03c19dbda552d7dc8598d73ac70d2811927767b388d22dcc7ca"
+    },
+    "backend/tests/test_baison_member_service.py": {
+      "path": "backend/tests/test_baison_member_service.py",
+      "lines": 144,
+      "size": 4413,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "67454227f984f9fc438d9f6edb409f9c2aa540b682a3d40c43fc51de68ed59b6"
+    },
+    "backend/tests/test_baison_member_sync.py": {
+      "path": "backend/tests/test_baison_member_sync.py",
+      "lines": 94,
+      "size": 3259,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "f117d7a674412b2cfdd90ad901c4c5a07383e9eafd3c7050c6743da397cc3ebf"
+    },
+    "backend/tests/test_baison_standard_purchase_price.py": {
+      "path": "backend/tests/test_baison_standard_purchase_price.py",
+      "lines": 41,
+      "size": 1281,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "de50fe621610c7bec82371fc416021420049697f446f8bd8a33a11f726fc1a60"
+    },
+    "backend/tests/test_baison_store_target_service.py": {
+      "path": "backend/tests/test_baison_store_target_service.py",
+      "lines": 57,
+      "size": 2133,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "b1b1838d3294732db125598be2761a975d636aeea894a0dd7838ce18d26ec051"
+    },
+    "backend/tests/test_business_overview_platform_sales.py": {
+      "path": "backend/tests/test_business_overview_platform_sales.py",
+      "lines": 50,
+      "size": 2101,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "d724064e6a18774d68555ad7bf2defdbeb9f1afbd6e20e19efb339f5f0254016"
+    },
+    "backend/tests/test_business_routes_auth.py": {
+      "path": "backend/tests/test_business_routes_auth.py",
+      "lines": 35,
+      "size": 1288,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "1877c7d421c43a8c60cab70c0e2aec458719f884770e6eaa0155f667b59fdea9"
+    },
+    "backend/tests/test_command_center_contract.py": {
+      "path": "backend/tests/test_command_center_contract.py",
+      "lines": 138,
+      "size": 6132,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 11,
+      "route_handlers": 8,
+      "digest": "0250510d9754e9b64075d6f24807831880a820bfcc09cb56ca2239d1064cc773"
+    },
+    "backend/tests/test_command_center_health_monitor.py": {
+      "path": "backend/tests/test_command_center_health_monitor.py",
+      "lines": 132,
+      "size": 4970,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "18d504f96f6b41fce7c74444fc064b46ce41fc63d9c3a86a03a7b3658e882a27"
+    },
+    "backend/tests/test_command_center_service.py": {
+      "path": "backend/tests/test_command_center_service.py",
+      "lines": 591,
+      "size": 19552,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 25,
+      "route_handlers": 0,
+      "digest": "4911c367890bb4523140607c54b6624ece14e202ad6bb60d7a9fc966794b6e58"
+    },
+    "backend/tests/test_dws_to_dm_refunds.py": {
+      "path": "backend/tests/test_dws_to_dm_refunds.py",
+      "lines": 106,
+      "size": 2918,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "641c890e0c89d631b186846e418a1bc6b0a81a78164ef3ee23c5175877507222"
+    },
+    "backend/tests/test_exception_rule_service.py": {
+      "path": "backend/tests/test_exception_rule_service.py",
+      "lines": 132,
+      "size": 4515,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 8,
+      "digest": "d3c8a5b39c3700b277d9806fa7700d9f8a26b50d39556118dc2360cd72023e74"
+    },
+    "backend/tests/test_finance_center_api.py": {
+      "path": "backend/tests/test_finance_center_api.py",
+      "lines": 129,
+      "size": 4679,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "845f5a2f75fe0ff58ba80e457f9e0eeac49a894520cc6ac2981c9b2c3e856486"
+    },
+    "backend/tests/test_finance_center_models.py": {
+      "path": "backend/tests/test_finance_center_models.py",
+      "lines": 312,
+      "size": 11277,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 9,
+      "route_handlers": 0,
+      "digest": "e2f3013bd0ffb8b89fa43ee2f42be9a9c2a1d6ed7a74985f927cb6c6fe37cafc"
+    },
+    "backend/tests/test_finance_center_service.py": {
+      "path": "backend/tests/test_finance_center_service.py",
+      "lines": 636,
+      "size": 24599,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 8,
+      "route_handlers": 0,
+      "digest": "aebd31eca276826c83be4b560b2fc073045d22d91beec2d12ba018eab98662d0"
+    },
+    "backend/tests/test_finance_parser.py": {
+      "path": "backend/tests/test_finance_parser.py",
+      "lines": 29,
+      "size": 917,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "b4beebe8249acabc6afeab8d24ee319c68ea761618f15b858d33b6602b2c2ab2"
+    },
+    "backend/tests/test_finance_profit_integration.py": {
+      "path": "backend/tests/test_finance_profit_integration.py",
+      "lines": 127,
+      "size": 3597,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "1e70336b9356bfc3895cfd075b6e8f5430ffa34b531f86d0617f8bd83fb34f0d"
+    },
+    "backend/tests/test_generate_boss_command_center.py": {
+      "path": "backend/tests/test_generate_boss_command_center.py",
+      "lines": 11,
+      "size": 491,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "a5320baaeb82a7f162ad6a9d00bb0209599993c209e732bffd9994304c0eebba"
+    },
+    "backend/tests/test_import_kingdee_finance.py": {
+      "path": "backend/tests/test_import_kingdee_finance.py",
+      "lines": 53,
+      "size": 1908,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "bae3760ab4d122929134b747e6d9c59adbf34845b4060f1ab0471aaad55b312f"
+    },
+    "backend/tests/test_inventory_daily_cost.py": {
+      "path": "backend/tests/test_inventory_daily_cost.py",
+      "lines": 46,
+      "size": 1651,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "459ff320aa1e2531c296d2e21bec31c627f1d6a38d65131166ea2ae885888682"
+    },
+    "backend/tests/test_inventory_sync_business_date.py": {
+      "path": "backend/tests/test_inventory_sync_business_date.py",
+      "lines": 16,
+      "size": 686,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "b2e5e4e48695592416a0b53765c53b15d6d08f151ce20d7566fa189c73fc2057"
+    },
+    "backend/tests/test_inventory_warning_rules.py": {
+      "path": "backend/tests/test_inventory_warning_rules.py",
+      "lines": 58,
+      "size": 2704,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "caf879d21a1eec1ce24d431c4ca37e5a4640148c87ab614948c886c215173b6c"
+    },
+    "backend/tests/test_investment_decision_api.py": {
+      "path": "backend/tests/test_investment_decision_api.py",
+      "lines": 106,
+      "size": 3417,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "5393e509107236bf3e8e03e6b114c8ad009609292ccdfc622ceb1ab5331d7194"
+    },
+    "backend/tests/test_investment_decision_jobs.py": {
+      "path": "backend/tests/test_investment_decision_jobs.py",
+      "lines": 28,
+      "size": 1143,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "9d64b8e525556ad31ba23b4554e4cec65608ad1878b39598440b2f840fbd19cc"
+    },
+    "backend/tests/test_investment_decision_models.py": {
+      "path": "backend/tests/test_investment_decision_models.py",
+      "lines": 78,
+      "size": 2704,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "366d997123a889cbc5d8306015744f3f4a1c68940555b65987e97f0abd59a03d"
+    },
+    "backend/tests/test_investment_decision_service.py": {
+      "path": "backend/tests/test_investment_decision_service.py",
+      "lines": 219,
+      "size": 8378,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 10,
+      "route_handlers": 0,
+      "digest": "ec6bd999d1f4f7a0047d2ad111beab4b1c3ae472fd0688e18aec49f19f34d275"
+    },
+    "backend/tests/test_investment_environment_service.py": {
+      "path": "backend/tests/test_investment_environment_service.py",
+      "lines": 51,
+      "size": 1747,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "4062278f3de996175c1a5e2eb7e92ee3de6c3dc58fbb02c90c2d1fe030ba2ac6"
+    },
+    "backend/tests/test_investment_metric_service.py": {
+      "path": "backend/tests/test_investment_metric_service.py",
+      "lines": 88,
+      "size": 3210,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "bc03746b5cf2b7e194b7cc2cdc64d3e06e387c28fcff913e3ae9f7c845b3ab82"
+    },
+    "backend/tests/test_investment_skill_contract.py": {
+      "path": "backend/tests/test_investment_skill_contract.py",
+      "lines": 20,
+      "size": 601,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "2052f14625f60f838ec001eaf22cb897d392fd72b173b530a833fbfeac3277db"
+    },
+    "backend/tests/test_kingdee_finance_api.py": {
+      "path": "backend/tests/test_kingdee_finance_api.py",
+      "lines": 103,
+      "size": 3042,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "a4ded23ad787373bfa47b981a05c98d63d1f78aed1a15b7f3a22ccb1a85b41f8"
+    },
+    "backend/tests/test_kingdee_finance_frontend_contract.py": {
+      "path": "backend/tests/test_kingdee_finance_frontend_contract.py",
+      "lines": 31,
+      "size": 1019,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "4ba1ae44df5804e3ebbc0b224f412377d662578e9d8022e40f06249465923e09"
+    },
+    "backend/tests/test_kingdee_finance_models.py": {
+      "path": "backend/tests/test_kingdee_finance_models.py",
+      "lines": 87,
+      "size": 3044,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "b8eb349d4afc7beb3af3c5de4742004af3cb47054dc19fd7a5b4e1a3250ded11"
+    },
+    "backend/tests/test_kingdee_finance_service.py": {
+      "path": "backend/tests/test_kingdee_finance_service.py",
+      "lines": 86,
+      "size": 3206,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 8,
+      "route_handlers": 0,
+      "digest": "add6ab7391171c322c6afe729f18be9a2e11a95953b63da309b46abf9c269727"
+    },
+    "backend/tests/test_life_data_analysis_service.py": {
+      "path": "backend/tests/test_life_data_analysis_service.py",
+      "lines": 483,
+      "size": 21718,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 19,
+      "route_handlers": 0,
+      "digest": "58a4e7b07904749e82a73c2b8ca4254a95f8f5dac4ebc531dd57e64d03e12479"
+    },
+    "backend/tests/test_life_data_api.py": {
+      "path": "backend/tests/test_life_data_api.py",
+      "lines": 550,
+      "size": 15882,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 28,
+      "route_handlers": 0,
+      "digest": "441773c192fe866835e6756ea6204ddc18ae88c6422eecd532066866d4536e1c"
+    },
+    "backend/tests/test_life_data_models.py": {
+      "path": "backend/tests/test_life_data_models.py",
+      "lines": 151,
+      "size": 5101,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "ad19aa3440fb3cbeb8747d0f9f09d9e37addc98fccb8afffe014a248fab846b0"
+    },
+    "backend/tests/test_life_data_retention.py": {
+      "path": "backend/tests/test_life_data_retention.py",
+      "lines": 216,
+      "size": 7082,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "d5196dbb1183ef43fccde2a67475a4a4f22b74ca666e7d88605101f34648bac7"
+    },
+    "backend/tests/test_life_data_service.py": {
+      "path": "backend/tests/test_life_data_service.py",
+      "lines": 582,
+      "size": 20168,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 20,
+      "route_handlers": 0,
+      "digest": "91df2d26d221349aeba1a2d3545348c9b65eb53cb3967407271d6f06c3d79829"
+    },
+    "backend/tests/test_member_action_service.py": {
+      "path": "backend/tests/test_member_action_service.py",
+      "lines": 168,
+      "size": 6906,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 9,
+      "route_handlers": 8,
+      "digest": "b327da4a6e498e2a37b3b585629bc27d5521b3030563ec0c47955e69ed242f78"
+    },
+    "backend/tests/test_member_api.py": {
+      "path": "backend/tests/test_member_api.py",
+      "lines": 64,
+      "size": 2334,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "131ce1e32b9a0d28a1df6f9bc45723b6334b2f37540d6b5322573423d09d1c92"
+    },
+    "backend/tests/test_member_phase_one.py": {
+      "path": "backend/tests/test_member_phase_one.py",
+      "lines": 99,
+      "size": 4812,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "4a6e222cd1e5cec0de6c89ab5a1571a901768e5e73023e17f92c541c8cc7f33e"
+    },
+    "backend/tests/test_member_segment_service.py": {
+      "path": "backend/tests/test_member_segment_service.py",
+      "lines": 238,
+      "size": 8411,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 15,
+      "route_handlers": 0,
+      "digest": "bb99cec569913e362e601c98e6a35b50419ba340b29913b803e0e84de4de3997"
+    },
+    "backend/tests/test_mobile_command_center.py": {
+      "path": "backend/tests/test_mobile_command_center.py",
+      "lines": 31,
+      "size": 935,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "571c3b7c88cf03ee2879a46316dcc4fc3e42397d59e9418e12aa320d1b50a89a"
+    },
+    "backend/tests/test_performance_attribution.py": {
+      "path": "backend/tests/test_performance_attribution.py",
+      "lines": 322,
+      "size": 11257,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 16,
+      "route_handlers": 6,
+      "digest": "79d083b2ecc1df1eb7c67285ec31f53d2d9f4bba49f8fa0821a94c957c6ebc35"
+    },
+    "backend/tests/test_phase1_acceptance.py": {
+      "path": "backend/tests/test_phase1_acceptance.py",
+      "lines": 55,
+      "size": 1829,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "93b7c146ac2f0ad4f4d9f7acc1a39b91524bd257a5e3160788a3e6296c3b50b8"
+    },
+    "backend/tests/test_phase2_acceptance.py": {
+      "path": "backend/tests/test_phase2_acceptance.py",
+      "lines": 336,
+      "size": 13409,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "c58f2ddfc53764ff9282883a3323731c6c2dd9bd5e2cc60fde50f2e79132023b"
+    },
+    "backend/tests/test_phase3_acceptance.py": {
+      "path": "backend/tests/test_phase3_acceptance.py",
+      "lines": 221,
+      "size": 7572,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "e2ca7c5ce73ce8d9cc181d09eef170990e2919905472ab98d326e1c9451c49e3"
+    },
+    "backend/tests/test_pos_sale_goods_cost_rebuild.py": {
+      "path": "backend/tests/test_pos_sale_goods_cost_rebuild.py",
+      "lines": 100,
+      "size": 4222,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "9064cb81e1b413ff58e1790471275cf4a606d872521e26039b925608bbf03ec6"
+    },
+    "backend/tests/test_pos_ticket_sync_completeness.py": {
+      "path": "backend/tests/test_pos_ticket_sync_completeness.py",
+      "lines": 165,
+      "size": 6052,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "fcb33141534ab4449fec22c3ec92b1907e7e4b9f462032538f4c498ae82bdade"
+    },
+    "backend/tests/test_product_decision.py": {
+      "path": "backend/tests/test_product_decision.py",
+      "lines": 26,
+      "size": 1071,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "7ef3d303879c5615df423674b36eb0627cf105c081ae2f7e0c46ac3b3d4590e2"
+    },
+    "backend/tests/test_product_image_service.py": {
+      "path": "backend/tests/test_product_image_service.py",
+      "lines": 71,
+      "size": 2023,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "a03118ddeeeb623f71ff596e45ca1f53caa4d5054bf4d8c38dbb4d0b5733bd37"
+    },
+    "backend/tests/test_product_inbound_service.py": {
+      "path": "backend/tests/test_product_inbound_service.py",
+      "lines": 158,
+      "size": 5274,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "37d5f3c1edac9df34fdde0b2c6c9701461ee28cae204051c02f16fc2eb0b1f19"
+    },
+    "backend/tests/test_product_transfer_inbound_service.py": {
+      "path": "backend/tests/test_product_transfer_inbound_service.py",
+      "lines": 71,
+      "size": 2645,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "0f5d08d16984209e89ee1f7e218f7b405030a034e316aa6ae54861b59006fc9d"
+    },
+    "backend/tests/test_profit_exception_rules.py": {
+      "path": "backend/tests/test_profit_exception_rules.py",
+      "lines": 80,
+      "size": 2668,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "0e8317fb716e1f83f1e1908cfe7a6d09896f07b2742fe7bee31c600310bcfa8e"
+    },
+    "backend/tests/test_profit_service.py": {
+      "path": "backend/tests/test_profit_service.py",
+      "lines": 242,
+      "size": 7902,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 11,
+      "route_handlers": 0,
+      "digest": "70a301573bc1e498a3c37c86717b9bb809ac08b63f555b8b048c661b02b41656"
+    },
+    "backend/tests/test_redis_rate_limit.py": {
+      "path": "backend/tests/test_redis_rate_limit.py",
+      "lines": 34,
+      "size": 969,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "3d6c3dfdcbd4e47bb6364689d5636afa51142494c648a8f0110f39278415056a"
+    },
+    "backend/tests/test_sales_channel_split.py": {
+      "path": "backend/tests/test_sales_channel_split.py",
+      "lines": 177,
+      "size": 6498,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 10,
+      "route_handlers": 0,
+      "digest": "9857f939c6a70dc552905aef3c383991ddd65d996a1d92e4d15c6a7b8f858aea"
+    },
+    "backend/tests/test_size_wall_service.py": {
+      "path": "backend/tests/test_size_wall_service.py",
+      "lines": 189,
+      "size": 8252,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 14,
+      "route_handlers": 0,
+      "digest": "b34d2712d6c95bd6f23bc5b2b982c5be5859e0297f5a06e95f6cbbf8f1693df4"
+    },
+    "backend/tests/test_standard_purchase_price_ai.py": {
+      "path": "backend/tests/test_standard_purchase_price_ai.py",
+      "lines": 65,
+      "size": 2438,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "1851ac979d8bd853a9274bd050b6fa15ad1508db8903ad0732406d484756a823"
+    },
+    "backend/tests/test_standard_purchase_price_api.py": {
+      "path": "backend/tests/test_standard_purchase_price_api.py",
+      "lines": 62,
+      "size": 2426,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "921f8468af5c518b6d0ef47bcbec71fd00648491ef857f011cb7624b06866029"
+    },
+    "backend/tests/test_standard_purchase_price_inventory.py": {
+      "path": "backend/tests/test_standard_purchase_price_inventory.py",
+      "lines": 108,
+      "size": 5141,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "98d819f24e34ae1c335901ee8a54b6b560ae6d123d2ac121b56bd653b757d013"
+    },
+    "backend/tests/test_standard_purchase_price_policy.py": {
+      "path": "backend/tests/test_standard_purchase_price_policy.py",
+      "lines": 66,
+      "size": 2402,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "41354d6a1e92721b723da6e13cf9adb4492f3123de540cfea9548927e9185066"
+    },
+    "backend/tests/test_standard_purchase_price_profit.py": {
+      "path": "backend/tests/test_standard_purchase_price_profit.py",
+      "lines": 100,
+      "size": 3757,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "7f6d871bab54021b0b72d638911720a3a0542c8b8a40757803277f6081e85adf"
+    },
+    "backend/tests/test_standard_purchase_price_schema.py": {
+      "path": "backend/tests/test_standard_purchase_price_schema.py",
+      "lines": 32,
+      "size": 1089,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "bf4cdafd510233d26a461cd94824e239ba5334ce882fe4aae6b5c2fe67c7c912"
+    },
+    "backend/tests/test_store_analysis.py": {
+      "path": "backend/tests/test_store_analysis.py",
+      "lines": 41,
+      "size": 1249,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "4be5f3e8ddac499edf578ac17f063839381cd89a2958e760c5182c894abd7101"
+    },
+    "backend/tests/test_task_authorization_scope.py": {
+      "path": "backend/tests/test_task_authorization_scope.py",
+      "lines": 63,
+      "size": 3168,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "d77a026b9937f997f11f58ca240ca321cde9d9766b74da019e2cbe9618b22ccb"
+    },
+    "backend/tests/test_task_notification_budget.py": {
+      "path": "backend/tests/test_task_notification_budget.py",
+      "lines": 200,
+      "size": 7315,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 9,
+      "route_handlers": 0,
+      "digest": "eeb4acf63978945de86c31111d8994d9d7d4d9ec29ceea3c25e771ac42f14727"
+    },
+    "backend/tests/test_task_notification_claims.py": {
+      "path": "backend/tests/test_task_notification_claims.py",
+      "lines": 249,
+      "size": 8010,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 8,
+      "route_handlers": 0,
+      "digest": "5f317fa837cc5774606caed37bb7cb4241022f28d269028ce805daceb6985981"
+    },
+    "backend/tests/test_task_workflow.py": {
+      "path": "backend/tests/test_task_workflow.py",
+      "lines": 181,
+      "size": 8288,
+      "language": "Python",
+      "is_test": true,
+      "test_functions": 17,
+      "route_handlers": 0,
+      "digest": "dbc6ad90a451b53a74c628077a4b5992b905e841501dd400870e4fb3cf04f786"
+    },
+    "frontend/package-lock.json": {
+      "path": "frontend/package-lock.json",
+      "lines": 2093,
+      "size": 74236,
+      "language": "JSON",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e804963c8ee961a48ad80691c172ec4ba1b2d66186498e2b73c05512e038e48a"
+    },
+    "frontend/package.json": {
+      "path": "frontend/package.json",
+      "lines": 30,
+      "size": 747,
+      "language": "JSON",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c7bc8a8691ea0976fcc7634fdeb25aeb07cec31839860b5cc065aedcdc3c8b35"
+    },
+    "frontend/public/life-data-collector.user.js": {
+      "path": "frontend/public/life-data-collector.user.js",
+      "lines": 2809,
+      "size": 109029,
+      "language": "JavaScript",
+      "is_test": false,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "2e51e7decb6f4702fa9b13e343a9bad8245a6624bbde8809fb29ece2d0c84f3a"
+    },
+    "frontend/src/App.vue": {
+      "path": "frontend/src/App.vue",
+      "lines": 11,
+      "size": 248,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "76f77ec61b8b262ade16856687d14f3be8ebd75f386902c8382f81660b33f0ba"
+    },
+    "frontend/src/api/ai.ts": {
+      "path": "frontend/src/api/ai.ts",
+      "lines": 53,
+      "size": 2469,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7035f80517e5e6963894568cf12bda043e4d9edf3d214bbe457d3d0842eecc0b"
+    },
+    "frontend/src/api/audit.ts": {
+      "path": "frontend/src/api/audit.ts",
+      "lines": 20,
+      "size": 999,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d521a92492b5123645e25f7c8e2cd26bb139b439fc7a4180303848bd46d85d38"
+    },
+    "frontend/src/api/auth.ts": {
+      "path": "frontend/src/api/auth.ts",
+      "lines": 26,
+      "size": 979,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6332c4c98bd43fb057e68b0976b2943c4a7d4b18e6bf96d2eb1bbd65226c8c34"
+    },
+    "frontend/src/api/baison.ts": {
+      "path": "frontend/src/api/baison.ts",
+      "lines": 32,
+      "size": 1187,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4192ef4da482a286b8649db4fa4564c2148aa8543dd9dcb23fefdd9e35a7a9ac"
+    },
+    "frontend/src/api/dashboard.ts": {
+      "path": "frontend/src/api/dashboard.ts",
+      "lines": 10,
+      "size": 664,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "bdd4355b7e50bfc2abc625aced387b4399921a3bc1f939d998e1e1f62011fb3a"
+    },
+    "frontend/src/api/dingtalk.ts": {
+      "path": "frontend/src/api/dingtalk.ts",
+      "lines": 6,
+      "size": 185,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a1a35d10fcbfca8ead719540c77e128704aa9f402b22133030f5c6d08efb6210"
+    },
+    "frontend/src/api/finance.ts": {
+      "path": "frontend/src/api/finance.ts",
+      "lines": 126,
+      "size": 4431,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c38a7870e33714444c122dea9ed8da62d2d7d114c9eb5de91d1b26c18b9bc8cb"
+    },
+    "frontend/src/api/financeCenter.ts": {
+      "path": "frontend/src/api/financeCenter.ts",
+      "lines": 47,
+      "size": 1864,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ed46b175a44e5df44a7556e2d2af91ffb932d00c766e66400b49e40a2fa079ca"
+    },
+    "frontend/src/api/hr.ts": {
+      "path": "frontend/src/api/hr.ts",
+      "lines": 25,
+      "size": 1248,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "aa27a80829db6227f4471376571a69c7ab02a865e1b9180cbea90f7aad354e0e"
+    },
+    "frontend/src/api/inventory.ts": {
+      "path": "frontend/src/api/inventory.ts",
+      "lines": 20,
+      "size": 1210,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "3474d9788989f52fce9342553d20eab5c6a47eb20b16fa58acd096243988802c"
+    },
+    "frontend/src/api/kingdeeFinance.ts": {
+      "path": "frontend/src/api/kingdeeFinance.ts",
+      "lines": 109,
+      "size": 3458,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "52dfc764b6cc1733f51cce0ebbf7e059ece306637e31b9b097133abf99c8d1e4"
+    },
+    "frontend/src/api/lifeDataAnalysis.ts": {
+      "path": "frontend/src/api/lifeDataAnalysis.ts",
+      "lines": 11,
+      "size": 1040,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5e5fb1be1e8252cd30ef9ea549f6b0510e7890e07edd152e848fa4bf179e5f9f"
+    },
+    "frontend/src/api/member.ts": {
+      "path": "frontend/src/api/member.ts",
+      "lines": 21,
+      "size": 1535,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9004a38bd24310fc6299980994c69a4d13436376308183ce8f89ae0be65c2e5a"
+    },
+    "frontend/src/api/product.ts": {
+      "path": "frontend/src/api/product.ts",
+      "lines": 18,
+      "size": 1015,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "0a94717620032617eee898ba59121a512074b3748286f66cecc1f9dbddc0338b"
+    },
+    "frontend/src/api/request.ts": {
+      "path": "frontend/src/api/request.ts",
+      "lines": 106,
+      "size": 3269,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "8dfdb23ecc7929fe9c9752c0ae2c47170af5ed55f88469f94236cec20d7beae6"
+    },
+    "frontend/src/api/routeRequestLifecycle.ts": {
+      "path": "frontend/src/api/routeRequestLifecycle.ts",
+      "lines": 40,
+      "size": 1029,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "29c40b42a30bb23dbb891a2266b2b7c153f74960996843621da5d3734b2272e9"
+    },
+    "frontend/src/api/store.ts": {
+      "path": "frontend/src/api/store.ts",
+      "lines": 8,
+      "size": 305,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4f37c8ce56f43bb5e66e216053a9f7741e1d9cafb093b50270f685a67f57024f"
+    },
+    "frontend/src/api/sync.ts": {
+      "path": "frontend/src/api/sync.ts",
+      "lines": 30,
+      "size": 1159,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "be08679592c1ac66b6d5e27165f5bb3c7b8c3c1c24bbe0f32b047c465f35fec2"
+    },
+    "frontend/src/api/system.ts": {
+      "path": "frontend/src/api/system.ts",
+      "lines": 34,
+      "size": 2637,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c2ada349e78e18252fffc855bd43ea91fc49641aeafe0e645dc65c24233e379d"
+    },
+    "frontend/src/api/task.ts": {
+      "path": "frontend/src/api/task.ts",
+      "lines": 19,
+      "size": 879,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "4500accf19b77cd7e5cc5965d8184346b182779d51d89039c306ecfd510e8ffc"
+    },
+    "frontend/src/components/ReareLogo.vue": {
+      "path": "frontend/src/components/ReareLogo.vue",
+      "lines": 62,
+      "size": 2016,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1a4fded68df91b62e6bd6d0e30bf298acb48655e3dc846ac71c406ed72f4b6c1"
+    },
+    "frontend/src/components/ai/BossAiChat.vue": {
+      "path": "frontend/src/components/ai/BossAiChat.vue",
+      "lines": 722,
+      "size": 20099,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "945576619e5869f9d69d13c28bb50343076e250b863141445cb9f073822c5298"
+    },
+    "frontend/src/components/ai/BossAiFloatingAssistant.vue": {
+      "path": "frontend/src/components/ai/BossAiFloatingAssistant.vue",
+      "lines": 169,
+      "size": 5001,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "5011992f08fb0bdc689891686be80e62ac1c0a0f063f9207f1db61f227424ce6"
+    },
+    "frontend/src/config/financeCenterModules.ts": {
+      "path": "frontend/src/config/financeCenterModules.ts",
+      "lines": 218,
+      "size": 7667,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "db5686a3c6b78d1486b190544b025cc693de183086705deb4b9c4acd534cb849"
+    },
+    "frontend/src/config/publicSite.ts": {
+      "path": "frontend/src/config/publicSite.ts",
+      "lines": 104,
+      "size": 4213,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7fbf03f00778eab5794c26bfc348725b5b38380151ac5c6722886bc192078988"
+    },
+    "frontend/src/layouts/AuthLayout.vue": {
+      "path": "frontend/src/layouts/AuthLayout.vue",
+      "lines": 13,
+      "size": 283,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "80ea498551d8ddf8dd6659a2c33947c5567c2ab2acf045d361e58f7c7dd6c125"
+    },
+    "frontend/src/layouts/BasicLayout.vue": {
+      "path": "frontend/src/layouts/BasicLayout.vue",
+      "lines": 306,
+      "size": 9025,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f6de51edab413ba36001ff9eae9113172cfe754e351e148232fcd216ec79f55c"
+    },
+    "frontend/src/layouts/MainLayout.vue": {
+      "path": "frontend/src/layouts/MainLayout.vue",
+      "lines": 796,
+      "size": 26553,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d3d73c9adab777df3338377def52cbdec35f6df20694bdad37fb5d0990a5b21e"
+    },
+    "frontend/src/layouts/PublicLayout.vue": {
+      "path": "frontend/src/layouts/PublicLayout.vue",
+      "lines": 163,
+      "size": 7132,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a9e42ec4d5ea584ecd1613946943d3fd1e77178c0ad0c1740705956ef7ffa7de"
+    },
+    "frontend/src/main.ts": {
+      "path": "frontend/src/main.ts",
+      "lines": 22,
+      "size": 635,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6c253ffc6022bc1f2094dc7d7f4c6bc6aff3c139f42bbc289fe37672156e4b98"
+    },
+    "frontend/src/router/index.ts": {
+      "path": "frontend/src/router/index.ts",
+      "lines": 201,
+      "size": 13183,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "73cf3b40add17f82eef69bf0479a5c7da9b8a576f9e85acba68dee2470f02d42"
+    },
+    "frontend/src/stores/auth.ts": {
+      "path": "frontend/src/stores/auth.ts",
+      "lines": 71,
+      "size": 2871,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "19c6229bb53f161a928faf75a7e17fe62a8847a6ac6f87113112cd7645683dfc"
+    },
+    "frontend/src/utils/businessDisplay.ts": {
+      "path": "frontend/src/utils/businessDisplay.ts",
+      "lines": 147,
+      "size": 4915,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "025d9c3ae77c60700069640823cf6e4c09c70ae53ae880c5ca6cd17afd5b5283"
+    },
+    "frontend/src/utils/routeQuery.mjs": {
+      "path": "frontend/src/utils/routeQuery.mjs",
+      "lines": 5,
+      "size": 220,
+      "language": "JavaScript",
+      "is_test": false,
+      "test_functions": 1,
+      "route_handlers": 0,
+      "digest": "ea17d6fb76bd41edb3020d411c7933626fd8e80da26b9093517bc684808d0f32"
+    },
+    "frontend/src/utils/shanghaiDate.mjs": {
+      "path": "frontend/src/utils/shanghaiDate.mjs",
+      "lines": 11,
+      "size": 350,
+      "language": "JavaScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "98dadf3c2854cd6ae2c08215a2803bec505c8d3d9c62f178bc2ed4a5d3b6380d"
+    },
+    "frontend/src/views/Login.vue": {
+      "path": "frontend/src/views/Login.vue",
+      "lines": 1090,
+      "size": 35677,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7c1787d67b876080fbbe469e032a58e2d75e3d59064212a8be358fd7abad48df"
+    },
+    "frontend/src/views/ai/Index.vue": {
+      "path": "frontend/src/views/ai/Index.vue",
+      "lines": 28,
+      "size": 526,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f29c1b8efaa9cf0ce907d03313f7ad1264a6ed6e9ee76b6c7725579355f943a0"
+    },
+    "frontend/src/views/baison/Shops.vue": {
+      "path": "frontend/src/views/baison/Shops.vue",
+      "lines": 154,
+      "size": 7059,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f3d12ef939b8183a5b4433f3f2d77fa8d61a7a0a3ee617eab25c1226c8269f9e"
+    },
+    "frontend/src/views/boss/Index.vue": {
+      "path": "frontend/src/views/boss/Index.vue",
+      "lines": 19,
+      "size": 603,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e72be3629feaa62f0a2835dd35c55adb4bbb7f1c4f92ee7673aa403261cb0a4a"
+    },
+    "frontend/src/views/dashboard/Index.vue": {
+      "path": "frontend/src/views/dashboard/Index.vue",
+      "lines": 452,
+      "size": 28164,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f29b9d71b8d1429345ee77cf3ec12e88325ac7ec61efb7e1bed7c0dadcf33b07"
+    },
+    "frontend/src/views/diagnosis/Index.vue": {
+      "path": "frontend/src/views/diagnosis/Index.vue",
+      "lines": 453,
+      "size": 26984,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "64d887325333a600910336e7d378bf2205fe872869ab2a1eb67078d1873c4481"
+    },
+    "frontend/src/views/dingtalk/Index.vue": {
+      "path": "frontend/src/views/dingtalk/Index.vue",
+      "lines": 19,
+      "size": 604,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ed5784c50a8f3ec8a728a4f45d0cec14ec165653040fae4790035fc22e297087"
+    },
+    "frontend/src/views/finance/ExpenseAnalysis.vue": {
+      "path": "frontend/src/views/finance/ExpenseAnalysis.vue",
+      "lines": 60,
+      "size": 3374,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cc299b988019e22786b8d9451d9e798c78000db3e49e2050b48e9575fee7ba60"
+    },
+    "frontend/src/views/finance/FinanceCenterModule.vue": {
+      "path": "frontend/src/views/finance/FinanceCenterModule.vue",
+      "lines": 86,
+      "size": 4149,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f5d0c293770827df99813c38399d831165ba2fd4a22c641b31f00216bba3d88c"
+    },
+    "frontend/src/views/finance/FinanceOverview.vue": {
+      "path": "frontend/src/views/finance/FinanceOverview.vue",
+      "lines": 90,
+      "size": 5191,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "3f561431a8c52b9c52ccdbedb2a1363d30002032d402d773d038b0fc2473e2fc"
+    },
+    "frontend/src/views/finance/FormalLedger.vue": {
+      "path": "frontend/src/views/finance/FormalLedger.vue",
+      "lines": 166,
+      "size": 9402,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cf17671655ad3dcae35a1ab589091a83ce520a301e0d9f7b3d4f592ee7ebbea6"
+    },
+    "frontend/src/views/finance/HistoricalFinance.vue": {
+      "path": "frontend/src/views/finance/HistoricalFinance.vue",
+      "lines": 240,
+      "size": 16576,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a35cae1502df167fbdfb64d987f9b29841b36200a63163305f130438e8663f9e"
+    },
+    "frontend/src/views/finance/Index.vue": {
+      "path": "frontend/src/views/finance/Index.vue",
+      "lines": 67,
+      "size": 16119,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7e77a5096ce85af7b5a6048ffd93f01751248d474c4d20c5efa1bccce0f13047"
+    },
+    "frontend/src/views/finance/Payments.vue": {
+      "path": "frontend/src/views/finance/Payments.vue",
+      "lines": 41,
+      "size": 2551,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a53bed7d8bb5c98ff83907a34c13be9ebd0adbd66e9aff4fae6be5f7b929dc02"
+    },
+    "frontend/src/views/finance/Reimbursements.vue": {
+      "path": "frontend/src/views/finance/Reimbursements.vue",
+      "lines": 40,
+      "size": 2301,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "647a7a2a30b54af190a0301486ede6a89ceb4f50107c5ac39d2defdea8a82dad"
+    },
+    "frontend/src/views/hr/Attendance.vue": {
+      "path": "frontend/src/views/hr/Attendance.vue",
+      "lines": 847,
+      "size": 25981,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "fea735acbf2e22a6ea2d526fa92920b2523887303dae7836ec91e2e46f462727"
+    },
+    "frontend/src/views/hr/Employees.vue": {
+      "path": "frontend/src/views/hr/Employees.vue",
+      "lines": 38,
+      "size": 2080,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "87778586be05b86b89e6afe9e298a971f608cbd3f18f37082ae252e9f2ff19c5"
+    },
+    "frontend/src/views/hr/HrOverview.vue": {
+      "path": "frontend/src/views/hr/HrOverview.vue",
+      "lines": 75,
+      "size": 4018,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "733e018095cfee843ce843e95b9a004ba05335a4f441dd6ada2008425a1aecf4"
+    },
+    "frontend/src/views/hr/Leaves.vue": {
+      "path": "frontend/src/views/hr/Leaves.vue",
+      "lines": 41,
+      "size": 2416,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "f327b145598bd70413f758045521c61a60e2ab75f817acafdb5e2afdd388e239"
+    },
+    "frontend/src/views/inventory/Index.vue": {
+      "path": "frontend/src/views/inventory/Index.vue",
+      "lines": 367,
+      "size": 22617,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c1cf199a6dd752cfc56eb0f1a420277b256da4894417c56421fe244e34887884"
+    },
+    "frontend/src/views/inventory/InventoryBalance.vue": {
+      "path": "frontend/src/views/inventory/InventoryBalance.vue",
+      "lines": 143,
+      "size": 7037,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "72493027091793e74a2c01bf08e83011fd59d483638294e74bf8f5efbc35a670"
+    },
+    "frontend/src/views/inventory/Warehouses.vue": {
+      "path": "frontend/src/views/inventory/Warehouses.vue",
+      "lines": 167,
+      "size": 8259,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6785018fe6e25570efe0f7b22f9f15203baf071611d9a16bae4e8b20812debf0"
+    },
+    "frontend/src/views/marketing/InvestmentOptimization.vue": {
+      "path": "frontend/src/views/marketing/InvestmentOptimization.vue",
+      "lines": 241,
+      "size": 20336,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d88dfefe48797eebb6fac8a659c7af5bde7d26921c3ab31d8bef40291cbc38dc"
+    },
+    "frontend/src/views/member/Index.vue": {
+      "path": "frontend/src/views/member/Index.vue",
+      "lines": 1002,
+      "size": 54839,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b8c4b2c94ea2d487e82241736b56217d4b33e66ce6afb666c4f6c9ae2c6453df"
+    },
+    "frontend/src/views/product/Index.vue": {
+      "path": "frontend/src/views/product/Index.vue",
+      "lines": 403,
+      "size": 22395,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "632df23ce0416b91572331ad29159bdff851bbc293bac95a00e969a9d5d4def4"
+    },
+    "frontend/src/views/product/ProductMaster.vue": {
+      "path": "frontend/src/views/product/ProductMaster.vue",
+      "lines": 263,
+      "size": 12404,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "965e31d4056a3072a57189fff6996c38531db6818c858c17f9e75c4ab1ad7cef"
+    },
+    "frontend/src/views/product/SizeWall.vue": {
+      "path": "frontend/src/views/product/SizeWall.vue",
+      "lines": 309,
+      "size": 22760,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d9daef34ee724f1da54cf3a1c83c956c2f5c61464a9a53068b29245a27d6bbb6"
+    },
+    "frontend/src/views/product/SkuArchive.vue": {
+      "path": "frontend/src/views/product/SkuArchive.vue",
+      "lines": 283,
+      "size": 13638,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "368cf500ed85df43a39dc7882c3698e6ec7c70482e63183d35f8478ebd89147a"
+    },
+    "frontend/src/views/public/BrandStory.vue": {
+      "path": "frontend/src/views/public/BrandStory.vue",
+      "lines": 58,
+      "size": 2824,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6845594528f2a92d682eaa3de6f9299b82b57332b63d9a2783a42dd90a2d85fb"
+    },
+    "frontend/src/views/public/CompanyIntro.vue": {
+      "path": "frontend/src/views/public/CompanyIntro.vue",
+      "lines": 53,
+      "size": 2591,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ad280b957a57aefdf7335c5a83fdee69fd5cdd4acb93b48f5a740038bb30362d"
+    },
+    "frontend/src/views/public/Contact.vue": {
+      "path": "frontend/src/views/public/Contact.vue",
+      "lines": 48,
+      "size": 2562,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "ca104c232f02342e6350788364a477bc15f0fa1dada6f4156f1d4b2d93d35810"
+    },
+    "frontend/src/views/public/Home.vue": {
+      "path": "frontend/src/views/public/Home.vue",
+      "lines": 558,
+      "size": 30684,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "cbd7edc94858a42a524531d345df70c361ca97b857515ae50e7ce403aac6082c"
+    },
+    "frontend/src/views/public/Products.vue": {
+      "path": "frontend/src/views/public/Products.vue",
+      "lines": 51,
+      "size": 2436,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "37424b3a1ec5e82341dec8b8a6bc97bba228aafa8cd2dade185203019fb73176"
+    },
+    "frontend/src/views/public/Space.vue": {
+      "path": "frontend/src/views/public/Space.vue",
+      "lines": 48,
+      "size": 2252,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "abf60d7ba7ebf735c3cef0a3c629c0b310f652d9cf5a6a96a850e8634bd41d31"
+    },
+    "frontend/src/views/public/Stores.vue": {
+      "path": "frontend/src/views/public/Stores.vue",
+      "lines": 50,
+      "size": 2388,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "3f8a2db496e9805776cbe938ec41907fe379a9bb45178672c4e2fca8520b3994"
+    },
+    "frontend/src/views/report/Index.vue": {
+      "path": "frontend/src/views/report/Index.vue",
+      "lines": 187,
+      "size": 16725,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "2c8bed33d67f8afddb29e4b7883cde746591e81e18c640ff629d0bf591f5233b"
+    },
+    "frontend/src/views/store/Index.vue": {
+      "path": "frontend/src/views/store/Index.vue",
+      "lines": 659,
+      "size": 25051,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d443aa00642fa94112b9a6747c4f804ddc6711735503c0a945a264832a7b32cd"
+    },
+    "frontend/src/views/system/AdminDashboard.vue": {
+      "path": "frontend/src/views/system/AdminDashboard.vue",
+      "lines": 3,
+      "size": 2882,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "48eeb0f16c897a7fde9fdfaee63845799639a6ff46a86fdccb7e4757ff7bf232"
+    },
+    "frontend/src/views/system/BaisonApi.vue": {
+      "path": "frontend/src/views/system/BaisonApi.vue",
+      "lines": 386,
+      "size": 11754,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "dfd856b46863da766cf21b5013751ac87688a31d1784219ff7df12ea465ad0c2"
+    },
+    "frontend/src/views/system/DataPermissions.vue": {
+      "path": "frontend/src/views/system/DataPermissions.vue",
+      "lines": 213,
+      "size": 6208,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "174b89bc8826a159a1f1cfbf4c17eb6fd6be01b35e676e263e37e9b1feb80183"
+    },
+    "frontend/src/views/system/FieldPermissions.vue": {
+      "path": "frontend/src/views/system/FieldPermissions.vue",
+      "lines": 3,
+      "size": 3686,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "dfb2b011847ae6d804517cb806dc9cc2c8c2e433b7422842a9d0855a5f8a64e1"
+    },
+    "frontend/src/views/system/ModulePermissions.vue": {
+      "path": "frontend/src/views/system/ModulePermissions.vue",
+      "lines": 50,
+      "size": 2496,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "8ae7a162e4ac4f8f0804e03a3ce67c6c043f1c3e1b130fd2fac02a083ca437a1"
+    },
+    "frontend/src/views/system/OperationLogs.vue": {
+      "path": "frontend/src/views/system/OperationLogs.vue",
+      "lines": 3,
+      "size": 3061,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "230f3e42e2603c28f3194681ee6994ff5ae8d1b1e48f4efc616178de2556d204"
+    },
+    "frontend/src/views/system/RegisterAudit.vue": {
+      "path": "frontend/src/views/system/RegisterAudit.vue",
+      "lines": 24,
+      "size": 9584,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "e93b804436b61b942f7fda57cc4aaf6168bb2f1772a29a216a259504bfa50506"
+    },
+    "frontend/src/views/system/Roles.vue": {
+      "path": "frontend/src/views/system/Roles.vue",
+      "lines": 3,
+      "size": 6472,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "0d39cae88ffbc69f03bb81ec265d061be9262a0e2fa204871831b42ca6983869"
+    },
+    "frontend/src/views/system/Security.vue": {
+      "path": "frontend/src/views/system/Security.vue",
+      "lines": 3,
+      "size": 3056,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "a897f1888526270030a8e2cc43d038be8643e3545ae65d8c7d0a1758be2e32fd"
+    },
+    "frontend/src/views/system/Sync.vue": {
+      "path": "frontend/src/views/system/Sync.vue",
+      "lines": 218,
+      "size": 8979,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "c6c8e5c271325fecbe0ab63c22afba7cfaaf4ab7e38432c54a93c1a977e85770"
+    },
+    "frontend/src/views/system/Users.vue": {
+      "path": "frontend/src/views/system/Users.vue",
+      "lines": 138,
+      "size": 11208,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b0b7f35b4549d982c397b14e3db036847416360d67e469db5686e302efe0c102"
+    },
+    "frontend/src/views/task/Detail.vue": {
+      "path": "frontend/src/views/task/Detail.vue",
+      "lines": 311,
+      "size": 18733,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "b53e3df56736b03149c4c0c28ba544853d5c30c54bbf941618e13983690db984"
+    },
+    "frontend/src/views/task/Index.vue": {
+      "path": "frontend/src/views/task/Index.vue",
+      "lines": 210,
+      "size": 10485,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "7ba463a47d51271b5d4f886a02857467ecb5327a2cdcc8878eaa748cdde947f9"
+    },
+    "frontend/src/views/warning/Index.vue": {
+      "path": "frontend/src/views/warning/Index.vue",
+      "lines": 347,
+      "size": 22386,
+      "language": "Vue SFC",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "6628de638e9b76a6589f35daa8c4127c518b829ca39588e3332f1c1d870e2a1e"
+    },
+    "frontend/tests/ai-business-advice.test.cjs": {
+      "path": "frontend/tests/ai-business-advice.test.cjs",
+      "lines": 53,
+      "size": 2649,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "10c1eff96ce5bf29bc1301d7ce457b765879780a43f738f939f6467199016df4"
+    },
+    "frontend/tests/boss-ai-assistant.test.cjs": {
+      "path": "frontend/tests/boss-ai-assistant.test.cjs",
+      "lines": 99,
+      "size": 3090,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "1cb105480a0b3564816c670dbe4a3bd1054b2be5d1cfb343fd7254d6bf9ab3c3"
+    },
+    "frontend/tests/command-center-light-theme.test.cjs": {
+      "path": "frontend/tests/command-center-light-theme.test.cjs",
+      "lines": 104,
+      "size": 4668,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 7,
+      "route_handlers": 0,
+      "digest": "608c11b733222812afc2e44acfd99d1a3596e1b076023d325a6cc4dc11af0029"
+    },
+    "frontend/tests/dashboard-command-center.test.cjs": {
+      "path": "frontend/tests/dashboard-command-center.test.cjs",
+      "lines": 62,
+      "size": 2752,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 5,
+      "route_handlers": 0,
+      "digest": "34b135c813b9741c771cc89cd32d6c5333fede6763c3571a47d348f74922187e"
+    },
+    "frontend/tests/dashboard-sales-channel.test.cjs": {
+      "path": "frontend/tests/dashboard-sales-channel.test.cjs",
+      "lines": 29,
+      "size": 1078,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "26fcb0e9083e5157ab2e64a2166d93e466f9ae3e4e860a47424aa5087c106bda"
+    },
+    "frontend/tests/exception-audit.test.cjs": {
+      "path": "frontend/tests/exception-audit.test.cjs",
+      "lines": 46,
+      "size": 2030,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "5828cdb386d25f1d698763d1eef0ce354e4281202ff4a3dd8a4ccb7e371440c4"
+    },
+    "frontend/tests/inventory-warning.test.cjs": {
+      "path": "frontend/tests/inventory-warning.test.cjs",
+      "lines": 22,
+      "size": 834,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "864202e6da68beed764733a62f5686601cbe75a5f3c0e4e550da23e4f326e338"
+    },
+    "frontend/tests/life-data-collector-runtime.test.cjs": {
+      "path": "frontend/tests/life-data-collector-runtime.test.cjs",
+      "lines": 2533,
+      "size": 101886,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 68,
+      "route_handlers": 0,
+      "digest": "a435048446d1ea26dcbfb0cf8e3d7dfe2d2720b52b55ee49409213df42243951"
+    },
+    "frontend/tests/life-data-collector.test.cjs": {
+      "path": "frontend/tests/life-data-collector.test.cjs",
+      "lines": 1032,
+      "size": 43353,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 64,
+      "route_handlers": 0,
+      "digest": "1779eb54b9c37c7b69fee6983a16b90951651520020e47f0454a55b13f4f68f1"
+    },
+    "frontend/tests/life-data-investment-page.test.cjs": {
+      "path": "frontend/tests/life-data-investment-page.test.cjs",
+      "lines": 58,
+      "size": 3588,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "29d71db2b7d7789dc974aa1269b9fd53bb69db0ffce3dd754ea539050134a6dd"
+    },
+    "frontend/tests/member-action.test.cjs": {
+      "path": "frontend/tests/member-action.test.cjs",
+      "lines": 35,
+      "size": 1629,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "674010ccc6bc4c8a83d0358052f6eda9fdaaab594875d00deb860f118e40d995"
+    },
+    "frontend/tests/member-assets.test.cjs": {
+      "path": "frontend/tests/member-assets.test.cjs",
+      "lines": 25,
+      "size": 990,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "922dbaa1cbed2d9394b2ba4bf09dde2c4442ab5de7ec35e3e528c1baf432638a"
+    },
+    "frontend/tests/member-segments.test.cjs": {
+      "path": "frontend/tests/member-segments.test.cjs",
+      "lines": 43,
+      "size": 2183,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "e60bf6afcdca25f759eb6667add110b6f881124cef434c3d5f49bd0ea8998e9e"
+    },
+    "frontend/tests/navigation-performance.test.cjs": {
+      "path": "frontend/tests/navigation-performance.test.cjs",
+      "lines": 104,
+      "size": 4728,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 6,
+      "route_handlers": 0,
+      "digest": "f4d551ccc96c405b8a203e2ced6a685c22fe62351a116be97abb726e495b8224"
+    },
+    "frontend/tests/performance-attribution.test.cjs": {
+      "path": "frontend/tests/performance-attribution.test.cjs",
+      "lines": 24,
+      "size": 1032,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "51c6a9aabea9d22381c9a40de7052abca65ef2803302a53abe957f25ea11cb07"
+    },
+    "frontend/tests/product-decision.test.cjs": {
+      "path": "frontend/tests/product-decision.test.cjs",
+      "lines": 23,
+      "size": 1071,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "16b4f5b15f7b2be4a78b69892347f6b24beb1f5af2cd9b668b05be13ab90241a"
+    },
+    "frontend/tests/profit-analysis.test.cjs": {
+      "path": "frontend/tests/profit-analysis.test.cjs",
+      "lines": 117,
+      "size": 5689,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 12,
+      "route_handlers": 0,
+      "digest": "e5b553b011207082164a8b61cd23712a4dda807bfc12b81c419e76d698f2f120"
+    },
+    "frontend/tests/report-density.test.cjs": {
+      "path": "frontend/tests/report-density.test.cjs",
+      "lines": 24,
+      "size": 918,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 2,
+      "route_handlers": 0,
+      "digest": "89ec0709695019878e9fbc9371925e9a9a80e8467dff4d9d7fb44e9457a873c9"
+    },
+    "frontend/tests/standard-purchase-price.test.cjs": {
+      "path": "frontend/tests/standard-purchase-price.test.cjs",
+      "lines": 41,
+      "size": 1984,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "6a9c43ac0456dfe10265130656b4e11d6f31d71986809e9b471f6176712954e0"
+    },
+    "frontend/tests/store-analysis.test.cjs": {
+      "path": "frontend/tests/store-analysis.test.cjs",
+      "lines": 32,
+      "size": 1179,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 3,
+      "route_handlers": 0,
+      "digest": "346a7620cf3c5892b04047c9148315f98e79e31fcedc16b7ecce773476537ece"
+    },
+    "frontend/tests/task-workflow.test.cjs": {
+      "path": "frontend/tests/task-workflow.test.cjs",
+      "lines": 64,
+      "size": 2984,
+      "language": "JavaScript",
+      "is_test": true,
+      "test_functions": 4,
+      "route_handlers": 0,
+      "digest": "57e3bb87bed4e61449b2016333c702a3da7292c05871611aff71e279c77622a6"
+    },
+    "frontend/tsconfig.json": {
+      "path": "frontend/tsconfig.json",
+      "lines": 25,
+      "size": 693,
+      "language": "JSON",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "1e6d9e745dffcb25182027f68694ffd7b0ed6cb8de172f9e6fac19252ae87891"
+    },
+    "frontend/tsconfig.node.json": {
+      "path": "frontend/tsconfig.node.json",
+      "lines": 10,
+      "size": 223,
+      "language": "JSON",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "9f846e1103236b06e0841c6d00312cca532e54197d1632bc671394e61c3fedbf"
+    },
+    "frontend/vite.config.ts": {
+      "path": "frontend/vite.config.ts",
+      "lines": 26,
+      "size": 501,
+      "language": "TypeScript",
+      "is_test": false,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "digest": "d582689403016a0810384831c47eaaccc2d3162f97aed3b7a6dfe94249f9d5f9"
+    }
+  },
+  "modules": {
+    "backend": {
+      "id": "backend",
+      "path": "backend",
+      "subtree_files": 307,
+      "subtree_loc": 56012,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 88,
+      "test_loc": 12059,
+      "test_functions": 541,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [
+        "backend/app/main.py"
+      ],
+      "source_fingerprint": "d64b7651e974fbe1fe50bca505f07c298ca16480753d01f941b1cb629340b743",
+      "last_change": {
+        "commit": "bdf55aad4aa77515f40c48b7116e90cead30ed9a",
+        "date": "2026-07-20T16:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: preserve signed Kingdee balance amounts"
+      }
+    },
+    "backend_app": {
+      "id": "backend_app",
+      "path": "backend/app",
+      "subtree_files": 155,
+      "subtree_loc": 38225,
+      "owned_files": 155,
+      "owned_loc": 38225,
+      "test_files": 88,
+      "test_loc": 12059,
+      "test_functions": 541,
+      "route_handlers": 402,
+      "languages": {
+        "Python": 155
+      },
+      "key_files": [
+        "backend/app/main.py",
+        "backend/app/api/v1/router.py",
+        "backend/app/api/v1/finance_center.py",
+        "backend/app/api/v1/kingdee_finance.py",
+        "backend/app/models/app.py",
+        "backend/app/services/ai_diagnosis_service.py",
+        "backend/app/services/command_center_service.py",
+        "backend/app/services/finance_center_service.py"
+      ],
+      "source_fingerprint": "561cdebac92f7f1d70f00b7cb6c69c9b605615628997385384ab64100c73b409",
+      "last_change": {
+        "commit": "bdf55aad4aa77515f40c48b7116e90cead30ed9a",
+        "date": "2026-07-20T16:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: preserve signed Kingdee balance amounts"
+      }
+    },
+    "backend_migrations": {
+      "id": "backend_migrations",
+      "path": "backend/alembic",
+      "subtree_files": 51,
+      "subtree_loc": 4339,
+      "owned_files": 51,
+      "owned_loc": 4339,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {
+        "Python": 51
+      },
+      "key_files": [
+        "backend/alembic/env.py",
+        "backend/alembic/versions/3e1f6a7b8c97_full_finance_center.py",
+        "backend/alembic/versions/1f0a2b3c4d5e_task_workflow_notifications.py",
+        "backend/alembic/versions/2a0f6a7b8c93_investment_decision_history.py",
+        "backend/alembic/versions/1b10a07bbe68_add_dingtalk_finance_hr_tables.py",
+        "backend/alembic/versions/e6f7a8b9c0d1_boss_command_center.py",
+        "backend/alembic/versions/f1b2c3d4e5f6_life_data_collector.py",
+        "backend/alembic/versions/0b8c9d0e1f2a_business_exception_evidence.py"
+      ],
+      "source_fingerprint": "4515f0c6fd2bfafe644d8c12799432ef62e03ec220dbff174e44e37d3e3cb855",
+      "last_change": {
+        "commit": "bdf55aad4aa77515f40c48b7116e90cead30ed9a",
+        "date": "2026-07-20T16:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: preserve signed Kingdee balance amounts"
+      }
+    },
+    "backend_scripts": {
+      "id": "backend_scripts",
+      "path": "backend/scripts",
+      "subtree_files": 13,
+      "subtree_loc": 1389,
+      "owned_files": 13,
+      "owned_loc": 1389,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {
+        "Python": 13
+      },
+      "key_files": [
+        "backend/scripts/import_kingdee_finance.py",
+        "backend/scripts/seed_module_permissions.py",
+        "backend/scripts/init_db.py",
+        "backend/scripts/export_ai_business_advice_context.py",
+        "backend/scripts/sync_baison_member_deposits.py",
+        "backend/scripts/generate_boss_command_center.py",
+        "backend/scripts/sync_baison_product_inbound.py",
+        "backend/scripts/backfill_investment_metrics.py"
+      ],
+      "source_fingerprint": "4140a052177f4712ca91dd5d2e8f168bc2ee70de36aeaeada6aebae24168bd9b",
+      "last_change": {
+        "commit": "e1b3c08beaaa4bc74e9edd9d3f66d2478c2bb760",
+        "date": "2026-07-19T12:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "Add read-only Kingdee historical finance warehouse"
+      }
+    },
+    "docs": {
+      "id": "docs",
+      "path": "docs",
+      "subtree_files": 0,
+      "subtree_loc": 0,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [],
+      "source_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_change": {
+        "commit": "f074224e6b21da53cf81f9197d0e3a2b298a74b2",
+        "date": "2026-07-20T10:42:54+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "docs: plan Huabang full finance center implementation"
+      }
+    },
+    "frontend": {
+      "id": "frontend",
+      "path": "frontend",
+      "subtree_files": 114,
+      "subtree_loc": 24153,
+      "owned_files": 6,
+      "owned_loc": 4993,
+      "test_files": 21,
+      "test_loc": 4570,
+      "test_functions": 207,
+      "route_handlers": 0,
+      "languages": {
+        "JSON": 4,
+        "TypeScript": 1,
+        "JavaScript": 1
+      },
+      "key_files": [
+        "frontend/src/main.ts",
+        "frontend/src/router/index.ts",
+        "frontend/src/layouts/MainLayout.vue",
+        "frontend/package.json",
+        "frontend/vite.config.ts",
+        "frontend/public/life-data-collector.user.js",
+        "frontend/package-lock.json",
+        "frontend/tsconfig.json"
+      ],
+      "source_fingerprint": "f7156affea30649bd3db5e788c8c8be9eee4e296ee11081be519b498e0c666b2",
+      "last_change": {
+        "commit": "e33ec03b401b9bee836a2bfa42bea8d85f52c583",
+        "date": "2026-07-21T10:12:25+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: align finance module hierarchy"
+      }
+    },
+    "frontend_app": {
+      "id": "frontend_app",
+      "path": "frontend/src",
+      "subtree_files": 87,
+      "subtree_loc": 14590,
+      "owned_files": 87,
+      "owned_loc": 14590,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {
+        "Vue SFC": 59,
+        "TypeScript": 26,
+        "JavaScript": 2
+      },
+      "key_files": [
+        "frontend/src/main.ts",
+        "frontend/src/router/index.ts",
+        "frontend/src/layouts/MainLayout.vue",
+        "frontend/src/config/financeCenterModules.ts",
+        "frontend/src/App.vue",
+        "frontend/src/views/Login.vue",
+        "frontend/src/views/member/Index.vue",
+        "frontend/src/views/hr/Attendance.vue"
+      ],
+      "source_fingerprint": "7a7c70c877d617b20e92ece7511d6424d8c8863905801ebbdfe5099e22a7323a",
+      "last_change": {
+        "commit": "e33ec03b401b9bee836a2bfa42bea8d85f52c583",
+        "date": "2026-07-21T10:12:25+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: align finance module hierarchy"
+      }
+    },
+    "operations": {
+      "id": "operations",
+      "path": "deploy",
+      "subtree_files": 0,
+      "subtree_loc": 0,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [],
+      "source_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_change": {
+        "commit": "c957ce7a78ccc59b3b3cbb551b23485e6fb22c36",
+        "date": "2026-06-22T03:30:01Z",
+        "author": "HuaBang AI Dev",
+        "subject": "backup: 每日服务器代码备份 2026-06-22 03:30"
+      }
+    },
+    "root_scripts": {
+      "id": "root_scripts",
+      "path": "scripts",
+      "subtree_files": 0,
+      "subtree_loc": 0,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [],
+      "source_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_change": {
+        "commit": "88e3084da2c6fd3086d02b04bc6c2876649b8d2e",
+        "date": "2026-07-15T10:08:42Z",
+        "author": "HuaBang AI Dev",
+        "subject": "Add constrained AI business advice service"
+      }
+    }
+  }
+}
