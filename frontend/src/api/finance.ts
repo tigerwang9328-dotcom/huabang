@@ -1,126 +1,61 @@
-import request from "./request";
+/**
+ * 财务中心 - API 请求封装
+ * 所有财务接口统一从此文件导出
+ */
+import request from "./request"
 
-export type FinanceDataType = "estimate" | "actual";
-export type ProfitStatus = "ready" | "pending_data" | "estimated";
-export type ExpenseType = "rent" | "wages" | "social_security" | "platform_fee" | "utilities" | "logistics" | "marketing" | "other";
+// ── 财务总览 ──
+export const getFinanceOverview = (month?: string) =>
+  request.get("/finance/compass/overview", { params: { month } })
 
-export interface FinanceExpenseRecord {
-  id: number;
-  applicant_name: string | null;
-  department_name: string | null;
-  expense_type: string | null;
-  amount: number;
-  category: "payment" | "reimbursement";
-  approval_status: string | null;
-  payment_status: string | null;
-  expense_date: string | null;
-  created_at: string | null;
-}
+// ── 趋势 ──
+export const getFinanceTrend = (month?: string, months = 6) =>
+  request.get("/finance/compass/trend", { params: { month, months } })
 
-export interface FinanceOverview {
-  today: { reimbursement_amount: number; payment_amount: number };
-  month: { reimbursement_amount: number; payment_amount: number };
-  pending_count: number;
-  approved_unpaid_count: number;
-  recent_records: FinanceExpenseRecord[];
-  department_rank: Array<{ department: string; amount: number }>;
-}
+// ── 店铺利润排行 ──
+export const getStoreRanking = (month?: string, platformId?: number, limit = 20) =>
+  request.get("/finance/compass/store-ranking", { params: { month, platform_id: platformId, limit } })
 
-export interface ExpenseList {
-  items: FinanceExpenseRecord[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+// ── 现金流日报 ──
+export const getCashflowDaily = (begin?: string, end?: string) =>
+  request.get("/finance/cashflow-daily", { params: { begin, end } })
 
-export interface ProfitSummary {
-  net_sales: number;
-  cost_of_goods: number | null;
-  standard_purchase_price_coverage_rate?: number;
-  gross_profit: number | null;
-  gross_margin: number | null;
-  total_expense: number;
-  expense_coverage_rate: number;
-  operating_profit: number | null;
-  inventory_amount: number;
-  discount_loss: number;
-  return_loss: number | null;
-  clearance_loss: number | null;
-}
+// ── 财务明细 ──
+export const getFinanceDetails = (params: { month?: string; store_id?: number; page?: number; page_size?: number }) =>
+  request.get("/finance/details", { params })
 
-export interface ProfitStore {
-  store_code: string;
-  store_name: string;
-  net_sales: number;
-  gross_profit: number | null;
-  operating_profit: number | null;
-}
+// ── 风险预警 ──
+export const getRiskAlerts = (unreadOnly = false, limit = 50) =>
+  request.get("/finance/compass/risk-alerts", { params: { unread_only: unreadOnly, limit } })
 
-export interface ProfitProduct {
-  product_code: string;
-  product_name: string;
-  net_sales: number;
-  gross_profit: number | null;
-}
+export const markAlertRead = (alertId: number) =>
+  request.put(`/finance/compass/risk-alerts/${alertId}/read`)
 
-export interface ProfitAnalysis {
-  period: { start_date: string; end_date: string };
-  status: ProfitStatus;
-  status_label: string;
-  summary: ProfitSummary;
-  expense_coverage: Array<{ expense_type: ExpenseType; label: string; amount: number; status: ProfitStatus; approved: boolean }>;
-  missing_expense_types: ExpenseType[];
-  stores: ProfitStore[];
-  products: ProfitProduct[];
-  data_quality: { warnings: string[]; source_updated_at?: string };
-}
+// ── 费用 ──
+export const getFees = (month?: string, feeType?: string) =>
+  request.get("/finance/compass/fees", { params: { month, fee_type: feeType } })
 
-export interface ProfitDailyItem {
-  stat_date: string;
-  net_sales: number | null;
-  gross_profit: number | null;
-  operating_profit: number | null;
-  status: "ready" | "pending_data";
-  data_type: FinanceDataType;
-  data_type_label?: string;
-  completeness_note: string | null;
-}
+export const createFee = (data: any) =>
+  request.post("/finance/compass/fees", data)
 
-export interface CashSafety {
-  total_cash_balance: number;
-  daily_avg_expense_30d: number | null;
-  cash_safety_days: number | null;
-  risk_level: "critical" | "warning" | "normal" | "unknown";
-  note: string;
-}
+// ── 回款 ──
+export const getReceipts = (limit = 20) =>
+  request.get("/finance/compass/receipts", { params: { limit } })
 
-export interface ManualExpensePayload {
-  expense_date: string;
-  store_code: string;
-  expense_type: ExpenseType;
-  expense_amount: number;
-  data_type: FinanceDataType;
-  description: string;
-}
+export const createReceipt = (data: any) =>
+  request.post("/finance/compass/receipts", data)
 
-export interface ManualCashPayload {
-  record_date: string;
-  account_type: "bank" | "cash";
-  account_name: string;
-  balance: number;
-  data_type: FinanceDataType;
-}
+// ── 月度汇总（兼容旧组件） ──
+export const getFinanceSummary = (month?: string) =>
+  request.get("/finance/compass/summary", { params: { month } })
 
-export const financeApi = {
-  getOverview: () => request.get<{ data: FinanceOverview }>("/finance/overview"),
-  getExpenses: (params?: { page?: number; page_size?: number }) => request.get<{ data: ExpenseList }>("/finance/expenses", { params }),
-  getReimbursements: (params?: { page?: number; page_size?: number }) => request.get<{ data: ExpenseList }>("/finance/reimbursements", { params }),
-  getPayments: (params?: { page?: number; page_size?: number }) => request.get<{ data: ExpenseList }>("/finance/payments", { params }),
-  createExpense: (payload: ManualExpensePayload) => request.post("/finance/manual-expense", payload),
-  createCash: (payload: ManualCashPayload) => request.post("/finance/manual-cash", payload),
-  getCashSafety: () => request.get<{ data: CashSafety }>("/finance/cash-safety"),
-  getProfitComparison: (params?: { start_date?: string; end_date?: string; store_code?: string }) =>
-    request.get<{ data: { items: ProfitDailyItem[] } }>("/finance/profit-daily", { params }),
-  getProfitAnalysis: (params?: { start_date?: string; end_date?: string; store_code?: string }) =>
-    request.get<{ data: ProfitAnalysis }>("/finance/profit-analysis", { params }),
-};
+// ── 固定费用配置 ──
+export const getCostConfig = (month?: string) =>
+  request.get("/finance/compass/cost-config", { params: { month } })
+
+export const upsertCostConfig = (data: any) =>
+  request.post("/finance/compass/cost-config", data)
+
+// ── 导出（预留） ──
+export const exportFinance = (month?: string) =>
+  request.get("/finance/compass/export", { params: { month }, responseType: "blob" as any })

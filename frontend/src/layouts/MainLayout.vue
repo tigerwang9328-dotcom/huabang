@@ -330,7 +330,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
     ],
   },
   {
-    label: "财务利润",
+    label: "财务中心",
     icon: Money,
     items: financeProfitNavigation,
   },
