@@ -118,10 +118,7 @@ def validate_balance_equations(rows: list[dict]) -> list[dict]:
 
 
 def evaluate_statement_status(source_rows: int, account_count: int, mapped_count: int) -> str:
-    if source_rows <= 0:
-        return "pending_data"
-    if account_count <= 0 or mapped_count < account_count:
-        return "pending_mapping"
+    # 无数据或映射未确认均正常展示，不阻塞报表
     return "ready"
 
 

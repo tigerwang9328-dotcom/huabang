@@ -29,8 +29,6 @@
       <el-button :icon="Refresh" circle aria-label="刷新" @click="loadActiveView" />
     </div>
 
-    <el-alert v-if="currentStatus === 'pending_mapping'" type="warning" :closable="false" show-icon title="科目报表映射待确认，当前不生成正式三表。" />
-    <el-alert v-else-if="currentStatus === 'pending_data'" type="info" :closable="false" show-icon title="该账套或期间暂无可确认数据。" />
 
     <section v-loading="loading" class="table-section">
       <el-table v-if="activeTab === 'account-sets'" :data="accountSets" stripe>
