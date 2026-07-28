@@ -1,4 +1,4 @@
-# 华邦财务中心 V2 实施计划
+# 华邦财务中心 V2.1 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -158,3 +158,128 @@
 - [ ] 所有当前写入都遵循草稿、审核、人工过账；适配器只生成草稿。
 - [ ] 全部业务域有真实 API 和页面，缺数据时清楚标识而非模拟成功。
 - [ ] 本地、试迁移、部署、生产重启、真实华邦数据接入与人工验收分别保存证据并分别报告。
+
+## V2.1 实施顺序修订（本节替代原 Task 1—8 的执行顺序）
+
+原计划中的“完整业务域 API”和“全量前端”不再作为单个任务执行。以下阶段按顺序推进；每个阶段的 Go 门槛未满足，不得进入下一阶段，更不得上线开写。
+
+### Phase 0: 证据、口径与发布基线
+
+**Files:**
+- Create: `docs/finance/v2-0-evidence-register.md`
+- Create: `docs/finance/v2-0-accounting-policy-signoff.md`
+- Create: `docs/finance/v2-0-release-baseline.md`
+
+- [ ] 核对本地与生产仓库提交、数据库版本、全部 Alembic heads、Python/Node 运行时、systemd 或容器编排、当前发布锁方式和数据库角色；将未验证项标为待确认。
+- [ ] 由财务负责人确认法人主体、核算组织、账套、法定账/管理账范围、会计政策、科目表、辅助核算、期间、期初余额、币种和报表口径；未签字不得进入数据库建模。
+- [ ] 产出金蝶源快照清单、哈希、账套/期间/科目/凭证/分录/余额基线，并记录已知缺口。
+- [ ] 运行 `git status --short`、迁移 head 检查和现有财务测试；将实际输出写入基线，不用计划中的假设替代事实。
+
+### Phase 1: 迁移图与数据库角色先决条件
+
+**Files:**
+- Create: `backend/alembic/versions/6f3d8c2a1b40_merge_finance_center_v2_heads.py`
+- Create: `backend/scripts/verify_finance_database_roles.py`
+- Test: `backend/tests/test_finance_database_roles.py`
+
+- [ ] 写失败测试：应用数据库角色无 `fin_history` 的插入、更新、删除权限；历史导入角色无 `fin_current` 写权限；表所有者和应用角色均不具备 `BYPASSRLS`。
+- [ ] 在实施当天重新读取所有 heads；仅当仍为 `299f6a7b8c92`、`2a0f6a7b8c93`、`6c1e4a7d2f09` 时，创建该固定 merge revision；否则用当日实际 heads 生成新的合并 revision 并更新本计划与证据登记册。
+- [ ] 运行 `alembic heads`，确认 merge 后恰有一个 head；多 head 为 No-Go。
+- [ ] 用只读角色检查实际 PostgreSQL 角色、owner、`BYPASSRLS`、schema grants、PITR/备份能力；缺任一生产权限隔离条件则停止在测试环境。
+
+### Phase 2: V2.0 会计内核模型（Expand）
+
+**Files:**
+- Create: `backend/app/models/finance_core_v2.py`
+- Modify: `backend/app/models/__init__.py`
+- Create: `backend/alembic/versions/7a4e9d2c1b60_finance_core_v2_expand.py`
+- Test: `backend/tests/test_finance_core_v2_models.py`
+
+- [ ] 先写失败测试，覆盖法人/组织/账套/账簿/政策/期间日历、科目版本、辅助维度规则、币种、汇率、账簿数据域、历史来源字段和复合外键。
+- [ ] 迁移只创建 `fin_current`、`fin_history` 和可空兼容结构；不在此阶段增加不可空字段、全表回填或阻塞索引。
+- [ ] 规定科目不可变编码、有效期、正常余额、末级/可记账规则和辅助维度组合验证；金额用 `NUMERIC`，默认 CNY 但模型不假设唯一币种。
+- [ ] 运行模型测试和测试库 `alembic upgrade head`；保存 DDL 与 head 输出。
+
+### Phase 3: 凭证工作流、账簿不变量与防并发
+
+**Files:**
+- Create: `backend/app/services/finance_v2/voucher_workflow.py`
+- Create: `backend/app/services/finance_v2/ledger_service.py`
+- Create: `backend/app/services/finance_v2/period_closing_service.py`
+- Test: `backend/tests/test_finance_v2_voucher_workflow.py`
+- Test: `backend/tests/test_finance_v2_concurrency.py`
+
+- [ ] 写失败测试，覆盖 `draft/submitted/reviewing/approved/posted/rejected/cancelled/posting_failed/reversed`、制单审核分离、连续凭证号、借贷平衡、冲销/更正、关闭期间限制与不允许修改已过账凭证。
+- [ ] 以 `WHERE id=:id AND version=:expected_version` 实现所有单记录写入；影响行数非 1 返回 409，禁止绕过服务的批量更新。
+- [ ] 固定锁序为账簿、期间、凭证、余额，并为死锁/序列化失败实现有上限的重试；测试同凭证过账、同来源制单、结账与过账、冲销与结账并发。
+- [ ] 只让 `post`/`reverse` 事务更新余额；每一步写不可篡改操作事件、版本快照和原因。
+
+### Phase 4: 历史账隔离与分批导入（Migrate）
+
+**Files:**
+- Create: `backend/app/services/finance_v2/history_import_service.py`
+- Create: `backend/alembic/versions/7b5f0e3d2c61_finance_history_guards.py`
+- Create: `backend/scripts/import_finance_history_v2.py`
+- Create: `backend/scripts/verify_finance_history_v2.py`
+- Test: `backend/tests/test_finance_v2_history_import.py`
+
+- [ ] 写失败测试，证明应用角色不能改历史表、触发器拒绝更新/删除、相同来源键和哈希只产生 `already_imported`、同来源键异哈希阻断、历史记录不接受任何当前账命令。
+- [ ] 以导入批次分批写入历史 schema；禁止 `ON CONFLICT DO UPDATE` 覆盖来源证据。
+- [ ] 每个批次逐账套、年度、期间、科目、辅助维度、凭证、分录、期初/借贷/期末、原币/本位币、来源单据和附件核对；报告不可通过时非零退出。
+- [ ] 在恢复副本连续执行两次导入，比较全量快照和哈希；只读前端验收可见“历史数据”及默认不混算。
+
+### Phase 5: 总账、基础报表、附件与只读发布
+
+**Files:**
+- Create: `backend/app/api/v1/finance_v2.py`
+- Create: `frontend/src/api/financeV2.ts`
+- Create: `frontend/src/views/finance-center/V2CoreWorkspace.vue`
+- Create: `frontend/src/views/finance-center/HistoryDataBadge.vue`
+- Create: `deploy/release_finance_center_v2.sh`
+- Create: `deploy/release_finance_center_v2.ps1`
+- Create: `deploy/verify_finance_center_v2.py`
+- Test: `backend/tests/test_finance_v2_reports.py`
+- Test: `frontend/tests/finance-v2-core.spec.ts`
+
+- [ ] 写失败测试：总账、明细账、余额表、资产负债表和利润表只使用已过账当前账或明确选择的历史范围；未确认映射不可导出正式报表；导出记录水印与下载时效。
+- [ ] 接入历史只读查询与当前账读模型；在“财务利润 → 财务中心”下仅开放 V2.0 页，其余域显示未启用。
+- [ ] 构建电子附件的接收、哈希、归档状态和权限骨架；未验签/未验真必须如实显示，不能伪称完成验证。
+- [ ] 脚本以 Linux `sh` 为生产执行入口，PowerShell 仅通过 SSH 调用它；二者使用发布锁、显式环境注入、原子前端切换和可保存日志。
+- [ ] 生产先只读发布：备份恢复演练、兼容迁移、导入核对、API/权限/浏览器验收全部通过后才到下一阶段。
+
+### Phase 6: 受控开启当前账写入与华邦适配器
+
+**Files:**
+- Create: `backend/app/services/finance_v2/source_inbox.py`
+- Create: `backend/app/services/finance_v2/baison_adapter.py`
+- Create: `backend/app/services/finance_v2/dingtalk_adapter.py`
+- Test: `backend/tests/test_finance_v2_source_inbox.py`
+- Create: `docs/finance/v2-0-write-enable-runbook.md`
+
+- [ ] 先写失败测试：来源单据版本、哈希和幂等键唯一；缺映射进入异常队列；百胜/钉钉只产生草稿且不改变余额。
+- [ ] 先启用制单，再启用审核，最后启用人工过账；每个开关间隔至少完成当日核对，任何异常回退到上一只读或草稿阶段。
+- [ ] 在回退点前冻结写入；回退点后只允许前向修复。若已产生真实写入，恢复旧备份前必须导出并演练重放新写入。
+- [ ] 首周每日输出来源单据、草稿、审核、过账、余额和异常队列对账；未通过不得扩大范围。
+
+### Phase 7: V2.1 子账逐域实施
+
+**Files:**
+- Create: `docs/finance/v2-1-subledger-gates.md`
+
+- [ ] 按“费用/付款与发票 → 应收 → 应付 → 出纳/银行对账”顺序，每个子域独立建模、迁移、来源接入、子账与总账对账、页面、权限、性能及生产验收。
+- [ ] 每个子域完成前，总账结账检查只显示该域为未启用；启用后将其差异为零纳入结账前置条件。
+- [ ] 不得把 CRUD、空表或模拟数据视为子域完成。
+
+### Phase 8: V2.2 专业域逐项实施
+
+**Files:**
+- Create: `docs/finance/v2-2-specialized-domain-gates.md`
+
+- [ ] 按“固定资产/折旧 → 工资 → 税务 → 现金流量表自动分配 → 管理会计/预算/合并报表”顺序单独立项。
+- [ ] 每项必须补齐数据来源、会计政策、子账-总账对账、敏感数据控制、结账依赖和回滚策略后才可实施。
+
+## 修订后的完成门槛
+
+- [ ] V2.0 仅在会计内核、历史隔离、基础账簿报表、只读发布和受控开写全部有证据时完成。
+- [ ] V2.1/V2.2 模块不因存在页面、接口或表而视为已完成；必须按各自 gate 通过。
+- [ ] 发布恢复策略区分“写入冻结可回退”和“已开写仅前向修复”，并验证 RPO/RTO/备份恢复。
