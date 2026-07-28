@@ -55,7 +55,7 @@
 - Create: `backend/tests/test_finance_v2_core_models.py`
 
 - [ ] 先写失败测试，覆盖会计主体、组织、账簿、政策、期间日历、科目版本、维度规则、币种/汇率、账簿数据域、余额唯一键和复合外键。
-- [ ] Expand 迁移仅创建 `fin_current`/`fin_history`、可空兼容列、检查约束和低风险索引；不新增不可空字段、不做全表回填、不删除旧结构。
+- [ ] Expand 迁移对旧表新增的兼容/待回填字段保持可空；对全新 V2 表从创建时即设置可安全确定的 `NOT NULL`、唯一约束、检查约束和外键，不做全表回填、不删除旧结构。
 - [ ] 实现数据库约束：借/贷非负且不能同时为正、汇率大于零、余额键包含账簿/期间/科目/维度/币种、当前子表不能引用历史主表。
 - [ ] 运行 `pytest tests/test_finance_v2_core_models.py -q` 与测试库 `alembic upgrade head`；保存迁移 SQL 和 head 输出。
 
@@ -67,10 +67,12 @@
 - Create: `backend/app/services/finance_v2/voucher_workflow.py`
 - Create: `backend/app/services/finance_v2/ledger_service.py`
 - Create: `backend/app/services/finance_v2/period_closing_service.py`
+- Create: `backend/app/services/finance_v2/voucher_number_service.py`
+- Create: `backend/app/services/finance_v2/command_idempotency_service.py`
 - Create: `backend/tests/test_finance_v2_voucher_workflow.py`
 - Create: `backend/tests/test_finance_v2_concurrency.py`
 
-- [ ] 写失败测试：完整状态转换、职责分离、已过账不可改、冲销关联、批准状态的过账失败记录、连续凭证号、借贷平衡、关闭期间限制和期末余额方程。
+- [ ] 写失败测试：`draft/submitted/reviewing/approved/rejected/cancelled/posted` 转换矩阵、职责分离、已过账不可改、冲销关联、批准状态的过账失败记录、连续凭证号、借贷平衡、关闭期间限制和期末余额方程。
 - [ ] 用如下版本条件实现单记录更新，影响行数不是 1 时返回 409：
 
 ```sql
@@ -80,9 +82,24 @@ WHERE id = :id AND version = :expected_version;
 ```
 
 - [ ] 固定账簿、期间、凭证、余额锁序；对死锁/序列化失败有限重试。并发测试覆盖同凭证过账、同来源制单、结账与过账、冲销与结账。
+- [ ] 以 `fin_voucher_number_counter` 和 `fin_voucher_number_reservation` 为账簿/期间/凭证字加锁分配号码；作废号保留且不得重用，禁止用会在回滚时留空号的裸 sequence 代替审计编号策略。
+- [ ] 所有 `post/reverse/close_period/reopen_period/approve_opening_balance/publish_history_batch` 命令记录 `command_id/request_id/idempotency_key` 并建立唯一约束；重复请求返回原结果而不是再次写入。
 - [ ] 仅 `post` 和 `reverse` 事务更新 `ledger_balance`；实现 `rebuild_ledger_balance` 与 `verify_ledger_balance`，并将操作/失败尝试写入审计事件。
 
 **Go:** 服务测试通过，余额重建与增量结果一致，无越权、重复过账或未平衡凭证。
+
+### Phase 3.5: 期间、损益结转、结账和反结账
+
+**Files:**
+- Create: `backend/app/services/finance_v2/period_close_workflow.py`
+- Create: `backend/tests/test_finance_v2_period_close.py`
+- Create: `backend/tests/test_finance_v2_profit_closing.py`
+
+- [ ] 写失败测试：`open/closing/closed/reopening` 状态、结账检查报告、损益结转凭证、重复结账幂等、结账失败恢复、反结账双人审批、年结下一年期初和关闭期间迟到单据。
+- [ ] 对月结与年结分别建模；结账批次保存命令幂等键、检查报告、损益结转凭证、失败原因与恢复步骤。
+- [ ] 对迟到来源单据只创建异常队列项；默认在当前开放期间创建调整凭证，只有受控反结账获批才允许影响原期间。
+
+**Go:** 结账/反结账在恢复副本完整演练，余额、损益结转和审计均可核对。
 
 ### Phase 4: 历史暂存、核对与发布
 
@@ -93,7 +110,7 @@ WHERE id = :id AND version = :expected_version;
 - Create: `backend/scripts/verify_finance_history_v2.py`
 - Create: `backend/tests/test_finance_v2_history_import.py`
 
-- [ ] 写失败测试：批次状态机、仅已发布可读、检查点续传、相同来源键+相同哈希幂等、相同键+不同哈希冲突、历史触发器拒绝改写。
+- [ ] 写失败测试：批次状态机、应用角色只能读取 `fin_read` 已发布视图、检查点续传、相同来源键+相同哈希幂等、相同键+不同哈希冲突、历史触发器拒绝改写。
 - [ ] 实现 `created/loading/loaded/validating/validated/published` 与 `failed/conflicted/cancelled/superseded`；发布批次为短事务，加载中数据不暴露给报表。
 - [ ] 逐账套、年度、期间、科目、维度、凭证、分录、期初/借贷/期末、原币/本位币、来源单据、附件生成差异报告；任一差异以非零退出。
 - [ ] 在恢复副本连续导入两次，比较发布数据、报告和哈希；历史余额只作为核对快照，不能与凭证分录重复计入报表。
@@ -120,47 +137,91 @@ WHERE id = :id AND version = :expected_version;
 - Create: `frontend/src/api/financeV2.ts`
 - Create: `frontend/src/views/finance-center/V2CoreWorkspace.vue`
 - Create: `frontend/src/views/finance-center/HistoryDataBadge.vue`
+- Create: `backend/tests/test_finance_v2_reports.py`
 - Create: `frontend/tests/finance-v2-core.spec.ts`
 - Create: `docs/finance/v2-0-legacy-compatibility-register.md`
 - Create: `deploy/release_finance_center_v2.sh`
 - Create: `deploy/release_finance_center_v2.ps1`
 - Create: `deploy/verify_finance_center_v2.py`
 
-- [ ] 写失败测试：报表按明确范围读取，重叠“含历史数据”被阻断，缺映射不导出正式报表，历史标记可见，跨账簿/组织/维度权限拒绝。
+- [ ] 写失败测试：资产等于负债加所有者权益、利润表净利润与权益结转一致、总账/明细账/余额表互相核对、期初加发生等于期末、模板版本切换、重叠“含历史数据”阻断、缺映射不导出正式报表。
 - [ ] 实现总账、明细账、余额表、资产负债表和利润表；模板、映射、公式、舍入、快照和穿透全部版本化。
 - [ ] 逐一登记旧 API、页面和表，按路线图兼容矩阵关闭旧审核/过账路径，旧制单只能适配 V2 草稿或返回 410。
 - [ ] Linux shell 是生产入口；PowerShell 仅经 SSH 编排。脚本包含发布锁、显式环境注入、原子前端切换、只读开关与可保存日志。
-- [ ] 生产先只读发布；运行 API、权限、浏览器、历史标记、导出和恢复验证，保存验收证据。
+- [ ] 实现附件大小/格式白名单、哈希去重、恶意文件扫描、私有对象存储、短期签名 URL、下载权限检查、保留/删除策略和文件缺失审计处理。
+- [ ] 生产先只读发布；运行 API、权限、浏览器、历史标记、导出、附件和恢复验证，保存验收证据。
 
 **Go:** 只读发布通过，旧写路径无一可用，V2 尚未开启制单/审核/过账。
+
+### Phase 5.2: 权限范围、审计和字段脱敏
+
+**Files:**
+- Create: `backend/app/services/finance_v2/finance_permission_service.py`
+- Create: `backend/app/models/finance_scope_grant.py`
+- Create: `backend/scripts/seed_finance_v2_permissions.py`
+- Create: `backend/tests/test_finance_v2_permission_matrix.py`
+
+- [ ] 写失败测试：操作权限、账簿范围、组织范围、辅助维度范围、敏感字段范围和导出范围均独立拒绝跨范围访问；超级管理员也必须记录越权审计。
+- [ ] 实现权限种子、账簿/组织/维度授权、字段脱敏、权限缓存失效和导出范围控制；所有审计日志脱敏后才可进入常规日志系统。
+
+**Go:** 权限矩阵、跨账簿越权、导出和敏感字段测试在 API 与浏览器层均通过。
 
 ### Phase 5.5: 写入开关与紧急停止
 
 **Files:**
 - Create: `backend/app/services/finance_v2/feature_gate_service.py`
+- Create: `backend/app/services/finance_v2/finance_observability.py`
 - Create: `backend/tests/test_finance_v2_feature_gates.py`
+- Create: `backend/tests/test_finance_v2_observability.py`
 - Create: `docs/finance/v2-0-emergency-stop-sop.md`
+- Create: `docs/finance/v2-0-observability-gate.md`
 
 - [ ] 写失败测试：`read_enabled/draft_enabled/review_enabled/post_enabled/source_sync_enabled` 分别控制对应命令；紧急停止立即拒绝所有当前写入和自动草稿。
 - [ ] 记录开关变更人、理由、审批和生效时间；紧急停止不影响已发布历史查询与已过账凭证的只读审计。
+- [ ] 为过账失败、借贷不平阻断、历史导入冲突、收件箱积压、异常队列、锁等待/死锁、结账失败、导出异常、API 5xx 和余额差异发布指标；为每项定义阈值、负责人、通知路由、日志脱敏和告警关闭条件。
+- [ ] 写指标与告警配置测试，验证敏感字段不进入指标标签或常规日志；在生产形态环境触发并确认告警通知和关闭流程。
 
 **Go:** 开关和紧急停止在生产形态环境演练通过。
+
+### Phase 5.6: 凭证工作台、当前账写入 API 与前端验收
+
+**Files:**
+- Create: `backend/app/api/v1/finance_v2_vouchers.py`
+- Create: `backend/tests/test_finance_v2_voucher_api.py`
+- Create: `frontend/src/views/finance-center/VoucherList.vue`
+- Create: `frontend/src/views/finance-center/VoucherEditor.vue`
+- Create: `frontend/src/views/finance-center/VoucherDetail.vue`
+- Create: `frontend/tests/finance-v2-voucher.spec.ts`
+
+- [ ] 写失败测试：凭证列表/详情、人工录入、草稿编辑、提交、撤回、开始审核、批准、拒绝、取消、人工过账、冲销、调整凭证、操作记录和 409 并发冲突提示。
+- [ ] 所有写 API 复用 Phase 3 服务、命令幂等和 Phase 5.2 数据范围权限；历史记录在工作台只读且不渲染写操作。
+- [ ] 运行浏览器验收，覆盖重复点击、网络重试、无权限、跨账簿、紧急停止和过账后不可编辑。
+
+**Go:** 此阶段通过前，`draft_enabled`、`review_enabled` 和 `post_enabled` 必须为关闭状态；通过后仍只开放给批准的试点角色。
 
 ### Phase 6: 来源收件箱、规则版本与受控开写
 
 **Files:**
 - Create: `backend/app/services/finance_v2/source_inbox.py`
 - Create: `backend/app/services/finance_v2/posting_rule_service.py`
-- Create: `backend/app/services/finance_v2/baison_adapter.py`
-- Create: `backend/app/services/finance_v2/dingtalk_adapter.py`
 - Create: `backend/tests/test_finance_v2_source_inbox.py`
 - Create: `backend/tests/test_finance_v2_posting_rules.py`
 - Create: `docs/finance/v2-0-write-enable-runbook.md`
 
-- [ ] 写失败测试：来源版本/哈希/幂等键唯一，规则按来源/业务类型/法人/组织/账簿/生效期/优先级选择，缺映射进异常队列，草稿不影响余额。
+- [ ] 写失败测试：来源版本/哈希/幂等键唯一，规则按来源/业务类型/法人/组织/账簿/生效期/优先级选择，缺映射进异常队列，`dry-run/preview` 不产生草稿也不影响余额。
 - [ ] 实现 `fin_posting_rule`、`fin_posting_rule_version`、`fin_mapping_rule`、`fin_mapping_exception`，包含借贷科目、维度、税额、审核人、发布时间与回滚版本。
 - [ ] 实现来源变更规则：未生成草稿用新版本；草稿未提交作废重建或人工确认；已审核阻断并退回；已过账生成调整/冲销建议；来源撤销进入异常队列。
-- [ ] 先开启制单，日对账通过后开启审核，再通过后开启人工过账；任一异常关闭到上一阶段，已写数据按前向修复处理。
+- [ ] V2.0 只接入生产数据的只读 `dry-run/preview`，不创建百胜或钉钉正式适配器、不生成生产草稿、不开放来源同步；试点决策转入 Phase 6.1。
+
+**Go:** 来源框架和预览只读可核对，生产自动草稿仍关闭。
+
+### Phase 6.1: 有限来源试点决策（V2.1 前置）
+
+**Files:**
+- Create: `docs/finance/v2-1-source-pilot-decision.md`
+
+- [ ] 逐来源列明是否需要未来子账、总账—子账关联键、补建子账历史、来源变更行为、回滚方式和财务负责人批准；未获批准的来源维持 preview。
+- [ ] 仅在 V2.1 子账边界已实施并通过对账时，创建对应的百胜或钉钉适配器；不得让总账先于子账产生不可追溯的正式自动凭证。
 
 **Go:** 首周每日来源、草稿、审核、过账、余额和异常队列对账通过。
 
@@ -170,9 +231,9 @@ WHERE id = :id AND version = :expected_version;
 - Create: migration generated by `cd backend && alembic revision -m "contract finance v2 legacy paths"`
 - Create: `docs/finance/v2-0-contract-evidence.md`
 
-- [ ] 仅在稳定观察期、备份和前向修复方案通过后，移除旧读路径、收紧 `NOT NULL`、关闭旧写权限、删除临时兼容视图/任务并更新数据字典。
+- [ ] 仅在至少完成一次完整月结、一次结账/反结账演练、连续 30 天无重大账务差异、日对账持续通过、旧入口调用量为零或有豁免、备份恢复再次演练通过后，移除旧读路径、收紧 `NOT NULL`、关闭旧写权限、删除临时兼容视图/任务并更新数据字典。
 - [ ] 保留源快照、历史证据、导入报告和归档接口；不删除仍在保留期内的旧业务数据。
-- [ ] 验证旧端点均代理只读或 410、数据库不存在第二正式过账路径、迁移仍为单一 head。
+- [ ] 验证旧端点均代理只读或 410、数据库不存在第二正式过账路径、迁移仍为单一 head。普通发布故障使用前向修复；数据库灾难按 PITR/备份恢复流程执行并重放 RPO 范围内交易、补录并完成财务核对。
 
 **Go:** 旧写路径彻底关闭、最终约束已生效、回滚策略已切换为前向修复。
 
