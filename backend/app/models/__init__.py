@@ -126,3 +126,4 @@ from app.models.finance_v2_history import (
     FinanceV2HistoryVoucherLine,
 )
 from app.models.finance_v2_opening import FinanceV2OpeningBalanceBatch, FinanceV2OpeningBalanceLine
+from app.models.finance_v2_operations import FinanceV2FeatureGate, FinanceV2PostingAttempt
