@@ -32,7 +32,7 @@ approved ──withdraw──→ draft
 draft/submitted/reviewing/approved ──cancel──→ cancelled
 ```
 
-`submitted → reviewing` 由具备审核范围的审核人以 `start_review` 明确领取；`reviewing` 支持多人审核时保留为持久状态，单人审核策略亦沿用相同命令和审计。`cancelled` 是终态，需重新制单而非恢复。所有转换增加版本号；提交、拒绝、撤回、取消、过账和冲销都记录操作理由。凭证号码仅在人工过账时按“账簿 + 会计期间 + 凭证字”加锁分配；作废号码保留且不得重用。
+`submitted → reviewing` 由具备审核范围的审核人以 `start_review` 明确领取。V2.0 固定为单人审核：一个凭证只能有一名活跃审核人，转交必须记录原因；多人会签不在 V2.0 实现范围，后续版本如启用必须另建 `review_instance/review_step/review_action` 模型。`cancelled` 是终态，需重新制单而非恢复。所有转换增加版本号；提交、拒绝、撤回、取消、过账和冲销都记录操作理由。凭证号码仅在人工过账时按“账簿 + 会计期间 + 凭证字”加锁分配；作废号码保留且不得重用。
 
 | 当前状态 | 命令 | 目标状态 | 授权人 | 必填原因 |
 | --- | --- | --- | --- | --- |
@@ -42,18 +42,21 @@ draft/submitted/reviewing/approved ──cancel──→ cancelled
 | reviewing | reject | rejected | 审核人 | 是 |
 | rejected | reopen | draft | 制单人 | 是 |
 | approved | withdraw | draft | 授权人员 | 是 |
+| draft/submitted/reviewing/approved | cancel | cancelled | 制单人或授权人员 | 是 |
 | approved | post | posted | 过账人 | 是 |
 | posted | reverse | 原凭证仍为 posted + 新冲销凭证 posted | 反操作人员 | 是 |
 
 过账失败不是凭证业务状态：余额事务失败时凭证仍保持 `approved`，失败详情写入 `fin_posting_attempt` 和 `fin_operation_event`。冲销不改变原凭证 `posted` 状态；原凭证记录 `reversal_status` 与 `reversal_voucher_id`，新的冲销凭证独立过账。已审核未过账凭证可因原因撤回到草稿；任何已过账凭证只能冲销或以调整凭证更正，永不编辑或删除。
 
-制单、审核、过账默认职责分离；会计政策若允许审核人与过账人为同一人，必须显式配置并审计。每个写命令要求 `expected_version` 和原因，并以带版本条件的单行更新实现乐观并发。余额只由过账/冲销事务更新，`ledger_balance` 是可重建读模型；提供 `rebuild_ledger_balance` 和 `verify_ledger_balance`。
+制单、审核、过账默认职责分离；会计政策若允许审核人与过账人为同一人，必须显式配置并审计。每个写命令要求 `expected_version` 和原因，并以带版本条件的单行更新实现乐观并发。草稿可包含未完成或零金额行；提交前每行必须且只能有借/贷一边大于零，审核和过账前全凭证借贷相等且总额大于零；例外零金额业务类型须单独配置。余额只由过账/冲销事务更新，`ledger_balance` 是可重建读模型；提供 `rebuild_ledger_balance` 和 `verify_ledger_balance`。
 
 锁定顺序固定为账簿、期间、凭证、余额；死锁与序列化失败有限重试。权限判定为“操作权限 + 账簿范围 + 组织范围 + 辅助维度范围 + 敏感字段范围”，不是单一全局权限码。
 
+过账尝试采用独立审计事务：先写入 `fin_posting_attempt=running`，再运行可整体回滚的凭证/余额事务；成功后独立更新为 `success`，失败后在新的干净 session 中更新为 `failed`、错误码和脱敏上下文。失败不会把凭证从 `approved` 改为另一业务状态，也不会在已回滚 session 中写日志。
+
 ## 历史暂存、核对与发布
 
-历史数据位于 `fin_history`，当前账位于 `fin_current`。`finance_history_importer` 仅能写 `fin_history.staging_*` 与批次控制表；应用角色不得读取 `fin_history` 基础表，只能读取 `fin_read.history_*_view` 已发布视图。导入角色不可修改已发布业务实体，应用角色不可写历史 schema；历史业务表拒绝更新/删除。`import_batch`、检查点和校验结果是受控可更新的控制表，发布后只允许追加审计字段。部署中验证应用角色不是 owner 且没有 `BYPASSRLS`。`is_historical=true`、来源键、哈希和批次是审计标签，不是唯一安全屏障。
+历史数据位于 `fin_history`，当前账位于 `fin_current`。角色严格分为 `finance_schema_owner`（仅对象所有权）、`finance_migrator`（仅 DDL/迁移）、`finance_app`（当前账受控 DML）、`finance_history_importer`（仅历史暂存/批次写入）和 `finance_readonly_auditor`（只读审计）；应用与导入角色均没有 DDL。`finance_history_importer` 仅能写 `fin_history.staging_*` 与批次控制表；`finance_app` 不得读取 `fin_history` 基础表，只能读取 `fin_read.history_*_view` 已发布视图。导入角色不可修改已发布业务实体，应用角色不可写历史 schema；历史业务表拒绝更新/删除。`import_batch`、检查点和校验结果是受控可更新的控制表，发布后只允许追加审计字段。部署中验证应用角色不是 owner 且没有 `BYPASSRLS`。`is_historical=true`、来源键、哈希和批次是审计标签，不是唯一安全屏障。
 
 导入批次状态：
 
@@ -68,7 +71,7 @@ created → loading → loaded → validating → validated → published
 
 ## 期初建账、结账与报表
 
-当前账建账记录 `current_book_go_live_date`、`history_coverage_end_date`、`opening_balance_batch_id`、`opening_balance_status`、`opening_balance_approved_by` 和 `opening_balance_locked_at`。期初借贷相等、起始日不与历史覆盖重叠、科目/维度余额核对一致后，财务负责人批准并锁定。后续修改只能创建新的期初调整批次，不能直接改余额。
+当前账建账记录 `current_book_go_live_date`、`history_coverage_end_date`、`opening_balance_batch_id`、`opening_balance_status`、`opening_balance_approved_by` 和 `opening_balance_locked_at`。默认 `current_book_go_live_date = history_coverage_end_date + 1 天`；不连续时必须登记 `coverage_gap_start/end`、原因、受影响报表、批准人和 `formal_report_blocked=true`。期初借贷相等、起始日不与历史覆盖重叠、科目/维度余额核对一致后，财务负责人批准并锁定。第一张正式凭证过账前允许废弃并重新创建期初批次；第一张正式凭证过账后及首次期间结账后，期初表永久只读，只能以当前开放期间调整凭证修正，不能再创建期初调整批次。
 
 结账状态为 `open → closing → closed`，反结账状态为 `closed → reopening → open`。结账批次保存检查报告、损益结转凭证、重试与失败恢复记录；月结与年结分开建模，年结额外生成下一年度期初。结账前校验未审核/未过账/借贷不平为零、异常来源为零、余额重算通过、损益结转完成。重新打开期间需申请、理由、双人审批和审计，且不改变已过账凭证不可修改的规则。迟到来源单据不得自动重开期间，应进入异常队列，由财务选择当前期间调整凭证或受控反结账。V2.1/V2.2 启用子账后，子账-总账差异为零才可结账。
 
@@ -78,11 +81,17 @@ created → loading → loaded → validating → validated → published
 
 电子凭证预留原件、文件哈希、验签/验真状态、结构化载荷、归档状态、归档引用和入账信息文件。未验签/未验真仅显示真实状态。导出记录条件、字段、操作者、时间、水印和短期下载授权。
 
-配置开关为 `finance_v2.read_enabled`、`draft_enabled`、`review_enabled`、`post_enabled`、`source_sync_enabled`，并有可即时关闭写入与自动草稿的紧急停止开关。关键写命令必须携带 `command_id`、`request_id` 和 `idempotency_key`，并以数据库唯一约束防止浏览器/网关重试重复执行。监控过账失败、借贷不平阻断、历史冲突、收件箱积压、异常队列、锁等待/死锁、结账失败、导出异常、API 5xx、当日凭证与余额差异；V2.1 起增加子账-总账差异。每项监控具有阈值、负责人、通知路由、日志脱敏与关闭条件。
+配置开关分为全局紧急停止、环境级、账簿级、来源系统级和角色试点范围：`finance_v2.read_enabled`、`draft_enabled`、`review_enabled`、`post_enabled`、`source_sync_enabled` 只能在其上级开关开启且角色/账簿范围获批准时生效。紧急停止可即时关闭当前写入与自动草稿。关键写命令必须携带 `command_id`、`request_id` 和 `idempotency_key`，并以数据库唯一约束防止浏览器/网关重试重复执行。监控过账失败、借贷不平阻断、历史冲突、收件箱积压、异常队列、锁等待/死锁、结账失败、导出异常、API 5xx、当日凭证与余额差异；V2.1 起增加子账-总账差异。每项监控具有阈值、负责人、通知路由、日志脱敏与关闭条件。
 
 ## V2.0 来源边界
 
 V2.0 只实现 `source_inbox`、映射/过账规则版本、异常队列、适配器接口和生产数据的只读 `dry-run/preview`。百胜与钉钉适配器不得在 V2.0 生产环境生成或过账正式草稿；任何有限来源试点属于 V2.1，必须逐来源批准，说明未来子账需求、总账—子账关联键、补建历史策略和回滚方式。
+
+## API、路由与切换契约
+
+唯一后端前缀为 `/api/v1/finance-center`，唯一前端前缀为 `/app/finance-center`；根路由在 `backend/app/api/v1/router.py` 注册，前端路由在 `frontend/src/router/index.ts` 注册，菜单单一来源为 `frontend/src/config/financeCenterModules.ts`。每个旧 `/api/v1/finance/*` 入口在 API 契约表中对应 V2 只读代理、V2 草稿适配或 410，旧审核/过账没有可写映射。
+
+切换顺序为：旧系统正常写入 → V2 只读验收 → V2 凭证工作台/权限验收 → 短时写入冻结 → 提取并核对旧系统最终增量 → 开启 V2 制单 → 关闭或转接旧制单 → 日对账后开启审核 → 再开启人工过账。旧审核和过账路径必须在 V2 只读发布前禁止；旧制单在 V2 制单开启前保持原状或进入明确冻结窗口，不得产生未计划的无写入系统停摆。
 
 ## 版本回退与灾难恢复
 
