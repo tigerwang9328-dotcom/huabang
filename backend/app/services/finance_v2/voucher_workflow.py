@@ -1,0 +1,202 @@
+"""Database-backed V2 voucher commands with optimistic concurrency."""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.finance_v2 import FinanceV2DimensionSet, FinanceV2FiscalPeriod, FinanceV2OperationEvent, FinanceV2Voucher, FinanceV2VoucherLine
+from app.services.finance_v2.domain import (
+    FinanceV2DomainError,
+    VoucherCommand,
+    VoucherDraft,
+    VoucherLineDraft,
+    apply_voucher_command,
+    canonical_dimension_hash,
+)
+from app.services.finance_v2.ledger_service import FinanceV2LedgerService
+
+
+class FinanceV2VoucherWorkflow:
+    """The only service allowed to change V2 voucher business state."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create_draft(
+        self,
+        *,
+        book_id: int,
+        period_id: int,
+        voucher_date: date,
+        prepared_by: str,
+        request_id: str,
+        entries: list[dict],
+    ) -> dict:
+        period = await self.db.get(FinanceV2FiscalPeriod, period_id)
+        if not period or period.book_id != book_id:
+            raise FinanceV2DomainError("fiscal period does not belong to the requested book")
+        if period.status != "open":
+            raise FinanceV2DomainError("fiscal period is not open")
+        existing = (
+            await self.db.execute(
+                select(FinanceV2Voucher).where(
+                    FinanceV2Voucher.book_id == book_id,
+                    FinanceV2Voucher.request_id == request_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return self._snapshot(existing, idempotent=True)
+
+        voucher = FinanceV2Voucher(
+            book_id=book_id,
+            period_id=period_id,
+            voucher_date=voucher_date,
+            prepared_by=prepared_by,
+            request_id=request_id,
+            status="draft",
+        )
+        self.db.add(voucher)
+        await self.db.flush()
+        empty_dimension_set_id = await self._empty_dimension_set_id(book_id)
+        for line_no, payload in enumerate(entries, start=1):
+            self.db.add(
+                FinanceV2VoucherLine(
+                    voucher_id=voucher.id,
+                    line_no=line_no,
+                    account_version_id=payload.get("account_version_id"),
+                    dimension_set_id=payload.get("dimension_set_id") or empty_dimension_set_id,
+                    summary=payload.get("summary") or "",
+                    currency_code=payload.get("currency_code") or "CNY",
+                    exchange_rate=Decimal(str(payload.get("exchange_rate", "1"))),
+                    debit_amount=Decimal(str(payload.get("debit_amount", "0"))),
+                    credit_amount=Decimal(str(payload.get("credit_amount", "0"))),
+                )
+            )
+        await self._event(voucher, prepared_by, "voucher.create", None, {"status": "draft"})
+        await self.db.flush()
+        return self._snapshot(voucher, idempotent=False)
+
+    async def command(
+        self,
+        *,
+        voucher_id: int,
+        action: str,
+        actor_id: str,
+        expected_version: int,
+        reason: str | None,
+    ) -> dict:
+        voucher = await self.db.get(FinanceV2Voucher, voucher_id)
+        if not voucher:
+            raise FinanceV2DomainError("voucher not found")
+        lines = (
+            await self.db.execute(
+                select(FinanceV2VoucherLine)
+                .where(FinanceV2VoucherLine.voucher_id == voucher_id)
+                .order_by(FinanceV2VoucherLine.line_no)
+            )
+        ).scalars().all()
+        domain_lines = [
+            VoucherLineDraft(
+                account_version_id=str(line.account_version_id or ""),
+                summary=line.summary,
+                debit=Decimal(line.debit_amount),
+                credit=Decimal(line.credit_amount),
+            )
+            for line in lines
+        ]
+        before = self._snapshot(voucher)
+        after = apply_voucher_command(
+            VoucherDraft(
+                voucher_id=str(voucher.id),
+                status=voucher.status,
+                version=voucher.version,
+                prepared_by=voucher.prepared_by,
+                reviewer_id=voucher.reviewer_id,
+                posted_by=voucher.posted_by,
+            ),
+            VoucherCommand(action, actor_id, expected_version, reason),
+            domain_lines,
+        )
+        values = {
+            "status": after.status,
+            "version": after.version,
+            "reviewer_id": after.reviewer_id,
+            "posted_by": after.posted_by,
+        }
+        if action == "approve":
+            values["approved_by"] = actor_id
+        result = await self.db.execute(
+            update(FinanceV2Voucher)
+            .where(FinanceV2Voucher.id == voucher_id, FinanceV2Voucher.version == expected_version)
+            .values(**values)
+        )
+        if result.rowcount != 1:
+            raise FinanceV2DomainError("version conflict: voucher changed concurrently")
+        for key, value in values.items():
+            setattr(voucher, key, value)
+        if action == "post":
+            await FinanceV2LedgerService().rebuild_period(
+                self.db,
+                book_id=voucher.book_id,
+                period_id=voucher.period_id,
+            )
+        await self._event(voucher, actor_id, f"voucher.{action}", reason, before)
+        await self.db.flush()
+        return self._snapshot(voucher)
+
+    async def _empty_dimension_set_id(self, book_id: int) -> int:
+        stable_hash = canonical_dimension_hash({})
+        row = (
+            await self.db.execute(
+                select(FinanceV2DimensionSet).where(
+                    FinanceV2DimensionSet.book_id == book_id,
+                    FinanceV2DimensionSet.stable_hash == stable_hash,
+                )
+            )
+        ).scalar_one_or_none()
+        if row:
+            return row.id
+        row = FinanceV2DimensionSet(book_id=book_id, stable_hash=stable_hash)
+        self.db.add(row)
+        await self.db.flush()
+        return row.id
+
+    async def _event(
+        self,
+        voucher: FinanceV2Voucher,
+        actor_id: str,
+        action: str,
+        reason: str | None,
+        before: dict | None,
+    ) -> None:
+        self.db.add(
+            FinanceV2OperationEvent(
+                book_id=voucher.book_id,
+                voucher_id=voucher.id,
+                command_id=f"{voucher.id}:{voucher.version}:{action}",
+                actor_id=actor_id,
+                action=action,
+                reason=reason,
+                before_data=before,
+                after_data=self._snapshot(voucher),
+            )
+        )
+
+    @staticmethod
+    def _snapshot(voucher: FinanceV2Voucher, *, idempotent: bool = False) -> dict:
+        return {
+            "voucher_id": voucher.id,
+            "book_id": voucher.book_id,
+            "period_id": voucher.period_id,
+            "status": voucher.status,
+            "version": voucher.version,
+            "reviewer_id": voucher.reviewer_id,
+            "approved_by": voucher.approved_by,
+            "posted_by": voucher.posted_by,
+            "idempotent": idempotent,
+        }

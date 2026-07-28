@@ -25,7 +25,7 @@
 | `period_close_batch`、`period_close_approval`、`profit_closing_run` | Phase 3.5 | `add finance v2 period closing` revision |
 | `fin_history.staging_*`、`import_batch`、`import_checkpoint`、`accounting_book`、`account_version`、`voucher`、`voucher_line`、`balance_snapshot`、`source_link`、`attachment_reference`、已发布视图/触发器 | Phase 4 | `add finance history publication guards` revision |
 | `opening_balance_batch`、`opening_balance_line`、`opening_balance_dimension`、`opening_balance_reconciliation_item`、`opening_balance_approval`、`coverage_gap` | Phase 4.5 | `add finance opening balance boundary` revision |
-| 附件/归档元数据、报表模板/映射/快照 | Phase 5 | `add finance reports and archive metadata` revision |
+| 附件引用元数据（无文件能力）、报表模板/映射/快照 | Phase 5 | `add finance reports and archive metadata` revision |
 | `scope_grant`、字段脱敏/导出审计 | Phase 5.2 | `add finance authorization scopes` revision |
 | `feature_gate_change`、指标/告警配置 | Phase 5.5 | `add finance feature gates and observability` revision |
 | `source_document`、`source_document_version`、`source_inbox`、`posting_rule`、`posting_rule_version`、`mapping_rule`、`mapping_exception`、`preview_run` | Phase 6 | `add finance source inbox and posting rules` revision |
@@ -139,7 +139,7 @@ WHERE id = :id AND version = :expected_version;
 - [ ] 写失败测试：批次状态机、应用角色只能读取 `fin_read` 已发布视图、检查点续传、相同来源键+相同哈希幂等、相同键+不同哈希冲突、历史触发器拒绝改写。
 - [ ] 实现 `created/loading/loaded/validating/validated/published` 与 `failed/conflicted/cancelled/superseded`；发布批次为短事务，加载中数据不暴露给报表。
 - [ ] 发布事务将验证通过的 staging 记录写入或不可变标记为 `fin_history.accounting_book/account_version/voucher/voucher_line/balance_snapshot/source_link/attachment_reference`，随后更新 batch 为 `published`；`fin_read` 视图不得直接查询 staging。
-- [ ] 逐账套、年度、期间、科目、维度、凭证、分录、期初/借贷/期末、原币/本位币、来源单据、附件生成差异报告；任一差异以非零退出。
+- [ ] 逐账套、年度、期间、科目、维度、凭证、分录、期初/借贷/期末、原币/本位币、来源单据及附件引用元数据生成差异报告；任一差异以非零退出。V2.0 不读取、上传或恢复附件物理文件。
 - [ ] 在恢复副本连续导入两次，比较发布数据、报告和哈希；历史余额只作为核对快照，不能与凭证分录重复计入报表。
 
 **Go:** 两次导入完全幂等，冲突可阻断，历史数据仅以已发布批次可读。
@@ -187,9 +187,8 @@ WHERE id = :id AND version = :expected_version;
 - [ ] 实现总账、明细账、余额表、资产负债表和利润表；模板、映射、公式、舍入、快照和穿透全部版本化。
 - [ ] 逐一登记旧 API、页面和表；只读验收阶段不关闭旧审核/过账或旧制单，最终切换完成后才按路线图兼容矩阵关闭/转接旧写路径。
 - [ ] Linux shell 是生产入口；PowerShell 仅经 SSH 编排。脚本包含发布锁、显式环境注入、原子前端切换、只读开关与可保存日志。
-- [ ] 实现附件大小/格式白名单、哈希去重、恶意文件扫描、私有对象存储、短期签名 URL、下载权限检查、保留/删除策略和文件缺失审计处理。
-- [ ] 验证附件对象存储的版本/不可变能力、跨节点复制、备份恢复、数据库—物理文件一致性、对象存储 RPO/RTO 与恶意文件隔离区恢复。
-- [ ] 生产先只读发布；运行 API、权限、浏览器、历史标记、导出、附件和恢复验证，保存验收证据。
+- [ ] 仅实现历史附件引用元数据的展示和“未验证/缺失”状态；不得增加文件上传、下载、对象存储、恶意文件扫描、签名 URL 或删除入口。
+- [ ] 生产先只读发布；运行 API、角色入口、浏览器、历史标记、导出和数据库恢复验证，保存验收证据。
 
 **Go:** 只读发布通过，旧审核/过账路径无一可用；旧制单在 V2 制单开启前保持原状或已进入批准的短时冻结窗口，V2 尚未开启制单/审核/过账。
 
@@ -224,7 +223,7 @@ WHERE id = :id AND version = :expected_version;
 - [ ] 测试全局紧急停止、环境级、账簿级、来源级和角色试点范围逐层生效，任何上级关闭时下级不得绕过。
 - [ ] 为过账失败、借贷不平阻断、历史导入冲突、收件箱积压、异常队列、锁等待/死锁、结账失败、导出异常、API 5xx 和余额差异发布指标；为每项定义阈值、负责人、通知路由、日志脱敏和告警关闭条件。
 - [ ] 写指标与告警配置测试，验证敏感字段不进入指标标签或常规日志；在生产形态环境触发并确认告警通知和关闭流程。
-- [ ] 在生产形态数据上验收余额表百万级分录响应、明细分页、单凭证过账 P95、月结耗时、历史导入吞吐、报表并发、锁等待/死锁上限及大附件/批量导出资源限制；阈值未达标为生产开写 No-Go。
+- [ ] 在生产形态数据上验收余额表百万级分录响应、明细分页、单凭证过账 P95、月结耗时、历史导入吞吐、报表并发、锁等待/死锁上限及批量导出资源限制；阈值未达标为生产开写 No-Go。
 **Go:** 开关和紧急停止在生产形态环境演练通过。
 
 ### Phase 5.6: 凭证工作台、当前账写入 API 与前端验收

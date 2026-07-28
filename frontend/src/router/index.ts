@@ -62,7 +62,9 @@ const routes = [
       ...financeCenterModules.map((item) => ({
         path: `finance-center/${item.key}`,
         name: `FinanceCenter${item.key.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("")}`,
-        component: () => import("@/views/finance/FinanceCenterModule.vue"),
+        component: item.key === "core-workspace"
+          ? () => import("@/views/finance-center/V2CoreWorkspace.vue")
+          : () => import("@/views/finance/FinanceCenterModule.vue"),
         meta: { title: item.label, financeModuleKey: item.key },
       })),
       { path: "fin/history/account-sets", name: "FinanceAccountSets", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "历史账套", financeTab: "account-sets" } },

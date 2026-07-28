@@ -40,6 +40,16 @@ export interface FinanceNavigationItem {
 
 export const financeCenterModules: FinanceCenterModule[] = [
   {
+    key: "core-workspace",
+    label: "会计工作台",
+    path: "/app/finance-center/core-workspace",
+    icon: Tickets,
+    status: "partial",
+    source: "fin_current（V2 独立会计内核）",
+    primaryObjects: ["当前账簿", "凭证草稿", "审核", "人工过账", "切换 Gate"],
+    currentScope: "V2.0 先只读验收；制单、审核和人工过账仅在最终切换批准后按开关启用。",
+  },
+  {
     key: "data-cockpit",
     label: "数据罗盘",
     path: "/app/finance-center/data-cockpit",

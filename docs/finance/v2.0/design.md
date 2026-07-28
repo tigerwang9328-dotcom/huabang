@@ -60,7 +60,7 @@ draft/submitted/reviewing/approved ──cancel──→ cancelled
 
 历史数据位于 `fin_history`，当前账位于 `fin_current`。角色严格分为 `finance_schema_owner`（仅对象所有权）、`finance_migrator`（仅 DDL/迁移）、`finance_app`（当前账受控 DML）、`finance_history_importer`（仅历史暂存/批次写入）和 `finance_readonly_auditor`（只读审计）；应用与导入角色均没有 DDL。`finance_history_importer` 仅能写 `fin_history.staging_*` 与批次控制表；`finance_app` 不得读取 `fin_history` 基础表，只能读取 `fin_read.history_*_view` 已发布视图。导入角色不可修改已发布业务实体，应用角色不可写历史 schema；历史业务表拒绝更新/删除。`import_batch`、检查点和校验结果是受控可更新的控制表，发布后只允许追加审计字段。部署中验证应用角色不是 owner 且没有 `BYPASSRLS`。`is_historical=true`、来源键、哈希和批次是审计标签，不是唯一安全屏障。
 
-历史发布事实表为 `fin_history.accounting_book`、`account_version`、`voucher`、`voucher_line`、`balance_snapshot`、`source_link` 与 `attachment_reference`。发布短事务只将已验证 staging 批次转入这些不可变事实表（或将预先写入且不可变的分区标记为 published），随后把 `import_batch` 标为 `published`；`fin_read` 视图仅查询这些事实表的 published 批次，绝不直接查询 staging。
+历史发布事实表为 `fin_history.accounting_book`、`account_version`、`voucher`、`voucher_line`、`balance_snapshot`、`source_link` 与可选的 `attachment_reference` 元数据。V2.0 仅保留来源附件引用、哈希或缺失状态的审计字段；不提供附件上传、下载、对象存储、版本控制或恶意文件扫描。发布短事务只将已验证 staging 批次转入这些不可变事实表（或将预先写入且不可变的分区标记为 published），随后把 `import_batch` 标为 `published`；`fin_read` 视图仅查询这些事实表的 published 批次，绝不直接查询 staging。
 
 导入批次状态：
 
@@ -83,7 +83,7 @@ Phase 4.5 建立 `provisional_opening_balance` 供只读验收使用；切换冻
 
 报表模板、项目/科目映射、公式、期间/年初数、舍入、快照、负责人确认与向科目/凭证/来源的穿透均版本化。映射或数据缺失时明确返回 `pending_mapping`、`pending_data`、`pending_gap`，不导出正式报表。
 
-## 电子附件、开关与监控
+## 附件元数据、开关与监控
 
 电子凭证预留原件、文件哈希、验签/验真状态、结构化载荷、归档状态、归档引用和入账信息文件。未验签/未验真仅显示真实状态。导出记录条件、字段、操作者、时间、水印和短期下载授权。
 
@@ -105,7 +105,7 @@ V2.0 只实现 `source_inbox`、映射/过账规则版本、异常队列、适�
 
 `operation_event` 只能追加，应用角色不可更新/删除；事件保存旧值、新值、原因、命令 ID 和保留期限，高风险操作使用哈希链或外部不可变日志。生产开写前须在生产形态数据上验收余额表百万级分录响应、明细分页、单凭证过账 P95、月结耗时、历史导入吞吐、报表并发、锁等待/死锁上限及大附件/批量导出资源限制。
 
-附件、电子凭证原件和归档文件如使用对象存储，灾难恢复还须验证版本控制或不可变存储、跨节点复制、备份恢复、数据库记录与物理文件一致性、对象存储 RPO/RTO 与恶意文件隔离区恢复。
+附件、电子凭证原件和归档文件的上传、对象存储、版本控制、恶意文件扫描和恢复演练不属于 V2.0。本版只要求导入或人工登记的附件引用元数据不得冒充文件已归档；待后续附件专项立项后再定义存储、扫描和恢复门槛。
 
 ## 版本回退与灾难恢复
 

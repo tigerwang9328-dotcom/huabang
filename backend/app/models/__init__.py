@@ -107,3 +107,22 @@ from app.models.finance_operations import (
     FinSettlement,
     FinTaxRecord,
 )
+from app.models.finance_v2 import (
+    FinanceV2AccountingBook,
+    FinanceV2AccountVersion,
+    FinanceV2CommandIdempotency,
+    FinanceV2DimensionSet,
+    FinanceV2DimensionSetItem,
+    FinanceV2FiscalPeriod,
+    FinanceV2LedgerBalance,
+    FinanceV2OperationEvent,
+    FinanceV2Voucher,
+    FinanceV2VoucherLine,
+)
+from app.models.finance_v2_history import (
+    FinanceV2HistoryBatch,
+    FinanceV2HistorySourceLink,
+    FinanceV2HistoryVoucher,
+    FinanceV2HistoryVoucherLine,
+)
+from app.models.finance_v2_opening import FinanceV2OpeningBalanceBatch, FinanceV2OpeningBalanceLine
