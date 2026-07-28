@@ -342,8 +342,12 @@ class DwdToDws:
             for code, scoped_sales, scoped_expenses in targets:
                 result = calculate_profit(
                     period_start=target_date, period_end=target_date,
-                    net_sales=sum((r["net_sales"] for r in scoped_sales), 0),
-                    cost_of_goods=sum((r["cost"] for r in scoped_sales), 0),
+                    net_sales=sum(((r["net_sales"] or 0) for r in scoped_sales), 0),
+                    cost_of_goods=(
+                        sum(((r["cost"] or 0) for r in scoped_sales), 0)
+                        if any(r["cost"] is not None for r in scoped_sales)
+                        else None
+                    ),
                     is_cost_complete=bool(scoped_sales) and all(bool(r["cost_complete"]) for r in scoped_sales),
                     expenses=[ExpenseAllocation(
                         expense_type=e["expense_type"], amount=e["expense_amount"],

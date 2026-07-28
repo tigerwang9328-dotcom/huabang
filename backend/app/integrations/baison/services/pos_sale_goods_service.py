@@ -9,7 +9,7 @@ from typing import Optional
 from app.integrations.baison.client import BaisonClient
 from app.core.database import AsyncSessionLocal
 from app.core.standard_purchase_price import effective_sales_standard_cost_sql
-from app.core.store_whitelist import ALLOWED_STORE_CODES, allowed_store_sql_in
+from app.core.store_whitelist import ALLOWED_STORE_CODES, ALLOWED_INVENTORY_CODES, allowed_store_sql_in
 from app.services.sales_metric_service import (
     complete_pos_sync_dates,
     reconcile_confirmed_sales_dates,
@@ -55,7 +55,11 @@ class PosSaleGoodsService:
                 "is_sku": "0",
             }
             try:
-                resp = self.client.request("pos.storefx.sale_goods_get", params)
+                resp = self.client.request(
+                    "pos.storefx.sale_goods_get",
+                    params,
+                    timeout=10,
+                )
             except Exception as e:
                 logger.error(f"API error store={zddm} page={page}: {e}")
                 break
