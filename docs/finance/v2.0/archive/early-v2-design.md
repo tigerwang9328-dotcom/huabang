@@ -4,8 +4,8 @@
 
 唯一有效的后续文档为：
 
-- `docs/finance/finance-center-v2-roadmap.md`
-- `docs/finance/finance-center-v2.0-design.md`
-- `docs/finance/finance-center-v2.0-implementation-plan.md`
+- `docs/finance/v2.0/roadmap.md`
+- `docs/finance/v2.0/design.md`
+- `docs/finance/v2.0/implementation-plan.md`
 
 任何与上述文件冲突的表述均无效。

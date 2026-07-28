@@ -2,7 +2,7 @@
 
 ## 单一执行来源
 
-本路线图和 V2.0 设计/实施计划是唯一有效的后续依据。`docs/superpowers/specs/2026-07-28-huabang-finance-center-v2-design.md` 与 `docs/superpowers/plans/2026-07-28-huabang-finance-center-v2.md` 均已归档，禁止执行。
+本路线图和同目录的 `design.md`、`implementation-plan.md` 是唯一有效的后续依据。`archive/` 中的文件均已归档，禁止执行。
 
 ## 版本范围
 

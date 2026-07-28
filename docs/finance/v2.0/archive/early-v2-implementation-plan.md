@@ -4,8 +4,8 @@
 
 有效实施顺序仅见：
 
-- `docs/finance/finance-center-v2-roadmap.md`
-- `docs/finance/finance-center-v2.0-design.md`
-- `docs/finance/finance-center-v2.0-implementation-plan.md`
+- `docs/finance/v2.0/roadmap.md`
+- `docs/finance/v2.0/design.md`
+- `docs/finance/v2.0/implementation-plan.md`
 
 本归档文件不构成计划、规格或生产操作授权。

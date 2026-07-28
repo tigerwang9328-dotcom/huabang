@@ -1,6 +1,6 @@
 # 华邦财务中心 V2.0 实施计划
 
-> **For implementation:** 此文档是唯一可执行计划。不得读取或执行两个已归档的 `docs/superpowers` 财务中心文档中的 Task、checkbox、迁移名或发布步骤。
+> **For implementation:** 此文档是唯一可执行计划。不得读取或执行同目录 `archive/` 中财务中心文档的 Task、checkbox、迁移名或发布步骤。
 
 **Goal:** 交付可核对、可审计且可受控开写的华邦会计内核；金蝶历史数据通过隔离的暂存—校验—发布流程只读呈现，华邦来源单据只生成草稿。
 
