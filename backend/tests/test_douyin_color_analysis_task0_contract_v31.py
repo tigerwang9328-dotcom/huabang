@@ -6,6 +6,7 @@ production models, migrations, or application routers.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 
@@ -21,11 +22,36 @@ ACCOUNT_A = "color-account-a"
 VIDEO_ID = "7666046377541012755"
 
 
+class GzipPartsClient:
+    """Makes every normal Task-0 part upload obey the frozen gzip contract."""
+
+    def __init__(self, real: TestClient) -> None:
+        self._real = real
+
+    @property
+    def app(self):
+        return self._real.app
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def post(self, url: str, *args, **kwargs):
+        if url.endswith("/parts") and "json" in kwargs:
+            payload = kwargs.pop("json")
+            headers = dict(kwargs.pop("headers", {}))
+            headers.update({"Content-Type": "application/json", "Content-Encoding": "gzip"})
+            kwargs["content"] = gzip.compress(
+                json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            )
+            kwargs["headers"] = headers
+        return self._real.post(url, *args, **kwargs)
+
+
 @pytest.fixture
 def client() -> TestClient:
     app = create_v31_contract_app()
     with TestClient(app) as test_client:
-        yield test_client
+        yield GzipPartsClient(test_client)
 
 
 def _part(
@@ -223,3 +249,80 @@ def test_v31_parts_are_ordered_idempotent_and_finalize_with_server_hash(client: 
         "batch_hash": expected_hash,
         "account_id": ACCOUNT_A,
     }
+
+
+def test_v31_gzip_whitelisted_record_preserves_raw_and_exposes_safe_trace(
+    client: TestClient,
+):
+    raw_response = {
+        "response_data": {
+            "analysis_trend": {
+                "current_item": [
+                    {"second": 0, "value": 80},
+                    {"second": 10, "value": 40},
+                ]
+            }
+        }
+    }
+    payload = _part(
+        client_batch_id="gzip-vertical-loop",
+        part_number=1,
+        part_count=1,
+        records=[
+            {
+                "video_id": VIDEO_ID,
+                "analysis_type": 1,
+                "source_snapshot_hash": "gzip-snapshot-1",
+                "raw_response_json": raw_response,
+            }
+        ],
+    )
+    response = client.post(
+        "/task0/douyin-color-v31/parts",
+        content=gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
+        headers={
+            **ACCOUNT_A_HEADERS,
+            "Content-Type": "application/json",
+            "Content-Encoding": "gzip",
+        },
+    )
+    assert response.status_code == 200
+
+    uncompressed = client._real.post(
+        "/task0/douyin-color-v31/parts",
+        json=_part(client_batch_id="uncompressed-rejected", part_number=1, part_count=1),
+        headers=ACCOUNT_A_HEADERS,
+    )
+    assert uncompressed.status_code == 415
+    assert uncompressed.json()["detail"] == "gzip_required"
+
+    store = client.app.state.task0_v31_contract_store
+    snapshot = store.connection.execute(
+        """
+        SELECT raw_response_json, normalized_curve_json
+        FROM video_analysis_snapshots
+        WHERE account_id = ? AND video_id = ? AND source_snapshot_hash = ?
+        """,
+        (ACCOUNT_A, VIDEO_ID, "gzip-snapshot-1"),
+    ).fetchone()
+    assert snapshot is not None
+    assert json.loads(snapshot["raw_response_json"]) == raw_response
+    normalized_curve = json.loads(snapshot["normalized_curve_json"])
+    assert normalized_curve == [
+        {"second": 0, "value": 0.8},
+        {"second": 10, "value": 0.4},
+    ]
+    assert all(0 <= point["value"] <= 1 for point in normalized_curve)
+    assert snapshot["raw_response_json"] != snapshot["normalized_curve_json"]
+
+    trace = client.get(
+        f"/task0/douyin-color-v31/videos/{VIDEO_ID}/trace",
+        headers=ACCOUNT_A_HEADERS,
+    )
+    assert trace.status_code == 200
+    assert "text/html" in trace.headers["content-type"]
+    assert VIDEO_ID in trace.text
+    assert "raw snapshot recorded" in trace.text
+    assert "normalized curve" in trace.text
+    for unsafe_value in ("color-token-a", "source_snapshot_hash", "https://", "?", "#"):
+        assert unsafe_value not in trace.text

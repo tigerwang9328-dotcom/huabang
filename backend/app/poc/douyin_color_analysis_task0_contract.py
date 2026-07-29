@@ -6,18 +6,37 @@ registered with production routers, models, migrations, or services.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
+import html
 import json
 import sqlite3
 from contextlib import asynccontextmanager
 from threading import RLock
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_curve(raw_response: dict[str, Any]) -> list[dict[str, float]]:
+    """Convert the Task-0 whitelist's percent-or-ratio points to 0..1."""
+    points = raw_response.get("response_data", {}).get("analysis_trend", {}).get("current_item", [])
+    normalized: list[dict[str, float]] = []
+    for point in points:
+        value = float(point["value"])
+        if value > 1:
+            value /= 100
+        if not 0 <= value <= 1:
+            raise HTTPException(status_code=400, detail="invalid_curve_value")
+        normalized.append({"second": int(point["second"]), "value": value})
+    if not normalized:
+        raise HTTPException(status_code=400, detail="empty_curve")
+    return normalized
 
 
 class V31ContractStore:
@@ -78,6 +97,8 @@ class V31ContractStore:
                 video_id TEXT NOT NULL,
                 analysis_type INTEGER NOT NULL,
                 source_snapshot_hash TEXT NOT NULL,
+                raw_response_json TEXT,
+                normalized_curve_json TEXT,
                 UNIQUE(account_id, video_id, analysis_type, source_snapshot_hash)
             );
             CREATE TABLE collection_items (
@@ -233,6 +254,15 @@ class V31ContractStore:
                     required_record = {"video_id", "analysis_type", "source_snapshot_hash"}
                     if not required_record.issubset(record):
                         raise HTTPException(status_code=400, detail="invalid_success_item")
+                    raw_response = record.get("raw_response_json")
+                    raw_response_json = (
+                        _canonical_json(raw_response) if isinstance(raw_response, dict) else None
+                    )
+                    normalized_curve_json = (
+                        _canonical_json(_normalize_curve(raw_response))
+                        if isinstance(raw_response, dict)
+                        else None
+                    )
                     snapshot = self.connection.execute(
                         """
                         SELECT id FROM video_analysis_snapshots
@@ -245,10 +275,18 @@ class V31ContractStore:
                         snapshot_cursor = self.connection.execute(
                             """
                             INSERT INTO video_analysis_snapshots(
-                                account_id, video_id, analysis_type, source_snapshot_hash
-                            ) VALUES (?, ?, ?, ?)
+                                account_id, video_id, analysis_type, source_snapshot_hash,
+                                raw_response_json, normalized_curve_json
+                            ) VALUES (?, ?, ?, ?, ?, ?)
                             """,
-                            (account_id, str(record["video_id"]), int(record["analysis_type"]), str(record["source_snapshot_hash"])),
+                            (
+                                account_id,
+                                str(record["video_id"]),
+                                int(record["analysis_type"]),
+                                str(record["source_snapshot_hash"]),
+                                raw_response_json,
+                                normalized_curve_json,
+                            ),
                         )
                         snapshot_id = int(snapshot_cursor.lastrowid)
                     else:
@@ -357,7 +395,15 @@ def create_v31_contract_app() -> FastAPI:
         return {"data": store.create_color(str(actor["id"]), int(payload["style_id"]), str(payload["color_code"]))}
 
     @app.post("/task0/douyin-color-v31/parts")
-    def receive_part(payload: dict[str, Any], authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    async def receive_part(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        if request.headers.get("content-encoding", "").lower() != "gzip":
+            raise HTTPException(status_code=415, detail="gzip_required")
+        try:
+            payload = json.loads(gzip.decompress(await request.body()))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail="invalid_gzip_json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="invalid_v31_part")
         return {"data": store.ingest_part(account(authorization), payload)}
 
     @app.get("/task0/douyin-color-v31/collection-batches/{client_batch_id}/missing-parts")
@@ -374,5 +420,25 @@ def create_v31_contract_app() -> FastAPI:
     def contract_state(authorization: str | None = Header(default=None)) -> dict[str, Any]:
         actor = account(authorization)
         return {"data": store.contract_state(str(actor["id"]))}
+
+    @app.get("/task0/douyin-color-v31/videos/{video_id}/trace", response_class=HTMLResponse)
+    def trace(video_id: str, authorization: str | None = Header(default=None)) -> HTMLResponse:
+        actor = account(authorization)
+        snapshot = store.connection.execute(
+            """
+            SELECT normalized_curve_json FROM video_analysis_snapshots
+            WHERE account_id = ? AND video_id = ? AND raw_response_json IS NOT NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+            (str(actor["id"]), video_id),
+        ).fetchone()
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="trace_not_found")
+        safe_video_id = html.escape(video_id)
+        safe_curve = html.escape(snapshot["normalized_curve_json"])
+        return HTMLResponse(
+            f"<main><h1>{safe_video_id}</h1><p>raw snapshot recorded</p>"
+            f"<p>normalized curve</p><pre>{safe_curve}</pre></main>"
+        )
 
     return app

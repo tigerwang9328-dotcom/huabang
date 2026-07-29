@@ -1,7 +1,7 @@
 # 抖音颜色分析 v3.1 Task 0 证据
 
 日期：2026-07-29（Asia/Shanghai）
-状态：`DONE_WITH_CONCERNS`
+状态：`BLOCKED_BY_UNVERIFIED_RECOVERY`
 
 ## 范围与边界
 
@@ -44,6 +44,11 @@ v3.1 颜色分析的合约证据。本文件是 v3.1 计划指定的评审入口
   `raw_record_hash IS NULL` 失败项均可保存，符合 SQLite/PostgreSQL UNIQUE 的
   NULL 语义；分片乱序、同内容重试、内容冲突、`part_count` 冲突、缺片查询、
   未齐全 finalize 失败和按分片号排序的服务器端 `batch_hash` 均得到验证。
+- 垂直闭环追加证明：v3.1 POC 的 `/parts` 只接受
+  `Content-Encoding: gzip`；白名单化原始曲线保存为 `raw_response_json`，独立
+  `normalized_curve_json` 保存为 `0..1` 曲线，原始 JSON 未被数值转换覆盖；
+  只读 trace 页面仅显示作品 ID、已记录原始证据和归一曲线，不显示令牌、URL 或
+  query/hash。该闭环是未注册 POC 的 Task 0 证据，不是生产 API。
 
 ## 既有回归结果（非 v3.1 合约证据）
 
