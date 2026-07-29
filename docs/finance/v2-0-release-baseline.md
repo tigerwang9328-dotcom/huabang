@@ -11,7 +11,7 @@
 | 生产仓库 | `feature/huabang-ai-mvp` / `1cdafd03674081ad3620ae7d723cf280774f3d0b` | 已核实，未部署 V2 本地分支 |
 | 生产 Alembic | 单一 head/current `6c1e4a7d2f09` | 已核实，发布前须再次执行 `alembic heads --verbose` 与 `alembic current --verbose` |
 | 生产运行方式 | `huabang-backend.service` → Uvicorn `app.main:app`，监听 `127.0.0.1:8000`，Nginx active | 已核实；只有 Gate 全通过后才允许重启 |
-| 本地后端验证 | V2 定向测试与角色核验 48 passed（临时非生产配置）；含职责分离、独立过账尝试审计、凭证命令幂等、锁定式凭证编号、审计不可篡改迁移与参数不一致拒绝 | 已核实 |
+| 本地后端验证 | V2 定向测试与角色核验 54 passed（临时非生产配置）；含职责分离、独立过账尝试审计、凭证命令幂等、锁定式凭证编号、审计不可篡改迁移、期间结账阻断与参数不一致拒绝 | 已核实 |
 | 本地前端验证 | 财务中心入口、服务端 Gate 就绪状态、受控草稿/命令工作台回归，类型检查与 Vite 构建成功 | 已核实 |
 
 ## 回滚基线与限制
