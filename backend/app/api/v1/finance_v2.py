@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_roles
@@ -20,6 +20,9 @@ from app.models.finance_v2 import (
     FinanceV2VoucherLine,
 )
 from app.models.finance_v2_operations import FinanceV2FeatureGate
+from app.models.finance_v2_operations import FinanceV2PostingAttempt
+from app.models.finance_v2_history import FinanceV2HistoryBatch
+from app.models.finance_v2_period_close import FinanceV2PeriodCloseBatch
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
@@ -307,6 +310,43 @@ async def list_ledger_lines(
         )
         .order_by(FinanceV2VoucherLine.id)
         .limit(limit + 1)
+    )
+
+
+@router.get("/monitoring/summary", response_model=ApiResponse)
+async def get_monitoring_summary(
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    async def count_rows(model, *conditions) -> int:
+        return int((await db.execute(select(func.count()).select_from(model).where(*conditions))).scalar_one())
+
+    failed_posts = await count_rows(FinanceV2PostingAttempt, FinanceV2PostingAttempt.status == "failed")
+    history_conflicts = await count_rows(FinanceV2HistoryBatch, FinanceV2HistoryBatch.status == "conflicted")
+    failed_closes = await count_rows(FinanceV2PeriodCloseBatch, FinanceV2PeriodCloseBatch.status == "failed")
+    gates = (await db.execute(select(FinanceV2FeatureGate).order_by(FinanceV2FeatureGate.id.desc()))).scalars().all()
+    return ApiResponse.ok(
+        data={
+            "metrics": {
+                "posting_attempt_failed": failed_posts,
+                "history_import_conflicted": history_conflicts,
+                "period_close_failed": failed_closes,
+            },
+            "gates": [
+                {
+                    "scope_type": gate.scope_type,
+                    "scope_key": gate.scope_key,
+                    "gate_name": gate.gate_name,
+                    "enabled": gate.enabled,
+                    "effective_at": gate.effective_at,
+                }
+                for gate in gates
+            ],
+            "unavailable_metrics": [
+                "api_5xx_rate", "lock_wait", "deadlock", "export_failure", "source_inbox_backlog", "balance_difference_alert",
+            ],
+            "message": "仅返回已持久化的 V2 运营指标；未接入指标采集器的项目明确标为不可用，不能当作零。",
+        }
     )
     if account_version_id is not None:
         statement = statement.where(FinanceV2VoucherLine.account_version_id == account_version_id)

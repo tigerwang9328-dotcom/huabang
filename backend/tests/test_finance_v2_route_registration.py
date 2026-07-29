@@ -19,6 +19,7 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/commands", "POST") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/trial-balance", "GET") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/ledger-lines", "GET") in routes
+    assert ("/finance-center/v2/monitoring/summary", "GET") in routes
     assert ("/finance-center/v2/vouchers", "POST") in routes
     assert ("/finance-center/v2/vouchers", "GET") in routes
     assert ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST") in routes
