@@ -89,7 +89,7 @@ async def test_v2_command_gate_uses_the_vouchers_book_not_its_identifier(monkeyp
 
     response = await finance_v2.execute_voucher_command(
         7,
-        finance_v2.VoucherCommandInput(action="submit", expected_version=1),
+        finance_v2.VoucherCommandInput(action="submit", command_id="submit-route-test-1", expected_version=1),
         current_user=SimpleNamespace(id=1, username="finance"),
         db=GateDb(),
     )

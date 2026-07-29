@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from hashlib import sha256
+import json
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.finance_v2 import FinanceV2DimensionSet, FinanceV2FiscalPeriod, FinanceV2OperationEvent, FinanceV2Voucher, FinanceV2VoucherLine
+from app.models.finance_v2 import (
+    FinanceV2CommandIdempotency,
+    FinanceV2DimensionSet,
+    FinanceV2FiscalPeriod,
+    FinanceV2OperationEvent,
+    FinanceV2Voucher,
+    FinanceV2VoucherLine,
+)
 from app.services.finance_v2.domain import (
     FinanceV2DomainError,
     VoucherCommand,
@@ -89,10 +98,39 @@ class FinanceV2VoucherWorkflow:
         actor_id: str,
         expected_version: int,
         reason: str | None,
+        command_id: str,
     ) -> dict:
-        voucher = await self.db.get(FinanceV2Voucher, voucher_id)
+        voucher = (
+            await self.db.execute(
+                select(FinanceV2Voucher)
+                .where(FinanceV2Voucher.id == voucher_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if not voucher:
             raise FinanceV2DomainError("voucher not found")
+        request_hash = self.command_payload_hash(
+            voucher_id=voucher.id,
+            action=action,
+            actor_id=actor_id,
+            expected_version=expected_version,
+            reason=reason,
+        )
+        existing_command = (
+            await self.db.execute(
+                select(FinanceV2CommandIdempotency)
+                .where(
+                    FinanceV2CommandIdempotency.book_id == voucher.book_id,
+                    FinanceV2CommandIdempotency.command_name == f"voucher.{action}",
+                    FinanceV2CommandIdempotency.idempotency_key == command_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if existing_command:
+            if existing_command.request_hash != request_hash:
+                raise FinanceV2DomainError("command id was already used with different parameters")
+            return {**dict(existing_command.result_payload), "idempotent": True}
         lines = (
             await self.db.execute(
                 select(FinanceV2VoucherLine)
@@ -145,9 +183,20 @@ class FinanceV2VoucherWorkflow:
                 book_id=voucher.book_id,
                 period_id=voucher.period_id,
             )
-        await self._event(voucher, actor_id, f"voucher.{action}", reason, before)
+        result_payload = self._snapshot(voucher)
+        self.db.add(
+            FinanceV2CommandIdempotency(
+                book_id=voucher.book_id,
+                command_name=f"voucher.{action}",
+                idempotency_key=command_id,
+                request_hash=request_hash,
+                result_payload=result_payload,
+                completed_at=datetime.now(timezone.utc),
+            )
+        )
+        await self._event(voucher, actor_id, f"voucher.{action}", command_id, reason, before)
         await self.db.flush()
-        return self._snapshot(voucher)
+        return result_payload
 
     async def _empty_dimension_set_id(self, book_id: int) -> int:
         stable_hash = canonical_dimension_hash({})
@@ -171,6 +220,7 @@ class FinanceV2VoucherWorkflow:
         voucher: FinanceV2Voucher,
         actor_id: str,
         action: str,
+        command_id: str,
         reason: str | None,
         before: dict | None,
     ) -> None:
@@ -178,7 +228,7 @@ class FinanceV2VoucherWorkflow:
             FinanceV2OperationEvent(
                 book_id=voucher.book_id,
                 voucher_id=voucher.id,
-                command_id=f"{voucher.id}:{voucher.version}:{action}",
+                command_id=command_id,
                 actor_id=actor_id,
                 action=action,
                 reason=reason,
@@ -200,3 +250,21 @@ class FinanceV2VoucherWorkflow:
             "posted_by": voucher.posted_by,
             "idempotent": idempotent,
         }
+
+    @staticmethod
+    def command_payload_hash(
+        *, voucher_id: int, action: str, actor_id: str, expected_version: int, reason: str | None
+    ) -> str:
+        payload = json.dumps(
+            {
+                "voucher_id": voucher_id,
+                "action": action,
+                "actor_id": actor_id,
+                "expected_version": expected_version,
+                "reason": reason or "",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()

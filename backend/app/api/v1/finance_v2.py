@@ -43,6 +43,7 @@ class VoucherDraftInput(BaseModel):
 
 class VoucherCommandInput(BaseModel):
     action: str = Field(pattern=r"^(submit|start_review|approve|reject|reopen|withdraw|cancel|post)$")
+    command_id: str = Field(min_length=1, max_length=128)
     expected_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=1000)
 
@@ -183,6 +184,7 @@ async def execute_voucher_command(
             actor_id=_actor(current_user),
             expected_version=body.expected_version,
             reason=body.reason,
+            command_id=body.command_id,
         )
     except FinanceV2DomainError as error:
         raise _domain_error(error) from error
