@@ -37,10 +37,17 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
         "seed_finance_v2_permissions.py",
         "import_finance_v2_history.py",
         "verify_finance_center_v2.py",
+        "find \"$next_dist\" -type d -exec chmod 755 {} +",
+        "find \"$next_dist\" -type f -exec chmod 644 {} +",
+        "sudo_run -u www-data test -r \"$next_dist/index.html\"",
+        "sudo_run -u www-data test -r \"$FRONTEND_DIR/dist/index.html\"",
         "systemctl restart huabang-backend.service",
         "rollback_runtime",
     ):
         assert required in source
+    assert source.index('npm run build -- --outDir "$next_dist"') < source.index(
+        'find "$next_dist" -type d -exec chmod 755 {} +'
+    ) < source.index('mv "$next_dist" "$FRONTEND_DIR/dist"')
     assert "draft_enabled" in source
     assert "review_enabled" in source
     assert "post_enabled" in source

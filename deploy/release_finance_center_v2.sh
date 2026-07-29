@@ -359,6 +359,14 @@ npm ci --no-audit --no-fund
 npm run type-check
 next_dist="$(mktemp -d "$FRONTEND_DIR/.finance-v2-dist.XXXXXX")"
 npm run build -- --outDir "$next_dist"
+# The release-wide umask keeps temporary credentials private, but a Vite
+# production build is served by nginx's www-data account.  Normalize only this
+# public static artifact before it becomes the active document root.
+find "$next_dist" -type d -exec chmod 755 {} +
+find "$next_dist" -type f -exec chmod 644 {} +
+sudo_run -u www-data test -x "$next_dist"
+sudo_run -u www-data test -x "$next_dist/assets"
+sudo_run -u www-data test -r "$next_dist/index.html"
 
 sudo_run systemctl restart huabang-backend.service
 runtime_activated=true
@@ -379,6 +387,9 @@ previous_dist="$FRONTEND_DIR/.finance-v2-previous-dist-$backup_stamp"
 mv "$FRONTEND_DIR/dist" "$previous_dist"
 mv "$next_dist" "$FRONTEND_DIR/dist"
 next_dist=""
+sudo_run -u www-data test -x "$FRONTEND_DIR/dist"
+sudo_run -u www-data test -x "$FRONTEND_DIR/dist/assets"
+sudo_run -u www-data test -r "$FRONTEND_DIR/dist/index.html"
 
 release_succeeded=true
 echo "Finance V2 read-only release completed. Log: $release_log"
