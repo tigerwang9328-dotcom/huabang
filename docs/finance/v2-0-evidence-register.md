@@ -6,7 +6,7 @@
 
 | 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
 | --- | --- | --- | --- | --- |
-| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；当前只读发布候选代码提交为 `a46705aa122be86966d2cb2c46bfdbd482279353`。Finance V2 路由使用单独的 `get_finance_db`；中台 JWT/角色/权限依赖仍使用既有 `get_db`，不存在受限财务角色读取 `sys` 表的授权扩大；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读与本地测试 | 可继续恢复副本演练 |
+| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；当前只读发布候选代码提交为 `b7c2c134131cec68080a66b49f8732930708bedf`。Finance V2 路由使用单独的 `get_finance_db`；中台 JWT/角色/权限依赖仍使用既有 `get_db`，不存在受限财务角色读取 `sys` 表的授权扩大；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读与本地测试 | 可继续恢复副本演练 |
 | 本地迁移图 | `1fdf4577d7d8` 是当前唯一 head；其父为 `9c121d3145d9`，新增 `fin_read.history_import_batch` 只读视图供受限应用监控历史冲突。保留手工损益结转凭证证据、结账批次、双人反结账审批、历史已发布分录只读视图/索引、凭证约束、凭证编号 reservation 审计与 `operation_event` 保护 | 本地，2026-07-29 | 本地只读与本地测试 | 新迁移必须从当天实际图生成并在恢复副本验证 |
 | 生产仓库 | `/srv/huabang-ai-center`，分支 `feature/huabang-ai-mvp`，HEAD `1cdafd03674081ad3620ae7d723cf280774f3d0b`，核验时无工作树改动输出 | 生产只读，2026-07-29 | 生产只读 | V2 本地代码尚未部署 |
 | 生产后端 | `huabang-backend.service` 为 active/running；以 `xiaohu` 身份在 `127.0.0.1:8000` 运行 Uvicorn，工作目录为 `/srv/huabang-ai-center/backend` | 生产只读，2026-07-29 | 生产只读 | 未授权前不得重启 |
@@ -30,6 +30,7 @@
 | 生产库 V2 隔离 | r2 最终核验查询 `huabang_ai` 的 `fin_current`、`fin_history`、`fin_read` schema 数为 0 | 生产数据库只读核验，2026-07-29 | 生产只读 | 证明本轮恢复演练未将 V2 schema 或历史数据写入生产；生产发布仍 No-Go |
 | 发布与凭据处理资产 | Linux 发布入口默认 dry-run，必须同时固定远端 ref、预期提交、历史清单 SHA-256 和历史凭证/分录预期数才可 `--execute`；它创建发布前逻辑备份、隔离迁移/导入临时口令、保持 V2 写 Gate 关闭、在失败时仅回退运行时文件。PowerShell 仅 SSH 编排。`alembic.ini` 与四个既有运维脚本已移除内联数据库口令，后者改为受限 `.env` 生成临时 `PGPASSFILE` | 本地，2026-07-29 | 本地测试与代码审查 | 仍须在生产先验证脚本语法/dry-run、历史清单和现有任务调用；不等同于生产凭据已轮换 |
 | 首次生产只读发布尝试 | 已建立新的发布前逻辑备份（SHA-256 `a6843390…a577cace`）；随后 bootstrap 在 `postgres` 用户无法读取应用目录 SQL 文件处停止。脚本已回退到旧提交，服务未重启、V2 三 schema 仍为 0、历史数据未写入；根因已在候选提交中改为受控临时 SQL 文件转交 `postgres` 执行 | 生产执行与只读复核，2026-07-29 | 已失败且已回退的发布尝试 | 不得把该次尝试计为部署；修复后必须重新 dry-run 和发布 |
+| 第二次生产只读发布尝试 | 已建立新的发布前逻辑备份（SHA-256 `389fbdf4…d65691a8`），V2 三 schema 与全部迁移已成功升级至 `1fdf4577d7d8`；随后角色验证脚本因 `app` 模块路径未注入而停止。脚本已回退到旧代码运行时，服务未重启，`fin_current.voucher=0`、`fin_history.voucher=0`、`fin_history.voucher_line=0`，三个临时登录角色均无持久口令 | 生产执行与只读复核，2026-07-29 | 部分数据库扩展、运行时已回退 | 数据库扩展保留并以前滚方式完成；修复后必须先验证角色脚本，再导入历史与重启服务 |
 
 ## 待确认或不可满足项
 

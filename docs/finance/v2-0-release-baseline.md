@@ -6,7 +6,7 @@
 
 | 位置 | 事实 | 状态 |
 | --- | --- | --- |
-| 本地工作树 | `feature/huabang-full-finance-center`；只读发布候选为 `a46705aa122be86966d2cb2c46bfdbd482279353`（Finance V2 数据会话与中台鉴权会话分离、过账尝试使用受限会话、历史批次状态经 `fin_read` 公开、总账明细分页修复，以及受控 Linux 发布入口/只读验证器/中台权限幂等种子；以发布前重新核实的最终提交为准） | 已核实，本地未发布 |
+| 本地工作树 | `feature/huabang-full-finance-center`；只读发布候选为 `b7c2c134131cec68080a66b49f8732930708bedf`（Finance V2 数据会话与中台鉴权会话分离、过账尝试使用受限会话、历史批次状态经 `fin_read` 公开、总账明细分页修复，以及受控 Linux 发布入口/只读验证器/中台权限幂等种子；以发布前重新核实的最终提交为准） | 已核实，本地未发布 |
 | 本地 Alembic | 单一 head `1fdf4577d7d8`（父 `9c121d3145d9`）；新增 `fin_read.history_import_batch` 只读视图。仍含凭证明细约束、凭证编号审计表、`operation_event` 追加写保护、历史分录只读视图/索引、结账批次/双人反结账审批与手工损益结转凭证证据表；首两条 V2 迁移只验证管理员 bootstrap schema，绝不申请数据库级 CREATE | 已核实，已在恢复副本执行，尚未在生产执行 |
 | 生产仓库 | `feature/huabang-ai-mvp` / `1cdafd03674081ad3620ae7d723cf280774f3d0b` | 已核实，未部署 V2 本地分支 |
 | 生产 Alembic | 单一 head/current `6c1e4a7d2f09` | 已核实，发布前须再次执行 `alembic heads --verbose` 与 `alembic current --verbose` |
