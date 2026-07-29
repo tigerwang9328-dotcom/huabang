@@ -981,6 +981,13 @@
     }
   },
   "fixture_scope": "v3.1 color analytics Task 0 sanitized historical catalog and curves",
+  "sanitization_contract": {
+    "allowed_hash_fields": [
+      "source_snapshot_hash"
+    ],
+    "credential_fields_excluded": true,
+    "signed_request_data_excluded": true
+  },
   "schema_version": "douyin-color-v3.1-task0-fixture-v1",
   "skipped_items": [
     {

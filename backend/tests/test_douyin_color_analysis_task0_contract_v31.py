@@ -356,3 +356,27 @@ def test_v31_historical_fixture_preserves_catalog_coverage_and_hash():
     }
     assert all(isinstance(item["video_id"], str) for item in payload["catalog_items"])
     assert checksum_path.read_text(encoding="utf-8").split()[0] == hashlib.sha256(payload_bytes).hexdigest()
+
+
+def test_v31_historical_fixture_has_real_edge_cases_and_no_session_artifacts():
+    payload = json.loads((FIXTURE_DIR / "historical-20260728.sanitized.json").read_bytes())
+
+    assert payload["sanitization_contract"] == {
+        "credential_fields_excluded": True,
+        "signed_request_data_excluded": True,
+        "allowed_hash_fields": ["source_snapshot_hash"],
+    }
+    edges = payload["edge_cases"]
+    assert edges["empty_curve"]["retention"]["response_data"]["analysis_trend"] == {
+        "current_item": [],
+        "similar_author": [],
+    }
+    assert edges["http_429"]["http_status"] == 429
+    assert edges["http_429"]["retry_after_seconds"] == 2
+    assert edges["business_error"]["http_status"] == 200
+    assert edges["business_error"]["business_status_code"] != 0
+    assert edges["duplicate_snapshot"]["first_record"] == edges["duplicate_snapshot"]["retry_record"]
+
+    serialized = json.dumps(payload, ensure_ascii=False).lower()
+    for forbidden in ("https://", "http://", "mstoken", "a_bogus", "authorization", "bearer ", "cookie="):
+        assert forbidden not in serialized
