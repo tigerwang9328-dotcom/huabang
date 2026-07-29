@@ -6,7 +6,7 @@
 
 | 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
 | --- | --- | --- | --- | --- |
-| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；本轮财务代码基线提交为 `ef6223fcef9638533bb74456e4bc327c422210cc`，发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读 | 可继续恢复副本演练 |
+| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；本轮财务代码基线提交为 `70a43ebec0d2e08a32f319712606445d4e6be2fb`，历史导入已在同一事务中显式 flush 暂存记录，且空暂存不得校验或发布；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读 | 可继续恢复副本演练 |
 | 本地迁移图 | `9c121d3145d9` 是当前唯一 head；其父为 `232ec287c52f`，新增 V2 手工损益结转凭证证据，且保留结账批次、双人反结账审批、历史已发布分录只读视图/索引、凭证约束、凭证编号 reservation 审计与 `operation_event` 保护 | 本地，2026-07-29 | 本地只读与本地测试 | 新迁移必须从当天实际图生成并在恢复副本验证 |
 | 生产仓库 | `/srv/huabang-ai-center`，分支 `feature/huabang-ai-mvp`，HEAD `1cdafd03674081ad3620ae7d723cf280774f3d0b`，核验时无工作树改动输出 | 生产只读，2026-07-29 | 生产只读 | V2 本地代码尚未部署 |
 | 生产后端 | `huabang-backend.service` 为 active/running；以 `xiaohu` 身份在 `127.0.0.1:8000` 运行 Uvicorn，工作目录为 `/srv/huabang-ai-center/backend` | 生产只读，2026-07-29 | 生产只读 | 未授权前不得重启 |
@@ -18,12 +18,13 @@
 | 金蝶覆盖范围 | 凭证日期为 2025-10-31 至 2026-06-30，来自 3 个 source database | 生产只读，2026-07-29 | 生产只读 | 当前账启用日与 2026-07-01 后连续性尚未获得财务确认 |
 | 既有正式账 | 旧 `fin` schema 存在 10 个账簿、349 张凭证和 4,617 条分录；它与 V2 的 `fin_current`/`fin_history` 隔离模型不是同一已验收实现 | 生产只读，2026-07-29 | 生产只读 | 不得把旧表直接宣布为 V2 正式账 |
 | V2 写入口保护 | 本地 V2 读/写 API 统一复用华邦中台 JWT、`SysUser`、`SysRole`、`SysPermission`；非管理员必须同时具有 `finance_manager` 角色及 `finance:center:view` 或 `finance:center:operate`，且不存在显式全局 Gate 时写命令 fail-closed | 本地测试，2026-07-29 | 本地测试 | 生产仍需先执行权限种子、重新登录并重新核验，不能据此开启写入 |
-| 数据库角色 | PostgreSQL 集群已创建 `fin_schema_owner`、`fin_migrator`、`fin_app`、`fin_history_importer`、`fin_readonly_auditor`，并在恢复副本为 V2 三 schema 配置所有权与最小权限；角色没有持久口令，生产 `huabang_ai` 尚未创建 V2 schema、未迁移、未授予 V2 对象权限 | 服务器恢复演练，2026-07-29 | 恢复副本验证与生产控制面变更 | 生产迁移、历史发布和当前账开写仍 No-Go；生产连接配置与受限凭据尚未配置 |
-| 备份与恢复 | 已从 `huabang_ai` 新建 custom 逻辑备份 `/var/backups/huabang-finance-v2/huabang_ai_finance_v2_drill_20260729T085500Z.dump`（65,714,187 bytes，SHA-256 `b803172e…c15c8050`），成功恢复到隔离库 `huabang_ai_finance_drill_20260729`（382 张表），并完成 V2 迁移与角色验证；仍未演练 PITR、备份轮换或正式 RTO | 服务器恢复副本，2026-07-29 | 恢复副本验证 | 正式开写仍需 PITR/保留策略/恢复时间证据；不得把本次演练描述为生产发布 |
-| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，全部 `test_finance_v2*.py`、角色核验和历史导入命令测试共 91 项通过；覆盖中台权限、最小权限迁移、命令幂等、API fail-closed Gate、金蝶来源哈希/红字校验、历史只读下钻、结账检查/双人反结账、手工损益结转证据、结账中人工过账阻断、当前账试算表和监控摘要路由 | 本地，2026-07-29 | 本地测试 | 可继续恢复副本导入；不是生产验收 |
+| 数据库角色 | PostgreSQL 集群已创建 `fin_schema_owner`、`fin_migrator`、`fin_app`、`fin_history_importer`、`fin_readonly_auditor`，并在恢复副本为 V2 三 schema 配置所有权与最小权限；r2 最终核验确认 `fin_migrator` 与 `fin_history_importer` 均无持久口令。生产 `huabang_ai` 仍未创建 V2 schema、未迁移、未授予 V2 对象权限 | 服务器恢复演练，2026-07-29 | 恢复副本验证与生产控制面变更 | 生产迁移、历史发布和当前账开写仍 No-Go；生产连接配置与受限凭据尚未配置 |
+| 备份与恢复 | 已从 `huabang_ai` 新建 custom 逻辑备份 `/var/backups/huabang-finance-v2/huabang_ai_finance_v2_drill_20260729T085500Z.dump`（65,714,187 bytes，SHA-256 `b803172e…c15c8050`），r1 曾恢复并迁移但历史导入揭示 `autoflush=False` 下暂存记录未显式 flush 的缺陷，r1 不作为发布证据。修复后从同一备份新建 r2 `huabang_ai_finance_drill_20260729_r2`，迁移至 `9c121d3145d9` 并通过角色验证；仍未演练 PITR、备份轮换或正式 RTO | 服务器恢复副本，2026-07-29 | 恢复副本验证 | 正式开写仍需 PITR/保留策略/恢复时间证据；不得把本次演练描述为生产发布 |
+| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，20 个 `test_finance_v2*.py`、`test_finance_database_roles.py`、`test_import_finance_v2_history_script.py` 共 96 项通过；有 1 条 Pydantic 弃用警告。覆盖中台权限、最小权限迁移、命令幂等、API fail-closed Gate、金蝶来源哈希/红字校验、历史只读下钻、结账检查/双人反结账、手工损益结转证据、结账中人工过账阻断、当前账试算表和监控摘要路由 | 本地，2026-07-29 | 本地测试 | 可继续恢复副本导入；不是生产验收 |
 | 前端基线 | `finance-v2-core` 静态回归、`npm run type-check` 与 `npm run build` 均退出成功；V2 工作台可展示中台权限入口、历史凭证与分录、手工损益结转凭证登记、结账检查和当前账试算表，构建输出仍包含现有依赖的 Vite/Rollup 警告 | 本地，2026-07-29 | 本地构建 | 不等同于浏览器、恢复副本或生产验收 |
-| 恢复副本 V2 迁移与权限 | 以短期 `fin_migrator` 登录并 `SET ROLE fin_schema_owner` 成功将隔离库从 `6c1e4a7d2f09` 升级到 `9c121d3145d9`；`verify_finance_database_roles` 返回 `{"status":"ready","violations":[]}`，短期口令已清除 | 服务器恢复副本，2026-07-29 | 恢复副本验证 | 可继续历史暂存/校验/发布演练；不等同于生产迁移、应用切流或生产验收 |
-| 恢复副本 SSH 连通性 | SSH 曾恢复并完成上述演练；其后查找金蝶 manifest 时再次超时。未因超时执行任何重试写入或生产服务操作 | 生产网络探针，2026-07-29 | 生产连通性 | 历史源读取与后续演练待连接稳定后重新核实 |
+| 恢复副本 V2 迁移与权限 | 以短期 `fin_migrator` 登录并 `SET ROLE fin_schema_owner` 成功将 r2 隔离库从 `6c1e4a7d2f09` 升级到 `9c121d3145d9`；`verify_finance_database_roles` 返回 `{"status":"ready","violations":[]}`，最终核验确认 `fin_migrator` 口令已清除 | 服务器恢复副本，2026-07-29 | 恢复副本验证 | 可继续历史暂存/校验/发布演练；不等同于生产迁移、应用切流或生产验收 |
+| r2 金蝶历史发布与幂等重跑 | 使用清单 SHA-256 `CE10F6A37FFBE0B6045F4B25D09F1E1E46F882E24DA1564B8513E9B4B56A805E` 的受控最小快照，3 个 official 账套均从 `loaded → validated → published`：77/871、244/3,476、18/249（凭证/分录）。最终为 3 批、339 历史凭证、4,596 历史分录、339 历史来源链接、339 个 `historical_marker=true` 只读视图记录、0 当前账凭证；第二次相同导入三批均为已发布且新增 0，计数不变 | 服务器恢复副本，2026-07-29 | 恢复副本验证 | 历史导入链可继续作为生产 Gate 的证据；不等同于生产历史写入、前端验收或开写授权 |
+| 生产库 V2 隔离 | r2 最终核验查询 `huabang_ai` 的 `fin_current`、`fin_history`、`fin_read` schema 数为 0 | 生产数据库只读核验，2026-07-29 | 生产只读 | 证明本轮恢复演练未将 V2 schema 或历史数据写入生产；生产发布仍 No-Go |
 
 ## 待确认或不可满足项
 
@@ -38,6 +39,6 @@
 
 ## 当前 Go / No-Go
 
-- 本地 TDD、迁移设计、恢复副本恢复/迁移/最小权限验证：**Go**。
+- 本地 TDD、迁移设计、恢复副本恢复/迁移/最小权限验证与金蝶历史暂存—校验—发布/幂等重跑：**Go**。
 - 生产数据库迁移、任何历史写入、服务重启、旧入口冻结、V2 制单/审核/人工过账：**No-Go**。
 - 解除 No-Go 的最小顺序：财务事实口径的可核对证据 → 数据库角色与凭据轮换 → 新鲜备份和恢复演练 → 单一 head/恢复副本迁移 → 生产只读验收 → 最终切换 Gate。
