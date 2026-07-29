@@ -72,3 +72,7 @@
 - 提交 `8a3dc105cc193f0f0389587532a422494105dec1` 已在生产后端重启加载，前端工作台已原子切换。health 显示数据库与 Redis connected，`/api/v1/finance-center/v2/monitoring/summary` 未登录为 401，OpenAPI 路由存在，静态文件仍经 `www-data` 读取校验。
 - 11 项策略均显示阈值、责任人、逻辑通知路由和关闭条件；只有过账失败、历史冲突、结账失败有已持久化聚合值。其他未接入项目明确显示 unavailable，且所有策略 `notification_configured=false`，不得描述为真实告警已经送达。
 - 本次仍未开启 `fin_current` 写 Gate、未创建当前账凭证、未完成已登录财务用户验收。性能测量、真实通知演练、异机恢复、最终期初/期间连续性和最终切换继续是正式开写前置。
+
+## 2026-07-29 性能 Gate 现状
+
+生产只读核验确认 `fin_current.voucher`、`voucher_line`、`ledger_balance`、`opening_balance_line` 全部为 0 行；历史账仅 339 张凭证、4,596 条分录。当前不能用空表查询、静态构建或历史小样本替代百万级余额表、大账簿分页、单凭证过账 P95、月结、并发、锁等待/死锁和导出资源限制测量。性能 Gate 明确保持 No-Go，待最终期初与受控试点数据进入恢复副本/生产形态环境后实测。
