@@ -59,6 +59,7 @@ const routes = [
       { path: "fin/payments", name: "Payments", component: () => import("@/views/finance/Payments.vue"), meta: { title: "付款申请" } },
       { path: "fin/expense-analysis", name: "ExpenseAnalysis", component: () => import("@/views/finance/ExpenseAnalysis.vue"), meta: { title: "费用分析" } },
       { path: "fin/formal-ledger", name: "FormalLedger", component: () => import("@/views/finance/FormalLedger.vue"), meta: { title: "正式账簿" } },
+      { path: "finance-center", redirect: "/app/finance-center/core-workspace" },
       ...financeCenterModules.map((item) => ({
         path: `finance-center/${item.key}`,
         name: `FinanceCenter${item.key.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("")}`,
@@ -137,6 +138,7 @@ const routePermissionRules: Array<[string, string]> = [
   ["/app/fin/expense-analysis", "finance:expense:view"],
   ["/app/fin/formal-ledger", "finance:voucher:write"],
   ["/app/fin/history", "finance:profit:view"],
+  ["/app/finance-center", "finance:profit:view"],
   ["/app/hr/overview", "hr:overview:view"],
   ["/app/hr/employees", "hr:employee:view"],
   ["/app/hr/attendance", "hr:attendance:view"],
