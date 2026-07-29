@@ -50,7 +50,13 @@ mkdir -p "$restore_dir" "$socket_dir"
 tar -xf "$base_dir/base.tar" -C "$restore_dir"
 tar -xf "$base_dir/pg_wal.tar" -C "$restore_dir"
 touch "$restore_dir/recovery.signal"
-cat >> "$restore_dir/postgresql.auto.conf" <<EOF
+cat > "$restore_dir/pg_hba.conf" <<'EOF'
+local   all             postgres                                peer
+host    all             all             127.0.0.1/32            trust
+EOF
+cat > "$restore_dir/postgresql.conf" <<EOF
+data_directory = '$restore_dir'
+hba_file = '$restore_dir/pg_hba.conf'
 restore_command = '/bin/cp $WAL_DIR/%f %p'
 recovery_target_action = 'promote'
 port = $port
