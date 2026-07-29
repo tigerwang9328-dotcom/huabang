@@ -187,9 +187,14 @@ git -C "$PROJECT_ROOT" diff --cached --quiet || die "production worktree has sta
 previous_commit="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 previous_ref="$(git -C "$PROJECT_ROOT" symbolic-ref --short -q HEAD || true)"
 
-git -C "$PROJECT_ROOT" fetch --tags origin "$release_ref"
-resolved_commit="$(git -C "$PROJECT_ROOT" rev-parse FETCH_HEAD)"
-[[ "${resolved_commit,,}" == "${expected_commit,,}" ]] || die "fetched release ref does not match --expected-commit"
+if resolved_commit="$(git -C "$PROJECT_ROOT" rev-parse --verify "${release_ref}^{commit}" 2>/dev/null)"; then
+  [[ "${resolved_commit,,}" == "${expected_commit,,}" ]] || die "local release ref does not match --expected-commit"
+else
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" \
+    git -C "$PROJECT_ROOT" fetch --tags origin "$release_ref"
+  resolved_commit="$(git -C "$PROJECT_ROOT" rev-parse --verify FETCH_HEAD)"
+  [[ "${resolved_commit,,}" == "${expected_commit,,}" ]] || die "fetched release ref does not match --expected-commit"
+fi
 git -C "$PROJECT_ROOT" checkout --detach "$expected_commit"
 
 "$VENV_PYTHON" -m pip install --no-input --disable-pip-version-check -r "$BACKEND_DIR/requirements.txt"
