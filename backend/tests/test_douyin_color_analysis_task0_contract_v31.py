@@ -23,6 +23,43 @@ ACCOUNT_A = "color-account-a"
 VIDEO_ID = "7666046377541012755"
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "douyin"
 
+_SENSITIVE_KEY_FRAGMENTS = (
+    "token",
+    "cookie",
+    "password",
+    "signature",
+    "captcha",
+    "query",
+    "url",
+    "hash",
+    "authorization",
+)
+_SENSITIVE_VALUE_FRAGMENTS = (
+    "https://",
+    "http://",
+    "bearer ",
+    "cookie=",
+    "mstoken",
+    "a_bogus",
+)
+
+
+def _assert_fixture_safe(value, path: str = "root") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_text = str(key).lower()
+            if key_text != "source_snapshot_hash":
+                for fragment in _SENSITIVE_KEY_FRAGMENTS:
+                    assert fragment not in key_text, f"unsafe key {path}.{key}: {fragment}"
+            _assert_fixture_safe(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_fixture_safe(child, f"{path}[{index}]")
+    elif isinstance(value, str):
+        text = value.lower()
+        for fragment in _SENSITIVE_VALUE_FRAGMENTS:
+            assert fragment not in text, f"unsafe value at {path}: {fragment}"
+
 
 class GzipPartsClient:
     """Makes every normal Task-0 part upload obey the frozen gzip contract."""
@@ -364,7 +401,7 @@ def test_v31_historical_fixture_has_real_edge_cases_and_no_session_artifacts():
     assert payload["sanitization_contract"] == {
         "credential_fields_excluded": True,
         "signed_request_data_excluded": True,
-        "allowed_hash_fields": ["source_snapshot_hash"],
+        "allowed_deduplication_identifier_fields": ["source_snapshot_hash"],
     }
     edges = payload["edge_cases"]
     assert edges["empty_curve"]["retention"]["response_data"]["analysis_trend"] == {
@@ -376,7 +413,32 @@ def test_v31_historical_fixture_has_real_edge_cases_and_no_session_artifacts():
     assert edges["business_error"]["http_status"] == 200
     assert edges["business_error"]["business_status_code"] != 0
     assert edges["duplicate_snapshot"]["first_record"] == edges["duplicate_snapshot"]["retry_record"]
+    _assert_fixture_safe(payload)
 
-    serialized = json.dumps(payload, ensure_ascii=False).lower()
-    for forbidden in ("https://", "http://", "mstoken", "a_bogus", "authorization", "bearer ", "cookie="):
-        assert forbidden not in serialized
+
+def test_v31_fixture_safety_scanner_rejects_frozen_sensitive_artifacts():
+    _assert_fixture_safe({"source_snapshot_hash": "a" * 64})
+
+    for forbidden_key in (
+        "token",
+        "cookie",
+        "password",
+        "signature",
+        "captcha",
+        "query",
+        "url",
+        "hash",
+    ):
+        with pytest.raises(AssertionError, match=forbidden_key):
+            _assert_fixture_safe({forbidden_key: "unsafe"})
+
+    for forbidden_value in (
+        "https://creator.douyin.com/path",
+        "https://creator.douyin.com/path?signature=unsafe",
+        "Bearer unsafe",
+        "Cookie=unsafe",
+        "msToken=unsafe",
+        "a_bogus=unsafe",
+    ):
+        with pytest.raises(AssertionError):
+            _assert_fixture_safe({"safe": forbidden_value})

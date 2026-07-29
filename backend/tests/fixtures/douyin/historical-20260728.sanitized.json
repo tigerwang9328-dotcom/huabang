@@ -982,7 +982,7 @@
   },
   "fixture_scope": "v3.1 color analytics Task 0 sanitized historical catalog and curves",
   "sanitization_contract": {
-    "allowed_hash_fields": [
+    "allowed_deduplication_identifier_fields": [
       "source_snapshot_hash"
     ],
     "credential_fields_excluded": true,
