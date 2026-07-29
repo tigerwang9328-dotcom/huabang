@@ -94,11 +94,33 @@ if [[ "$execute" != true ]]; then
 fi
 
 [[ "$EUID" -ne 0 ]] || die "run as the application owner; the script uses narrowly scoped sudo commands"
-sudo -v
+
+# An ordinary operator terminal can let sudo prompt normally.  The deployment
+# orchestrator uses the opt-in stdin mode only for the initial sudo validation;
+# every privileged action thereafter is non-interactive so a missing/expired
+# authorization fails safely instead of consuming arbitrary script input.
+case "${FINANCE_RELEASE_SUDO_STDIN:-0}" in
+  0|1) ;;
+  *) die "FINANCE_RELEASE_SUDO_STDIN must be 0 or 1" ;;
+esac
+
+sudo_init() {
+  if [[ "${FINANCE_RELEASE_SUDO_STDIN:-0}" == "1" ]]; then
+    command sudo -S -v
+  else
+    command sudo -v
+  fi
+}
+
+sudo_run() {
+  command sudo -n "$@"
+}
+
+sudo_init
 
 keep_sudo_alive() {
   while sleep 60; do
-    sudo -n -v || exit 0
+    sudo_run -v || exit 0
   done &
   sudo_keepalive_pid=$!
 }
@@ -127,13 +149,13 @@ postgres_sql() {
   remote_file="${local_file}.postgres"
   printf '%s\n' "$sql" > "$local_file"
   chmod 600 "$local_file"
-  if ! sudo -n install -o postgres -g postgres -m 600 "$local_file" "$remote_file"; then
+  if ! sudo_run install -o postgres -g postgres -m 600 "$local_file" "$remote_file"; then
     rm -f "$local_file"
     return 1
   fi
   rm -f "$local_file"
-  sudo -n -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DATABASE_NAME" -f "$remote_file" || status=$?
-  sudo -n rm -f "$remote_file" || return 1
+  sudo_run -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DATABASE_NAME" -f "$remote_file" || status=$?
+  sudo_run rm -f "$remote_file" || return 1
   return "$status"
 }
 
@@ -174,7 +196,7 @@ rollback_runtime() {
     mv "$previous_dist" "$FRONTEND_DIR/dist"
   fi
   if [[ "$runtime_activated" == true ]]; then
-    sudo -n systemctl restart huabang-backend.service
+    sudo_run systemctl restart huabang-backend.service
   fi
   if [[ -n "$credentials_file" && -f "$credentials_file" ]]; then
     rm -f "$credentials_file"
@@ -223,9 +245,9 @@ git -C "$PROJECT_ROOT" checkout --detach "$expected_commit"
 backup_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_file="$BACKUP_DIR/huabang_ai_finance_v2_release_${backup_stamp}.dump"
 backup_tmp="${backup_file}.tmp"
-sudo -n install -d -o postgres -g postgres -m 700 "$BACKUP_DIR"
-sudo -n -u postgres bash -c "umask 077; pg_dump -Fc -d '$DATABASE_NAME' > '$backup_tmp'; mv '$backup_tmp' '$backup_file'"
-sudo -n -u postgres sha256sum "$backup_file"
+sudo_run install -d -o postgres -g postgres -m 700 "$BACKUP_DIR"
+sudo_run -u postgres bash -c "umask 077; pg_dump -Fc -d '$DATABASE_NAME' > '$backup_tmp'; mv '$backup_tmp' '$backup_file'"
+sudo_run -u postgres sha256sum "$backup_file"
 
 postgres_sql "$(<"$BACKEND_DIR/scripts/bootstrap_finance_database_roles.sql")"
 postgres_sql "GRANT CONNECT ON DATABASE $DATABASE_NAME TO fin_migrator, fin_app, fin_history_importer, fin_readonly_auditor;"
@@ -338,7 +360,7 @@ npm run type-check
 next_dist="$(mktemp -d "$FRONTEND_DIR/.finance-v2-dist.XXXXXX")"
 npm run build -- --outDir "$next_dist"
 
-sudo -n systemctl restart huabang-backend.service
+sudo_run systemctl restart huabang-backend.service
 runtime_activated=true
 for attempt in $(seq 1 20); do
   if curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null; then
