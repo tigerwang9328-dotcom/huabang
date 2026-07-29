@@ -39,6 +39,11 @@ _SENSITIVE_VALUE_FRAGMENTS = (
     "http://",
     "bearer ",
     "cookie=",
+    "set-cookie",
+    "token",
+    "signature",
+    "password",
+    "captcha",
     "mstoken",
     "a_bogus",
 )
@@ -437,6 +442,11 @@ def test_v31_fixture_safety_scanner_rejects_frozen_sensitive_artifacts():
         "https://creator.douyin.com/path?signature=unsafe",
         "Bearer unsafe",
         "Cookie=unsafe",
+        "Set-Cookie: unsafe",
+        "token=unsafe",
+        "signature=unsafe",
+        "password=unsafe",
+        "captcha=unsafe",
         "msToken=unsafe",
         "a_bogus=unsafe",
     ):
