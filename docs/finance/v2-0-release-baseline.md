@@ -66,3 +66,9 @@
 - 前端提交 `872cb674554b8dd8ed86d0b28a15c41ecc15d725` 已部署：财务利润下的“财务中心”改为复用统一导航配置，因此只由 `finance:center:view` 显示，不再错误依赖 `finance:profit:view`。
 - 服务器构建、`www-data` 静态读取检查、`/app/dashboard` 与 `/app/finance-center/core-workspace` HTTP 200 均已核验；后端未重启且保持 active。
 - 当前 `fin_current.feature_gate` 无启用记录、`fin_current.voucher=0`。该变更不构成浏览器登录验收，也不解除当前账写入 No-Go。
+
+## 2026-07-29 可观测性 Gate 更新
+
+- 提交 `8a3dc105cc193f0f0389587532a422494105dec1` 已在生产后端重启加载，前端工作台已原子切换。health 显示数据库与 Redis connected，`/api/v1/finance-center/v2/monitoring/summary` 未登录为 401，OpenAPI 路由存在，静态文件仍经 `www-data` 读取校验。
+- 11 项策略均显示阈值、责任人、逻辑通知路由和关闭条件；只有过账失败、历史冲突、结账失败有已持久化聚合值。其他未接入项目明确显示 unavailable，且所有策略 `notification_configured=false`，不得描述为真实告警已经送达。
+- 本次仍未开启 `fin_current` 写 Gate、未创建当前账凭证、未完成已登录财务用户验收。性能测量、真实通知演练、异机恢复、最终期初/期间连续性和最终切换继续是正式开写前置。
