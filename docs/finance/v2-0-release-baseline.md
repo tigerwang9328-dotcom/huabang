@@ -32,3 +32,19 @@
 | 清单结果 | 4 个账套、0 个清单错误；3 个 official 账套合计 339 张凭证、4,596 条分录；另有 1 个空 test 账套。用于恢复演练的最小受控副本清单 SHA-256 为 `CE10F6A37FFBE0B6045F4B25D09F1E1E46F882E24DA1564B8513E9B4B56A805E`，r2 已完成暂存、校验与发布；生产仍未导入 | 已核实，恢复副本已验证，生产未导入 |
 
 历史源使用及切换授权边界见 `v2.0/deployment-decisions.md`。不得将本地快照描述为已写入生产或已完成财务核对。
+
+## 2026-07-29 生产只读发布实际结果（覆盖上方预发布状态）
+
+| 项目 | 实际结果 | 验证状态 |
+| --- | --- | --- |
+| 生产代码与服务 | `/srv/huabang-ai-center` 已切换到 `9eb4024cf7741f398010be656c2660c875d6ac84`；`huabang-backend.service` active，启动时间 `2026-07-29 12:13:22 UTC` | 已核实，生产运行时 |
+| 迁移与备份 | Alembic 已到唯一 head `1fdf4577d7d8`。发布前 custom 逻辑备份为 `/var/backups/huabang-finance-v2/huabang_ai_finance_v2_release_20260729T121220Z.dump`，SHA-256 `4754e6a18a0a0f70dbbec1e80ef21be530429793923e88b97fe5c86ec8fd833b` | 已核实，生产执行 |
+| 金蝶历史账 | 受控清单 `CE10F6A37FFBE0B6045F4B25D09F1E1E46F882E24DA1564B8513E9B4B56A805E` 对应 3 个 official 账套；`fin_app` 只读验证为 339 张历史凭证、4,596 条历史分录、0 张当前账凭证 | 已核实，生产运行时 |
+| 中台与数据库边界 | 已幂等补齐 `finance_manager` 的 `finance:center:view`、`finance:center:operate`；未分配用户。实际验证会话为 `fin_app`；四个财务登录角色中仅运行所需的 `fin_app` 保有口令，临时迁移/导入角色口令已清除 | 已核实，生产执行与数据库只读核验 |
+| 写入控制 | `draft_enabled`、`review_enabled`、`post_enabled`、`period_close_enabled`、`source_sync_enabled` 均未启用（计数 0）；旧财务写入口未冻结、未改写 | 已核实，生产运行时 |
+| 前端与公网 | 发布后曾因发布脚本全局 `umask 077` 令新 `dist` 为 700/600，Nginx `www-data` 无法读取并返回 500。已将仅有的静态构建产物修正为目录 755、文件 644；本地 Nginx 的 `/app/dashboard` 与 FinanceCenter 资源均为 200，外部浏览器到达华邦登录页。候选发布脚本现已加入构建前/切换后 `www-data` 可读性校验，防止复发 | 已核实，生产运行时与外部匿名浏览器 |
+
+### 当前发布结论
+
+- **Go：** Finance V2 历史账只读查询、中台权限入口与前端静态资源已完成生产部署；历史数据保留历史标记，未写回金蝶来源表。
+- **No-Go：** V2 草稿、审核、人工过账、结账、来源同步以及任何当前账写入仍关闭。`archive_mode=off`、PITR/RTO/保留策略、期初与期间连续性、已授权财务用户的浏览器端到端验收尚未补齐，不能把本次只读发布表述为正式财务切换或可记账上线。

@@ -119,7 +119,9 @@ sudo_run() {
 sudo_init
 
 keep_sudo_alive() {
-  while sleep 60; do
+  # The production sudo timestamp is shorter than a frontend build on this
+  # host, so refresh well before expiry rather than only after it can lapse.
+  while sleep 20; do
     sudo_run -v || exit 0
   done &
   sudo_keepalive_pid=$!

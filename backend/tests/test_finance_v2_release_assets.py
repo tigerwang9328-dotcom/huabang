@@ -24,6 +24,7 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
         "GIT_TERMINAL_PROMPT=0",
         "BatchMode=yes",
         "sudo_keepalive_pid",
+        "while sleep 20; do",
         "command sudo -n \"$@\"",
         "FINANCE_RELEASE_SUDO_STDIN",
         "sudo_run",
