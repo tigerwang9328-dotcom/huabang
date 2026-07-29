@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 import json
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finance_v2 import FinanceV2AccountingBook, FinanceV2CommandIdempotency, FinanceV2OperationEvent
-from app.models.finance_v2_opening import FinanceV2CoverageGap, FinanceV2OpeningBalanceBatch, FinanceV2OpeningBalanceLine
+from app.models.finance_v2_opening import FinanceV2CoverageGap, FinanceV2OpeningBalanceApproval, FinanceV2OpeningBalanceBatch, FinanceV2OpeningBalanceLine
 from app.services.finance_v2.opening_balance_domain import (
     OpeningBalanceError,
+    OpeningBalanceLine,
     OpeningBalanceState,
+    approve_opening_balance,
     assert_current_writes_allowed,
 )
 
@@ -136,6 +138,76 @@ class FinanceV2OpeningBalanceService:
         )
         await self.db.flush()
         return result
+
+    async def lock_batch(
+        self,
+        *,
+        book_id: int,
+        batch_id: int,
+        actor_id: str,
+        expected_version: int,
+        command_id: str,
+        reason: str | None,
+    ) -> dict:
+        book = await self.db.get(FinanceV2AccountingBook, book_id)
+        if not book:
+            raise OpeningBalanceError("opening balance book was not found")
+        batch = (
+            await self.db.execute(
+                select(FinanceV2OpeningBalanceBatch)
+                .where(FinanceV2OpeningBalanceBatch.id == batch_id, FinanceV2OpeningBalanceBatch.book_id == book_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not batch:
+            raise OpeningBalanceError("opening balance batch was not found")
+        if batch.version != expected_version:
+            raise OpeningBalanceError("version conflict: opening balance batch changed concurrently")
+        request_hash = self._payload_hash({"batch_id": batch_id, "actor_id": actor_id, "expected_version": expected_version, "reason": reason})
+        existing = (
+            await self.db.execute(
+                select(FinanceV2CommandIdempotency).where(
+                    FinanceV2CommandIdempotency.book_id == book_id,
+                    FinanceV2CommandIdempotency.command_name == "opening.lock",
+                    FinanceV2CommandIdempotency.idempotency_key == command_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            if existing.request_hash != request_hash:
+                raise OpeningBalanceError("opening balance command id was already used with different parameters")
+            return {**dict(existing.result_payload), "idempotent": True}
+        rows = (
+            await self.db.execute(
+                select(FinanceV2OpeningBalanceLine)
+                .where(FinanceV2OpeningBalanceLine.batch_id == batch_id)
+                .order_by(FinanceV2OpeningBalanceLine.id)
+            )
+        ).scalars().all()
+        approved = approve_opening_balance(
+            OpeningBalanceState(batch.batch_kind, batch.status, bool(batch.coverage_continuous)),
+            [OpeningBalanceLine(str(row.account_version_id), str(row.dimension_set_id), row.currency_code, Decimal(row.debit_amount), Decimal(row.credit_amount), row.source_system) for row in rows],
+            approver=actor_id,
+        )
+        now = datetime.now(timezone.utc)
+        result = await self.db.execute(
+            update(FinanceV2OpeningBalanceBatch)
+            .where(FinanceV2OpeningBalanceBatch.id == batch_id, FinanceV2OpeningBalanceBatch.version == expected_version)
+            .values(status=approved.status, approved_by=actor_id, approved_at=now, locked_at=now, version=expected_version + 1)
+        )
+        if result.rowcount != 1:
+            raise OpeningBalanceError("version conflict: opening balance batch changed concurrently")
+        batch.status, batch.approved_by, batch.version = approved.status, actor_id, expected_version + 1
+        if batch.batch_kind == "final":
+            book.history_coverage_end_date = batch.history_coverage_end_date
+            book.current_book_go_live_date = batch.go_live_date
+            book.formal_report_blocked = not bool(batch.coverage_continuous)
+        payload = {"batch_id": batch_id, "book_id": book_id, "status": approved.status, "version": batch.version}
+        self.db.add(FinanceV2OpeningBalanceApproval(batch_id=batch_id, actor_id=actor_id, command_id=command_id, reason=reason))
+        self.db.add(FinanceV2CommandIdempotency(book_id=book_id, command_name="opening.lock", idempotency_key=command_id, request_hash=request_hash, result_payload=payload, completed_at=now))
+        self.db.add(FinanceV2OperationEvent(book_id=book_id, command_id=command_id, actor_id=actor_id, action="opening.lock", reason=reason, before_data={"status": "validated", "version": expected_version}, after_data=payload))
+        await self.db.flush()
+        return payload
 
     async def assert_current_writes_allowed(self, *, book_id: int) -> None:
         book = await self.db.get(FinanceV2AccountingBook, book_id)

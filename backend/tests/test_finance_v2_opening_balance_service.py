@@ -175,3 +175,66 @@ async def test_opening_draft_rejects_incomplete_or_double_sided_lines_before_per
                 }
             ],
         )
+
+
+@pytest.mark.asyncio
+async def test_locking_a_final_opening_updates_book_boundary_and_records_approval():
+    book = SimpleNamespace(id=3, formal_report_blocked=True)
+    batch = SimpleNamespace(
+        id=8,
+        book_id=3,
+        batch_kind="final",
+        status="validated",
+        version=1,
+        coverage_continuous=True,
+        coverage_gap_id=None,
+        history_coverage_end_date=date(2026, 7, 31),
+        go_live_date=date(2026, 8, 1),
+        approved_by=None,
+    )
+    lines = [
+        SimpleNamespace(account_version_id=10, dimension_set_id=20, currency_code="CNY", debit_amount="100", credit_amount="0", source_system="kingdee"),
+        SimpleNamespace(account_version_id=30, dimension_set_id=20, currency_code="CNY", debit_amount="0", credit_amount="100", source_system="kingdee"),
+    ]
+
+    class Result:
+        def __init__(self, value=None, *, rowcount=None):
+            self.value = value
+            self.rowcount = rowcount
+
+        def scalar_one_or_none(self):
+            return self.value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.value
+
+    class Db:
+        def __init__(self):
+            self.calls = 0
+            self.added = []
+
+        async def get(self, _model, book_id):
+            assert book_id == 3
+            return book
+
+        async def execute(self, _statement):
+            self.calls += 1
+            return [Result(batch), Result(None), Result(lines), Result(rowcount=1)][self.calls - 1]
+
+        def add(self, item):
+            self.added.append(item)
+
+        async def flush(self):
+            pass
+
+    db = Db()
+    result = await FinanceV2OpeningBalanceService(db).lock_batch(
+        book_id=3, batch_id=8, actor_id="finance-manager", expected_version=1, command_id="opening-lock-001", reason="期初核对完成"
+    )
+
+    assert result["status"] == "locked"
+    assert book.current_book_go_live_date == date(2026, 8, 1)
+    assert any(type(item).__name__ == "FinanceV2OpeningBalanceApproval" for item in db.added)
