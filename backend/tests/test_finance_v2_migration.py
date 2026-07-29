@@ -49,3 +49,11 @@ def test_history_batch_monitoring_is_exposed_through_fin_read_not_fin_history_gr
     assert "FROM fin_history.import_batch" in migration
     assert "validation_report" not in migration
     assert "DROP VIEW IF EXISTS fin_read.history_import_batch" in migration
+
+
+def test_alembic_configuration_never_embeds_database_credentials():
+    config = (Path(__file__).parents[1] / "alembic.ini").read_text(encoding="utf-8")
+    url_line = next(line for line in config.splitlines() if line.startswith("sqlalchemy.url ="))
+
+    assert url_line == "sqlalchemy.url = postgresql://"
+    assert "@" not in url_line

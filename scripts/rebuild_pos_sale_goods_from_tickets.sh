@@ -13,13 +13,23 @@ cd "$BACKEND_DIR"
 START_DATE="${1:-$(TZ='Asia/Shanghai' date -d '6 days ago' '+%Y-%m-%d')}"
 END_DATE="${2:-$(TZ='Asia/Shanghai' date '+%Y-%m-%d')}"
 
+DB_HOST=$(grep '^DB_HOST=' .env | cut -d= -f2-)
+DB_PORT=$(grep '^DB_PORT=' .env | cut -d= -f2-)
+DB_NAME=$(grep '^DB_NAME=' .env | cut -d= -f2-)
 DB_USER=$(grep '^DB_USER=' .env | cut -d= -f2-)
 DB_PASS=$(grep '^DB_PASSWORD=' .env | cut -d= -f2-)
+DB_HOST=${DB_HOST:-localhost}; DB_PORT=${DB_PORT:-5432}; DB_NAME=${DB_NAME:-huabang_ai}
+PGPASSFILE=$(mktemp)
+trap 'rm -f "$PGPASSFILE"' EXIT
+chmod 600 "$PGPASSFILE"
+printf '%s:%s:%s:%s:%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASS" > "$PGPASSFILE"
+export PGPASSFILE
+unset DB_PASS
 
 echo "==========================================" | tee -a "$LOG_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] rebuild dwd_pos_sale_goods/dws_product_daily ${START_DATE} ~ ${END_DATE}" | tee -a "$LOG_FILE"
 
-PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -v start_date="$START_DATE" -v end_date="$END_DATE" -P pager=off <<'SQL' >> "$LOG_FILE" 2>&1
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v start_date="$START_DATE" -v end_date="$END_DATE" -P pager=off <<'SQL' >> "$LOG_FILE" 2>&1
 \set ON_ERROR_STOP on
 
 BEGIN;
