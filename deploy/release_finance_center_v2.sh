@@ -30,6 +30,7 @@ next_dist=""
 credentials_file=""
 release_succeeded=false
 runtime_activated=false
+sudo_keepalive_pid=""
 
 usage() {
   cat <<'USAGE'
@@ -94,6 +95,23 @@ fi
 
 [[ "$EUID" -ne 0 ]] || die "run as the application owner; the script uses narrowly scoped sudo commands"
 sudo -v
+
+keep_sudo_alive() {
+  while sleep 60; do
+    sudo -n -v || exit 0
+  done &
+  sudo_keepalive_pid=$!
+}
+
+stop_sudo_keepalive() {
+  if [[ -n "$sudo_keepalive_pid" ]]; then
+    kill "$sudo_keepalive_pid" 2>/dev/null || true
+    wait "$sudo_keepalive_pid" 2>/dev/null || true
+    sudo_keepalive_pid=""
+  fi
+}
+
+keep_sudo_alive
 
 mkdir -p "$LOG_DIR"
 release_log="$LOG_DIR/release-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -163,6 +181,7 @@ rollback_runtime() {
   fi
   clear_temporary_role_passwords
   clear_fin_app_password_after_failed_release
+  stop_sudo_keepalive
   trap - EXIT
   exit "$failure_status"
 }
@@ -179,6 +198,7 @@ cleanup() {
     rm -f "$previous_env_backup"
   fi
   clear_temporary_role_passwords
+  stop_sudo_keepalive
 }
 trap cleanup EXIT
 

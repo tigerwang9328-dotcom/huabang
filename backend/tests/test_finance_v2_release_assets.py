@@ -23,6 +23,8 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
         "rev-parse --verify",
         "GIT_TERMINAL_PROMPT=0",
         "BatchMode=yes",
+        "sudo_keepalive_pid",
+        "sudo -n -v",
         "pg_dump",
         "bootstrap_finance_database_roles.sql",
         "postgres_sql \"$(<\"$BACKEND_DIR/scripts/bootstrap_finance_database_roles.sql\")\"",
