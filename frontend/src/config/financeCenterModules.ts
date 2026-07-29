@@ -212,11 +212,11 @@ export const mirroredFinanceCenterNavigation: FinanceNavigationItem = {
   icon: Money,
   label: "财务中心",
   key: "finance-center",
-  permission: "finance:profit:view",
+  permission: "finance:center:view",
   children: financeCenterModules.map((item) => ({
     path: item.path,
     label: item.label,
-    permission: "finance:profit:view",
+    permission: "finance:center:view",
   })),
 };
 

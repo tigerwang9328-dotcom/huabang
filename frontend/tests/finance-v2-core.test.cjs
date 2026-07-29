@@ -6,7 +6,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
-test("finance center base URL opens the V2 core workspace with the existing finance read permission", () => {
+test("finance center base URL opens the V2 core workspace with the platform Finance V2 read permission", () => {
   const router = read("src/router/index.ts");
 
   assert.ok(
@@ -14,8 +14,20 @@ test("finance center base URL opens the V2 core workspace with the existing fina
     "the finance center base route must redirect to the V2 core workspace",
   );
   assert.ok(
-    router.includes('["/app/finance-center", "finance:profit:view"]'),
-    "the finance center route family must use the existing finance read permission",
+    router.includes('["/app/finance-center", "finance:center:view"]'),
+    "the finance center route family must use the platform Finance V2 read permission",
+  );
+});
+
+test("finance center navigation uses the platform Finance V2 read permission", () => {
+  const modules = read("src/config/financeCenterModules.ts");
+  const router = read("src/router/index.ts");
+
+  assert.ok(modules.includes('permission: "finance:center:view"'));
+  assert.ok(!modules.includes('key: "finance-center",\n  permission: "finance:profit:view"'));
+  assert.ok(
+    router.includes('["/app/finance-center/core-workspace", "finance:center:view"]'),
+    "a finance-only user must land on the V2 workspace after login",
   );
 });
 

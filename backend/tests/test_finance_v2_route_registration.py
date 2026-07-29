@@ -6,6 +6,10 @@ from fastapi import HTTPException
 
 from app.api.v1 import finance_v2
 from app.api.v1.finance_v2 import router
+from app.services.finance_v2.platform_permissions import (
+    FINANCE_V2_READ_PERMISSION,
+    FINANCE_V2_WRITE_PERMISSION,
+)
 
 
 def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
@@ -25,6 +29,37 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST") in routes
     assert ("/finance-center/v2/history/vouchers", "GET") in routes
     assert ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET") in routes
+
+
+def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency():
+    expected = {
+        ("/finance-center/v2/books", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/write-readiness", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/periods", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/periods/{period_id}/close-readiness", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/periods/{period_id}/commands", "POST"): FINANCE_V2_WRITE_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/periods/{period_id}/trial-balance", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/periods/{period_id}/ledger-lines", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/monitoring/summary", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/accounts", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/vouchers", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/history/vouchers", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/vouchers", "POST"): FINANCE_V2_WRITE_PERMISSION,
+        ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST"): FINANCE_V2_WRITE_PERMISSION,
+    }
+    actual = {}
+    for route in router.routes:
+        for method in route.methods:
+            dependency_codes = [
+                getattr(dependency.call, "finance_v2_permission", None)
+                for dependency in route.dependant.dependencies
+            ]
+            code = next((value for value in dependency_codes if value), None)
+            if code:
+                actual[(route.path, method)] = code
+
+    assert actual == expected
 
 
 @pytest.mark.asyncio

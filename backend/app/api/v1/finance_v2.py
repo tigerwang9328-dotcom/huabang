@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import require_roles
+from app.api.v1.finance_v2_deps import require_finance_v2_permission
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.finance_v2 import (
@@ -29,9 +29,15 @@ from app.services.finance_v2.domain import FinanceV2DomainError
 from app.services.finance_v2.feature_gate_domain import FeatureGateError, GateScope, assert_command_enabled
 from app.services.finance_v2.period_close_workflow import FinanceV2PeriodCloseWorkflow
 from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
+from app.services.finance_v2.platform_permissions import (
+    FINANCE_V2_READ_PERMISSION,
+    FINANCE_V2_WRITE_PERMISSION,
+)
 
 
 router = APIRouter(prefix="/finance-center/v2", tags=["财务中心 V2.0"])
+require_finance_v2_read = require_finance_v2_permission(FINANCE_V2_READ_PERMISSION)
+require_finance_v2_write = require_finance_v2_permission(FINANCE_V2_WRITE_PERMISSION)
 
 
 class VoucherLineInput(BaseModel):
@@ -112,7 +118,7 @@ async def _assert_v2_write_enabled(db: AsyncSession, *, command: str, book_id: i
 
 @router.get("/books", response_model=ApiResponse)
 async def list_books(
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     books = (await db.execute(select(FinanceV2AccountingBook).order_by(FinanceV2AccountingBook.book_code))).scalars().all()
@@ -133,7 +139,7 @@ async def list_books(
 @router.get("/books/{book_id}/write-readiness", response_model=ApiResponse)
 async def get_book_write_readiness(
     book_id: int,
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (await db.execute(select(FinanceV2FeatureGate))).scalars().all()
@@ -167,7 +173,7 @@ async def get_book_write_readiness(
 @router.get("/books/{book_id}/periods", response_model=ApiResponse)
 async def list_book_periods(
     book_id: int,
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
@@ -196,7 +202,7 @@ async def list_book_periods(
 async def get_period_close_readiness(
     book_id: int,
     period_id: int,
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -211,7 +217,7 @@ async def execute_period_command(
     book_id: int,
     period_id: int,
     body: PeriodCommandInput,
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_write),
     db: AsyncSession = Depends(get_db),
 ):
     await _assert_v2_write_enabled(
@@ -240,7 +246,7 @@ async def get_trial_balance(
     book_id: int,
     period_id: int,
     limit: int = Query(default=500, ge=1, le=1000),
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     book = await db.get(FinanceV2AccountingBook, book_id)
@@ -293,7 +299,7 @@ async def list_ledger_lines(
     account_version_id: int | None = Query(default=None),
     after_line_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     period = await db.get(FinanceV2FiscalPeriod, period_id)
@@ -315,7 +321,7 @@ async def list_ledger_lines(
 
 @router.get("/monitoring/summary", response_model=ApiResponse)
 async def get_monitoring_summary(
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     async def count_rows(model, *conditions) -> int:
@@ -385,7 +391,7 @@ async def get_monitoring_summary(
 async def list_book_accounts(
     book_id: int,
     active_on: date | None = Query(default=None),
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     statement = (
@@ -426,7 +432,7 @@ async def list_vouchers(
     period_id: int | None = Query(default=None),
     status: str | None = Query(default=None, max_length=16),
     limit: int = Query(default=100, ge=1, le=200),
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     statement = select(FinanceV2Voucher).where(FinanceV2Voucher.book_id == book_id)
@@ -464,7 +470,7 @@ async def list_vouchers(
 @router.get("/history/vouchers", response_model=ApiResponse)
 async def list_history_vouchers(
     limit: int = Query(default=50, ge=1, le=200),
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
@@ -488,7 +494,7 @@ async def list_history_vouchers(
 async def list_history_voucher_lines(
     voucher_id: int,
     limit: int = Query(default=200, ge=1, le=500),
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
@@ -514,7 +520,7 @@ async def list_history_voucher_lines(
 @router.post("/vouchers", response_model=ApiResponse)
 async def create_voucher_draft(
     body: VoucherDraftInput,
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_write),
     db: AsyncSession = Depends(get_db),
 ):
     await _assert_v2_write_enabled(
@@ -541,7 +547,7 @@ async def create_voucher_draft(
 async def execute_voucher_command(
     voucher_id: int,
     body: VoucherCommandInput,
-    current_user: SysUser = Depends(require_roles("finance_manager")),
+    current_user: SysUser = Depends(require_finance_v2_write),
     db: AsyncSession = Depends(get_db),
 ):
     voucher = await db.get(FinanceV2Voucher, voucher_id)

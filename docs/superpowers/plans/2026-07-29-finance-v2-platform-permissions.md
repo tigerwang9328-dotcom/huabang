@@ -27,11 +27,11 @@
 **Interfaces:**
 - Produces `FINANCE_MANAGER_ROLE`, `FINANCE_V2_READ_PERMISSION`, `FINANCE_V2_WRITE_PERMISSION`, and `assert_finance_v2_access(...)`.
 
-- [ ] **Step 1: Write failing tests** for a finance manager with a required permission, a user missing the finance role, a finance manager missing a permission, and a super administrator.
-- [ ] **Step 2: Run** `python -m pytest tests/test_finance_v2_platform_permissions.py -q` and confirm failure because the service is absent.
-- [ ] **Step 3: Implement** a pure authorization function that allows administrators, otherwise requires `finance_manager` and the requested central permission.
-- [ ] **Step 4: Re-run** the test and confirm all cases pass.
-- [ ] **Step 5: Commit** the service and test.
+- [x] **Step 1: Write failing tests** for a finance manager with a required permission, a user missing the finance role, a finance manager missing a permission, and a super administrator.
+- [x] **Step 2: Run** `python -m pytest tests/test_finance_v2_platform_permissions.py -q` and confirm failure because the service is absent.
+- [x] **Step 3: Implement** a pure authorization function that allows administrators, otherwise requires `finance_manager` and the requested central permission.
+- [x] **Step 4: Re-run** the test and confirm all cases pass.
+- [x] **Step 5: Commit** the service and test.
 
 ### Task 2: Wire every Finance V2 API route to central permissions
 
@@ -44,11 +44,11 @@
 - Consumes `assert_finance_v2_access` and the existing JWT/current-user dependencies.
 - Produces `require_finance_v2_permission(permission_code)` for FastAPI dependencies.
 
-- [ ] **Step 1: Write a failing route test** that asserts GET routes require `finance:center:view` and POST command routes require `finance:center:operate`.
-- [ ] **Step 2: Run** `python -m pytest tests/test_finance_v2_route_registration.py -q` and confirm the dependency assertions fail.
-- [ ] **Step 3: Implement** central permission loading and a Finance V2 dependency without changing generic platform authorization semantics.
-- [ ] **Step 4: Replace** V2 route role-only dependencies with the read or write dependency.
-- [ ] **Step 5: Re-run** the route and full Finance V2 tests; commit.
+- [x] **Step 1: Write a failing route test** that asserts GET routes require `finance:center:view` and POST command routes require `finance:center:operate`.
+- [x] **Step 2: Run** `python -m pytest tests/test_finance_v2_route_registration.py -q` and confirm the dependency assertions fail.
+- [x] **Step 3: Implement** central permission loading and a Finance V2 dependency without changing generic platform authorization semantics.
+- [x] **Step 4: Replace** V2 route role-only dependencies with the read or write dependency.
+- [x] **Step 5: Re-run** the route and full Finance V2 tests; commit.
 
 ### Task 3: Seed and expose the permissions through the platform
 
@@ -61,11 +61,11 @@
 **Interfaces:**
 - Seed script creates `finance_manager`, two `sys_permission` records and their two `sys_role_permission` links with PostgreSQL conflict-safe SQL.
 
-- [ ] **Step 1: Write failing tests** for the script's idempotent role/permission set and the frontend's `finance:center:view` route/navigation gate.
-- [ ] **Step 2: Run** targeted backend and frontend tests and confirm failures.
-- [ ] **Step 3: Implement** the seed script and replace the old generic finance permission in the V2 UI route/navigation gate.
-- [ ] **Step 4: Run** targeted tests, backend Finance V2 suite, frontend type-check and production build.
-- [ ] **Step 5: Commit** the complete integration.
+- [x] **Step 1: Write failing tests** for the script's idempotent role/permission set and the frontend's `finance:center:view` route/navigation gate.
+- [x] **Step 2: Run** targeted backend and frontend tests and confirm failures.
+- [x] **Step 3: Implement** the seed script and replace the old generic finance permission in the V2 UI route/navigation gate.
+- [x] **Step 4: Run** targeted tests, backend Finance V2 suite, frontend type-check and production build.
+- [x] **Step 5: Commit** the complete integration.
 
 ### Task 4: Recovery-copy execution evidence
 
