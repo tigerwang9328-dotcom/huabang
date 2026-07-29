@@ -20,10 +20,13 @@ class PeriodCloseCheck:
     unbalanced_voucher_count: int = 0
     source_exception_count: int = 0
     ledger_difference_count: int = 0
+    profit_closing_evidence_missing_count: int = 0
 
     def assert_clear(self) -> None:
         for field, value in self.__dict__.items():
             if value:
+                if field == "profit_closing_evidence_missing_count":
+                    raise PeriodCloseError("manual profit-closing evidence is required before period close")
                 raise PeriodCloseError(f"{field} must be zero before period close")
 
 

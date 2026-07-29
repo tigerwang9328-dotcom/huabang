@@ -59,3 +59,26 @@ class FinanceV2PeriodCloseApproval(Base):
     command_id = Column(String(128), nullable=False)
     reason = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class FinanceV2ProfitClosingEvidence(Base):
+    """Immutable link from a closed-period request to its manual closing voucher."""
+
+    __tablename__ = "profit_closing_evidence"
+    __table_args__ = (
+        UniqueConstraint("period_id", name="uq_fin_current_profit_close_period"),
+        UniqueConstraint("voucher_id", name="uq_fin_current_profit_close_voucher"),
+        UniqueConstraint("command_id", name="uq_fin_current_profit_close_command"),
+        CheckConstraint("length(btrim(reason)) > 0", name="ck_fin_current_profit_close_reason"),
+        {"schema": "fin_current"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    book_id = Column(BigInteger, ForeignKey("fin_current.accounting_book.id"), nullable=False)
+    period_id = Column(BigInteger, ForeignKey("fin_current.fiscal_period.id"), nullable=False)
+    voucher_id = Column(BigInteger, ForeignKey("fin_current.voucher.id"), nullable=False)
+    command_id = Column(String(128), nullable=False)
+    confirmed_by = Column(String(128), nullable=False)
+    reason = Column(Text, nullable=False)
+    confirmed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -176,6 +176,8 @@
           <el-descriptions-item label="余额差异">{{ periodCloseReadiness.checks.ledger_difference_count }}</el-descriptions-item>
           <el-descriptions-item label="已过账借贷">{{ periodCloseReadiness.checks.posted_debit }} / {{ periodCloseReadiness.checks.posted_credit }}</el-descriptions-item>
           <el-descriptions-item label="余额表借贷">{{ periodCloseReadiness.checks.ledger_debit }} / {{ periodCloseReadiness.checks.ledger_credit }}</el-descriptions-item>
+          <el-descriptions-item label="需要损益结转证据">{{ periodCloseReadiness.checks.profit_closing_evidence_required ? "是" : "否" }}</el-descriptions-item>
+          <el-descriptions-item label="已登记损益结转凭证">{{ periodCloseReadiness.checks.profit_closing_evidence_count }}</el-descriptions-item>
         </el-descriptions>
         <p class="close-note">来源异常口径：{{ periodCloseReadiness.checks.source_exception_scope }}</p>
         <el-button text type="primary" :loading="trialBalanceLoading" @click="loadTrialBalance">查看 V2 当前账试算表</el-button>
@@ -186,6 +188,11 @@
           <el-table-column prop="period_debit" label="本期借" min-width="100" /><el-table-column prop="period_credit" label="本期贷" min-width="100" />
           <el-table-column prop="closing_debit" label="期末借" min-width="100" /><el-table-column prop="closing_credit" label="期末贷" min-width="100" />
         </el-table>
+        <div v-if="periodCloseEnabled && periodCloseReadiness.status === 'open' && periodCloseReadiness.checks.profit_closing_evidence_missing_count" class="close-actions">
+          <el-select v-model="selectedProfitClosingVoucherId" placeholder="选择已过账的手工损益结转凭证" clearable style="width: 320px">
+            <el-option v-for="voucher in closePostedVouchers" :key="voucher.id" :label="`${voucher.voucher_no || `凭证#${voucher.id}`} · 借${voucher.total_debit} / 贷${voucher.total_credit}`" :value="voucher.id" />
+          </el-select>
+        </div>
         <div v-if="periodCloseEnabled" class="close-actions">
           <el-button v-for="action in availablePeriodActions()" :key="action" type="primary" :loading="periodCommandLoading === action" @click="runPeriodCommand(action)">{{ periodActionLabel(action) }}</el-button>
         </div>
@@ -205,6 +212,7 @@ import {
   type FinanceV2Book,
   type FinanceV2HistoryVoucher,
   type FinanceV2HistoryVoucherLine,
+  type FinanceV2PeriodCommandInput,
   type FinanceV2PeriodCloseReadiness,
   type FinanceV2TrialBalance,
   type FinanceV2Period,
@@ -225,6 +233,8 @@ const selectedClosePeriod = ref<FinanceV2Period>();
 const writeReadiness = ref<FinanceV2WriteReadiness>();
 const periodCloseReadiness = ref<FinanceV2PeriodCloseReadiness>();
 const trialBalance = ref<FinanceV2TrialBalance>();
+const closePostedVouchers = ref<FinanceV2Voucher[]>([]);
+const selectedProfitClosingVoucherId = ref<number>();
 const loading = ref(false);
 const historyLoading = ref(false);
 const historyLineLoading = ref(false);
@@ -308,11 +318,17 @@ async function viewPeriodCloseReadiness(period: FinanceV2Period) {
   selectedClosePeriod.value = period;
   periodCloseReadiness.value = undefined;
   trialBalance.value = undefined;
+  closePostedVouchers.value = [];
+  selectedProfitClosingVoucherId.value = undefined;
   periodCloseDrawerOpen.value = true;
   periodCloseLoading.value = true;
   try {
-    const response = await financeV2Api.getPeriodCloseReadiness(selectedBookId.value, period.id);
-    periodCloseReadiness.value = response.data;
+    const [readinessResponse, voucherResponse] = await Promise.all([
+      financeV2Api.getPeriodCloseReadiness(selectedBookId.value, period.id),
+      financeV2Api.listVouchers(selectedBookId.value, { period_id: period.id, status: "posted", limit: 200 }),
+    ]);
+    periodCloseReadiness.value = readinessResponse.data;
+    closePostedVouchers.value = voucherResponse.data || [];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "结账检查读取失败");
   } finally {
@@ -398,9 +414,11 @@ function availableActions(voucher: FinanceV2Voucher) {
   return (candidates[voucher.status] || []).filter(actionGate);
 }
 
-const periodActionLabel = (action: string) => ({ start_close: "开始结账", complete_close: "完成结账", request_reopen: "申请反结账", approve_reopen: "批准反结账" } as Record<string, string>)[action] || action;
-function availablePeriodActions() {
+const periodActionLabel = (action: string) => ({ register_profit_closing: "登记损益结转凭证", start_close: "开始结账", complete_close: "完成结账", request_reopen: "申请反结账", approve_reopen: "批准反结账" } as Record<string, string>)[action] || action;
+type FinanceV2PeriodAction = FinanceV2PeriodCommandInput["action"];
+function availablePeriodActions(): FinanceV2PeriodAction[] {
   const status = periodCloseReadiness.value?.status;
+  if (status === "open" && periodCloseReadiness.value?.checks.profit_closing_evidence_missing_count) return ["register_profit_closing"];
   if (status === "open" && periodCloseReadiness.value?.ready_to_start_close) return ["start_close"];
   if (status === "closing") return ["complete_close"];
   if (status === "closed") return ["request_reopen"];
@@ -408,9 +426,11 @@ function availablePeriodActions() {
   return [];
 }
 
-async function runPeriodCommand(action: string) {
+async function runPeriodCommand(action: FinanceV2PeriodAction) {
   if (!selectedBookId.value || !selectedClosePeriod.value || !periodCloseReadiness.value) return;
-  const reasonRequired = ["request_reopen", "approve_reopen"].includes(action);
+  const reasonRequired = ["register_profit_closing", "request_reopen", "approve_reopen"].includes(action);
+  const voucherId = action === "register_profit_closing" ? selectedProfitClosingVoucherId.value : undefined;
+  if (action === "register_profit_closing" && !voucherId) return ElMessage.warning("请选择已过账的手工损益结转凭证");
   let reason: string | undefined;
   if (reasonRequired) {
     try {
@@ -427,6 +447,7 @@ async function runPeriodCommand(action: string) {
       command_id: newRequestId(),
       expected_version: periodCloseReadiness.value.version,
       reason,
+      voucher_id: voucherId,
     });
     ElMessage.success(`${periodActionLabel(action)}已提交`);
     await loadWorkspace();

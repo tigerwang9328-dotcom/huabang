@@ -28,6 +28,13 @@ def test_period_close_is_blocked_by_any_unresolved_finance_check(field):
         begin_close(PeriodState("open"), checks)
 
 
+def test_period_close_requires_manual_profit_closing_evidence_when_activity_exists():
+    checks = PeriodCloseCheck(profit_closing_evidence_missing_count=1)
+
+    with pytest.raises(PeriodCloseError, match="manual profit-closing evidence"):
+        begin_close(PeriodState("open"), checks)
+
+
 def test_reopen_requires_a_reason_and_two_distinct_approvers():
     reopening = request_reopen(PeriodState("closed"), reason="更正已核对差异", requester="finance-a")
     with pytest.raises(PeriodCloseError, match="distinct"):

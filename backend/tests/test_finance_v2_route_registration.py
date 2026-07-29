@@ -62,6 +62,18 @@ def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency(
     assert actual == expected
 
 
+def test_period_command_accepts_an_explicit_manual_profit_closing_evidence_registration():
+    command = finance_v2.PeriodCommandInput(
+        action="register_profit_closing",
+        command_id="profit-close-202607-001",
+        expected_version=1,
+        reason="已人工核对损益结转凭证",
+        voucher_id=88,
+    )
+
+    assert command.voucher_id == 88
+
+
 @pytest.mark.asyncio
 async def test_v2_history_line_endpoint_reads_only_the_published_read_view():
     captured = {}

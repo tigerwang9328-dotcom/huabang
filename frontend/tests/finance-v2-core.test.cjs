@@ -85,3 +85,15 @@ test("V2 workspace exposes period-close readiness and keeps close commands behin
   assert.ok(workspace.includes("periodCloseEnabled"));
   assert.ok(workspace.includes("viewPeriodCloseReadiness"));
 });
+
+test("V2 workspace requires an explicit manual profit-closing voucher before starting a close with activity", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("voucher_id?: number"));
+  assert.ok(workspace.includes("登记损益结转凭证"));
+  assert.ok(workspace.includes("profit_closing_evidence_missing_count"));
+  assert.ok(workspace.includes("selectedProfitClosingVoucherId"));
+  assert.ok(workspace.includes("closePostedVouchers"));
+  assert.ok(workspace.includes('listVouchers(selectedBookId.value, { period_id: period.id, status: "posted", limit: 200 })'));
+});

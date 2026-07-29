@@ -99,8 +99,19 @@ export interface FinanceV2PeriodCloseReadiness {
     posted_credit: string;
     ledger_debit: string;
     ledger_credit: string;
+    profit_closing_evidence_required: boolean;
+    profit_closing_evidence_count: number;
+    profit_closing_evidence_missing_count: number;
     source_exception_scope: string;
   };
+}
+
+export interface FinanceV2PeriodCommandInput {
+  action: "register_profit_closing" | "start_close" | "complete_close" | "request_reopen" | "approve_reopen";
+  command_id: string;
+  expected_version: number;
+  reason?: string;
+  voucher_id?: number;
 }
 
 export interface FinanceV2TrialBalance {
@@ -156,7 +167,7 @@ export const financeV2Api = {
     { params },
   ),
   createDraft: (payload: FinanceV2DraftInput) => request.post("/finance-center/v2/vouchers", payload),
-  executePeriodCommand: (bookId: number, periodId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>
+  executePeriodCommand: (bookId: number, periodId: number, payload: FinanceV2PeriodCommandInput) =>
     request.post(`/finance-center/v2/books/${bookId}/periods/${periodId}/commands`, payload),
   executeCommand: (voucherId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>
     request.post(`/finance-center/v2/vouchers/${voucherId}/commands`, payload),

@@ -18,7 +18,11 @@ from app.models.finance_v2 import (
     FinanceV2OperationEvent,
     FinanceV2Voucher,
 )
-from app.models.finance_v2_period_close import FinanceV2PeriodCloseApproval, FinanceV2PeriodCloseBatch
+from app.models.finance_v2_period_close import (
+    FinanceV2PeriodCloseApproval,
+    FinanceV2PeriodCloseBatch,
+    FinanceV2ProfitClosingEvidence,
+)
 from app.services.finance_v2.domain import FinanceV2DomainError
 from app.services.finance_v2.period_close_domain import (
     PeriodCloseCheck,
@@ -42,6 +46,12 @@ class PeriodCloseMetrics:
     posted_credit: Decimal
     ledger_debit: Decimal
     ledger_credit: Decimal
+    profit_closing_evidence_required: bool = False
+    profit_closing_evidence_count: int = 0
+
+    @property
+    def profit_closing_evidence_missing_count(self) -> int:
+        return int(self.profit_closing_evidence_required and self.profit_closing_evidence_count == 0)
 
     @property
     def ready(self) -> bool:
@@ -52,6 +62,7 @@ class PeriodCloseMetrics:
                 self.unbalanced_voucher_count,
                 self.source_exception_count,
                 self.ledger_difference_count,
+                self.profit_closing_evidence_missing_count,
             )
         )
 
@@ -61,6 +72,7 @@ class PeriodCloseMetrics:
             unbalanced_voucher_count=self.unbalanced_voucher_count,
             source_exception_count=self.source_exception_count,
             ledger_difference_count=self.ledger_difference_count,
+            profit_closing_evidence_missing_count=self.profit_closing_evidence_missing_count,
         )
 
     def to_report(self) -> dict[str, int | str]:
@@ -73,6 +85,9 @@ class PeriodCloseMetrics:
             "posted_credit": format(self.posted_credit, "f"),
             "ledger_debit": format(self.ledger_debit, "f"),
             "ledger_credit": format(self.ledger_credit, "f"),
+            "profit_closing_evidence_required": self.profit_closing_evidence_required,
+            "profit_closing_evidence_count": self.profit_closing_evidence_count,
+            "profit_closing_evidence_missing_count": self.profit_closing_evidence_missing_count,
             "source_exception_scope": "manual-only V2 current account; source inbox is not enabled in V2.0",
         }
 
@@ -106,10 +121,9 @@ class FinanceV2PeriodCloseWorkflow:
         expected_version: int,
         command_id: str,
         reason: str | None,
+        voucher_id: int | None = None,
     ) -> dict:
         period = await self._get_period(book_id=book_id, period_id=period_id, lock=True)
-        if period.version != expected_version:
-            raise FinanceV2DomainError("version conflict: fiscal period changed concurrently")
         request_hash = self.command_payload_hash(
             book_id=book_id,
             period_id=period_id,
@@ -117,6 +131,7 @@ class FinanceV2PeriodCloseWorkflow:
             actor_id=actor_id,
             expected_version=expected_version,
             reason=reason,
+            voucher_id=voucher_id,
         )
         existing = (
             await self.db.execute(
@@ -133,10 +148,20 @@ class FinanceV2PeriodCloseWorkflow:
             if existing.request_hash != request_hash:
                 raise FinanceV2DomainError("command id was already used with different parameters")
             return {**dict(existing.result_payload), "idempotent": True}
+        if period.version != expected_version:
+            raise FinanceV2DomainError("version conflict: fiscal period changed concurrently")
 
         try:
             if action == "start_close":
                 result = await self._start_close(period=period, actor_id=actor_id, expected_version=expected_version, command_id=command_id)
+            elif action == "register_profit_closing":
+                result = await self._register_profit_closing(
+                    period=period,
+                    actor_id=actor_id,
+                    command_id=command_id,
+                    reason=reason or "",
+                    voucher_id=voucher_id,
+                )
             elif action == "complete_close":
                 result = await self._complete_close(period=period, actor_id=actor_id, expected_version=expected_version, command_id=command_id)
             elif action == "request_reopen":
@@ -178,10 +203,6 @@ class FinanceV2PeriodCloseWorkflow:
     ) -> dict:
         metrics = await self._metrics(book_id=period.book_id, period_id=period.id)
         begin_close(PeriodState(period.status), metrics.to_period_check())
-        if metrics.posted_debit != 0 or metrics.posted_credit != 0:
-            raise FinanceV2DomainError(
-                "manual profit-closing evidence is required before closing a period with posted activity"
-            )
         run_number = int(
             (
                 await self.db.execute(
@@ -214,6 +235,69 @@ class FinanceV2PeriodCloseWorkflow:
             before=before,
         )
         return self._snapshot(period, batch=batch, metrics=metrics)
+
+    async def _register_profit_closing(
+        self,
+        *,
+        period: FinanceV2FiscalPeriod,
+        actor_id: str,
+        command_id: str,
+        reason: str,
+        voucher_id: int | None,
+    ) -> dict:
+        if period.status != "open":
+            raise FinanceV2DomainError("manual profit-closing evidence can only be registered for an open period")
+        if not reason.strip():
+            raise FinanceV2DomainError("manual profit-closing evidence reason is required")
+        if voucher_id is None:
+            raise FinanceV2DomainError("manual profit-closing evidence requires a voucher id")
+        voucher = (
+            await self.db.execute(
+                select(FinanceV2Voucher).where(FinanceV2Voucher.id == voucher_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not voucher or voucher.book_id != period.book_id or voucher.period_id != period.id:
+            raise FinanceV2DomainError("profit-closing voucher does not belong to the requested fiscal period")
+        if voucher.status != "posted" or voucher.source_system != "manual":
+            raise FinanceV2DomainError("profit-closing evidence requires a posted manual voucher")
+        if Decimal(voucher.total_debit) <= 0 or Decimal(voucher.total_credit) <= 0:
+            raise FinanceV2DomainError("profit-closing voucher must contain non-zero balanced amounts")
+        existing_evidence = (
+            await self.db.execute(
+                select(FinanceV2ProfitClosingEvidence)
+                .where(FinanceV2ProfitClosingEvidence.period_id == period.id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if existing_evidence:
+            raise FinanceV2DomainError("manual profit-closing evidence is already registered for fiscal period")
+        evidence = FinanceV2ProfitClosingEvidence(
+            book_id=period.book_id,
+            period_id=period.id,
+            voucher_id=voucher.id,
+            command_id=command_id,
+            confirmed_by=actor_id,
+            reason=reason.strip(),
+        )
+        self.db.add(evidence)
+        await self.db.flush()
+        await self._event(
+            period,
+            actor_id,
+            "period.register_profit_closing",
+            command_id,
+            reason.strip(),
+            {"evidence_id": evidence.id, "voucher_id": voucher.id},
+            before=(period.status, period.version),
+            voucher_id=voucher.id,
+        )
+        return {
+            "period_id": period.id,
+            "book_id": period.book_id,
+            "voucher_id": voucher.id,
+            "evidence_id": evidence.id,
+            "status": "registered",
+        }
 
     async def _complete_close(
         self, *, period: FinanceV2FiscalPeriod, actor_id: str, expected_version: int, command_id: str
@@ -400,6 +484,18 @@ class FinanceV2PeriodCloseWorkflow:
                 )
             )
         ).one()
+        profit_closing_evidence_count = int(
+            (
+                await self.db.execute(
+                    select(func.count())
+                    .select_from(FinanceV2ProfitClosingEvidence)
+                    .where(
+                        FinanceV2ProfitClosingEvidence.book_id == book_id,
+                        FinanceV2ProfitClosingEvidence.period_id == period_id,
+                    )
+                )
+            ).scalar_one()
+        )
         posted_debit = Decimal(posted_debit)
         posted_credit = Decimal(posted_credit)
         ledger_debit = Decimal(ledger_debit)
@@ -413,6 +509,8 @@ class FinanceV2PeriodCloseWorkflow:
             posted_credit=posted_credit,
             ledger_debit=ledger_debit,
             ledger_credit=ledger_credit,
+            profit_closing_evidence_required=posted_debit != 0 or posted_credit != 0,
+            profit_closing_evidence_count=profit_closing_evidence_count,
         )
 
     async def _set_period_status(
@@ -440,11 +538,12 @@ class FinanceV2PeriodCloseWorkflow:
         after_data: dict,
         *,
         before: tuple[str, int],
+        voucher_id: int | None = None,
     ) -> None:
         self.db.add(
             FinanceV2OperationEvent(
                 book_id=period.book_id,
-                voucher_id=None,
+                voucher_id=voucher_id,
                 command_id=command_id,
                 actor_id=actor_id,
                 action=action,
@@ -471,7 +570,14 @@ class FinanceV2PeriodCloseWorkflow:
 
     @staticmethod
     def command_payload_hash(
-        *, book_id: int, period_id: int, action: str, actor_id: str, expected_version: int, reason: str | None
+        *,
+        book_id: int,
+        period_id: int,
+        action: str,
+        actor_id: str,
+        expected_version: int,
+        reason: str | None,
+        voucher_id: int | None = None,
     ) -> str:
         payload = json.dumps(
             {
@@ -481,6 +587,7 @@ class FinanceV2PeriodCloseWorkflow:
                 "actor_id": actor_id,
                 "expected_version": expected_version,
                 "reason": reason or "",
+                "voucher_id": voucher_id,
             },
             ensure_ascii=False,
             sort_keys=True,

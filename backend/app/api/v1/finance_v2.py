@@ -66,10 +66,11 @@ class VoucherCommandInput(BaseModel):
 
 
 class PeriodCommandInput(BaseModel):
-    action: str = Field(pattern=r"^(start_close|complete_close|request_reopen|approve_reopen)$")
+    action: str = Field(pattern=r"^(register_profit_closing|start_close|complete_close|request_reopen|approve_reopen)$")
     command_id: str = Field(min_length=1, max_length=128)
     expected_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=1000)
+    voucher_id: int | None = Field(default=None, ge=1)
 
 
 def _actor(user: SysUser) -> str:
@@ -235,6 +236,7 @@ async def execute_period_command(
             expected_version=body.expected_version,
             command_id=body.command_id,
             reason=body.reason,
+            voucher_id=body.voucher_id,
         )
     except FinanceV2DomainError as error:
         raise _domain_error(error) from error
