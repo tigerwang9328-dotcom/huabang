@@ -207,7 +207,7 @@ sudo -n install -d -o postgres -g postgres -m 700 "$BACKUP_DIR"
 sudo -n -u postgres bash -c "umask 077; pg_dump -Fc -d '$DATABASE_NAME' > '$backup_tmp'; mv '$backup_tmp' '$backup_file'"
 sudo -n -u postgres sha256sum "$backup_file"
 
-sudo -n -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DATABASE_NAME" -f "$BACKEND_DIR/scripts/bootstrap_finance_database_roles.sql"
+postgres_sql "$(<"$BACKEND_DIR/scripts/bootstrap_finance_database_roles.sql")"
 postgres_sql "GRANT CONNECT ON DATABASE $DATABASE_NAME TO fin_migrator, fin_app, fin_history_importer, fin_readonly_auditor;"
 
 credentials_file="$(mktemp "$PROJECT_ROOT/.finance-v2-credentials.XXXXXX")"

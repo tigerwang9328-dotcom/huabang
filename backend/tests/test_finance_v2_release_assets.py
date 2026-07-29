@@ -25,6 +25,7 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
         "BatchMode=yes",
         "pg_dump",
         "bootstrap_finance_database_roles.sql",
+        "postgres_sql \"$(<\"$BACKEND_DIR/scripts/bootstrap_finance_database_roles.sql\")\"",
         "fin_migrator",
         "fin_history_importer",
         "FINANCE_DB_USER",
