@@ -2,7 +2,7 @@
 Description=Huabang PostgreSQL logical backup
 Requires=postgresql@16-main.service
 After=postgresql@16-main.service
-ConditionPathIsExecutable=/usr/local/lib/huabang/pg_backup_as_postgres.sh
+ConditionPathExists=/usr/local/lib/huabang/pg_backup_as_postgres.sh
 
 [Service]
 Type=oneshot

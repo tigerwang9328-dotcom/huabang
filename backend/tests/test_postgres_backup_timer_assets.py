@@ -26,6 +26,8 @@ def test_postgres_backup_timer_runs_a_root_owned_template_as_postgres():
     assert "User=postgres" in service_source
     assert "ProtectSystem=full" in service_source
     assert "ReadWritePaths=/var/backups/huabang-postgres" in service_source
+    assert "ConditionPathExists=/usr/local/lib/huabang/pg_backup_as_postgres.sh" in service_source
+    assert "ConditionPathIsExecutable" not in service_source
 
     timer_source = timer.read_text(encoding="utf-8")
     assert "OnCalendar=*-*-* 03,15:00:00" in timer_source
@@ -33,6 +35,6 @@ def test_postgres_backup_timer_runs_a_root_owned_template_as_postgres():
 
     installer_source = installer.read_text(encoding="utf-8")
     assert "--apply" in installer_source
-    assert "install -o root -g root -m 700" in installer_source
+    assert "install -o root -g root -m 755" in installer_source
     assert "systemctl enable --now huabang-postgres-backup.timer" in installer_source
     assert "crontab -" in installer_source

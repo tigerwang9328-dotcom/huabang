@@ -42,7 +42,7 @@ fi
 
 install -d -o root -g root -m 755 "$TARGET_DIR"
 install -d -o postgres -g postgres -m 700 /var/backups/huabang-postgres
-install -o root -g root -m 700 "$SOURCE_BACKUP" "$TARGET_BACKUP"
+install -o root -g root -m 755 "$SOURCE_BACKUP" "$TARGET_BACKUP"
 install -o root -g root -m 644 "$SOURCE_SERVICE" /etc/systemd/system/huabang-postgres-backup.service
 install -o root -g root -m 644 "$SOURCE_TIMER" /etc/systemd/system/huabang-postgres-backup.timer
 
