@@ -6,7 +6,7 @@
 
 | 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
 | --- | --- | --- | --- | --- |
-| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；当前只读发布候选代码提交为 `2c2e2cc`。Finance V2 路由使用单独的 `get_finance_db`；中台 JWT/角色/权限依赖仍使用既有 `get_db`，不存在受限财务角色读取 `sys` 表的授权扩大；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读与本地测试 | 可继续恢复副本演练 |
+| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；当前只读发布候选代码提交为 `69ca943e35596b6340ced01622b11f53255204c5`。Finance V2 路由使用单独的 `get_finance_db`；中台 JWT/角色/权限依赖仍使用既有 `get_db`，不存在受限财务角色读取 `sys` 表的授权扩大；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读与本地测试 | 可继续恢复副本演练 |
 | 本地迁移图 | `1fdf4577d7d8` 是当前唯一 head；其父为 `9c121d3145d9`，新增 `fin_read.history_import_batch` 只读视图供受限应用监控历史冲突。保留手工损益结转凭证证据、结账批次、双人反结账审批、历史已发布分录只读视图/索引、凭证约束、凭证编号 reservation 审计与 `operation_event` 保护 | 本地，2026-07-29 | 本地只读与本地测试 | 新迁移必须从当天实际图生成并在恢复副本验证 |
 | 生产仓库 | `/srv/huabang-ai-center`，分支 `feature/huabang-ai-mvp`，HEAD `1cdafd03674081ad3620ae7d723cf280774f3d0b`，核验时无工作树改动输出 | 生产只读，2026-07-29 | 生产只读 | V2 本地代码尚未部署 |
 | 生产后端 | `huabang-backend.service` 为 active/running；以 `xiaohu` 身份在 `127.0.0.1:8000` 运行 Uvicorn，工作目录为 `/srv/huabang-ai-center/backend` | 生产只读，2026-07-29 | 生产只读 | 未授权前不得重启 |
