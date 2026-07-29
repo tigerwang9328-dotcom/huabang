@@ -184,8 +184,23 @@ class FinanceV2OpeningBalanceService:
                 .order_by(FinanceV2OpeningBalanceLine.id)
             )
         ).scalars().all()
+        coverage_gap_approved = False
+        if not batch.coverage_continuous:
+            gap = await self.db.get(FinanceV2CoverageGap, batch.coverage_gap_id)
+            coverage_gap_approved = bool(
+                gap
+                and gap.status == "approved"
+                and gap.gap_start_date == batch.history_coverage_end_date + timedelta(days=1)
+                and gap.gap_end_date == batch.go_live_date - timedelta(days=1)
+            )
         approved = approve_opening_balance(
-            OpeningBalanceState(batch.batch_kind, batch.status, bool(batch.coverage_continuous)),
+            OpeningBalanceState(
+                batch.batch_kind,
+                batch.status,
+                bool(batch.coverage_continuous),
+                coverage_gap_approved=coverage_gap_approved,
+                formal_report_blocked=not bool(batch.coverage_continuous),
+            ),
             [OpeningBalanceLine(str(row.account_version_id), str(row.dimension_set_id), row.currency_code, Decimal(row.debit_amount), Decimal(row.credit_amount), row.source_system) for row in rows],
             approver=actor_id,
         )

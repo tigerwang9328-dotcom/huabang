@@ -186,16 +186,17 @@ async def test_locking_a_final_opening_updates_book_boundary_and_records_approva
         batch_kind="final",
         status="validated",
         version=1,
-        coverage_continuous=True,
-        coverage_gap_id=None,
-        history_coverage_end_date=date(2026, 7, 31),
-        go_live_date=date(2026, 8, 1),
+        coverage_continuous=False,
+        coverage_gap_id=9,
+        history_coverage_end_date=date(2026, 7, 30),
+        go_live_date=date(2026, 8, 2),
         approved_by=None,
     )
     lines = [
         SimpleNamespace(account_version_id=10, dimension_set_id=20, currency_code="CNY", debit_amount="100", credit_amount="0", source_system="kingdee"),
         SimpleNamespace(account_version_id=30, dimension_set_id=20, currency_code="CNY", debit_amount="0", credit_amount="100", source_system="kingdee"),
     ]
+    gap = SimpleNamespace(status="approved", gap_start_date=date(2026, 7, 31), gap_end_date=date(2026, 8, 1))
 
     class Result:
         def __init__(self, value=None, *, rowcount=None):
@@ -217,8 +218,7 @@ async def test_locking_a_final_opening_updates_book_boundary_and_records_approva
             self.added = []
 
         async def get(self, _model, book_id):
-            assert book_id == 3
-            return book
+            return book if book_id == 3 else gap
 
         async def execute(self, _statement):
             self.calls += 1
@@ -236,5 +236,6 @@ async def test_locking_a_final_opening_updates_book_boundary_and_records_approva
     )
 
     assert result["status"] == "locked"
-    assert book.current_book_go_live_date == date(2026, 8, 1)
+    assert book.current_book_go_live_date == date(2026, 8, 2)
+    assert book.formal_report_blocked is True
     assert any(type(item).__name__ == "FinanceV2OpeningBalanceApproval" for item in db.added)
