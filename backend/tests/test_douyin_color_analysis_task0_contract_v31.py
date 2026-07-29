@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ ACCOUNT_A_HEADERS = {"Authorization": "Bearer color-token-a"}
 ACCOUNT_B_HEADERS = {"Authorization": "Bearer color-token-b"}
 ACCOUNT_A = "color-account-a"
 VIDEO_ID = "7666046377541012755"
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "douyin"
 
 
 class GzipPartsClient:
@@ -326,3 +328,31 @@ def test_v31_gzip_whitelisted_record_preserves_raw_and_exposes_safe_trace(
     assert "normalized curve" in trace.text
     for unsafe_value in ("color-token-a", "source_snapshot_hash", "https://", "?", "#"):
         assert unsafe_value not in trace.text
+
+
+def test_v31_historical_fixture_preserves_catalog_coverage_and_hash():
+    fixture_path = FIXTURE_DIR / "historical-20260728.sanitized.json"
+    checksum_path = FIXTURE_DIR / "historical-20260728.sanitized.sha256"
+
+    payload_bytes = fixture_path.read_bytes()
+    payload = json.loads(payload_bytes)
+
+    assert payload["schema_version"] == "douyin-color-v3.1-task0-fixture-v1"
+    assert payload["summary"] == {
+        "catalog_items": 48,
+        "video_items": 46,
+        "skipped_items": 2,
+        "successful_items": 46,
+    }
+    assert len(payload["catalog_items"]) == 48
+    assert len(payload["videos"]) == 46
+    assert len(payload["skipped_items"]) == 2
+    assert {item["skip_reason"] for item in payload["skipped_items"]}
+    assert set(payload["edge_cases"]) == {
+        "empty_curve",
+        "http_429",
+        "business_error",
+        "duplicate_snapshot",
+    }
+    assert all(isinstance(item["video_id"], str) for item in payload["catalog_items"])
+    assert checksum_path.read_text(encoding="utf-8").split()[0] == hashlib.sha256(payload_bytes).hexdigest()
