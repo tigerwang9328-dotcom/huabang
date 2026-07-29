@@ -26,6 +26,16 @@ def test_history_batch_rejects_publish_from_loading():
         raise AssertionError("loading batch must not be published")
 
 
+def test_history_batch_reaches_conflict_only_after_validation_starts():
+    state = HistoryBatchState("created")
+    state = transition_history_batch(state, "start_loading")
+    state = transition_history_batch(state, "mark_loaded")
+    state = transition_history_batch(state, "start_validation")
+    state = transition_history_batch(state, "conflict")
+
+    assert state.status == "conflicted"
+
+
 def test_same_source_key_is_idempotent_but_different_hash_is_conflict():
     assert classify_source_record("same", "same") == "already_imported"
     assert classify_source_record("same", "changed") == "conflict"

@@ -1,13 +1,25 @@
 from pathlib import Path
 
-from app.models.finance_v2_history import FinanceV2HistoryBatch, FinanceV2HistoryVoucher, FinanceV2HistoryVoucherLine
+from app.models.finance_v2_history import (
+    FinanceV2HistoryBatch,
+    FinanceV2HistoryStagingVoucher,
+    FinanceV2HistoryVoucher,
+    FinanceV2HistoryVoucherLine,
+)
 
 
 def test_history_facts_are_in_their_own_schema_and_link_to_batches():
     assert FinanceV2HistoryBatch.__table__.schema == "fin_history"
+    assert FinanceV2HistoryStagingVoucher.__table__.schema == "fin_history"
     assert FinanceV2HistoryVoucher.__table__.schema == "fin_history"
     assert FinanceV2HistoryVoucherLine.__table__.schema == "fin_history"
     assert "published" in " ".join(str(c.sqltext) for c in FinanceV2HistoryBatch.__table__.constraints if hasattr(c, "sqltext"))
+
+
+def test_history_staging_uses_batch_scoped_source_identity():
+    names = {constraint.name for constraint in FinanceV2HistoryStagingVoucher.__table__.constraints}
+
+    assert "uq_fin_history_staging_source" in names
 
 
 def test_history_source_identity_is_immutable_and_idempotent():

@@ -29,6 +29,23 @@ class FinanceV2HistoryBatch(Base):
     published_at = Column(DateTime(timezone=True))
 
 
+class FinanceV2HistoryStagingVoucher(Base):
+    __tablename__ = "staging_voucher"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "source_system", "source_database", "source_pk", name="uq_fin_history_staging_source"),
+        {"schema": "fin_history"},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id = Column(BigInteger, ForeignKey("fin_history.import_batch.id"), nullable=False)
+    source_system = Column(String(32), nullable=False)
+    source_database = Column(String(128), nullable=False)
+    source_pk = Column(String(256), nullable=False)
+    source_hash = Column(String(64), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    status = Column(String(16), nullable=False, server_default="loaded")
+
+
 class FinanceV2HistoryVoucher(Base):
     __tablename__ = "voucher"
     __table_args__ = (

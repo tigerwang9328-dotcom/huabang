@@ -122,6 +122,7 @@ from app.models.finance_v2 import (
 from app.models.finance_v2_history import (
     FinanceV2HistoryBatch,
     FinanceV2HistorySourceLink,
+    FinanceV2HistoryStagingVoucher,
     FinanceV2HistoryVoucher,
     FinanceV2HistoryVoucherLine,
 )

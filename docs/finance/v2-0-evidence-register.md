@@ -13,19 +13,22 @@
 | 生产迁移状态 | Alembic 单一 head/current 均为 `6c1e4a7d2f09` | 生产只读，2026-07-29 | 生产只读 | 发布前必须重新核实并比较本地迁移链 |
 | 旧财务正式写入口 | 生产 OpenAPI 中现有 `/api/v1/finance-center/kingdee/import`、`/vouchers`、`/vouchers/{id}/post`、`/reverse`、`/revise-entries`，以及旧 `/api/v1/finance/*` 写接口 | 生产只读，2026-07-29 | 生产运行时 | 只读验收期不得关闭或代理这些入口 |
 | 金蝶源快照 | `ods.kingdee_import_batch=3`、`ods.kingdee_voucher=339`、`ods.kingdee_voucher_entry=4596`、`ods.kingdee_account=416`、`ods.kingdee_balance=6868`；3 个批次均保存备份/manifest 哈希、预期计数与校验结果 | 生产只读，2026-07-29 | 生产只读 | V2 历史导入必须另建 `fin_history` 暂存—校验—发布链，绝不改写 ODS |
+| 本地金蝶 V2 dry-run | 原生快照 `D:\huabang\invest_kingdee\results\K3MIG_20260717_172928` 的 SHA-256/行数已读取校验；仅 3 个 official 账套进入候选集，得到 339 张凭证、4,596 条分录、0 个重复/变更哈希冲突 | 本地，2026-07-29 | 本地只读与本地测试 | 未写数据库；待在恢复副本以 `fin_history_importer` 暂存、校验、发布 |
+| 历史数据方向与红字 | 金蝶 `FDC=1` 作为借方、`FDC=0` 作为贷方；`FAmount` 保留其签名，并逐凭证与金蝶表头借/贷签名合计核对。339 张凭证均通过该校验 | 本地，2026-07-29 | 本地只读与本地测试 | 仅适用于 `fin_history` 历史只读事实；不可套用到 `fin_current` 当前账正数分录约束 |
 | 金蝶覆盖范围 | 凭证日期为 2025-10-31 至 2026-06-30，来自 3 个 source database | 生产只读，2026-07-29 | 生产只读 | 当前账启用日与 2026-07-01 后连续性尚未获得财务确认 |
 | 既有正式账 | 旧 `fin` schema 存在 10 个账簿、349 张凭证和 4,617 条分录；它与 V2 的 `fin_current`/`fin_history` 隔离模型不是同一已验收实现 | 生产只读，2026-07-29 | 生产只读 | 不得把旧表直接宣布为 V2 正式账 |
 | V2 写入口保护 | 本地 V2 草稿/命令 API 在不存在显式全局 Gate 时 fail-closed；命令按凭证所属账簿及财务/超级管理员角色评估 | 本地测试，2026-07-29 | 本地测试 | 生产仍需部署后重新核验，不能据此开启写入 |
 | 数据库角色 | 仅观测到 `huabang` 与 `postgres`；应用使用的 `huabang` 是 `fin` owner，拥有写与 trigger 权限；未发现 `fin_current`、`fin_history`、`fin_read` schema 或分离的 migrator/importer/auditor 角色 | 生产只读，2026-07-29 | 生产只读 | **生产迁移、历史发布和当前账开写 No-Go** |
 | 备份与恢复 | 每日备份 cron 存在，但最近可见数据库备份工件为 2026-07-20；没有本轮恢复副本或 PITR 演练证据。备份脚本含明文数据库凭据，凭据值不记录在本文档 | 生产只读，2026-07-29 | 生产只读 | **RPO≤24h/RTO≤4h 未证明，生产开写 No-Go** |
-| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，11 个 `test_finance_v2*.py` 文件及角色核验共 37 项通过；涵盖命令幂等和 API fail-closed Gate | 本地，2026-07-29 | 本地测试 | 可继续实现；不是数据库恢复或生产验收 |
+| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，全部 `test_finance_v2*.py`、角色核验和历史导入命令测试共 67 项通过；涵盖命令幂等、API fail-closed Gate、金蝶来源哈希/红字校验和历史冲突计划 | 本地，2026-07-29 | 本地测试 | 可继续实现；不是数据库恢复或生产验收 |
 | 前端基线 | `npm run type-check` 与 `npm run build` 均退出成功；构建输出包含现有依赖的 Vite/Rollup 警告 | 本地，2026-07-29 | 本地构建 | 不等同于浏览器或生产验收 |
+| 恢复副本环境 | 本机未发现 PostgreSQL 服务/监听端口、Docker、`psql` 客户端；未创建或运行恢复副本 | 本地，2026-07-29 | 本地只读 | 不得将本地 parser/服务测试描述为恢复副本验证 |
 
 ## 待确认或不可满足项
 
 | 项目 | 状态 | 所需证据/处置 | 对发布的影响 |
 | --- | --- | --- | --- |
-| 会计政策签字 | 待财务负责人签字 | 见 `v2-0-accounting-policy-signoff.md` | 没有签字时只能调查和只读准备，不能声明法定报表或正式切换 |
+| 会计政策签字 | 用户授权例外 | 形式签字按 `v2.0/deployment-decisions.md` 忽略；但法人、账套、期间、币种、科目、期初及报表映射仍需可核对事实证据 | 不得把例外当作正式会计依据或法定报表/最终切换批准 |
 | 当前账起始日与覆盖缺口 | 待确认 | 确认历史截止日、旧系统最终余额、启用日期与任何 `coverage_gap` | 不得批准最终期初或打开 V2 制单 |
 | 数据库最小权限 | 不满足 | 由有 `CREATEROLE`/schema 管理权的管理员创建并验证 owner、migrator、app、history importer、readonly auditor | 不得迁移、发布历史或开写 |
 | 凭据轮换 | 不满足 | 轮换已暴露于备份脚本的数据库凭据，迁移为受限凭据来源，复核备份作业 | 生产发布与开写 No-Go |
@@ -36,4 +39,4 @@
 
 - 本地 TDD、迁移设计和只读生产调查：**Go**。
 - 生产数据库迁移、任何历史写入、服务重启、旧入口冻结、V2 制单/审核/人工过账：**No-Go**。
-- 解除 No-Go 的最小顺序：财务口径签字 → 数据库角色与凭据轮换 → 新鲜备份和恢复演练 → 单一 head/恢复副本迁移 → 生产只读验收 → 最终切换 Gate。
+- 解除 No-Go 的最小顺序：财务事实口径的可核对证据 → 数据库角色与凭据轮换 → 新鲜备份和恢复演练 → 单一 head/恢复副本迁移 → 生产只读验收 → 最终切换 Gate。
