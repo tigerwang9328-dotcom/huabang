@@ -11,6 +11,7 @@
 | 生产仓库 | `feature/huabang-ai-mvp` / `1cdafd03674081ad3620ae7d723cf280774f3d0b` | 已核实，未部署 V2 本地分支 |
 | 生产 Alembic | 单一 head/current `6c1e4a7d2f09` | 已核实，发布前须再次执行 `alembic heads --verbose` 与 `alembic current --verbose` |
 | 生产运行方式 | `huabang-backend.service` → Uvicorn `app.main:app`，监听 `127.0.0.1:8000`，Nginx active | 已核实；只有 Gate 全通过后才允许重启 |
+| 生产数据库角色 | 2026-07-29 只读探针：应用账户 `huabang` 无 superuser/CREATEROLE/CREATEDB/BYPASSRLS；`fin_*` 五角色和 V2 三 schema 尚不存在 | 已核实；必须由 PostgreSQL 管理员执行角色脚本，当前应用账号不可替代 |
 | 本地后端验证 | V2 定向测试与角色核验 54 passed（临时非生产配置）；含职责分离、独立过账尝试审计、凭证命令幂等、锁定式凭证编号、审计不可篡改迁移、期间结账阻断与参数不一致拒绝 | 已核实 |
 | 本地前端验证 | 财务中心入口、服务端 Gate 就绪状态、受控草稿/命令工作台回归，类型检查与 Vite 构建成功 | 已核实 |
 
@@ -20,3 +21,12 @@
 2. 真实 V2 当前账写入发生后，业务问题只能前向修复；数据库灾难才按已验证 PITR/备份恢复流程，并重放和核对 RPO 范围内交易。
 3. 当前生产备份工件与恢复演练证据不足，不能把本表视为可执行回滚授权。
 4. 旧 `/api/v1/finance/*` 与 `/api/v1/finance-center/*` 写入口在 V2 只读验收期保持原状；最终切换前不得关闭。
+
+## 历史源候选基线
+
+| 项目 | 事实 | 状态 |
+| --- | --- | --- |
+| 本地金蝶迁移快照 | `D:\huabang\invest_kingdee\results\K3MIG_20260717_172928`，清单 SHA-256：`BBE9676545C413A5AE077796D766C04E572A75D1F918B1053FA9548F1D8DB1FD` | 已核实，本地只读候选源，未导入 V2 |
+| 清单结果 | 4 个账套、0 个清单错误；3 个 official 账套合计 339 张凭证、4,596 条分录；另有 1 个空 test 账套 | 已核实，尚未完成字段映射、暂存加载或发布 |
+
+历史源使用及切换授权边界见 `v2.0/deployment-decisions.md`。不得将本地快照描述为已写入生产或已完成财务核对。

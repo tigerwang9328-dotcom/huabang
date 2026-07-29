@@ -35,6 +35,7 @@ class FinanceRoleTopology:
     schema_create_roles: Set[str] = field(default_factory=set)
     database_ddl_roles: Set[str] = field(default_factory=set)
     table_privileges: Mapping[Tuple[str, str], Set[str]] = field(default_factory=dict)
+    role_memberships: Mapping[str, Set[str]] = field(default_factory=dict)
 
 
 def _has_write_privilege(topology: FinanceRoleTopology, role: str, schema: str) -> bool:
@@ -67,6 +68,12 @@ def validate_role_separation(topology: FinanceRoleTopology) -> list[str]:
         violations.append("fin_app must not have CREATE on finance schemas")
     if app_role in topology.database_ddl_roles:
         violations.append("fin_app must not have database-level DDL capabilities")
+    for restricted_role in (importer_role, auditor_role):
+        if restricted_role in topology.database_ddl_roles:
+            violations.append(f"{restricted_role} must not have database-level DDL capabilities")
+    for restricted_role in (app_role, importer_role, auditor_role):
+        if schema_owner_role in topology.role_memberships.get(restricted_role, set()):
+            violations.append(f"{restricted_role} must not be a member of fin_schema_owner")
     if _has_write_privilege(topology, app_role, "fin_history"):
         violations.append("fin_app must not write fin_history")
     if _has_write_privilege(topology, importer_role, "fin_current"):
@@ -88,18 +95,22 @@ def inspect_topology(database_url: str) -> FinanceRoleTopology:
     schema_create_roles: set[str] = set()
     database_ddl_roles: set[str] = set()
     table_privileges: dict[tuple[str, str], set[str]] = {}
+    role_memberships: dict[str, set[str]] = {}
     known_roles: set[str] = set()
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
             role_rows = connection.execute(
-                text("select rolname, rolbypassrls, rolcreaterole, rolcreatedb from pg_roles where rolname !~ '^pg_'")
+                text(
+                    "select rolname, rolbypassrls, rolcreaterole, rolcreatedb, rolsuper "
+                    "from pg_roles where rolname !~ '^pg_'"
+                )
             )
-            for name, bypass_rls, can_create_role, can_create_database in role_rows:
+            for name, bypass_rls, can_create_role, can_create_database, is_superuser in role_rows:
                 known_roles.add(str(name))
                 if bypass_rls:
                     bypass_rls_roles.add(str(name))
-                if can_create_role or can_create_database:
+                if can_create_role or can_create_database or is_superuser:
                     database_ddl_roles.add(str(name))
 
             owner_rows = connection.execute(
@@ -123,15 +134,39 @@ def inspect_topology(database_url: str) -> FinanceRoleTopology:
             for role, _schema in create_rows:
                 schema_create_roles.add(str(role))
 
+            # Do not inspect only direct ACL rows: grants through PUBLIC or a
+            # role membership are still effective privileges and must block a
+            # least-privilege release.  The catalog query below is read-only
+            # and asks PostgreSQL for each role's effective table privileges.
             grant_rows = connection.execute(
                 text(
-                    "select grantee, table_schema, privilege_type "
-                    "from information_schema.role_table_grants "
-                    "where table_schema in ('fin_current', 'fin_history', 'fin_read')"
+                    "select role.rolname, schema.nspname, privilege.privilege_type "
+                    "from pg_roles role "
+                    "cross join pg_namespace schema "
+                    "cross join lateral unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) "
+                    "as privilege(privilege_type) "
+                    "where schema.nspname in ('fin_current', 'fin_history', 'fin_read') "
+                    "and role.rolname !~ '^pg_' "
+                    "and exists (select 1 from pg_class relation "
+                    "            where relation.relnamespace=schema.oid "
+                    "              and relation.relkind in ('r','p','v','m','f') "
+                    "              and has_table_privilege(role.oid, relation.oid, privilege.privilege_type))"
                 )
             )
             for grantee, schema, privilege in grant_rows:
                 table_privileges.setdefault((str(grantee), str(schema)), set()).add(str(privilege).upper())
+
+            membership_rows = connection.execute(
+                text(
+                    "select member.rolname, owner.rolname "
+                    "from pg_roles member cross join pg_roles owner "
+                    "where member.rolname in ('fin_app','fin_history_importer','fin_readonly_auditor') "
+                    "and owner.rolname='fin_schema_owner' "
+                    "and pg_has_role(member.oid, owner.oid, 'MEMBER')"
+                )
+            )
+            for member, parent in membership_rows:
+                role_memberships.setdefault(str(member), set()).add(str(parent))
     finally:
         engine.dispose()
 
@@ -142,6 +177,7 @@ def inspect_topology(database_url: str) -> FinanceRoleTopology:
         schema_create_roles=schema_create_roles,
         database_ddl_roles=database_ddl_roles,
         table_privileges=table_privileges,
+        role_memberships=role_memberships,
     )
 
 
