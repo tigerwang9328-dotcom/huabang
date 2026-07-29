@@ -30,6 +30,32 @@ v3.1 颜色分析的合约证据。本文件是 v3.1 计划指定的评审入口
 
 没有保存 query、Cookie、token、签名 URL 或数据库密码。
 
+## 三视频同源曲线抽样
+
+在用户已登录且已打开的三个不同作品详情页中，只读取现有同源资源并以页面会话内的
+相同请求复取响应；未保存或输出原始 URL、query、Cookie、token 或签名。三个页面
+均观察到目录接口和
+`/janus/douyin/creator/data/realtime/analysis/data_center`，两种分析类型都返回
+`status_code=0`，响应结构均为：
+
+```text
+analysis_trend.current_item[] / analysis_trend.similar_author[]
+point = { key: "mm:ss", value: number }
+```
+
+脱敏逐点摘要为：
+
+| 作品指纹 | `analysis_type=1` | `analysis_type=7` |
+| --- | --- | --- |
+| A | 112 点，首点 `00:00=1` | 112 点，首点 `00:00=0.1081` |
+| B | 32 点，首点 `00:00=1`，末点 `00:31=0.04` | 32 点，首点 `00:00=0.2`，末点 `00:31=0.04` |
+| C | 89 点，首点 `00:00=1`，末点 `01:28=0.0167` | 89 点，首点 `00:00=0.1667`，末点 `01:28=0.0167` |
+
+页面可见“留存分析”和“跳出分析”入口；`analysis_type=1` 的首点与页面留存曲线的
+100% 起点一致。由于尚未把三视频的跳出图逐点人工截图对照固化为夹具，
+`analysis_type=7` 仍仅命名为 `platform_bounce_curve_value`，并保持报告开关关闭，
+不得标为跳出率或参与排名。
+
 ## v3.1 专属合约证明
 
 - 独立文件：`backend/app/poc/douyin_color_analysis_task0_contract.py` 与
@@ -62,6 +88,19 @@ v3.1 颜色分析的合约证据。本文件是 v3.1 计划指定的评审入口
   -> `103 passed, 1 failed`。失败是现有固定历史 Alembic head
   `2b0f6a7b8c94` 与真实 `6c1e4a7d2f09` 不一致；Task 0 未越界修复。
 
+## 当前基线测试与迁移权限
+
+- 在重新基线后的工作树中，用生产同版本虚拟环境并将 `PYTHONPATH` 指向隔离工作树
+  执行 `pytest tests/test_douyin_color_analysis_task0_contract_v31.py -q`，结果为
+  `5 passed in 0.70s`。旧 v3.2 垂直环测试文件已不在当前生产基线，不能作为本次
+  v3.1 回归命令。
+- `alembic heads` 与 `alembic current` 均为 `1fdf4577d7d8`。`alembic check`
+  使用现有应用数据库角色时稳定失败于 `permission denied for schema fin_current`：
+  当前应用角色 `huabang` 不属于具有该 schema 权限的 `fin_app` 角色。该权限隔离
+  属于当前财务发布，未在本任务中扩大权限。Task 1 的迁移验证必须使用独立、最小
+  权限的迁移运行角色或结构副本管理连接；不能把应用角色检查失败伪装成通过，也不
+  得为此给应用角色授予财务 schema 权限。
+
 ## 恢复演练
 
 第一次手工 gzip 备份恢复后只得到 170 张业务表，缺少生产中的
@@ -93,7 +132,8 @@ PostgreSQL OS 账户运行 `pg_dump -Fc --no-owner --no-privileges`，不使用�
 
 ## 评审结论
 
-v3.1 专属合约证明、当前生产复核及自动备份恢复演练均已记录，等待重新运行合约
-测试及独立审查。旧 v3.2 穿搭 POC 不计入本结论；旧不完整的手工备份也不计入。
-即使审查通过，结论也只表示 Task 1 可以开始，不表示模块已上线、已部署、已完成
-迁移或已完成生产验收。Task 1--7 保持未开始。
+v3.1 专属合约证明、当前生产复核、三视频接口抽样及自动备份恢复演练均已记录，
+等待独立审查。旧 v3.2 穿搭 POC 不计入本结论；旧不完整的手工备份也不计入。
+跳出语义逐点截图夹具和 Task 1 的迁移验证运行角色仍是未完成前置。即使审查通过，
+结论也只表示 Task 1 可以开始，不表示模块已上线、已部署、已完成迁移或已完成
+生产验收。Task 1--7 保持未开始。
