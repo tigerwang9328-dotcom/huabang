@@ -123,6 +123,27 @@ export interface FinanceV2TrialBalance {
   rows: Array<{ account_version_id: number; account_code: string; account_name: string; dimension_set_id: number; currency_code: string; opening_debit: number; opening_credit: number; period_debit: number; period_credit: number; closing_debit: number; closing_credit: number }>;
 }
 
+export interface FinanceV2MonitoringMetric {
+  metric_key: string;
+  availability: "available" | "unavailable";
+  threshold: string;
+  owner: string;
+  notification_route: string;
+  notification_configured: boolean;
+  close_condition: string;
+  labels: string[];
+  unavailable_reason: string | null;
+  value: number | null;
+}
+
+export interface FinanceV2MonitoringSummary {
+  metrics: Record<string, number>;
+  metric_policies: FinanceV2MonitoringMetric[];
+  gates: Array<{ scope_type: string; scope_key: string; gate_name: string; enabled: boolean; effective_at: string }>;
+  unavailable_metrics: string[];
+  message: string;
+}
+
 export interface FinanceV2VoucherLineInput {
   account_version_id: number;
   summary: string;
@@ -150,6 +171,7 @@ export const financeV2Api = {
   getTrialBalance: (bookId: number, periodId: number) => request.get<FinanceV2TrialBalance>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/trial-balance`,
   ),
+  getMonitoringSummary: () => request.get<FinanceV2MonitoringSummary>("/finance-center/v2/monitoring/summary"),
   listAccounts: (bookId: number, activeOn?: string) => request.get<FinanceV2Account[]>(
     `/finance-center/v2/books/${bookId}/accounts`,
     { params: activeOn ? { active_on: activeOn } : undefined },

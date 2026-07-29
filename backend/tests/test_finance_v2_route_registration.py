@@ -151,6 +151,13 @@ async def test_monitoring_summary_reads_history_import_status_only_from_fin_read
         "history_import_conflicted": 2,
         "period_close_failed": 4,
     }
+    policies = {item["metric_key"]: item for item in response.data["metric_policies"]}
+    assert policies["posting_attempt_failed"]["availability"] == "available"
+    assert policies["posting_attempt_failed"]["value"] == 3
+    assert policies["posting_attempt_failed"]["notification_configured"] is False
+    assert policies["source_inbox_backlog"]["availability"] == "unavailable"
+    assert policies["source_inbox_backlog"]["value"] is None
+    assert policies["source_inbox_backlog"]["labels"] == []
     assert "fin_read.history_import_batch" in captured[1]
     assert "fin_history.import_batch" not in captured[1]
 

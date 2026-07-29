@@ -26,6 +26,7 @@ from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
 from app.services.finance_v2.feature_gate_domain import FeatureGateError, GateScope, assert_command_enabled
+from app.services.finance_v2.finance_observability import monitoring_payload
 from app.services.finance_v2.period_close_workflow import FinanceV2PeriodCloseWorkflow
 from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
 from app.services.finance_v2.platform_permissions import (
@@ -369,13 +370,16 @@ async def get_monitoring_summary(
     )
     failed_closes = await count_rows(FinanceV2PeriodCloseBatch, FinanceV2PeriodCloseBatch.status == "failed")
     gates = (await db.execute(select(FinanceV2FeatureGate).order_by(FinanceV2FeatureGate.id.desc()))).scalars().all()
+    metric_values = {
+        "posting_attempt_failed": failed_posts,
+        "history_import_conflicted": history_conflicts,
+        "period_close_failed": failed_closes,
+    }
+    metric_policies = monitoring_payload(metric_values)
     return ApiResponse.ok(
         data={
-            "metrics": {
-                "posting_attempt_failed": failed_posts,
-                "history_import_conflicted": history_conflicts,
-                "period_close_failed": failed_closes,
-            },
+            "metrics": metric_values,
+            "metric_policies": metric_policies,
             "gates": [
                 {
                     "scope_type": gate.scope_type,
@@ -387,7 +391,9 @@ async def get_monitoring_summary(
                 for gate in gates
             ],
             "unavailable_metrics": [
-                "api_5xx_rate", "lock_wait", "deadlock", "export_failure", "source_inbox_backlog", "balance_difference_alert",
+                item["metric_key"]
+                for item in metric_policies
+                if item["availability"] == "unavailable"
             ],
             "message": "仅返回已持久化的 V2 运营指标；未接入指标采集器的项目明确标为不可用，不能当作零。",
         }

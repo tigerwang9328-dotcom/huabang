@@ -95,6 +95,17 @@ test("V2 workspace exposes period-close readiness and keeps close commands behin
   assert.ok(workspace.includes("viewPeriodCloseReadiness"));
 });
 
+test("V2 workspace renders the structured monitoring policy without treating unavailable collectors as zero", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getMonitoringSummary"));
+  assert.ok(workspace.includes("monitoringSummary"));
+  assert.ok(workspace.includes("metric_policies"));
+  assert.ok(workspace.includes("未接入"));
+  assert.ok(workspace.includes("loadMonitoring"));
+});
+
 test("V2 workspace requires an explicit manual profit-closing voucher before starting a close with activity", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

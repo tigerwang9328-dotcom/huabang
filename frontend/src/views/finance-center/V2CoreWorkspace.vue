@@ -49,6 +49,28 @@
       </div>
     </el-card>
 
+    <el-card v-loading="monitoringLoading" shadow="never" class="monitoring-card">
+      <template #header>
+        <div class="title-row">
+          <div>
+            <strong>运行监控与告警 Gate</strong>
+            <p class="subtle">仅显示脱敏的 V2 聚合值；未接入的采集器会明确标记，不以 0 代替。</p>
+          </div>
+          <el-button :loading="monitoringLoading" text type="primary" @click="loadMonitoring">刷新</el-button>
+        </div>
+      </template>
+      <el-alert v-if="monitoringError" class="history-error" :title="`监控读取失败：${monitoringError}`" type="error" :closable="false" show-icon />
+      <el-alert v-else-if="monitoringSummary" :title="monitoringSummary.message" type="info" :closable="false" show-icon />
+      <el-table :data="monitoringSummary?.metric_policies || []" max-height="360" empty-text="尚未取得 V2 监控策略">
+        <el-table-column label="指标" min-width="170"><template #default="{ row }">{{ metricLabel(row.metric_key) }}</template></el-table-column>
+        <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.availability === 'available' ? 'success' : 'info'" effect="plain">{{ row.availability === 'available' ? '已接入' : '未接入' }}</el-tag></template></el-table-column>
+        <el-table-column label="当前值" width="100"><template #default="{ row }">{{ row.availability === 'available' ? row.value : '—' }}</template></el-table-column>
+        <el-table-column prop="threshold" label="告警阈值" min-width="170" />
+        <el-table-column prop="close_condition" label="关闭条件" min-width="270" show-overflow-tooltip />
+        <el-table-column label="说明" min-width="250" show-overflow-tooltip><template #default="{ row }">{{ row.unavailable_reason || `负责人：${row.owner}；通知：${row.notification_route}${row.notification_configured ? '（已接入）' : '（待接入）'}` }}</template></el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card v-loading="historyLoading" shadow="never" class="history-card">
       <template #header>
         <div class="title-row">
@@ -212,6 +234,7 @@ import {
   type FinanceV2Book,
   type FinanceV2HistoryVoucher,
   type FinanceV2HistoryVoucherLine,
+  type FinanceV2MonitoringSummary,
   type FinanceV2PeriodCommandInput,
   type FinanceV2PeriodCloseReadiness,
   type FinanceV2TrialBalance,
@@ -233,6 +256,7 @@ const selectedClosePeriod = ref<FinanceV2Period>();
 const writeReadiness = ref<FinanceV2WriteReadiness>();
 const periodCloseReadiness = ref<FinanceV2PeriodCloseReadiness>();
 const trialBalance = ref<FinanceV2TrialBalance>();
+const monitoringSummary = ref<FinanceV2MonitoringSummary>();
 const closePostedVouchers = ref<FinanceV2Voucher[]>([]);
 const selectedProfitClosingVoucherId = ref<number>();
 const loading = ref(false);
@@ -240,12 +264,14 @@ const historyLoading = ref(false);
 const historyLineLoading = ref(false);
 const periodCloseLoading = ref(false);
 const trialBalanceLoading = ref(false);
+const monitoringLoading = ref(false);
 const workspaceLoading = ref(false);
 const draftSaving = ref(false);
 const commandLoading = ref("");
 const periodCommandLoading = ref("");
 const loadError = ref("");
 const historyLoadError = ref("");
+const monitoringError = ref("");
 const historyDrawerOpen = ref(false);
 const periodCloseDrawerOpen = ref(false);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -297,6 +323,34 @@ async function loadHistoryVouchers() {
     historyLoading.value = false;
   }
 }
+
+async function loadMonitoring() {
+  monitoringLoading.value = true;
+  monitoringError.value = "";
+  try {
+    const response = await financeV2Api.getMonitoringSummary();
+    monitoringSummary.value = response.data;
+  } catch (error) {
+    monitoringSummary.value = undefined;
+    monitoringError.value = error instanceof Error ? error.message : "请求失败";
+  } finally {
+    monitoringLoading.value = false;
+  }
+}
+
+const metricLabel = (key: string) => ({
+  posting_attempt_failed: "过账失败",
+  voucher_unbalanced_blocked: "借贷不平阻断",
+  history_import_conflicted: "历史导入冲突",
+  source_inbox_backlog: "来源收件箱积压",
+  exception_queue_backlog: "异常队列积压",
+  lock_wait: "锁等待",
+  deadlock: "死锁",
+  period_close_failed: "结账失败",
+  export_failure: "导出异常",
+  api_5xx_rate: "API 5xx 比率",
+  balance_difference_alert: "余额差异",
+} as Record<string, string>)[key] || key;
 
 async function viewHistoryVoucher(voucher: FinanceV2HistoryVoucher) {
   selectedHistoryVoucher.value = voucher;
@@ -484,7 +538,7 @@ async function runCommand(voucher: FinanceV2Voucher, action: string) {
   }
 }
 
-onMounted(loadBooks);
+onMounted(() => Promise.all([loadBooks(), loadMonitoring()]));
 </script>
 
 <style scoped>
@@ -494,6 +548,7 @@ onMounted(loadBooks);
 .title-row h1 { margin: 2px 0 0; font-size: 22px; }
 .eyebrow { margin: 0; color: var(--el-color-primary); font-size: 12px; font-weight: 600; }
 .book-card { min-height: 260px; }
+.monitoring-card { min-height: 220px; }
 .history-card { min-height: 260px; }
 .subtle { margin: 6px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
 .history-error { margin-top: 12px; }
