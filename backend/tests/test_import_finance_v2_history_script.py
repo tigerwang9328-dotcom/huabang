@@ -13,3 +13,13 @@ def test_finance_v2_history_import_script_is_dry_run_by_default_and_requires_ded
     assert 'current_user != "fin_history_importer"' in source
     assert 'sys.path.insert(0, str(Path(__file__).resolve().parents[1]))' in source
     assert "FinanceV2HistoryImportService" in source
+
+
+def test_history_import_dry_run_does_not_eagerly_load_database_settings():
+    source = SCRIPT.read_text(encoding="utf-8")
+    before_execute = source.split("async def _execute", maxsplit=1)[0]
+
+    assert "from app.core.database import AsyncSessionLocal" not in before_execute
+    assert "from app.services.finance_v2.history_import_service" not in before_execute
+    assert "from app.services.finance_v2.history_import_plan import HistoryPublicationError, plan_history_import" in before_execute
+    assert "from app.core.database import AsyncSessionLocal" in source

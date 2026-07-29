@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Iterable, Mapping, Protocol, Sequence
+from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,24 +17,9 @@ from app.models.finance_v2_history import (
     FinanceV2HistoryVoucher,
     FinanceV2HistoryVoucherLine,
 )
-from app.services.finance_v2.history_domain import HistoryBatchError, HistoryBatchState, classify_source_record, transition_history_batch
+from app.services.finance_v2.history_domain import HistoryBatchError, HistoryBatchState, transition_history_batch
+from app.services.finance_v2.history_import_plan import HistoryPublicationError, plan_history_import
 from app.services.finance_v2.kingdee_history_loader import KingdeeHistoryRecord, _source_hash
-
-
-class _SourceRecord(Protocol):
-    source_pk: str
-    source_hash: str
-
-
-class HistoryPublicationError(ValueError):
-    pass
-
-
-@dataclass(frozen=True)
-class HistoryImportPlan:
-    new_records: tuple[_SourceRecord, ...]
-    idempotent_source_pks: tuple[str, ...]
-    conflicts: tuple[tuple[str, str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -44,33 +29,6 @@ class HistoryStageResult:
     new_record_count: int
     idempotent_source_pks: tuple[str, ...]
     conflicts: tuple[tuple[str, str, str], ...]
-
-
-def plan_history_import(records: Iterable[_SourceRecord], existing_hashes: Mapping[str, str]) -> HistoryImportPlan:
-    """Classify each source fact without mutating a history table."""
-
-    new_records: list[_SourceRecord] = []
-    idempotent: list[str] = []
-    conflicts: list[tuple[str, str, str]] = []
-    seen: dict[str, str] = {}
-    for record in records:
-        previous_in_request = seen.get(record.source_pk)
-        if previous_in_request is not None and previous_in_request != record.source_hash:
-            conflicts.append((record.source_pk, previous_in_request, record.source_hash))
-            continue
-        if previous_in_request is not None:
-            continue
-        seen[record.source_pk] = record.source_hash
-        existing_hash = existing_hashes.get(record.source_pk)
-        classification = classify_source_record(existing_hash, record.source_hash)
-        if classification == "new":
-            new_records.append(record)
-        elif classification == "already_imported":
-            idempotent.append(record.source_pk)
-        else:
-            conflicts.append((record.source_pk, str(existing_hash), record.source_hash))
-    return HistoryImportPlan(tuple(new_records), tuple(sorted(idempotent)), tuple(sorted(conflicts)))
-
 
 def _advance(batch: FinanceV2HistoryBatch, action: str) -> None:
     batch.status = transition_history_batch(HistoryBatchState(str(batch.status)), action).status

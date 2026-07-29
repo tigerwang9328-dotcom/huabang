@@ -19,8 +19,7 @@ from sqlalchemy import text
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.database import AsyncSessionLocal
-from app.services.finance_v2.history_import_service import FinanceV2HistoryImportService, HistoryPublicationError, plan_history_import
+from app.services.finance_v2.history_import_plan import HistoryPublicationError, plan_history_import
 from app.services.finance_v2.kingdee_history_loader import KingdeeHistorySourceError, load_kingdee_history_records
 
 
@@ -47,6 +46,9 @@ def _batch_code(manifest_path: Path, database: str) -> str:
 
 
 async def _execute(manifest_path: Path, records, *, publish: bool) -> list[dict]:
+    from app.core.database import AsyncSessionLocal
+    from app.services.finance_v2.history_import_service import FinanceV2HistoryImportService
+
     grouped = _group_records(records)
     results: list[dict] = []
     async with AsyncSessionLocal() as db:

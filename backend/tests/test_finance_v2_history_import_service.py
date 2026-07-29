@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.services.finance_v2.history_import_service import plan_history_import
+from app.services.finance_v2.history_import_plan import plan_history_import
 
 
 @dataclass(frozen=True)
