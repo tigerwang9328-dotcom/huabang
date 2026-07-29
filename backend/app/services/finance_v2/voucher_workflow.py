@@ -27,6 +27,7 @@ from app.services.finance_v2.domain import (
     canonical_dimension_hash,
 )
 from app.services.finance_v2.ledger_service import FinanceV2LedgerService
+from app.services.finance_v2.voucher_number_service import FinanceV2VoucherNumberService
 
 
 class FinanceV2VoucherWorkflow:
@@ -168,6 +169,16 @@ class FinanceV2VoucherWorkflow:
         }
         if action == "approve":
             values["approved_by"] = actor_id
+        reservation = None
+        if action == "post":
+            reservation = await FinanceV2VoucherNumberService(self.db).reserve(
+                book_id=voucher.book_id,
+                period_id=voucher.period_id,
+                voucher_group=voucher.voucher_group,
+                command_id=command_id,
+                voucher_id=voucher.id,
+            )
+            values["voucher_no"] = reservation.voucher_no
         result = await self.db.execute(
             update(FinanceV2Voucher)
             .where(FinanceV2Voucher.id == voucher_id, FinanceV2Voucher.version == expected_version)
@@ -183,6 +194,7 @@ class FinanceV2VoucherWorkflow:
                 book_id=voucher.book_id,
                 period_id=voucher.period_id,
             )
+            FinanceV2VoucherNumberService.mark_used(reservation)
         result_payload = self._snapshot(voucher)
         self.db.add(
             FinanceV2CommandIdempotency(
@@ -243,6 +255,7 @@ class FinanceV2VoucherWorkflow:
             "voucher_id": voucher.id,
             "book_id": voucher.book_id,
             "period_id": voucher.period_id,
+            "voucher_no": voucher.voucher_no,
             "status": voucher.status,
             "version": voucher.version,
             "reviewer_id": voucher.reviewer_id,

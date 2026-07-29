@@ -4,6 +4,7 @@ import pytest
 
 from app.models.finance_v2 import FinanceV2CommandIdempotency, FinanceV2OperationEvent
 from app.services.finance_v2.domain import FinanceV2DomainError
+from app.services.finance_v2 import voucher_workflow
 from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
 
 
@@ -55,6 +56,8 @@ def _voucher():
         id=7,
         book_id=3,
         period_id=9,
+        voucher_group="记",
+        voucher_no=None,
         status="draft",
         version=1,
         prepared_by="maker",
@@ -133,3 +136,50 @@ async def test_voucher_command_rejects_reuse_of_a_command_id_with_different_para
             reason=None,
             command_id="submit-20260729-001",
         )
+
+
+@pytest.mark.asyncio
+async def test_manual_post_assigns_and_finalizes_a_reserved_voucher_number(monkeypatch):
+    voucher = _voucher()
+    voucher.status = "approved"
+    voucher.version = 4
+    db = _WorkflowDb(voucher)
+    reservation = SimpleNamespace(voucher_no="0007", status="reserved")
+
+    class FakeNumberService:
+        def __init__(self, _db):
+            pass
+
+        async def reserve(self, **kwargs):
+            assert kwargs == {
+                "book_id": 3,
+                "period_id": 9,
+                "voucher_group": "记",
+                "command_id": "post-20260729-001",
+                "voucher_id": 7,
+            }
+            return reservation
+
+        @staticmethod
+        def mark_used(item):
+            item.status = "used"
+
+    class FakeLedgerService:
+        async def rebuild_period(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(voucher_workflow, "FinanceV2VoucherNumberService", FakeNumberService)
+    monkeypatch.setattr(voucher_workflow, "FinanceV2LedgerService", FakeLedgerService)
+
+    result = await FinanceV2VoucherWorkflow(db).command(
+        voucher_id=7,
+        action="post",
+        actor_id="poster",
+        expected_version=4,
+        reason="人工过账",
+        command_id="post-20260729-001",
+    )
+
+    assert voucher.voucher_no == "0007"
+    assert reservation.status == "used"
+    assert result["voucher_no"] == "0007"

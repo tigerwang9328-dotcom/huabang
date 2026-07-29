@@ -59,6 +59,6 @@ class VoucherNumberAllocator:
         reservation = self._reservations[reservation_id]
         if not reason.strip():
             raise ValueError("void reason is required")
-        reservation.status = "void"
+        reservation.status = "voided"
         reservation.void_reason = reason
         return reservation
