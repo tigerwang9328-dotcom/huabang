@@ -59,3 +59,10 @@
 | 物理基线与恢复 | 物理基线 `base_20260729T130303Z` 已生成（含 `base.tar`、`pg_wal.tar` 与校验清单）。在独立端口 `55432`、独立数据目录完成第二次 PITR 恢复，核验 Alembic `1fdf4577d7d8`、339 历史凭证、4,596 历史分录、0 当前账凭证；恢复耗时 16 秒，实例已关闭并自动清理 | 已核实，生产形态隔离恢复 |
 
 本机恢复链已满足技术演练的 RPO/RTO Gate；但备份、WAL 与恢复目录仍在同一服务器磁盘，不能覆盖主机级故障。正式开写仍需至少一份异机/异存储副本及相应恢复演练证据。
+
+## 2026-07-29 中台权限菜单一致性更新
+
+- 生产 `finance_manager` 角色已有 1 名已分配用户，且角色实际包含 `finance:center:view`、`finance:center:operate`；本次未增加用户或扩大角色权限。
+- 前端提交 `872cb674554b8dd8ed86d0b28a15c41ecc15d725` 已部署：财务利润下的“财务中心”改为复用统一导航配置，因此只由 `finance:center:view` 显示，不再错误依赖 `finance:profit:view`。
+- 服务器构建、`www-data` 静态读取检查、`/app/dashboard` 与 `/app/finance-center/core-workspace` HTTP 200 均已核验；后端未重启且保持 active。
+- 当前 `fin_current.feature_gate` 无启用记录、`fin_current.voucher=0`。该变更不构成浏览器登录验收，也不解除当前账写入 No-Go。

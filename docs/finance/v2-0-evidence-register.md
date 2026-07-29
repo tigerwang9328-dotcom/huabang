@@ -74,3 +74,12 @@
 | 隔离 PITR 恢复 | 独立 PostgreSQL 实例使用归档 WAL 在端口 `55432` 恢复后，核验 `alembic=1fdf4577d7d8`、`history_vouchers=339`、`history_entries=4596`、`current_vouchers=0`；第二次完整演练耗时 16 秒且实例自动关闭/清理 | 生产形态隔离恢复 | 恢复演练证据 | 本机 RTO 技术演练通过；不等同于异机灾备 |
 
 **更新后的限制：** PITR 的技术链路已从 “未验证” 更新为 “本机已验证”；由于没有异机或异存储副本，它仍不能证明主机损坏场景下的 RPO/RTO。当前账开写 Gate 继续关闭，直至该副本和期初/期间/业务验收证据齐备。
+
+## 中台权限菜单一致性实证（2026-07-29，后补）
+
+| 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- | --- |
+| 中台角色实际分配 | `finance_manager`（财务经理）已有 1 名已分配用户，角色包含 `finance:center:view`、`finance:center:operate` 及既有财务权限；未在本次变更中新增或调整用户角色 | 生产数据库只读核验 | 生产控制面证据 | 具备后续受控浏览器验收的账号前提，但尚未完成登录验收 |
+| 菜单权限修正 | 侧边栏不再复制财务菜单或以 `finance:profit:view` 控制“财务中心”；改为复用 `financeProfitNavigation` 单一配置，财务中心及其下级菜单统一要求 `finance:center:view` | 本地测试、生产静态资源切换 | 回归测试、类型检查、生产运行时 | 消除旧利润权限与财务中心权限的漂移；不改变任何角色授权 |
+| 生产静态资源验证 | 代码提交 `872cb674554b8dd8ed86d0b28a15c41ecc15d725` 已在 `/srv/huabang-ai-center`；服务器完成类型检查与构建，候选静态目录经 `www-data` 读取验证后原子切换。`/app/dashboard`、`/app/finance-center/core-workspace` 均为 HTTP 200，后端保持 active | 生产运行时 | 生产部署验证 | 菜单与路由可达；未等同于已登录财务用户端到端验收 |
+| 写入保护复核 | `fin_current.feature_gate` 无启用记录，`fin_current.voucher=0` | 生产数据库只读核验 | 生产运行时 | 本次只发布前端权限一致性，不开启草稿、审核、过账或结账 |
