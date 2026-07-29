@@ -26,6 +26,7 @@ done
 for required in \
   "$PROJECT_ROOT/deploy/archive_postgres_wal.sh" \
   "$PROJECT_ROOT/deploy/pg_basebackup_as_postgres.sh" \
+  "$PROJECT_ROOT/deploy/drill_postgres_pitr_restore.sh" \
   "$PROJECT_ROOT/deploy/postgresql/huabang-finance-pitr.conf" \
   "$PROJECT_ROOT/deploy/systemd/huabang-postgres-basebackup.service" \
   "$PROJECT_ROOT/deploy/systemd/huabang-postgres-basebackup.timer"; do
@@ -45,6 +46,7 @@ install -d -o root -g root -m 755 "$TARGET_DIR"
 install -d -o postgres -g postgres -m 700 /var/backups/huabang-postgres /var/backups/huabang-postgres/base /var/backups/huabang-postgres/wal
 install -o root -g root -m 755 "$PROJECT_ROOT/deploy/archive_postgres_wal.sh" "$TARGET_DIR/archive_postgres_wal.sh"
 install -o root -g root -m 755 "$PROJECT_ROOT/deploy/pg_basebackup_as_postgres.sh" "$TARGET_DIR/pg_basebackup_as_postgres.sh"
+install -o root -g root -m 755 "$PROJECT_ROOT/deploy/drill_postgres_pitr_restore.sh" "$TARGET_DIR/drill_postgres_pitr_restore.sh"
 install -o root -g root -m 644 "$PROJECT_ROOT/deploy/postgresql/huabang-finance-pitr.conf" "$CONF_DIR/huabang-finance-pitr.conf"
 install -o root -g root -m 644 "$PROJECT_ROOT/deploy/systemd/huabang-postgres-basebackup.service" /etc/systemd/system/huabang-postgres-basebackup.service
 install -o root -g root -m 644 "$PROJECT_ROOT/deploy/systemd/huabang-postgres-basebackup.timer" /etc/systemd/system/huabang-postgres-basebackup.timer
