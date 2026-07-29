@@ -1,6 +1,9 @@
 from pathlib import Path
 
 
+VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
+
+
 def test_finance_v2_foundation_migration_is_isolated_and_append_only():
     path = Path(__file__).parents[1] / "alembic" / "versions" / "7f4a8c1d9e20_finance_v2_current_core.py"
     migration = path.read_text(encoding="utf-8")
@@ -35,3 +38,14 @@ def test_history_migration_requires_bootstrapped_schemas_without_database_create
     assert "to_regnamespace('fin_history')" in migration
     assert "to_regnamespace('fin_read')" in migration
     assert "bootstrap_finance_database_roles.sql" in migration
+
+
+def test_history_batch_monitoring_is_exposed_through_fin_read_not_fin_history_grants():
+    matches = list(VERSIONS.glob("*_add_finance_v2_history_batch_read_view.py"))
+    assert len(matches) == 1
+
+    migration = matches[0].read_text(encoding="utf-8")
+    assert "CREATE OR REPLACE VIEW fin_read.history_import_batch" in migration
+    assert "FROM fin_history.import_batch" in migration
+    assert "validation_report" not in migration
+    assert "DROP VIEW IF EXISTS fin_read.history_import_batch" in migration

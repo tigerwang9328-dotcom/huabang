@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.finance_v2_deps import require_finance_v2_permission
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_finance_db
 from app.models.finance_v2 import (
     FinanceV2AccountVersion,
     FinanceV2AccountingBook,
@@ -21,7 +21,6 @@ from app.models.finance_v2 import (
 )
 from app.models.finance_v2_operations import FinanceV2FeatureGate
 from app.models.finance_v2_operations import FinanceV2PostingAttempt
-from app.models.finance_v2_history import FinanceV2HistoryBatch
 from app.models.finance_v2_period_close import FinanceV2PeriodCloseBatch
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
@@ -120,7 +119,7 @@ async def _assert_v2_write_enabled(db: AsyncSession, *, command: str, book_id: i
 @router.get("/books", response_model=ApiResponse)
 async def list_books(
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     books = (await db.execute(select(FinanceV2AccountingBook).order_by(FinanceV2AccountingBook.book_code))).scalars().all()
     return ApiResponse.ok(
@@ -141,7 +140,7 @@ async def list_books(
 async def get_book_write_readiness(
     book_id: int,
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     rows = (await db.execute(select(FinanceV2FeatureGate))).scalars().all()
     gates = [
@@ -175,7 +174,7 @@ async def get_book_write_readiness(
 async def list_book_periods(
     book_id: int,
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     rows = (
         await db.execute(
@@ -204,7 +203,7 @@ async def get_period_close_readiness(
     book_id: int,
     period_id: int,
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     try:
         result = await FinanceV2PeriodCloseWorkflow(db).readiness(book_id=book_id, period_id=period_id)
@@ -219,7 +218,7 @@ async def execute_period_command(
     period_id: int,
     body: PeriodCommandInput,
     current_user: SysUser = Depends(require_finance_v2_write),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     await _assert_v2_write_enabled(
         db,
@@ -249,7 +248,7 @@ async def get_trial_balance(
     period_id: int,
     limit: int = Query(default=500, ge=1, le=1000),
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     book = await db.get(FinanceV2AccountingBook, book_id)
     period = await db.get(FinanceV2FiscalPeriod, period_id)
@@ -302,7 +301,7 @@ async def list_ledger_lines(
     after_line_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=100, ge=1, le=500),
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     period = await db.get(FinanceV2FiscalPeriod, period_id)
     if not period or period.book_id != book_id:
@@ -318,43 +317,6 @@ async def list_ledger_lines(
         )
         .order_by(FinanceV2VoucherLine.id)
         .limit(limit + 1)
-    )
-
-
-@router.get("/monitoring/summary", response_model=ApiResponse)
-async def get_monitoring_summary(
-    current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
-):
-    async def count_rows(model, *conditions) -> int:
-        return int((await db.execute(select(func.count()).select_from(model).where(*conditions))).scalar_one())
-
-    failed_posts = await count_rows(FinanceV2PostingAttempt, FinanceV2PostingAttempt.status == "failed")
-    history_conflicts = await count_rows(FinanceV2HistoryBatch, FinanceV2HistoryBatch.status == "conflicted")
-    failed_closes = await count_rows(FinanceV2PeriodCloseBatch, FinanceV2PeriodCloseBatch.status == "failed")
-    gates = (await db.execute(select(FinanceV2FeatureGate).order_by(FinanceV2FeatureGate.id.desc()))).scalars().all()
-    return ApiResponse.ok(
-        data={
-            "metrics": {
-                "posting_attempt_failed": failed_posts,
-                "history_import_conflicted": history_conflicts,
-                "period_close_failed": failed_closes,
-            },
-            "gates": [
-                {
-                    "scope_type": gate.scope_type,
-                    "scope_key": gate.scope_key,
-                    "gate_name": gate.gate_name,
-                    "enabled": gate.enabled,
-                    "effective_at": gate.effective_at,
-                }
-                for gate in gates
-            ],
-            "unavailable_metrics": [
-                "api_5xx_rate", "lock_wait", "deadlock", "export_failure", "source_inbox_backlog", "balance_difference_alert",
-            ],
-            "message": "仅返回已持久化的 V2 运营指标；未接入指标采集器的项目明确标为不可用，不能当作零。",
-        }
     )
     if account_version_id is not None:
         statement = statement.where(FinanceV2VoucherLine.account_version_id == account_version_id)
@@ -389,12 +351,53 @@ async def get_monitoring_summary(
     )
 
 
+@router.get("/monitoring/summary", response_model=ApiResponse)
+async def get_monitoring_summary(
+    current_user: SysUser = Depends(require_finance_v2_read),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    async def count_rows(model, *conditions) -> int:
+        return int((await db.execute(select(func.count()).select_from(model).where(*conditions))).scalar_one())
+
+    failed_posts = await count_rows(FinanceV2PostingAttempt, FinanceV2PostingAttempt.status == "failed")
+    history_conflicts = int(
+        (
+            await db.execute(
+                text("SELECT count(*) FROM fin_read.history_import_batch WHERE status = 'conflicted'")
+            )
+        ).scalar_one()
+    )
+    failed_closes = await count_rows(FinanceV2PeriodCloseBatch, FinanceV2PeriodCloseBatch.status == "failed")
+    gates = (await db.execute(select(FinanceV2FeatureGate).order_by(FinanceV2FeatureGate.id.desc()))).scalars().all()
+    return ApiResponse.ok(
+        data={
+            "metrics": {
+                "posting_attempt_failed": failed_posts,
+                "history_import_conflicted": history_conflicts,
+                "period_close_failed": failed_closes,
+            },
+            "gates": [
+                {
+                    "scope_type": gate.scope_type,
+                    "scope_key": gate.scope_key,
+                    "gate_name": gate.gate_name,
+                    "enabled": gate.enabled,
+                    "effective_at": gate.effective_at,
+                }
+                for gate in gates
+            ],
+            "unavailable_metrics": [
+                "api_5xx_rate", "lock_wait", "deadlock", "export_failure", "source_inbox_backlog", "balance_difference_alert",
+            ],
+            "message": "仅返回已持久化的 V2 运营指标；未接入指标采集器的项目明确标为不可用，不能当作零。",
+        }
+    )
 @router.get("/books/{book_id}/accounts", response_model=ApiResponse)
 async def list_book_accounts(
     book_id: int,
     active_on: date | None = Query(default=None),
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     statement = (
         select(FinanceV2AccountVersion)
@@ -435,7 +438,7 @@ async def list_vouchers(
     status: str | None = Query(default=None, max_length=16),
     limit: int = Query(default=100, ge=1, le=200),
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     statement = select(FinanceV2Voucher).where(FinanceV2Voucher.book_id == book_id)
     if period_id is not None:
@@ -473,7 +476,7 @@ async def list_vouchers(
 async def list_history_vouchers(
     limit: int = Query(default=50, ge=1, le=200),
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     rows = (
         await db.execute(
@@ -497,7 +500,7 @@ async def list_history_voucher_lines(
     voucher_id: int,
     limit: int = Query(default=200, ge=1, le=500),
     current_user: SysUser = Depends(require_finance_v2_read),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     rows = (
         await db.execute(
@@ -523,7 +526,7 @@ async def list_history_voucher_lines(
 async def create_voucher_draft(
     body: VoucherDraftInput,
     current_user: SysUser = Depends(require_finance_v2_write),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     await _assert_v2_write_enabled(
         db,
@@ -550,7 +553,7 @@ async def execute_voucher_command(
     voucher_id: int,
     body: VoucherCommandInput,
     current_user: SysUser = Depends(require_finance_v2_write),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_finance_db),
 ):
     voucher = await db.get(FinanceV2Voucher, voucher_id)
     if not voucher:

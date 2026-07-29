@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.api.v1 import finance_v2
 from app.api.v1.finance_v2 import router
+from app.core.database import get_db
 from app.services.finance_v2.platform_permissions import (
     FINANCE_V2_READ_PERMISSION,
     FINANCE_V2_WRITE_PERMISSION,
@@ -62,6 +63,14 @@ def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency(
     assert actual == expected
 
 
+def test_every_finance_v2_route_uses_the_restricted_finance_database_dependency():
+    for route in router.routes:
+        direct_dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+
+        assert finance_v2.get_finance_db in direct_dependency_calls
+        assert get_db not in direct_dependency_calls
+
+
 def test_period_command_accepts_an_explicit_manual_profit_closing_evidence_registration():
     command = finance_v2.PeriodCommandInput(
         action="register_profit_closing",
@@ -102,6 +111,123 @@ async def test_v2_history_line_endpoint_reads_only_the_published_read_view():
     assert "fin_read.history_voucher_line" in captured["statement"]
     assert "fin_history.voucher_line" not in captured["statement"]
     assert captured["params"] == {"voucher_id": 17, "limit": 200}
+
+
+@pytest.mark.asyncio
+async def test_monitoring_summary_reads_history_import_status_only_from_fin_read():
+    captured = []
+
+    class CountResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one(self):
+            return self.value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class MonitoringDb:
+        async def execute(self, statement):
+            captured.append(str(statement))
+            if "history_import_batch" in str(statement):
+                return CountResult(2)
+            if "posting_attempt" in str(statement):
+                return CountResult(3)
+            if "period_close_batch" in str(statement):
+                return CountResult(4)
+            return CountResult(0)
+
+    response = await finance_v2.get_monitoring_summary(
+        current_user=SimpleNamespace(id=1, username="finance"),
+        db=MonitoringDb(),
+    )
+
+    assert response.data["metrics"] == {
+        "posting_attempt_failed": 3,
+        "history_import_conflicted": 2,
+        "period_close_failed": 4,
+    }
+    assert "fin_read.history_import_batch" in captured[1]
+    assert "fin_history.import_batch" not in captured[1]
+
+
+@pytest.mark.asyncio
+async def test_ledger_lines_returns_only_posted_rows_with_cursor_pagination():
+    captured = {}
+    line_1 = SimpleNamespace(
+        id=11,
+        voucher_id=101,
+        line_no=1,
+        dimension_set_id=7,
+        summary="期初调整",
+        currency_code="CNY",
+        exchange_rate=1,
+        debit_amount=100,
+        credit_amount=0,
+    )
+    line_2 = SimpleNamespace(
+        id=12,
+        voucher_id=102,
+        line_no=2,
+        dimension_set_id=8,
+        summary="本期凭证",
+        currency_code="CNY",
+        exchange_rate=1,
+        debit_amount=0,
+        credit_amount=100,
+    )
+    voucher_1 = SimpleNamespace(id=101, voucher_no="记-0001", voucher_group="记", voucher_date=date(2026, 8, 1))
+    voucher_2 = SimpleNamespace(id=102, voucher_no="记-0002", voucher_group="记", voucher_date=date(2026, 8, 2))
+    account = SimpleNamespace(id=33, account_code="1001", account_name="库存现金")
+
+    class LedgerResult:
+        def all(self):
+            return [(line_1, voucher_1, account), (line_2, voucher_2, account)]
+
+    class LedgerDb:
+        async def get(self, _model, period_id):
+            assert period_id == 9
+            return SimpleNamespace(book_id=5)
+
+        async def execute(self, statement):
+            captured["statement"] = str(statement)
+            return LedgerResult()
+
+    response = await finance_v2.list_ledger_lines(
+        5,
+        9,
+        account_version_id=None,
+        after_line_id=None,
+        limit=1,
+        current_user=SimpleNamespace(id=1, username="finance"),
+        db=LedgerDb(),
+    )
+
+    assert response.data["lines"] == [
+        {
+            "line_id": 11,
+            "voucher_id": 101,
+            "voucher_no": "记-0001",
+            "voucher_group": "记",
+            "voucher_date": date(2026, 8, 1),
+            "line_no": 1,
+            "account_version_id": 33,
+            "account_code": "1001",
+            "account_name": "库存现金",
+            "dimension_set_id": 7,
+            "summary": "期初调整",
+            "currency_code": "CNY",
+            "exchange_rate": 1,
+            "debit_amount": 100,
+            "credit_amount": 0,
+        }
+    ]
+    assert response.data["next_after_line_id"] == 11
+    assert "fin_current.voucher.status = :status_1" in captured["statement"]
 
 
 @pytest.mark.asyncio

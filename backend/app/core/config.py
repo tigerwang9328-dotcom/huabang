@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import URL
 from typing import List, Optional
 from functools import lru_cache
 
@@ -16,6 +17,14 @@ class Settings(BaseSettings):
     DB_NAME: str = "huabang_ai"
     DB_USER: str = "huabang"
     DB_PASSWORD: str
+
+    # Finance V2 uses a separate, least-privilege login.  Do not fall back to
+    # the shared application account when any value is absent.
+    FINANCE_DB_HOST: Optional[str] = None
+    FINANCE_DB_PORT: Optional[int] = None
+    FINANCE_DB_NAME: Optional[str] = None
+    FINANCE_DB_USER: Optional[str] = None
+    FINANCE_DB_PASSWORD: Optional[str] = None
 
     # Redis
     REDIS_HOST: str = "localhost"
@@ -124,6 +133,29 @@ class Settings(BaseSettings):
     @property
     def DATABASE_URL_SYNC(self) -> str:
         return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
+    @property
+    def FINANCE_DATABASE_URL(self) -> str:
+        values = {
+            "FINANCE_DB_HOST": self.FINANCE_DB_HOST,
+            "FINANCE_DB_PORT": self.FINANCE_DB_PORT,
+            "FINANCE_DB_NAME": self.FINANCE_DB_NAME,
+            "FINANCE_DB_USER": self.FINANCE_DB_USER,
+            "FINANCE_DB_PASSWORD": self.FINANCE_DB_PASSWORD,
+        }
+        missing = [key for key, value in values.items() if value is None or value == ""]
+        if missing:
+            raise ValueError(
+                "Finance V2 dedicated database settings are required: " + ", ".join(missing)
+            )
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.FINANCE_DB_USER,
+            password=self.FINANCE_DB_PASSWORD,
+            host=self.FINANCE_DB_HOST,
+            port=self.FINANCE_DB_PORT,
+            database=self.FINANCE_DB_NAME,
+        ).render_as_string(hide_password=False)
 
     @property
     def REDIS_URL(self) -> str:

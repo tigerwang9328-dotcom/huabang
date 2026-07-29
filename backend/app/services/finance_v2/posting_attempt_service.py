@@ -9,18 +9,22 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_finance_session_factory
 from app.models.finance_v2_operations import FinanceV2PostingAttempt
 
 
 class FinanceV2PostingAttemptRecorder:
     """Persist posting-attempt transitions in sessions independent of account writes."""
 
-    def __init__(self, session_factory: Callable[[], AsyncSession] = AsyncSessionLocal):
+    def __init__(self, session_factory: Callable[[], AsyncSession] | None = None):
         self._session_factory = session_factory
 
+    def _new_session(self) -> AsyncSession:
+        factory = self._session_factory or get_finance_session_factory()
+        return factory()
+
     async def start(self, *, voucher_id: int, command_id: str) -> int:
-        async with self._session_factory() as session:
+        async with self._new_session() as session:
             existing = (
                 await session.execute(
                     select(FinanceV2PostingAttempt).where(FinanceV2PostingAttempt.command_id == command_id)
@@ -59,7 +63,7 @@ class FinanceV2PostingAttemptRecorder:
         error_code: str | None = None,
         error_context: dict[str, Any] | None = None,
     ) -> None:
-        async with self._session_factory() as session:
+        async with self._new_session() as session:
             attempt = await session.get(FinanceV2PostingAttempt, attempt_id)
             if not attempt:
                 raise LookupError(f"posting attempt {attempt_id} not found")
