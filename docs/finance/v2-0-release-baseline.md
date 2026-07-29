@@ -6,12 +6,13 @@
 
 | 位置 | 事实 | 状态 |
 | --- | --- | --- |
-| 本地工作树 | `feature/huabang-full-finance-center`；本轮财务代码基线为 `7dc5c48dc6a30bd3e596f230e520e20f71513774`（Finance V2 数据会话与中台鉴权会话分离、过账尝试使用受限会话、历史批次状态经 `fin_read` 公开，且修复总账明细分页；以发布前重新核实的最终提交为准） | 已核实，本地未发布 |
+| 本地工作树 | `feature/huabang-full-finance-center`；只读发布候选为 `2c2e2cc`（Finance V2 数据会话与中台鉴权会话分离、过账尝试使用受限会话、历史批次状态经 `fin_read` 公开、总账明细分页修复，以及受控 Linux 发布入口/只读验证器/中台权限幂等种子；以发布前重新核实的最终提交为准） | 已核实，本地未发布 |
 | 本地 Alembic | 单一 head `1fdf4577d7d8`（父 `9c121d3145d9`）；新增 `fin_read.history_import_batch` 只读视图。仍含凭证明细约束、凭证编号审计表、`operation_event` 追加写保护、历史分录只读视图/索引、结账批次/双人反结账审批与手工损益结转凭证证据表；首两条 V2 迁移只验证管理员 bootstrap schema，绝不申请数据库级 CREATE | 已核实，已在恢复副本执行，尚未在生产执行 |
 | 生产仓库 | `feature/huabang-ai-mvp` / `1cdafd03674081ad3620ae7d723cf280774f3d0b` | 已核实，未部署 V2 本地分支 |
 | 生产 Alembic | 单一 head/current `6c1e4a7d2f09` | 已核实，发布前须再次执行 `alembic heads --verbose` 与 `alembic current --verbose` |
 | 生产运行方式 | `huabang-backend.service` → Uvicorn `app.main:app`，监听 `127.0.0.1:8000`，Nginx active | 已核实；只有 Gate 全通过后才允许重启 |
 | 生产数据库角色 | 2026-07-29 已备份全局角色定义后，在 PostgreSQL 集群创建五个无持久口令的 `fin_*` 角色；生产 `huabang_ai` 仍没有 V2 schema/迁移/应用连接切换，V2 对象权限只在隔离恢复副本设置 | 已核实；生产最小权限与连接配置仍须在发布 Gate 中单独执行 |
+| 生产恢复能力 | 发布前新鲜逻辑备份存在，且 r2 隔离恢复通过；生产 PostgreSQL 仍为 `archive_mode=off`，没有已验证的 PITR、保留策略或 RTO 证据 | 只读发布可在独立备份后评审；正式当前账写入不得放行 |
 | 恢复副本演练 | 旧 r1 副本曾暴露暂存记录未 flush、却表面显示发布的缺陷，保留为失败演练证据而非发布结果；使用同一已校验备份新建的 r2 `huabang_ai_finance_drill_20260729_r2` 已升级至 `1fdf4577d7d8`，三 schema 与角色验证均通过。r2 使用受控快照发布 3 批金蝶历史：339 张凭证、4,596 条分录、339 个历史标记、0 个 `fin_current.voucher`；重跑新增 0，计数不变。应用 `get_finance_db` 实际以 `fin_app` 连接，能读 `fin_current`/`fin_read`、能写 `fin_current`、不能写 `fin_history` | 已核实，恢复副本，不是生产部署 |
 | 本地后端验证 | V2 定向测试、角色核验和历史导入命令测试 106 passed（临时非生产配置，另有 1 条 Pydantic 弃用警告）；含中台权限、职责分离、独立 `fin_app` 会话、最小权限迁移、独立过账尝试审计、凭证命令幂等、锁定式编号、结账中人工过账阻断、手工损益结转证据、结账检查/双人反结账、历史分录下钻、总账明细分页、当前账试算表与监控摘要 | 已核实 |
 | 本地前端验证 | 财务中心中台权限入口、服务端 Gate 就绪状态、受控草稿/命令工作台、历史金蝶分录下钻、手工损益结转凭证登记、结账检查与当前账试算表回归，类型检查与 Vite 构建成功 | 已核实 |

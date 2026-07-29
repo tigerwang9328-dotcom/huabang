@@ -6,11 +6,13 @@
 
 | 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
 | --- | --- | --- | --- | --- |
-| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；本轮财务代码基线提交为 `7dc5c48dc6a30bd3e596f230e520e20f71513774`。Finance V2 路由使用单独的 `get_finance_db`；中台 JWT/角色/权限依赖仍使用既有 `get_db`，不存在受限财务角色读取 `sys` 表的授权扩大；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读与本地测试 | 可继续恢复副本演练 |
+| 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`；当前只读发布候选代码提交为 `2c2e2cc`。Finance V2 路由使用单独的 `get_finance_db`；中台 JWT/角色/权限依赖仍使用既有 `get_db`，不存在受限财务角色读取 `sys` 表的授权扩大；发布前须重新核实最终 HEAD 与工作树状态 | 本地，2026-07-29 | 本地只读与本地测试 | 可继续恢复副本演练 |
 | 本地迁移图 | `1fdf4577d7d8` 是当前唯一 head；其父为 `9c121d3145d9`，新增 `fin_read.history_import_batch` 只读视图供受限应用监控历史冲突。保留手工损益结转凭证证据、结账批次、双人反结账审批、历史已发布分录只读视图/索引、凭证约束、凭证编号 reservation 审计与 `operation_event` 保护 | 本地，2026-07-29 | 本地只读与本地测试 | 新迁移必须从当天实际图生成并在恢复副本验证 |
 | 生产仓库 | `/srv/huabang-ai-center`，分支 `feature/huabang-ai-mvp`，HEAD `1cdafd03674081ad3620ae7d723cf280774f3d0b`，核验时无工作树改动输出 | 生产只读，2026-07-29 | 生产只读 | V2 本地代码尚未部署 |
 | 生产后端 | `huabang-backend.service` 为 active/running；以 `xiaohu` 身份在 `127.0.0.1:8000` 运行 Uvicorn，工作目录为 `/srv/huabang-ai-center/backend` | 生产只读，2026-07-29 | 生产只读 | 未授权前不得重启 |
 | 生产迁移状态 | Alembic 单一 head/current 均为 `6c1e4a7d2f09` | 生产只读，2026-07-29 | 生产只读 | 发布前必须重新核实并比较本地迁移链 |
+| 生产只读发布预检 | 服务 active/enabled；运行环境文件权限 `0600`、归属 `xiaohu:xiaohu`；生产 V2 三 schema 数为 0；五个 `fin_*` 角色均存在且三个登录角色无持久口令；本轮恢复逻辑备份为 63 MB。PostgreSQL `archive_mode=off`、`wal_level=replica`、非恢复模式 | 生产只读，2026-07-29 | 生产只读 | 允许评审只读发布脚本；PITR/RTO 仍未满足，正式当前账写入继续 No-Go |
+| 华邦中台权限现状 | `finance_manager` 与 `super_admin` 均存在；`finance_manager` 当前仅有一条 V2 权限记录及一条关联。候选发布的幂等种子只补齐 `finance:center:view`、`finance:center:operate` 与该角色的缺失关联，不分配用户、不修改其他角色 | 生产只读，2026-07-29 | 生产只读与本地代码审查 | 发布后必须重新登录，以超级管理员及已分配财务角色分别验收 |
 | 旧财务正式写入口 | 生产 OpenAPI 中现有 `/api/v1/finance-center/kingdee/import`、`/vouchers`、`/vouchers/{id}/post`、`/reverse`、`/revise-entries`，以及旧 `/api/v1/finance/*` 写接口 | 生产只读，2026-07-29 | 生产运行时 | 只读验收期不得关闭或代理这些入口 |
 | 金蝶源快照 | `ods.kingdee_import_batch=3`、`ods.kingdee_voucher=339`、`ods.kingdee_voucher_entry=4596`、`ods.kingdee_account=416`、`ods.kingdee_balance=6868`；3 个批次均保存备份/manifest 哈希、预期计数与校验结果 | 生产只读，2026-07-29 | 生产只读 | V2 历史导入必须另建 `fin_history` 暂存—校验—发布链，绝不改写 ODS |
 | 本地金蝶 V2 dry-run | 原生快照 `D:\huabang\invest_kingdee\results\K3MIG_20260717_172928` 的 SHA-256/行数已读取校验；仅 3 个 official 账套进入候选集，得到 339 张凭证、4,596 条分录、0 个重复/变更哈希冲突 | 本地，2026-07-29 | 本地只读与本地测试 | 未写数据库；待在恢复副本以 `fin_history_importer` 暂存、校验、发布 |
@@ -26,6 +28,7 @@
 | r2 金蝶历史发布与幂等重跑 | 使用清单 SHA-256 `CE10F6A37FFBE0B6045F4B25D09F1E1E46F882E24DA1564B8513E9B4B56A805E` 的受控最小快照，3 个 official 账套均从 `loaded → validated → published`：77/871、244/3,476、18/249（凭证/分录）。最终为 3 批、339 历史凭证、4,596 历史分录、339 历史来源链接、339 个 `historical_marker=true` 只读视图记录、0 当前账凭证；第二次相同导入三批均为已发布且新增 0，计数不变 | 服务器恢复副本，2026-07-29 | 恢复副本验证 | 历史导入链可继续作为生产 Gate 的证据；不等同于生产历史写入、前端验收或开写授权 |
 | r2 `fin_app` 应用会话 | 新代码的 `get_finance_db` 以短期 `fin_app` 登录运行，`current_user=fin_app`；读取 `fin_current.voucher` 和 `fin_read.history_import_batch` 均成功。`fin_app` 对 `fin_current.voucher` 有 INSERT，对 `fin_history.import_batch` 无 INSERT，实际 INSERT 尝试被数据库以 permission denied 拒绝；验证后口令清除，历史与当前账计数仍为 339/4,596/0 | 服务器恢复副本，2026-07-29 | 恢复副本运行时验证 | 证明受限会话可作为生产只读发布的前置；不等同于生产服务重启、平台登录端到端验收或生产开写 |
 | 生产库 V2 隔离 | r2 最终核验查询 `huabang_ai` 的 `fin_current`、`fin_history`、`fin_read` schema 数为 0 | 生产数据库只读核验，2026-07-29 | 生产只读 | 证明本轮恢复演练未将 V2 schema 或历史数据写入生产；生产发布仍 No-Go |
+| 发布与凭据处理资产 | Linux 发布入口默认 dry-run，必须同时固定远端 ref、预期提交、历史清单 SHA-256 和历史凭证/分录预期数才可 `--execute`；它创建发布前逻辑备份、隔离迁移/导入临时口令、保持 V2 写 Gate 关闭、在失败时仅回退运行时文件。PowerShell 仅 SSH 编排。`alembic.ini` 与四个既有运维脚本已移除内联数据库口令，后者改为受限 `.env` 生成临时 `PGPASSFILE` | 本地，2026-07-29 | 本地测试与代码审查 | 仍须在生产先验证脚本语法/dry-run、历史清单和现有任务调用；不等同于生产凭据已轮换 |
 
 ## 待确认或不可满足项
 
@@ -34,7 +37,7 @@
 | 会计政策签字 | 用户授权例外 | 形式签字按 `v2.0/deployment-decisions.md` 忽略；但法人、账套、期间、币种、科目、期初及报表映射仍需可核对事实证据 | 不得把例外当作正式会计依据或法定报表/最终切换批准 |
 | 当前账起始日与覆盖缺口 | 待确认 | 确认历史截止日、旧系统最终余额、启用日期与任何 `coverage_gap` | 不得批准最终期初或打开 V2 制单 |
 | 生产数据库最小权限 | 恢复副本已验证 | 为生产 `huabang_ai` 配置受限凭据、`CONNECT`、V2 schema 与默认权限，并在不影响现有应用的前提下重新运行验证器 | 生产迁移、发布历史或开写仍 No-Go |
-| 凭据轮换 | 不满足 | 轮换已暴露于备份脚本的数据库凭据，迁移为受限凭据来源，复核备份作业 | 生产发布与开写 No-Go |
+| 生产主应用凭据轮换 | 待执行 | 已从候选源码清除内联口令并改造相关脚本；仍需核验生产现用主应用口令是否受影响、部署新脚本后轮换，并验证后端/备份/定时任务 | 正式开写 No-Go；只读发布脚本仅生成独立 `fin_*` 凭据，不擅自改变主应用登录 |
 | 备份恢复演练 | 部分验证 | 已有新鲜逻辑备份、校验和、隔离恢复、迁移和权限验证；仍需 PITR、保留策略、恢复耗时与清理记录 | 只读发布可评审；正式开写 No-Go |
 | 性能、告警与浏览器验收 | 未开始 | 按实施计划 Phase 5.5A/5.6 在生产形态环境取得证据 | 正式切换与开写 No-Go |
 
