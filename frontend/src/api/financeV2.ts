@@ -103,6 +103,15 @@ export interface FinanceV2PeriodCloseReadiness {
   };
 }
 
+export interface FinanceV2TrialBalance {
+  book_id: number;
+  period_id: number;
+  period_code: string;
+  formal_report_status: "blocked" | "pending_mapping";
+  formal_report_message: string;
+  rows: Array<{ account_version_id: number; account_code: string; account_name: string; dimension_set_id: number; currency_code: string; opening_debit: number; opening_credit: number; period_debit: number; period_credit: number; closing_debit: number; closing_credit: number }>;
+}
+
 export interface FinanceV2VoucherLineInput {
   account_version_id: number;
   summary: string;
@@ -126,6 +135,9 @@ export const financeV2Api = {
   getWriteReadiness: (bookId: number) => request.get<FinanceV2WriteReadiness>(`/finance-center/v2/books/${bookId}/write-readiness`),
   getPeriodCloseReadiness: (bookId: number, periodId: number) => request.get<FinanceV2PeriodCloseReadiness>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/close-readiness`,
+  ),
+  getTrialBalance: (bookId: number, periodId: number) => request.get<FinanceV2TrialBalance>(
+    `/finance-center/v2/books/${bookId}/periods/${periodId}/trial-balance`,
   ),
   listAccounts: (bookId: number, activeOn?: string) => request.get<FinanceV2Account[]>(
     `/finance-center/v2/books/${bookId}/accounts`,

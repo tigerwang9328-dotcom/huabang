@@ -15,7 +15,9 @@ from app.models.finance_v2 import (
     FinanceV2AccountVersion,
     FinanceV2AccountingBook,
     FinanceV2FiscalPeriod,
+    FinanceV2LedgerBalance,
     FinanceV2Voucher,
+    FinanceV2VoucherLine,
 )
 from app.models.finance_v2_operations import FinanceV2FeatureGate
 from app.models.sys import SysUser
@@ -228,6 +230,115 @@ async def execute_period_command(
     except FinanceV2DomainError as error:
         raise _domain_error(error) from error
     return ApiResponse.ok(data=result, message="V2 会计期间命令已执行")
+
+
+@router.get("/books/{book_id}/periods/{period_id}/trial-balance", response_model=ApiResponse)
+async def get_trial_balance(
+    book_id: int,
+    period_id: int,
+    limit: int = Query(default=500, ge=1, le=1000),
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    book = await db.get(FinanceV2AccountingBook, book_id)
+    period = await db.get(FinanceV2FiscalPeriod, period_id)
+    if not book or not period or period.book_id != book_id:
+        raise HTTPException(status_code=404, detail="V2 accounting book or fiscal period not found")
+    rows = (
+        await db.execute(
+            select(FinanceV2LedgerBalance, FinanceV2AccountVersion)
+            .join(FinanceV2AccountVersion, FinanceV2AccountVersion.id == FinanceV2LedgerBalance.account_version_id)
+            .where(
+                FinanceV2LedgerBalance.book_id == book_id,
+                FinanceV2LedgerBalance.period_id == period_id,
+            )
+            .order_by(FinanceV2AccountVersion.account_code, FinanceV2LedgerBalance.dimension_set_id)
+            .limit(limit)
+        )
+    ).all()
+    return ApiResponse.ok(
+        data={
+            "book_id": book_id,
+            "period_id": period_id,
+            "period_code": period.period_code,
+            "formal_report_status": "blocked" if book.formal_report_blocked else "pending_mapping",
+            "formal_report_message": "当前仅提供 V2 当前账试算表；资产负债表和利润表须在科目映射经核对后另行发布。",
+            "rows": [
+                {
+                    "account_version_id": balance.account_version_id,
+                    "account_code": account.account_code,
+                    "account_name": account.account_name,
+                    "dimension_set_id": balance.dimension_set_id,
+                    "currency_code": balance.currency_code,
+                    "opening_debit": balance.opening_debit,
+                    "opening_credit": balance.opening_credit,
+                    "period_debit": balance.period_debit,
+                    "period_credit": balance.period_credit,
+                    "closing_debit": balance.closing_debit,
+                    "closing_credit": balance.closing_credit,
+                }
+                for balance, account in rows
+            ],
+        }
+    )
+
+
+@router.get("/books/{book_id}/periods/{period_id}/ledger-lines", response_model=ApiResponse)
+async def list_ledger_lines(
+    book_id: int,
+    period_id: int,
+    account_version_id: int | None = Query(default=None),
+    after_line_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    period = await db.get(FinanceV2FiscalPeriod, period_id)
+    if not period or period.book_id != book_id:
+        raise HTTPException(status_code=404, detail="V2 fiscal period not found")
+    statement = (
+        select(FinanceV2VoucherLine, FinanceV2Voucher, FinanceV2AccountVersion)
+        .join(FinanceV2Voucher, FinanceV2Voucher.id == FinanceV2VoucherLine.voucher_id)
+        .join(FinanceV2AccountVersion, FinanceV2AccountVersion.id == FinanceV2VoucherLine.account_version_id)
+        .where(
+            FinanceV2Voucher.book_id == book_id,
+            FinanceV2Voucher.period_id == period_id,
+            FinanceV2Voucher.status == "posted",
+        )
+        .order_by(FinanceV2VoucherLine.id)
+        .limit(limit + 1)
+    )
+    if account_version_id is not None:
+        statement = statement.where(FinanceV2VoucherLine.account_version_id == account_version_id)
+    if after_line_id is not None:
+        statement = statement.where(FinanceV2VoucherLine.id > after_line_id)
+    rows = (await db.execute(statement)).all()
+    page = rows[:limit]
+    return ApiResponse.ok(
+        data={
+            "lines": [
+                {
+                    "line_id": line.id,
+                    "voucher_id": voucher.id,
+                    "voucher_no": voucher.voucher_no,
+                    "voucher_group": voucher.voucher_group,
+                    "voucher_date": voucher.voucher_date,
+                    "line_no": line.line_no,
+                    "account_version_id": account.id,
+                    "account_code": account.account_code,
+                    "account_name": account.account_name,
+                    "dimension_set_id": line.dimension_set_id,
+                    "summary": line.summary,
+                    "currency_code": line.currency_code,
+                    "exchange_rate": line.exchange_rate,
+                    "debit_amount": line.debit_amount,
+                    "credit_amount": line.credit_amount,
+                }
+                for line, voucher, account in page
+            ],
+            "next_after_line_id": page[-1][0].id if len(rows) > limit else None,
+        }
+    )
 
 
 @router.get("/books/{book_id}/accounts", response_model=ApiResponse)

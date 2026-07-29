@@ -178,6 +178,14 @@
           <el-descriptions-item label="余额表借贷">{{ periodCloseReadiness.checks.ledger_debit }} / {{ periodCloseReadiness.checks.ledger_credit }}</el-descriptions-item>
         </el-descriptions>
         <p class="close-note">来源异常口径：{{ periodCloseReadiness.checks.source_exception_scope }}</p>
+        <el-button text type="primary" :loading="trialBalanceLoading" @click="loadTrialBalance">查看 V2 当前账试算表</el-button>
+        <el-alert v-if="trialBalance" class="history-error" :title="trialBalance.formal_report_message" type="info" :closable="false" show-icon />
+        <el-table v-if="trialBalance" :data="trialBalance.rows" max-height="300" empty-text="当前期间暂无已重建余额">
+          <el-table-column prop="account_code" label="科目编码" min-width="110" /><el-table-column prop="account_name" label="科目名称" min-width="160" />
+          <el-table-column prop="opening_debit" label="期初借" min-width="100" /><el-table-column prop="opening_credit" label="期初贷" min-width="100" />
+          <el-table-column prop="period_debit" label="本期借" min-width="100" /><el-table-column prop="period_credit" label="本期贷" min-width="100" />
+          <el-table-column prop="closing_debit" label="期末借" min-width="100" /><el-table-column prop="closing_credit" label="期末贷" min-width="100" />
+        </el-table>
         <div v-if="periodCloseEnabled" class="close-actions">
           <el-button v-for="action in availablePeriodActions()" :key="action" type="primary" :loading="periodCommandLoading === action" @click="runPeriodCommand(action)">{{ periodActionLabel(action) }}</el-button>
         </div>
@@ -198,6 +206,7 @@ import {
   type FinanceV2HistoryVoucher,
   type FinanceV2HistoryVoucherLine,
   type FinanceV2PeriodCloseReadiness,
+  type FinanceV2TrialBalance,
   type FinanceV2Period,
   type FinanceV2Voucher,
   type FinanceV2VoucherLineInput,
@@ -215,10 +224,12 @@ const selectedHistoryVoucher = ref<FinanceV2HistoryVoucher>();
 const selectedClosePeriod = ref<FinanceV2Period>();
 const writeReadiness = ref<FinanceV2WriteReadiness>();
 const periodCloseReadiness = ref<FinanceV2PeriodCloseReadiness>();
+const trialBalance = ref<FinanceV2TrialBalance>();
 const loading = ref(false);
 const historyLoading = ref(false);
 const historyLineLoading = ref(false);
 const periodCloseLoading = ref(false);
+const trialBalanceLoading = ref(false);
 const workspaceLoading = ref(false);
 const draftSaving = ref(false);
 const commandLoading = ref("");
@@ -296,6 +307,7 @@ async function viewPeriodCloseReadiness(period: FinanceV2Period) {
   if (!selectedBookId.value) return;
   selectedClosePeriod.value = period;
   periodCloseReadiness.value = undefined;
+  trialBalance.value = undefined;
   periodCloseDrawerOpen.value = true;
   periodCloseLoading.value = true;
   try {
@@ -305,6 +317,19 @@ async function viewPeriodCloseReadiness(period: FinanceV2Period) {
     ElMessage.error(error instanceof Error ? error.message : "结账检查读取失败");
   } finally {
     periodCloseLoading.value = false;
+  }
+}
+
+async function loadTrialBalance() {
+  if (!selectedBookId.value || !selectedClosePeriod.value) return;
+  trialBalanceLoading.value = true;
+  try {
+    const response = await financeV2Api.getTrialBalance(selectedBookId.value, selectedClosePeriod.value.id);
+    trialBalance.value = response.data;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "试算表读取失败");
+  } finally {
+    trialBalanceLoading.value = false;
   }
 }
 
