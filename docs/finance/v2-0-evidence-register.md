@@ -7,7 +7,7 @@
 | 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
 | --- | --- | --- | --- | --- |
 | 本地实施工作树 | `D:\huabang\worktrees\kingdee-finance-local`，分支 `feature/huabang-full-finance-center`，HEAD `035a4cd`，开始核验时干净 | 本地，2026-07-29 | 本地只读 | 可继续本地实现 |
-| 本地迁移图 | `a4e7b1c3d6f8` 是唯一 head；实现计划中不得预写未来 revision ID | 本地，2026-07-29 | 本地只读 | 新迁移必须从当天实际图生成 |
+| 本地迁移图 | `bda75497f94f` 是唯一 head；该 revision 于 2026-07-29 从实际图生成，增加 `voucher_line` 借贷不可同时为正约束；实施计划中不得预写未来 revision ID | 本地，2026-07-29 | 本地只读 | 新迁移必须从当天实际图生成并在恢复副本验证 |
 | 生产仓库 | `/srv/huabang-ai-center`，分支 `feature/huabang-ai-mvp`，HEAD `1cdafd03674081ad3620ae7d723cf280774f3d0b`，核验时无工作树改动输出 | 生产只读，2026-07-29 | 生产只读 | V2 本地代码尚未部署 |
 | 生产后端 | `huabang-backend.service` 为 active/running；以 `xiaohu` 身份在 `127.0.0.1:8000` 运行 Uvicorn，工作目录为 `/srv/huabang-ai-center/backend` | 生产只读，2026-07-29 | 生产只读 | 未授权前不得重启 |
 | 生产迁移状态 | Alembic 单一 head/current 均为 `6c1e4a7d2f09` | 生产只读，2026-07-29 | 生产只读 | 发布前必须重新核实并比较本地迁移链 |
@@ -17,7 +17,7 @@
 | 既有正式账 | 旧 `fin` schema 存在 10 个账簿、349 张凭证和 4,617 条分录；它与 V2 的 `fin_current`/`fin_history` 隔离模型不是同一已验收实现 | 生产只读，2026-07-29 | 生产只读 | 不得把旧表直接宣布为 V2 正式账 |
 | 数据库角色 | 仅观测到 `huabang` 与 `postgres`；应用使用的 `huabang` 是 `fin` owner，拥有写与 trigger 权限；未发现 `fin_current`、`fin_history`、`fin_read` schema 或分离的 migrator/importer/auditor 角色 | 生产只读，2026-07-29 | 生产只读 | **生产迁移、历史发布和当前账开写 No-Go** |
 | 备份与恢复 | 每日备份 cron 存在，但最近可见数据库备份工件为 2026-07-20；没有本轮恢复副本或 PITR 演练证据。备份脚本含明文数据库凭据，凭据值不记录在本文档 | 生产只读，2026-07-29 | 生产只读 | **RPO≤24h/RTO≤4h 未证明，生产开写 No-Go** |
-| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，11 个 `test_finance_v2*.py` 文件共 27 项通过 | 本地，2026-07-29 | 本地测试 | 可继续实现；不是数据库恢复或生产验收 |
+| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，11 个 `test_finance_v2*.py` 文件及角色核验共 31 项通过 | 本地，2026-07-29 | 本地测试 | 可继续实现；不是数据库恢复或生产验收 |
 | 前端基线 | `npm run type-check` 与 `npm run build` 均退出成功；构建输出包含现有依赖的 Vite/Rollup 警告 | 本地，2026-07-29 | 本地构建 | 不等同于浏览器或生产验收 |
 
 ## 待确认或不可满足项

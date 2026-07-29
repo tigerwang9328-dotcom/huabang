@@ -137,6 +137,10 @@ class FinanceV2VoucherLine(Base):
     __table_args__ = (
         UniqueConstraint("voucher_id", "line_no", name="uq_fin_current_voucher_line_no"),
         CheckConstraint("debit_amount >= 0 AND credit_amount >= 0", name="ck_fin_current_voucher_line_nonnegative"),
+        CheckConstraint(
+            "NOT (debit_amount > 0 AND credit_amount > 0)",
+            name="ck_fin_current_voucher_line_not_both_positive",
+        ),
         {"schema": "fin_current"},
     )
 

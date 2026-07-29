@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.models.finance_v2 import (
     FinanceV2AccountingBook,
     FinanceV2CommandIdempotency,
@@ -32,3 +34,14 @@ def test_voucher_line_and_command_idempotency_have_database_identity_guards():
     assert "ck_fin_current_voucher_line_nonnegative" in line_constraint_names
     assert "ck_fin_current_voucher_line_one_sided" not in line_constraint_names
     assert "uq_fin_current_command_scope_key" in command_constraint_names
+
+
+def test_voucher_line_rejects_simultaneous_positive_debit_and_credit_in_model_and_migration():
+    constraint_names = {item.name for item in FinanceV2VoucherLine.__table__.constraints}
+    migration_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (Path(__file__).parents[1] / "alembic" / "versions").glob("*.py")
+    )
+
+    assert "ck_fin_current_voucher_line_not_both_positive" in constraint_names
+    assert "ck_fin_current_voucher_line_not_both_positive" in migration_sources
