@@ -28,6 +28,8 @@ from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
 from app.services.finance_v2.feature_gate_domain import FeatureGateError, GateScope, assert_command_enabled
 from app.services.finance_v2.finance_observability import monitoring_payload
+from app.services.finance_v2.opening_balance_domain import OpeningBalanceError
+from app.services.finance_v2.opening_balance_service import FinanceV2OpeningBalanceService
 from app.services.finance_v2.period_close_workflow import FinanceV2PeriodCloseWorkflow
 from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
 from app.services.finance_v2.platform_permissions import (
@@ -123,6 +125,10 @@ async def _assert_v2_write_enabled(db: AsyncSession, *, command: str, book_id: i
         )
     except FeatureGateError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
+    try:
+        await FinanceV2OpeningBalanceService(db).assert_current_writes_allowed(book_id=book_id)
+    except OpeningBalanceError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
 
 @router.get("/books", response_model=ApiResponse)
@@ -162,6 +168,12 @@ async def get_book_write_readiness(
         for row in rows
     ]
     role = _finance_gate_role(current_user)
+    try:
+        await FinanceV2OpeningBalanceService(db).assert_current_writes_allowed(book_id=book_id)
+    except OpeningBalanceError as error:
+        opening_balance_reason = str(error)
+    else:
+        opening_balance_reason = None
     readiness = {}
     for command in ("draft", "review", "post", "period_close"):
         try:
@@ -175,7 +187,10 @@ async def get_book_write_readiness(
         except FeatureGateError as error:
             readiness[command] = {"enabled": False, "reason": str(error)}
         else:
-            readiness[command] = {"enabled": True, "reason": None}
+            readiness[command] = {
+                "enabled": opening_balance_reason is None,
+                "reason": opening_balance_reason,
+            }
     return ApiResponse.ok(data={"book_id": book_id, "role": role, "commands": readiness})
 
 

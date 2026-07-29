@@ -13,6 +13,17 @@ from app.services.finance_v2.platform_permissions import (
 )
 
 
+def _allow_final_opening_balance(monkeypatch):
+    class FinalOpeningReady:
+        def __init__(self, _db):
+            pass
+
+        async def assert_current_writes_allowed(self, *, book_id):
+            assert book_id > 0
+
+    monkeypatch.setattr(finance_v2, "FinanceV2OpeningBalanceService", FinalOpeningReady)
+
+
 def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     routes = {(route.path, next(iter(route.methods))) for route in router.routes}
 
@@ -341,6 +352,7 @@ async def test_v2_command_gate_uses_the_vouchers_book_not_its_identifier(monkeyp
             return SimpleNamespace(book_id=100)
 
     monkeypatch.setattr(finance_v2, "FinanceV2VoucherWorkflow", FakeWorkflow)
+    _allow_final_opening_balance(monkeypatch)
 
     response = await finance_v2.execute_voucher_command(
         7,
@@ -379,6 +391,7 @@ async def test_v2_write_gate_uses_super_admin_role_for_an_administrator(monkeypa
             return GateResult()
 
     monkeypatch.setattr(finance_v2, "FinanceV2VoucherWorkflow", FakeWorkflow)
+    _allow_final_opening_balance(monkeypatch)
 
     response = await finance_v2.create_voucher_draft(
         finance_v2.VoucherDraftInput(
@@ -393,6 +406,114 @@ async def test_v2_write_gate_uses_super_admin_role_for_an_administrator(monkeypa
     )
 
     assert response.data["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_v2_write_gate_rejects_enabled_command_until_final_opening_balance_is_locked(monkeypatch):
+    class FinalOpeningRequired:
+        def __init__(self, _db):
+            pass
+
+        async def assert_current_writes_allowed(self, *, book_id):
+            assert book_id == 1
+            raise finance_v2.OpeningBalanceError("final locked opening balance is required before current writes")
+
+    gates = [SimpleNamespace(scope_type="global", scope_key="*", gate_name="draft_enabled", enabled=True)]
+
+    class GateResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return gates
+
+    class GateDb:
+        async def execute(self, _statement):
+            return GateResult()
+
+    monkeypatch.setattr(finance_v2, "FinanceV2OpeningBalanceService", FinalOpeningRequired)
+
+    with pytest.raises(HTTPException, match="final locked opening balance") as error:
+        await finance_v2._assert_v2_write_enabled(
+            GateDb(), command="draft", book_id=1, role="finance_manager"
+        )
+
+    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_v2_write_gate_permits_an_enabled_command_after_final_opening_balance_is_ready(monkeypatch):
+    calls = []
+
+    class FinalOpeningReady:
+        def __init__(self, _db):
+            pass
+
+        async def assert_current_writes_allowed(self, *, book_id):
+            calls.append(book_id)
+
+    gates = [SimpleNamespace(scope_type="global", scope_key="*", gate_name="draft_enabled", enabled=True)]
+
+    class GateResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return gates
+
+    class GateDb:
+        async def execute(self, _statement):
+            return GateResult()
+
+    monkeypatch.setattr(finance_v2, "FinanceV2OpeningBalanceService", FinalOpeningReady)
+
+    await finance_v2._assert_v2_write_enabled(GateDb(), command="draft", book_id=1, role="finance_manager")
+
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_v2_write_readiness_reports_the_final_opening_boundary_once_for_each_enabled_command(monkeypatch):
+    calls = []
+
+    class FinalOpeningRequired:
+        def __init__(self, _db):
+            pass
+
+        async def assert_current_writes_allowed(self, *, book_id):
+            calls.append(book_id)
+            raise finance_v2.OpeningBalanceError("final locked opening balance is required before current writes")
+
+    gates = [
+        SimpleNamespace(scope_type="global", scope_key="*", gate_name=f"{command}_enabled", enabled=True)
+        for command in ("draft", "review", "post", "period_close")
+    ]
+
+    class GateResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return gates
+
+    class GateDb:
+        async def execute(self, _statement):
+            return GateResult()
+
+    monkeypatch.setattr(finance_v2, "FinanceV2OpeningBalanceService", FinalOpeningRequired)
+
+    response = await finance_v2.get_book_write_readiness(
+        1,
+        current_user=SimpleNamespace(id=1, username="finance"),
+        db=GateDb(),
+    )
+
+    assert calls == [1]
+    assert response.data["commands"]["draft"] == {
+        "enabled": False,
+        "reason": "final locked opening balance is required before current writes",
+    }
+    assert response.data["commands"]["period_close"]["enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -432,6 +553,7 @@ async def test_v2_post_commits_primary_transaction_before_marking_attempt_succes
             self.committed = True
 
     monkeypatch.setattr(finance_v2, "FinanceV2VoucherWorkflow", FakeWorkflow)
+    _allow_final_opening_balance(monkeypatch)
     db = GateDb()
 
     response = await finance_v2.execute_voucher_command(
@@ -488,6 +610,7 @@ async def test_v2_post_marks_independent_attempt_failed_when_primary_commit_fail
             self.rolled_back = True
 
     monkeypatch.setattr(finance_v2, "FinanceV2VoucherWorkflow", FakeWorkflow)
+    _allow_final_opening_balance(monkeypatch)
     db = GateDb()
 
     with pytest.raises(RuntimeError, match="primary commit failed"):
