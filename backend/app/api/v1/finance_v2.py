@@ -9,11 +9,14 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_roles
+from app.core.config import settings
 from app.core.database import get_db
-from app.models.finance_v2 import FinanceV2AccountingBook
+from app.models.finance_v2 import FinanceV2AccountingBook, FinanceV2Voucher
+from app.models.finance_v2_operations import FinanceV2FeatureGate
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
+from app.services.finance_v2.feature_gate_domain import FeatureGateError, GateScope, assert_command_enabled
 from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
 
 
@@ -51,6 +54,41 @@ def _actor(user: SysUser) -> str:
 def _domain_error(error: FinanceV2DomainError) -> HTTPException:
     message = str(error)
     return HTTPException(status_code=409 if "conflict" in message else 400, detail=message)
+
+
+def _gate_command_for_voucher_action(action: str) -> str:
+    if action == "post":
+        return "post"
+    if action in {"start_review", "approve", "reject"}:
+        return "review"
+    return "draft"
+
+
+def _finance_gate_role(user: SysUser) -> str:
+    return "super_admin" if getattr(user, "is_admin", False) else "finance_manager"
+
+
+async def _assert_v2_write_enabled(db: AsyncSession, *, command: str, book_id: int, role: str) -> None:
+    rows = (await db.execute(select(FinanceV2FeatureGate))).scalars().all()
+    gates = [
+        GateScope(
+            scope_type=row.scope_type,
+            scope_key=row.scope_key,
+            gate_name=row.gate_name,
+            enabled=row.enabled,
+        )
+        for row in rows
+    ]
+    try:
+        assert_command_enabled(
+            gates,
+            command=command,
+            environment=settings.APP_ENV,
+            book=str(book_id),
+            role=role,
+        )
+    except FeatureGateError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
 
 @router.get("/books", response_model=ApiResponse)
@@ -102,6 +140,12 @@ async def create_voucher_draft(
     current_user: SysUser = Depends(require_roles("finance_manager")),
     db: AsyncSession = Depends(get_db),
 ):
+    await _assert_v2_write_enabled(
+        db,
+        command="draft",
+        book_id=body.book_id,
+        role=_finance_gate_role(current_user),
+    )
     try:
         result = await FinanceV2VoucherWorkflow(db).create_draft(
             book_id=body.book_id,
@@ -123,6 +167,15 @@ async def execute_voucher_command(
     current_user: SysUser = Depends(require_roles("finance_manager")),
     db: AsyncSession = Depends(get_db),
 ):
+    voucher = await db.get(FinanceV2Voucher, voucher_id)
+    if not voucher:
+        raise HTTPException(status_code=404, detail="V2 voucher not found")
+    await _assert_v2_write_enabled(
+        db,
+        command=_gate_command_for_voucher_action(body.action),
+        book_id=voucher.book_id,
+        role=_finance_gate_role(current_user),
+    )
     try:
         result = await FinanceV2VoucherWorkflow(db).command(
             voucher_id=voucher_id,

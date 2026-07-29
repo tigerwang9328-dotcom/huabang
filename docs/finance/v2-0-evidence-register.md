@@ -15,9 +15,10 @@
 | 金蝶源快照 | `ods.kingdee_import_batch=3`、`ods.kingdee_voucher=339`、`ods.kingdee_voucher_entry=4596`、`ods.kingdee_account=416`、`ods.kingdee_balance=6868`；3 个批次均保存备份/manifest 哈希、预期计数与校验结果 | 生产只读，2026-07-29 | 生产只读 | V2 历史导入必须另建 `fin_history` 暂存—校验—发布链，绝不改写 ODS |
 | 金蝶覆盖范围 | 凭证日期为 2025-10-31 至 2026-06-30，来自 3 个 source database | 生产只读，2026-07-29 | 生产只读 | 当前账启用日与 2026-07-01 后连续性尚未获得财务确认 |
 | 既有正式账 | 旧 `fin` schema 存在 10 个账簿、349 张凭证和 4,617 条分录；它与 V2 的 `fin_current`/`fin_history` 隔离模型不是同一已验收实现 | 生产只读，2026-07-29 | 生产只读 | 不得把旧表直接宣布为 V2 正式账 |
+| V2 写入口保护 | 本地 V2 草稿/命令 API 在不存在显式全局 Gate 时 fail-closed；命令按凭证所属账簿及财务/超级管理员角色评估 | 本地测试，2026-07-29 | 本地测试 | 生产仍需部署后重新核验，不能据此开启写入 |
 | 数据库角色 | 仅观测到 `huabang` 与 `postgres`；应用使用的 `huabang` 是 `fin` owner，拥有写与 trigger 权限；未发现 `fin_current`、`fin_history`、`fin_read` schema 或分离的 migrator/importer/auditor 角色 | 生产只读，2026-07-29 | 生产只读 | **生产迁移、历史发布和当前账开写 No-Go** |
 | 备份与恢复 | 每日备份 cron 存在，但最近可见数据库备份工件为 2026-07-20；没有本轮恢复副本或 PITR 演练证据。备份脚本含明文数据库凭据，凭据值不记录在本文档 | 生产只读，2026-07-29 | 生产只读 | **RPO≤24h/RTO≤4h 未证明，生产开写 No-Go** |
-| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，11 个 `test_finance_v2*.py` 文件及角色核验共 34 项通过；涵盖命令幂等的纯领域编号分配 | 本地，2026-07-29 | 本地测试 | 可继续实现；不是数据库恢复或生产验收 |
+| 后端 V2 定向测试 | 在临时非生产 `APP_SECRET_KEY`/`DB_PASSWORD`/`JWT_SECRET_KEY` 环境变量下，11 个 `test_finance_v2*.py` 文件及角色核验共 37 项通过；涵盖命令幂等和 API fail-closed Gate | 本地，2026-07-29 | 本地测试 | 可继续实现；不是数据库恢复或生产验收 |
 | 前端基线 | `npm run type-check` 与 `npm run build` 均退出成功；构建输出包含现有依赖的 Vite/Rollup 警告 | 本地，2026-07-29 | 本地构建 | 不等同于浏览器或生产验收 |
 
 ## 待确认或不可满足项
