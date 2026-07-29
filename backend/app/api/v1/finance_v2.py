@@ -22,6 +22,7 @@ from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
 from app.services.finance_v2.feature_gate_domain import FeatureGateError, GateScope, assert_command_enabled
+from app.services.finance_v2.period_close_workflow import FinanceV2PeriodCloseWorkflow
 from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
 
 
@@ -48,6 +49,13 @@ class VoucherDraftInput(BaseModel):
 
 class VoucherCommandInput(BaseModel):
     action: str = Field(pattern=r"^(submit|start_review|approve|reject|reopen|withdraw|cancel|post)$")
+    command_id: str = Field(min_length=1, max_length=128)
+    expected_version: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class PeriodCommandInput(BaseModel):
+    action: str = Field(pattern=r"^(start_close|complete_close|request_reopen|approve_reopen)$")
     command_id: str = Field(min_length=1, max_length=128)
     expected_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=1000)
@@ -135,7 +143,7 @@ async def get_book_write_readiness(
     ]
     role = _finance_gate_role(current_user)
     readiness = {}
-    for command in ("draft", "review", "post"):
+    for command in ("draft", "review", "post", "period_close"):
         try:
             assert_command_enabled(
                 gates,
@@ -177,6 +185,49 @@ async def list_book_periods(
             for row in rows
         ]
     )
+
+
+@router.get("/books/{book_id}/periods/{period_id}/close-readiness", response_model=ApiResponse)
+async def get_period_close_readiness(
+    book_id: int,
+    period_id: int,
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await FinanceV2PeriodCloseWorkflow(db).readiness(book_id=book_id, period_id=period_id)
+    except FinanceV2DomainError as error:
+        raise _domain_error(error) from error
+    return ApiResponse.ok(data=result)
+
+
+@router.post("/books/{book_id}/periods/{period_id}/commands", response_model=ApiResponse)
+async def execute_period_command(
+    book_id: int,
+    period_id: int,
+    body: PeriodCommandInput,
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    await _assert_v2_write_enabled(
+        db,
+        command="period_close",
+        book_id=book_id,
+        role=_finance_gate_role(current_user),
+    )
+    try:
+        result = await FinanceV2PeriodCloseWorkflow(db).command(
+            book_id=book_id,
+            period_id=period_id,
+            action=body.action,
+            actor_id=_actor(current_user),
+            expected_version=body.expected_version,
+            command_id=body.command_id,
+            reason=body.reason,
+        )
+    except FinanceV2DomainError as error:
+        raise _domain_error(error) from error
+    return ApiResponse.ok(data=result, message="V2 会计期间命令已执行")
 
 
 @router.get("/books/{book_id}/accounts", response_model=ApiResponse)

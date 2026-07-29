@@ -7,6 +7,7 @@ from app.services.finance_v2.period_close_domain import (
     approve_reopen,
     begin_close,
     complete_close,
+    next_reopen_approval,
     request_reopen,
 )
 
@@ -34,3 +35,32 @@ def test_reopen_requires_a_reason_and_two_distinct_approvers():
 
     reopened = approve_reopen(reopening, first_approver="finance-b", second_approver="finance-c")
     assert reopened.status == "open"
+
+
+def test_reopen_approval_requires_two_people_distinct_from_requester_and_each_other():
+    first_step, can_reopen = next_reopen_approval(
+        requester="finance-requester",
+        existing_approvers=(),
+        actor="finance-a",
+    )
+    assert (first_step, can_reopen) == (1, False)
+
+    second_step, can_reopen = next_reopen_approval(
+        requester="finance-requester",
+        existing_approvers=("finance-a",),
+        actor="finance-b",
+    )
+    assert (second_step, can_reopen) == (2, True)
+
+    with pytest.raises(PeriodCloseError, match="requester"):
+        next_reopen_approval(
+            requester="finance-requester",
+            existing_approvers=(),
+            actor="finance-requester",
+        )
+    with pytest.raises(PeriodCloseError, match="already approved"):
+        next_reopen_approval(
+            requester="finance-requester",
+            existing_approvers=("finance-a",),
+            actor="finance-a",
+        )

@@ -54,3 +54,17 @@ def approve_reopen(state: PeriodState, *, first_approver: str, second_approver: 
     if not first_approver.strip() or not second_approver.strip() or first_approver == second_approver:
         raise PeriodCloseError("reopen requires two distinct approvers")
     return PeriodState("open")
+
+
+def next_reopen_approval(*, requester: str, existing_approvers: tuple[str, ...], actor: str) -> tuple[int, bool]:
+    """Return the next persisted approval step and whether it reopens the period."""
+
+    if not requester.strip() or not actor.strip():
+        raise PeriodCloseError("reopen requester and approver are required")
+    if len(existing_approvers) >= 2:
+        raise PeriodCloseError("reopen already has two approvals")
+    if actor == requester:
+        raise PeriodCloseError("reopen requester cannot approve the request")
+    if actor in existing_approvers:
+        raise PeriodCloseError("approver already approved this reopen request")
+    return len(existing_approvers) + 1, len(existing_approvers) == 1

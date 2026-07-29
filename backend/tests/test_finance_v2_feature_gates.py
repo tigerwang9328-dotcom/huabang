@@ -24,3 +24,9 @@ def test_emergency_stop_overrides_every_enabled_scope_but_not_read_only_queries(
     with pytest.raises(FeatureGateError, match="emergency stop"):
         assert_command_enabled(gates, command="post", environment="prod", book="book-1", role="finance_manager")
     assert_command_enabled(gates, command="read", environment="prod", book="book-1", role="finance_manager")
+
+
+def test_period_close_requires_its_own_explicit_write_gate():
+    gates = [GateScope("global", "*", "period_close_enabled", True)]
+
+    assert_command_enabled(gates, command="period_close", environment="prod", book="book-1", role="finance_manager")

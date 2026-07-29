@@ -44,6 +44,9 @@ class _WorkflowDb:
             ])
         return _Result(rowcount=1)
 
+    async def get(self, _model, _identifier):
+        return SimpleNamespace(status="open")
+
     def add(self, item):
         self.added.append(item)
 
@@ -192,3 +195,28 @@ async def test_manual_post_assigns_and_finalizes_a_reserved_voucher_number(monke
     assert reservation.status == "used"
     assert result["voucher_no"] == "0007"
     assert result["posting_attempt_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_manual_post_is_rejected_once_its_period_has_started_closing():
+    voucher = _voucher()
+    voucher.status = "approved"
+    voucher.version = 4
+
+    class ClosedPeriodDb:
+        async def execute(self, _statement):
+            return _Result(scalar=voucher)
+
+        async def get(self, _model, period_id):
+            assert period_id == voucher.period_id
+            return SimpleNamespace(status="closing")
+
+    with pytest.raises(FinanceV2DomainError, match="fiscal period is not open"):
+        await FinanceV2VoucherWorkflow(ClosedPeriodDb()).command(
+            voucher_id=voucher.id,
+            action="post",
+            actor_id="poster",
+            expected_version=voucher.version,
+            reason="期末结账中",
+            command_id="post-closed-period-001",
+        )

@@ -119,6 +119,7 @@
             <el-table-column prop="status" label="状态" min-width="90" />
             <el-table-column prop="start_date" label="开始" min-width="110" />
             <el-table-column prop="end_date" label="结束" min-width="110" />
+            <el-table-column label="结账" width="100" fixed="right"><template #default="{ row }"><el-button text type="primary" @click="viewPeriodCloseReadiness(row)">检查</el-button></template></el-table-column>
           </el-table>
         </section>
         <section>
@@ -162,6 +163,28 @@
         <el-table-column label="数据标记" width="100"><template #default="{ row }"><el-tag :type="row.historical_marker ? 'info' : 'danger'" effect="plain">{{ row.historical_marker ? "历史数据" : "标记异常" }}</el-tag></template></el-table-column>
       </el-table>
     </el-drawer>
+
+    <el-drawer v-model="periodCloseDrawerOpen" :title="`结账检查${selectedClosePeriod ? ` · ${selectedClosePeriod.period_code}` : ''}`" size="720px">
+      <el-alert title="结账前必须全部通过未过账、借贷平衡、来源异常和余额重算检查；人工操作仍受独立 period_close Gate 控制。" type="warning" :closable="false" show-icon />
+      <template v-if="periodCloseReadiness">
+        <el-descriptions class="close-summary" :column="2" border>
+          <el-descriptions-item label="期间状态">{{ periodCloseReadiness.status }}</el-descriptions-item>
+          <el-descriptions-item label="可开始结账">{{ periodCloseReadiness.ready_to_start_close ? "是" : "否" }}</el-descriptions-item>
+          <el-descriptions-item label="未过账凭证">{{ periodCloseReadiness.checks.unposted_voucher_count }}</el-descriptions-item>
+          <el-descriptions-item label="借贷不平凭证">{{ periodCloseReadiness.checks.unbalanced_voucher_count }}</el-descriptions-item>
+          <el-descriptions-item label="来源异常">{{ periodCloseReadiness.checks.source_exception_count }}</el-descriptions-item>
+          <el-descriptions-item label="余额差异">{{ periodCloseReadiness.checks.ledger_difference_count }}</el-descriptions-item>
+          <el-descriptions-item label="已过账借贷">{{ periodCloseReadiness.checks.posted_debit }} / {{ periodCloseReadiness.checks.posted_credit }}</el-descriptions-item>
+          <el-descriptions-item label="余额表借贷">{{ periodCloseReadiness.checks.ledger_debit }} / {{ periodCloseReadiness.checks.ledger_credit }}</el-descriptions-item>
+        </el-descriptions>
+        <p class="close-note">来源异常口径：{{ periodCloseReadiness.checks.source_exception_scope }}</p>
+        <div v-if="periodCloseEnabled" class="close-actions">
+          <el-button v-for="action in availablePeriodActions()" :key="action" type="primary" :loading="periodCommandLoading === action" @click="runPeriodCommand(action)">{{ periodActionLabel(action) }}</el-button>
+        </div>
+        <el-alert v-else class="history-error" :title="writeReadiness?.commands.period_close.reason || '结账写入 Gate 未开启'" type="info" :closable="false" show-icon />
+      </template>
+      <el-skeleton v-else-if="periodCloseLoading" :rows="5" animated />
+    </el-drawer>
   </section>
 </template>
 
@@ -174,6 +197,7 @@ import {
   type FinanceV2Book,
   type FinanceV2HistoryVoucher,
   type FinanceV2HistoryVoucherLine,
+  type FinanceV2PeriodCloseReadiness,
   type FinanceV2Period,
   type FinanceV2Voucher,
   type FinanceV2VoucherLineInput,
@@ -188,16 +212,21 @@ const vouchers = ref<FinanceV2Voucher[]>([]);
 const historyVouchers = ref<FinanceV2HistoryVoucher[]>([]);
 const historyVoucherLines = ref<FinanceV2HistoryVoucherLine[]>([]);
 const selectedHistoryVoucher = ref<FinanceV2HistoryVoucher>();
+const selectedClosePeriod = ref<FinanceV2Period>();
 const writeReadiness = ref<FinanceV2WriteReadiness>();
+const periodCloseReadiness = ref<FinanceV2PeriodCloseReadiness>();
 const loading = ref(false);
 const historyLoading = ref(false);
 const historyLineLoading = ref(false);
+const periodCloseLoading = ref(false);
 const workspaceLoading = ref(false);
 const draftSaving = ref(false);
 const commandLoading = ref("");
+const periodCommandLoading = ref("");
 const loadError = ref("");
 const historyLoadError = ref("");
 const historyDrawerOpen = ref(false);
+const periodCloseDrawerOpen = ref(false);
 const today = () => new Date().toISOString().slice(0, 10);
 const newRequestId = () => globalThis.crypto?.randomUUID?.() || `finance-v2-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const draft = reactive({ book_id: 0, period_id: 0, voucher_date: today(), request_id: newRequestId(), entries: [] as FinanceV2VoucherLineInput[] });
@@ -205,6 +234,7 @@ const draft = reactive({ book_id: 0, period_id: 0, voucher_date: today(), reques
 const draftEnabled = computed(() => Boolean(writeReadiness.value?.commands.draft.enabled));
 const reviewEnabled = computed(() => Boolean(writeReadiness.value?.commands.review.enabled));
 const postEnabled = computed(() => Boolean(writeReadiness.value?.commands.post.enabled));
+const periodCloseEnabled = computed(() => Boolean(writeReadiness.value?.commands.period_close.enabled));
 const openPeriods = computed(() => periods.value.filter((period) => period.status === "open"));
 const writeGateMessage = computed(() => {
   if (!writeReadiness.value) return "正在读取服务器写入 Gate；未确认前不显示可写操作。";
@@ -259,6 +289,22 @@ async function viewHistoryVoucher(voucher: FinanceV2HistoryVoucher) {
     ElMessage.error(error instanceof Error ? error.message : "历史凭证分录读取失败");
   } finally {
     historyLineLoading.value = false;
+  }
+}
+
+async function viewPeriodCloseReadiness(period: FinanceV2Period) {
+  if (!selectedBookId.value) return;
+  selectedClosePeriod.value = period;
+  periodCloseReadiness.value = undefined;
+  periodCloseDrawerOpen.value = true;
+  periodCloseLoading.value = true;
+  try {
+    const response = await financeV2Api.getPeriodCloseReadiness(selectedBookId.value, period.id);
+    periodCloseReadiness.value = response.data;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "结账检查读取失败");
+  } finally {
+    periodCloseLoading.value = false;
   }
 }
 
@@ -327,6 +373,47 @@ function availableActions(voucher: FinanceV2Voucher) {
   return (candidates[voucher.status] || []).filter(actionGate);
 }
 
+const periodActionLabel = (action: string) => ({ start_close: "开始结账", complete_close: "完成结账", request_reopen: "申请反结账", approve_reopen: "批准反结账" } as Record<string, string>)[action] || action;
+function availablePeriodActions() {
+  const status = periodCloseReadiness.value?.status;
+  if (status === "open" && periodCloseReadiness.value?.ready_to_start_close) return ["start_close"];
+  if (status === "closing") return ["complete_close"];
+  if (status === "closed") return ["request_reopen"];
+  if (status === "reopening") return ["approve_reopen"];
+  return [];
+}
+
+async function runPeriodCommand(action: string) {
+  if (!selectedBookId.value || !selectedClosePeriod.value || !periodCloseReadiness.value) return;
+  const reasonRequired = ["request_reopen", "approve_reopen"].includes(action);
+  let reason: string | undefined;
+  if (reasonRequired) {
+    try {
+      const response = await ElMessageBox.prompt(`${periodActionLabel(action)}原因将写入不可变审计记录。`, periodActionLabel(action), { inputPattern: /\S+/, inputErrorMessage: "必须填写原因", confirmButtonText: "确认", cancelButtonText: "取消" });
+      reason = response.value;
+    } catch {
+      return;
+    }
+  }
+  periodCommandLoading.value = action;
+  try {
+    await financeV2Api.executePeriodCommand(selectedBookId.value, selectedClosePeriod.value.id, {
+      action,
+      command_id: newRequestId(),
+      expected_version: periodCloseReadiness.value.version,
+      reason,
+    });
+    ElMessage.success(`${periodActionLabel(action)}已提交`);
+    await loadWorkspace();
+    const refreshed = periods.value.find((period) => period.id === selectedClosePeriod.value?.id);
+    if (refreshed) await viewPeriodCloseReadiness(refreshed);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : `${periodActionLabel(action)}失败，请刷新后确认状态`);
+  } finally {
+    periodCommandLoading.value = "";
+  }
+}
+
 async function runCommand(voucher: FinanceV2Voucher, action: string) {
   const reasonRequired = ["reject", "reopen", "withdraw", "cancel", "post"].includes(action);
   let reason: string | undefined;
@@ -364,6 +451,9 @@ onMounted(loadBooks);
 .history-card { min-height: 260px; }
 .subtle { margin: 6px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
 .history-error { margin-top: 12px; }
+.close-summary { margin-top: 16px; }
+.close-note { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.6; }
+.close-actions { display: flex; gap: 10px; margin-top: 16px; }
 .workspace-filter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .gate-alert { margin-top: 16px; }
 .draft-section { margin-top: 20px; }

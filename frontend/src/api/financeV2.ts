@@ -80,7 +80,27 @@ export interface FinanceV2HistoryVoucherLine {
 export interface FinanceV2WriteReadiness {
   book_id: number;
   role: "finance_manager" | "super_admin";
-  commands: Record<"draft" | "review" | "post", { enabled: boolean; reason: string | null }>;
+  commands: Record<"draft" | "review" | "post" | "period_close", { enabled: boolean; reason: string | null }>;
+}
+
+export interface FinanceV2PeriodCloseReadiness {
+  book_id: number;
+  period_id: number;
+  period_code: string;
+  status: FinanceV2Period["status"];
+  version: number;
+  ready_to_start_close: boolean;
+  checks: {
+    unposted_voucher_count: number;
+    unbalanced_voucher_count: number;
+    source_exception_count: number;
+    ledger_difference_count: number;
+    posted_debit: string;
+    posted_credit: string;
+    ledger_debit: string;
+    ledger_credit: string;
+    source_exception_scope: string;
+  };
 }
 
 export interface FinanceV2VoucherLineInput {
@@ -104,6 +124,9 @@ export const financeV2Api = {
   listBooks: () => request.get<FinanceV2Book[]>("/finance-center/v2/books"),
   listPeriods: (bookId: number) => request.get<FinanceV2Period[]>(`/finance-center/v2/books/${bookId}/periods`),
   getWriteReadiness: (bookId: number) => request.get<FinanceV2WriteReadiness>(`/finance-center/v2/books/${bookId}/write-readiness`),
+  getPeriodCloseReadiness: (bookId: number, periodId: number) => request.get<FinanceV2PeriodCloseReadiness>(
+    `/finance-center/v2/books/${bookId}/periods/${periodId}/close-readiness`,
+  ),
   listAccounts: (bookId: number, activeOn?: string) => request.get<FinanceV2Account[]>(
     `/finance-center/v2/books/${bookId}/accounts`,
     { params: activeOn ? { active_on: activeOn } : undefined },
@@ -121,6 +144,8 @@ export const financeV2Api = {
     { params },
   ),
   createDraft: (payload: FinanceV2DraftInput) => request.post("/finance-center/v2/vouchers", payload),
+  executePeriodCommand: (bookId: number, periodId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>
+    request.post(`/finance-center/v2/books/${bookId}/periods/${periodId}/commands`, payload),
   executeCommand: (voucherId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>
     request.post(`/finance-center/v2/vouchers/${voucherId}/commands`, payload),
 };

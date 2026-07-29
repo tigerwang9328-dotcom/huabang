@@ -112,6 +112,10 @@ class FinanceV2VoucherWorkflow:
         ).scalar_one_or_none()
         if not voucher:
             raise FinanceV2DomainError("voucher not found")
+        if action == "post":
+            period = await self.db.get(FinanceV2FiscalPeriod, voucher.period_id)
+            if not period or period.status != "open":
+                raise FinanceV2DomainError("fiscal period is not open for manual posting")
         request_hash = self.command_payload_hash(
             voucher_id=voucher.id,
             action=action,

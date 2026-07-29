@@ -62,3 +62,14 @@ test("V2 workspace exposes write actions only through server-reported Gate readi
   assert.ok(workspace.includes("draftEnabled"));
   assert.ok(workspace.includes("runCommand"));
 });
+
+test("V2 workspace exposes period-close readiness and keeps close commands behind their own Gate", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getPeriodCloseReadiness"));
+  assert.ok(api.includes("executePeriodCommand"));
+  assert.ok(workspace.includes("结账检查"));
+  assert.ok(workspace.includes("periodCloseEnabled"));
+  assert.ok(workspace.includes("viewPeriodCloseReadiness"));
+});
