@@ -7,6 +7,7 @@ from app.models.finance_v2 import (
     FinanceV2Voucher,
     FinanceV2VoucherLine,
 )
+from app.models.finance_v2_operations import FinanceV2VoucherNumberCounter, FinanceV2VoucherNumberReservation
 
 
 def test_current_finance_tables_are_isolated_from_legacy_fin_schema():
@@ -45,3 +46,22 @@ def test_voucher_line_rejects_simultaneous_positive_debit_and_credit_in_model_an
 
     assert "ck_fin_current_voucher_line_not_both_positive" in constraint_names
     assert "ck_fin_current_voucher_line_not_both_positive" in migration_sources
+
+
+def test_voucher_number_counter_and_reservation_preserve_period_scoped_audit_identity():
+    counter_constraints = {item.name for item in FinanceV2VoucherNumberCounter.__table__.constraints}
+    reservation_constraints = {item.name for item in FinanceV2VoucherNumberReservation.__table__.constraints}
+
+    assert FinanceV2VoucherNumberCounter.__table__.schema == "fin_current"
+    assert FinanceV2VoucherNumberReservation.__table__.schema == "fin_current"
+    assert "uq_fin_current_voucher_number_counter_scope" in counter_constraints
+    assert "uq_fin_current_voucher_number_reservation_scope" in reservation_constraints
+    assert "voided" in " ".join(
+        str(item.sqltext) for item in FinanceV2VoucherNumberReservation.__table__.constraints if hasattr(item, "sqltext")
+    )
+    migration_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (Path(__file__).parents[1] / "alembic" / "versions").glob("*.py")
+    )
+    assert "fin_current.voucher_number_counter" in migration_sources
+    assert "fin_current.voucher_number_reservation" in migration_sources
