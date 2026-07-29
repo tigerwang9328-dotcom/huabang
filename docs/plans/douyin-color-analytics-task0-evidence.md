@@ -1,7 +1,7 @@
 # 抖音颜色分析 v3.1 Task 0 证据
 
 日期：2026-07-29（Asia/Shanghai）
-状态：`BLOCKED_BY_UNVERIFIED_RECOVERY`
+状态：`PASSED`
 
 ## 范围与边界
 
@@ -61,20 +61,32 @@ v3.1 颜色分析的合约证据。本文件是 v3.1 计划指定的评审入口
   -> `103 passed, 1 failed`。失败是现有固定历史 Alembic head
   `2b0f6a7b8c94` 与真实 `6c1e4a7d2f09` 不一致；Task 0 未越界修复。
 
-## 恢复演练阻塞
+## 恢复演练
 
-唯一允许的恢复目标为 `huabang_ai_task0_restore`。应用数据库角色创建它时得到
-`ERROR: permission denied to create database`。`sudo -n -l` 和
-`sudo -n -u postgres psql -d postgres -Atqc 'SELECT current_user'` 也都返回
-`sudo: a password is required`。随后只读确认该恢复库不存在。
+唯一恢复目标为 `huabang_ai_task0_restore`。在受控 PostgreSQL 管理权限下，先
+精确删除同名临时库（若存在），再创建归属 `huabang` 的独立库；生产
+`huabang_ai` 未被恢复、写入或删除。恢复过程使用 `postgres` 读取已验证的 gzip
+备份，并在 `/dev/shm` 创建仅 `postgres` 可读的 0600 临时副本；恢复完成后该副本
+已由退出清理逻辑删除。
 
-未创建或删除任何数据库，未变更权限，也未对生产 `huabang_ai` 写入。备份压缩
-完整性已验证，但恢复可用性尚未实证。需要受控 PostgreSQL 管理入口预建唯一
-临时库或提供一次性 CREATEDB 能力后，才能执行恢复、结构/样本行数校验和删除。
+恢复后以 `postgres` 只读验证得到：
+
+| 校验项 | 结果 |
+| --- | --- |
+| 恢复库/所有者 | `huabang_ai_task0_restore` / `huabang` |
+| Alembic revision | `6c1e4a7d2f09`（与生产 current/head 一致） |
+| 非系统 schema 表数 | 173 |
+| `sys.sys_user` | 7 行 |
+| `dwd.dwd_pos_ticket` | 1,955 行 |
+| 核心 schema 表数 | `sys=15`、`dwd=17`、`dm=13` |
+| 临时备份副本 | 不存在（已清理） |
+
+以上同时证明备份可解压、可恢复为完整结构，并包含可读取的业务样本。恢复库保留
+供本次门禁审阅；它是唯一临时库，不是生产库，也没有应用部署、重启或迁移。
 
 ## 评审结论
 
 v3.1 专属合约证明与生产只读复核均可评审；旧 v3.2 穿搭 POC 不计入本结论。
-恢复演练门禁仍未通过，因此 Task 0 为
-`BLOCKED_BY_UNVERIFIED_RECOVERY`，不可描述为已上线、已完成迁移准备或已验证
-恢复。Task 1--7 保持未开始。
+Task 0 的恢复演练、v3.1 专属合约证明与生产只读复核均已通过。该结论只表示
+Task 1 可以开始，不表示模块已上线、已部署、已完成迁移或已完成生产验收。Task
+1--7 保持未开始。
