@@ -16,6 +16,7 @@ from app.models.finance_v2 import (
     FinanceV2AccountingBook,
     FinanceV2FiscalPeriod,
     FinanceV2LedgerBalance,
+    FinanceV2OperationEvent,
     FinanceV2Voucher,
     FinanceV2VoucherLine,
 )
@@ -63,6 +64,13 @@ class VoucherCommandInput(BaseModel):
     command_id: str = Field(min_length=1, max_length=128)
     expected_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=1000)
+
+
+class VoucherDraftUpdateInput(BaseModel):
+    voucher_date: date
+    entries: list[VoucherLineInput] = Field(default_factory=list)
+    command_id: str = Field(min_length=1, max_length=128)
+    expected_version: int = Field(ge=1)
 
 
 class PeriodCommandInput(BaseModel):
@@ -478,6 +486,77 @@ async def list_vouchers(
     )
 
 
+@router.get("/vouchers/{voucher_id}", response_model=ApiResponse)
+async def get_voucher_detail(
+    voucher_id: int,
+    current_user: SysUser = Depends(require_finance_v2_read),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    voucher = await db.get(FinanceV2Voucher, voucher_id)
+    if not voucher:
+        raise HTTPException(status_code=404, detail="V2 voucher not found")
+    lines = (
+        await db.execute(
+            select(FinanceV2VoucherLine)
+            .where(FinanceV2VoucherLine.voucher_id == voucher_id)
+            .order_by(FinanceV2VoucherLine.line_no, FinanceV2VoucherLine.id)
+        )
+    ).scalars().all()
+    events = (
+        await db.execute(
+            select(FinanceV2OperationEvent)
+            .where(FinanceV2OperationEvent.voucher_id == voucher_id)
+            .order_by(FinanceV2OperationEvent.created_at, FinanceV2OperationEvent.id)
+        )
+    ).scalars().all()
+    return ApiResponse.ok(
+        data={
+            "id": voucher.id,
+            "book_id": voucher.book_id,
+            "period_id": voucher.period_id,
+            "voucher_no": voucher.voucher_no,
+            "voucher_group": voucher.voucher_group,
+            "voucher_date": voucher.voucher_date,
+            "status": voucher.status,
+            "version": voucher.version,
+            "total_debit": voucher.total_debit,
+            "total_credit": voucher.total_credit,
+            "prepared_by": voucher.prepared_by,
+            "reviewer_id": voucher.reviewer_id,
+            "approved_by": voucher.approved_by,
+            "posted_by": voucher.posted_by,
+            "source_system": voucher.source_system,
+            "lines": [
+                {
+                    "id": line.id,
+                    "line_no": line.line_no,
+                    "account_version_id": line.account_version_id,
+                    "dimension_set_id": line.dimension_set_id,
+                    "summary": line.summary,
+                    "currency_code": line.currency_code,
+                    "exchange_rate": line.exchange_rate,
+                    "debit_amount": line.debit_amount,
+                    "credit_amount": line.credit_amount,
+                }
+                for line in lines
+            ],
+            "operation_events": [
+                {
+                    "id": event.id,
+                    "action": event.action,
+                    "actor_id": event.actor_id,
+                    "reason": event.reason,
+                    "command_id": event.command_id,
+                    "before_data": event.before_data,
+                    "after_data": event.after_data,
+                    "created_at": event.created_at,
+                }
+                for event in events
+            ],
+        }
+    )
+
+
 @router.get("/history/vouchers", response_model=ApiResponse)
 async def list_history_vouchers(
     limit: int = Query(default=50, ge=1, le=200),
@@ -552,6 +631,36 @@ async def create_voucher_draft(
     except FinanceV2DomainError as error:
         raise _domain_error(error) from error
     return ApiResponse.ok(data=result, message="V2 凭证草稿已保存")
+
+
+@router.put("/vouchers/{voucher_id}", response_model=ApiResponse)
+async def update_voucher_draft(
+    voucher_id: int,
+    body: VoucherDraftUpdateInput,
+    current_user: SysUser = Depends(require_finance_v2_write),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    voucher = await db.get(FinanceV2Voucher, voucher_id)
+    if not voucher:
+        raise HTTPException(status_code=404, detail="V2 voucher not found")
+    await _assert_v2_write_enabled(
+        db,
+        command="draft",
+        book_id=voucher.book_id,
+        role=_finance_gate_role(current_user),
+    )
+    try:
+        result = await FinanceV2VoucherWorkflow(db).update_draft(
+            voucher_id=voucher_id,
+            voucher_date=body.voucher_date,
+            entries=[entry.model_dump() for entry in body.entries],
+            actor_id=_actor(current_user),
+            expected_version=body.expected_version,
+            command_id=body.command_id,
+        )
+    except FinanceV2DomainError as error:
+        raise _domain_error(error) from error
+    return ApiResponse.ok(data=result, message="V2 凭证草稿已更新")
 
 
 @router.post("/vouchers/{voucher_id}/commands", response_model=ApiResponse)

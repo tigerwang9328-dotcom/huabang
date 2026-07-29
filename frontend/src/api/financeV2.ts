@@ -42,6 +42,34 @@ export interface FinanceV2Voucher {
   posted_by: string | null;
 }
 
+export interface FinanceV2VoucherLine {
+  id: number;
+  line_no: number;
+  account_version_id: number | null;
+  dimension_set_id: number | null;
+  summary: string;
+  currency_code: string;
+  exchange_rate: number;
+  debit_amount: number;
+  credit_amount: number;
+}
+
+export interface FinanceV2VoucherDetail extends FinanceV2Voucher {
+  book_id: number;
+  source_system: string;
+  lines: FinanceV2VoucherLine[];
+  operation_events: Array<{
+    id: number;
+    action: string;
+    actor_id: string;
+    reason: string | null;
+    command_id: string | null;
+    before_data: Record<string, unknown> | null;
+    after_data: Record<string, unknown> | null;
+    created_at: string;
+  }>;
+}
+
 export interface FinanceV2HistoryVoucher {
   id: number;
   voucher_no: string;
@@ -146,6 +174,7 @@ export interface FinanceV2MonitoringSummary {
 
 export interface FinanceV2VoucherLineInput {
   account_version_id: number;
+  dimension_set_id?: number;
   summary: string;
   debit_amount: number;
   credit_amount: number;
@@ -180,6 +209,7 @@ export const financeV2Api = {
     "/finance-center/v2/vouchers",
     { params: { book_id: bookId, ...params } },
   ),
+  getVoucherDetail: (voucherId: number) => request.get<FinanceV2VoucherDetail>(`/finance-center/v2/vouchers/${voucherId}`),
   listHistoryVouchers: (params?: { limit?: number }) => request.get<FinanceV2HistoryVoucher[]>(
     "/finance-center/v2/history/vouchers",
     { params },
@@ -189,6 +219,8 @@ export const financeV2Api = {
     { params },
   ),
   createDraft: (payload: FinanceV2DraftInput) => request.post("/finance-center/v2/vouchers", payload),
+  updateDraft: (voucherId: number, payload: { voucher_date: string; entries: FinanceV2VoucherLineInput[]; command_id: string; expected_version: number }) =>
+    request.put(`/finance-center/v2/vouchers/${voucherId}`, payload),
   executePeriodCommand: (bookId: number, periodId: number, payload: FinanceV2PeriodCommandInput) =>
     request.post(`/finance-center/v2/books/${bookId}/periods/${periodId}/commands`, payload),
   executeCommand: (voucherId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>

@@ -27,6 +27,8 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/monitoring/summary", "GET") in routes
     assert ("/finance-center/v2/vouchers", "POST") in routes
     assert ("/finance-center/v2/vouchers", "GET") in routes
+    assert ("/finance-center/v2/vouchers/{voucher_id}", "GET") in routes
+    assert ("/finance-center/v2/vouchers/{voucher_id}", "PUT") in routes
     assert ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST") in routes
     assert ("/finance-center/v2/history/vouchers", "GET") in routes
     assert ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET") in routes
@@ -44,9 +46,11 @@ def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency(
         ("/finance-center/v2/monitoring/summary", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/accounts", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/vouchers", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/vouchers/{voucher_id}", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/history/vouchers", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/vouchers", "POST"): FINANCE_V2_WRITE_PERMISSION,
+        ("/finance-center/v2/vouchers/{voucher_id}", "PUT"): FINANCE_V2_WRITE_PERMISSION,
         ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST"): FINANCE_V2_WRITE_PERMISSION,
     }
     actual = {}
@@ -81,6 +85,37 @@ def test_period_command_accepts_an_explicit_manual_profit_closing_evidence_regis
     )
 
     assert command.voucher_id == 88
+
+
+@pytest.mark.asyncio
+async def test_current_voucher_detail_includes_lines_and_append_only_operation_events():
+    voucher = SimpleNamespace(
+        id=7, book_id=3, period_id=9, voucher_no=None, voucher_group="记", voucher_date=date(2026, 7, 29),
+        status="draft", version=2, total_debit=100, total_credit=100, prepared_by="maker", reviewer_id=None,
+        approved_by=None, posted_by=None, source_system="manual",
+    )
+    line = SimpleNamespace(id=31, line_no=1, account_version_id=1001, dimension_set_id=11, summary="收款", currency_code="CNY", exchange_rate=1, debit_amount=100, credit_amount=0)
+    event = SimpleNamespace(id=41, action="voucher.update_draft", actor_id="maker", reason=None, command_id="update-001", before_data={"version": 1}, after_data={"version": 2}, created_at="2026-07-29T00:00:00Z")
+
+    class Result:
+        def __init__(self, rows): self.rows = rows
+        def scalars(self): return self
+        def all(self): return self.rows
+
+    class DetailDb:
+        calls = 0
+        async def get(self, model, voucher_id):
+            assert voucher_id == 7
+            return voucher
+        async def execute(self, statement):
+            self.calls += 1
+            return Result([line] if self.calls == 1 else [event])
+
+    response = await finance_v2.get_voucher_detail(7, current_user=SimpleNamespace(id=1, username="finance"), db=DetailDb())
+
+    assert response.data["id"] == 7
+    assert response.data["lines"][0]["summary"] == "收款"
+    assert response.data["operation_events"][0]["action"] == "voucher.update_draft"
 
 
 @pytest.mark.asyncio

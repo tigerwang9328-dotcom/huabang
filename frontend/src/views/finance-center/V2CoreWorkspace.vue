@@ -166,6 +166,7 @@
           <el-table-column prop="posted_by" label="过账人" min-width="100" />
           <el-table-column label="操作" min-width="250" fixed="right">
             <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="viewVoucher(row)">查看明细</el-button>
               <el-button v-for="action in availableActions(row)" :key="action" size="small" text type="primary" :loading="commandLoading === `${row.id}:${action}`" @click="runCommand(row, action)">{{ actionLabel(action) }}</el-button>
             </template>
           </el-table-column>
@@ -184,6 +185,55 @@
         <el-table-column prop="currency_code" label="币种" width="80" />
         <el-table-column label="数据标记" width="100"><template #default="{ row }"><el-tag :type="row.historical_marker ? 'info' : 'danger'" effect="plain">{{ row.historical_marker ? "历史数据" : "标记异常" }}</el-tag></template></el-table-column>
       </el-table>
+    </el-drawer>
+
+    <el-drawer v-model="voucherDrawerOpen" :title="`当前账凭证明细${selectedVoucher ? ` · ${selectedVoucher.voucher_no || `凭证#${selectedVoucher.id}`}` : ''}`" size="860px">
+      <el-alert title="当前账凭证的分录与操作事件均来自 fin_current；历史金蝶凭证须在独立历史档案中查看。" type="info" :closable="false" show-icon />
+      <template v-if="selectedVoucher">
+        <el-descriptions class="close-summary" :column="2" border>
+          <el-descriptions-item label="状态">{{ selectedVoucher.status }}</el-descriptions-item>
+          <el-descriptions-item label="版本">{{ selectedVoucher.version }}</el-descriptions-item>
+          <el-descriptions-item label="日期">{{ selectedVoucher.voucher_date }}</el-descriptions-item>
+          <el-descriptions-item label="制单人">{{ selectedVoucher.prepared_by }}</el-descriptions-item>
+          <el-descriptions-item label="审核人">{{ selectedVoucher.reviewer_id || "—" }}</el-descriptions-item>
+          <el-descriptions-item label="过账人">{{ selectedVoucher.posted_by || "—" }}</el-descriptions-item>
+        </el-descriptions>
+        <div v-if="selectedVoucher?.status === 'draft' && draftEnabled" class="detail-actions">
+          <el-button type="primary" @click="beginVoucherDraftEdit">编辑草稿</el-button>
+        </div>
+        <section v-if="voucherEditOpen" class="draft-section">
+          <div class="section-head"><h2>编辑草稿</h2><span>保存会整体替换当前草稿分录，并以版本号防止并发覆盖。</span></div>
+          <div class="draft-meta">
+            <el-date-picker v-model="voucherEdit.voucher_date" type="date" value-format="YYYY-MM-DD" :clearable="false" />
+            <el-button type="primary" :loading="voucherEditSaving" @click="saveVoucherDraftEdit">保存草稿修改</el-button>
+          </div>
+          <el-table :data="voucherEdit.entries" max-height="260" empty-text="请至少保留两条分录">
+            <el-table-column label="科目" min-width="220"><template #default="{ row }"><el-select v-model="row.account_version_id" filterable placeholder="选择可制单科目"><el-option v-for="account in accounts" :key="account.id" :label="`${account.account_code} · ${account.account_name}`" :value="account.id" /></el-select></template></el-table-column>
+            <el-table-column label="摘要" min-width="160"><template #default="{ row }"><el-input v-model="row.summary" maxlength="512" /></template></el-table-column>
+            <el-table-column label="借方" width="150"><template #default="{ row }"><el-input-number v-model="row.debit_amount" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
+            <el-table-column label="贷方" width="150"><template #default="{ row }"><el-input-number v-model="row.credit_amount" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
+            <el-table-column width="80"><template #default="{ $index }"><el-button text type="danger" :disabled="voucherEdit.entries.length <= 2" @click="removeVoucherEditLine($index)">删除</el-button></template></el-table-column>
+          </el-table>
+          <el-button text type="primary" @click="addVoucherEditLine">添加分录</el-button>
+        </section>
+        <section class="voucher-detail-section">
+          <h2>分录</h2>
+          <el-table v-loading="voucherDetailLoading" :data="selectedVoucher.lines" max-height="300" empty-text="该凭证没有分录">
+            <el-table-column prop="line_no" label="行号" width="70" /><el-table-column prop="account_version_id" label="科目版本" min-width="110" />
+            <el-table-column prop="summary" label="摘要" min-width="180" show-overflow-tooltip /><el-table-column prop="debit_amount" label="借方" min-width="110" /><el-table-column prop="credit_amount" label="贷方" min-width="110" />
+            <el-table-column prop="currency_code" label="币种" width="80" />
+          </el-table>
+        </section>
+        <section class="voucher-detail-section">
+          <h2>不可变操作记录</h2>
+          <el-table :data="selectedVoucher.operation_events" max-height="260" empty-text="尚无操作记录">
+            <el-table-column prop="created_at" label="时间" min-width="170" /><el-table-column prop="action" label="操作" min-width="150" />
+            <el-table-column prop="actor_id" label="操作人" min-width="110" /><el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="command_id" label="命令幂等键" min-width="180" show-overflow-tooltip />
+          </el-table>
+        </section>
+      </template>
+      <el-skeleton v-else-if="voucherDetailLoading" :rows="6" animated />
     </el-drawer>
 
     <el-drawer v-model="periodCloseDrawerOpen" :title="`结账检查${selectedClosePeriod ? ` · ${selectedClosePeriod.period_code}` : ''}`" size="720px">
@@ -240,6 +290,7 @@ import {
   type FinanceV2TrialBalance,
   type FinanceV2Period,
   type FinanceV2Voucher,
+  type FinanceV2VoucherDetail,
   type FinanceV2VoucherLineInput,
   type FinanceV2WriteReadiness,
 } from "@/api/financeV2";
@@ -249,6 +300,7 @@ const selectedBookId = ref<number>();
 const periods = ref<FinanceV2Period[]>([]);
 const accounts = ref<FinanceV2Account[]>([]);
 const vouchers = ref<FinanceV2Voucher[]>([]);
+const selectedVoucher = ref<FinanceV2VoucherDetail>();
 const historyVouchers = ref<FinanceV2HistoryVoucher[]>([]);
 const historyVoucherLines = ref<FinanceV2HistoryVoucherLine[]>([]);
 const selectedHistoryVoucher = ref<FinanceV2HistoryVoucher>();
@@ -273,10 +325,15 @@ const loadError = ref("");
 const historyLoadError = ref("");
 const monitoringError = ref("");
 const historyDrawerOpen = ref(false);
+const voucherDrawerOpen = ref(false);
+const voucherDetailLoading = ref(false);
+const voucherEditOpen = ref(false);
+const voucherEditSaving = ref(false);
 const periodCloseDrawerOpen = ref(false);
 const today = () => new Date().toISOString().slice(0, 10);
 const newRequestId = () => globalThis.crypto?.randomUUID?.() || `finance-v2-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const draft = reactive({ book_id: 0, period_id: 0, voucher_date: today(), request_id: newRequestId(), entries: [] as FinanceV2VoucherLineInput[] });
+const voucherEdit = reactive({ voucher_date: "", expected_version: 0, entries: [] as FinanceV2VoucherLineInput[] });
 
 const draftEnabled = computed(() => Boolean(writeReadiness.value?.commands.draft.enabled));
 const reviewEnabled = computed(() => Boolean(writeReadiness.value?.commands.review.enabled));
@@ -364,6 +421,70 @@ async function viewHistoryVoucher(voucher: FinanceV2HistoryVoucher) {
     ElMessage.error(error instanceof Error ? error.message : "历史凭证分录读取失败");
   } finally {
     historyLineLoading.value = false;
+  }
+}
+
+async function loadVoucherDetail(voucherId: number) {
+  voucherDetailLoading.value = true;
+  try {
+    const response = await financeV2Api.getVoucherDetail(voucherId);
+    selectedVoucher.value = response.data;
+  } catch (error) {
+    selectedVoucher.value = undefined;
+    ElMessage.error(error instanceof Error ? error.message : "当前账凭证明细读取失败");
+  } finally {
+    voucherDetailLoading.value = false;
+  }
+}
+
+async function viewVoucher(voucher: FinanceV2Voucher) {
+  selectedVoucher.value = undefined;
+  voucherEditOpen.value = false;
+  voucherDrawerOpen.value = true;
+  await loadVoucherDetail(voucher.id);
+}
+
+function beginVoucherDraftEdit() {
+  if (!selectedVoucher.value) return;
+  voucherEdit.voucher_date = selectedVoucher.value.voucher_date;
+  voucherEdit.expected_version = selectedVoucher.value.version;
+  voucherEdit.entries.splice(0, voucherEdit.entries.length, ...selectedVoucher.value.lines.map((line) => ({
+    account_version_id: line.account_version_id || 0,
+    dimension_set_id: line.dimension_set_id || undefined,
+    summary: line.summary,
+    debit_amount: line.debit_amount,
+    credit_amount: line.credit_amount,
+    currency_code: line.currency_code,
+    exchange_rate: line.exchange_rate,
+  })));
+  voucherEditOpen.value = true;
+}
+
+function addVoucherEditLine() {
+  voucherEdit.entries.push({ account_version_id: 0, summary: "", debit_amount: 0, credit_amount: 0 });
+}
+
+function removeVoucherEditLine(index: number) {
+  voucherEdit.entries.splice(index, 1);
+}
+
+async function saveVoucherDraftEdit() {
+  if (!selectedVoucher.value || selectedVoucher.value.status !== "draft" || !draftEnabled.value) return;
+  voucherEditSaving.value = true;
+  try {
+    await financeV2Api.updateDraft(selectedVoucher.value.id, {
+      voucher_date: voucherEdit.voucher_date,
+      entries: voucherEdit.entries.map((entry) => ({ ...entry })),
+      command_id: newRequestId(),
+      expected_version: voucherEdit.expected_version,
+    });
+    ElMessage.success("凭证草稿已更新");
+    voucherEditOpen.value = false;
+    await Promise.all([loadVoucherDetail(selectedVoucher.value.id), loadWorkspace()]);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "草稿更新失败，请刷新后确认凭证版本");
+  } finally {
+    voucherEditSaving.value = false;
   }
 }
 
@@ -564,5 +685,8 @@ onMounted(() => Promise.all([loadBooks(), loadMonitoring()]));
 .workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .workspace-grid h2, .voucher-section h2 { margin: 0 0 10px; font-size: 15px; }
 .voucher-section { margin-top: 20px; }
+.voucher-detail-section { margin-top: 20px; }
+.voucher-detail-section h2 { margin: 0 0 10px; font-size: 15px; }
+.detail-actions { margin-top: 16px; }
 @media (max-width: 900px) { .workspace-grid { grid-template-columns: 1fr; } .draft-meta { flex-direction: column; } }
 </style>

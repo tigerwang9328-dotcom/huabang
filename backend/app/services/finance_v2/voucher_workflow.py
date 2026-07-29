@@ -7,7 +7,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finance_v2 import (
@@ -48,6 +48,7 @@ class FinanceV2VoucherWorkflow:
         request_id: str,
         entries: list[dict],
     ) -> dict:
+        total_debit, total_credit = self._entry_totals(entries)
         period = await self.db.get(FinanceV2FiscalPeriod, period_id)
         if not period or period.book_id != book_id:
             raise FinanceV2DomainError("fiscal period does not belong to the requested book")
@@ -71,6 +72,8 @@ class FinanceV2VoucherWorkflow:
             prepared_by=prepared_by,
             request_id=request_id,
             status="draft",
+            total_debit=total_debit,
+            total_credit=total_credit,
         )
         self.db.add(voucher)
         await self.db.flush()
@@ -89,7 +92,14 @@ class FinanceV2VoucherWorkflow:
                     credit_amount=Decimal(str(payload.get("credit_amount", "0"))),
                 )
             )
-        await self._event(voucher, prepared_by, "voucher.create", None, {"status": "draft"})
+        await self._event(
+            voucher,
+            prepared_by,
+            "voucher.create",
+            request_id,
+            None,
+            {"status": "new"},
+        )
         await self.db.flush()
         return self._snapshot(voucher, idempotent=False)
 
@@ -233,6 +243,122 @@ class FinanceV2VoucherWorkflow:
                 )
             raise
 
+    async def update_draft(
+        self,
+        *,
+        voucher_id: int,
+        voucher_date: date,
+        entries: list[dict],
+        actor_id: str,
+        expected_version: int,
+        command_id: str,
+    ) -> dict:
+        """Replace the lines of a draft before it enters the review workflow.
+
+        Draft changes are intentionally a full replacement: a request is a
+        complete version of the voucher, rather than a partial patch whose
+        omitted lines could be retained by accident.
+        """
+
+        voucher = (
+            await self.db.execute(
+                select(FinanceV2Voucher)
+                .where(FinanceV2Voucher.id == voucher_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not voucher:
+            raise FinanceV2DomainError("voucher not found")
+
+        request_hash = self.draft_update_payload_hash(
+            voucher_id=voucher_id,
+            voucher_date=voucher_date,
+            entries=entries,
+            actor_id=actor_id,
+            expected_version=expected_version,
+        )
+        existing_command = (
+            await self.db.execute(
+                select(FinanceV2CommandIdempotency)
+                .where(
+                    FinanceV2CommandIdempotency.book_id == voucher.book_id,
+                    FinanceV2CommandIdempotency.command_name == "voucher.update_draft",
+                    FinanceV2CommandIdempotency.idempotency_key == command_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if existing_command:
+            if existing_command.request_hash != request_hash:
+                raise FinanceV2DomainError("command id was already used with different parameters")
+            return {**dict(existing_command.result_payload), "idempotent": True}
+        if voucher.status != "draft":
+            raise FinanceV2DomainError("only draft vouchers can be edited")
+        if voucher.version != expected_version:
+            raise FinanceV2DomainError("version conflict: voucher changed concurrently")
+        period = await self.db.get(FinanceV2FiscalPeriod, voucher.period_id)
+        if not period or period.book_id != voucher.book_id:
+            raise FinanceV2DomainError("fiscal period does not belong to the voucher book")
+        if period.status != "open":
+            raise FinanceV2DomainError("fiscal period is not open for draft editing")
+        if not period.start_date <= voucher_date <= period.end_date:
+            raise FinanceV2DomainError("voucher date is outside fiscal period")
+
+        before = self._snapshot(voucher)
+        total_debit, total_credit = self._entry_totals(entries)
+        await self.db.execute(delete(FinanceV2VoucherLine).where(FinanceV2VoucherLine.voucher_id == voucher_id))
+        empty_dimension_set_id = None
+        for line_no, payload in enumerate(entries, start=1):
+            dimension_set_id = payload.get("dimension_set_id")
+            if dimension_set_id is None:
+                if empty_dimension_set_id is None:
+                    empty_dimension_set_id = await self._empty_dimension_set_id(voucher.book_id)
+                dimension_set_id = empty_dimension_set_id
+            self.db.add(
+                FinanceV2VoucherLine(
+                    voucher_id=voucher.id,
+                    line_no=line_no,
+                    account_version_id=payload.get("account_version_id"),
+                    dimension_set_id=dimension_set_id,
+                    summary=payload.get("summary") or "",
+                    currency_code=payload.get("currency_code") or "CNY",
+                    exchange_rate=Decimal(str(payload.get("exchange_rate", "1"))),
+                    debit_amount=Decimal(str(payload.get("debit_amount", "0"))),
+                    credit_amount=Decimal(str(payload.get("credit_amount", "0"))),
+                )
+            )
+        next_version = expected_version + 1
+        result = await self.db.execute(
+            update(FinanceV2Voucher)
+            .where(FinanceV2Voucher.id == voucher_id, FinanceV2Voucher.version == expected_version)
+            .values(
+                voucher_date=voucher_date,
+                total_debit=total_debit,
+                total_credit=total_credit,
+                version=next_version,
+            )
+        )
+        if result.rowcount != 1:
+            raise FinanceV2DomainError("version conflict: voucher changed concurrently")
+        voucher.voucher_date = voucher_date
+        voucher.total_debit = total_debit
+        voucher.total_credit = total_credit
+        voucher.version = next_version
+        result_payload = self._snapshot(voucher)
+        self.db.add(
+            FinanceV2CommandIdempotency(
+                book_id=voucher.book_id,
+                command_name="voucher.update_draft",
+                idempotency_key=command_id,
+                request_hash=request_hash,
+                result_payload=result_payload,
+                completed_at=datetime.now(timezone.utc),
+            )
+        )
+        await self._event(voucher, actor_id, "voucher.update_draft", command_id, None, before)
+        await self.db.flush()
+        return result_payload
+
     async def mark_posting_attempt_succeeded(self, attempt_id: int) -> None:
         """Call only after the primary V2 posting transaction has committed."""
 
@@ -293,8 +419,11 @@ class FinanceV2VoucherWorkflow:
             "book_id": voucher.book_id,
             "period_id": voucher.period_id,
             "voucher_no": voucher.voucher_no,
+            "voucher_date": voucher.voucher_date.isoformat() if voucher.voucher_date else None,
             "status": voucher.status,
             "version": voucher.version,
+            "total_debit": str(voucher.total_debit),
+            "total_credit": str(voucher.total_credit),
             "reviewer_id": voucher.reviewer_id,
             "approved_by": voucher.approved_by,
             "posted_by": voucher.posted_by,
@@ -318,3 +447,40 @@ class FinanceV2VoucherWorkflow:
             separators=(",", ":"),
         )
         return sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def draft_update_payload_hash(
+        *, voucher_id: int, voucher_date: date, entries: list[dict], actor_id: str, expected_version: int
+    ) -> str:
+        canonical_entries = [
+            {
+                "account_version_id": entry.get("account_version_id"),
+                "dimension_set_id": entry.get("dimension_set_id"),
+                "summary": entry.get("summary") or "",
+                "currency_code": entry.get("currency_code") or "CNY",
+                "exchange_rate": str(entry.get("exchange_rate", "1")),
+                "debit_amount": str(entry.get("debit_amount", "0")),
+                "credit_amount": str(entry.get("credit_amount", "0")),
+            }
+            for entry in entries
+        ]
+        payload = json.dumps(
+            {
+                "voucher_id": voucher_id,
+                "voucher_date": voucher_date.isoformat(),
+                "entries": canonical_entries,
+                "actor_id": actor_id,
+                "expected_version": expected_version,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _entry_totals(entries: list[dict]) -> tuple[Decimal, Decimal]:
+        return (
+            sum((Decimal(str(entry.get("debit_amount", "0"))) for entry in entries), Decimal("0")),
+            sum((Decimal(str(entry.get("credit_amount", "0"))) for entry in entries), Decimal("0")),
+        )

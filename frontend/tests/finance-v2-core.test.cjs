@@ -84,6 +84,20 @@ test("V2 workspace exposes write actions only through server-reported Gate readi
   assert.ok(workspace.includes("runCommand"));
 });
 
+test("V2 workspace can inspect current voucher lines and audit events, while editing only a Gate-enabled draft", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getVoucherDetail"));
+  assert.ok(api.includes("updateDraft"));
+  assert.ok(api.includes("expected_version"));
+  assert.ok(workspace.includes("查看明细"));
+  assert.ok(workspace.includes("operation_events"));
+  assert.ok(workspace.includes("selectedVoucher"));
+  assert.ok(workspace.includes("saveVoucherDraftEdit"));
+  assert.ok(workspace.includes("selectedVoucher?.status === 'draft' && draftEnabled"));
+});
+
 test("V2 workspace exposes period-close readiness and keeps close commands behind their own Gate", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
