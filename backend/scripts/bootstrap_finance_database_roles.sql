@@ -66,6 +66,21 @@ REVOKE fin_schema_owner FROM fin_app, fin_history_importer, fin_readonly_auditor
 -- must remain reusable.  The administrator grants CONNECT explicitly during
 -- the secure environment-specific invocation described at the end.
 
+-- This application has one Alembic lineage whose version table predates the
+-- Finance V2 schemas.  Migrations run as fin_migrator after SET ROLE
+-- fin_schema_owner, so grant that owner only the DML Alembic needs on this
+-- existing table.  Do not grant CREATE on public: all Finance V2 objects stay
+-- under the finance-owned schemas below.
+DO $$
+BEGIN
+    IF to_regclass('public.alembic_version') IS NULL THEN
+        RAISE EXCEPTION
+            'public.alembic_version is required before Finance V2 migration; aborting role bootstrap';
+    END IF;
+END
+$$;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.alembic_version TO fin_schema_owner;
+
 CREATE SCHEMA IF NOT EXISTS fin_current AUTHORIZATION fin_schema_owner;
 CREATE SCHEMA IF NOT EXISTS fin_history AUTHORIZATION fin_schema_owner;
 CREATE SCHEMA IF NOT EXISTS fin_read AUTHORIZATION fin_schema_owner;

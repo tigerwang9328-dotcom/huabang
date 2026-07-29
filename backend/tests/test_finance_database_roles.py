@@ -147,6 +147,7 @@ def test_database_role_bootstrap_is_admin_only_and_denies_cross_schema_writes():
     assert "GRANT SELECT ON ALL TABLES IN SCHEMA fin_read TO fin_app, fin_readonly_auditor" in script
     assert "existing Finance V2 objects are not owned by fin_schema_owner" in script
     assert "REVOKE fin_schema_owner FROM fin_app, fin_history_importer, fin_readonly_auditor" in script
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.alembic_version TO fin_schema_owner" in script
 
 
 def test_database_role_verifier_collects_effective_not_only_direct_privileges():
