@@ -19,6 +19,37 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/vouchers", "GET") in routes
     assert ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST") in routes
     assert ("/finance-center/v2/history/vouchers", "GET") in routes
+    assert ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET") in routes
+
+
+@pytest.mark.asyncio
+async def test_v2_history_line_endpoint_reads_only_the_published_read_view():
+    captured = {}
+
+    class MappingResult:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [{"voucher_id": 17, "line_no": 1, "historical_marker": True}]
+
+    class ReadOnlyDb:
+        async def execute(self, statement, params):
+            captured["statement"] = str(statement)
+            captured["params"] = params
+            return MappingResult()
+
+    response = await finance_v2.list_history_voucher_lines(
+        17,
+        limit=200,
+        current_user=SimpleNamespace(id=1, username="finance"),
+        db=ReadOnlyDb(),
+    )
+
+    assert response.data == [{"voucher_id": 17, "line_no": 1, "historical_marker": True}]
+    assert "fin_read.history_voucher_line" in captured["statement"]
+    assert "fin_history.voucher_line" not in captured["statement"]
+    assert captured["params"] == {"voucher_id": 17, "limit": 200}
 
 
 @pytest.mark.asyncio

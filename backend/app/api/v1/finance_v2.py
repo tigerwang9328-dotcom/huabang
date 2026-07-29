@@ -282,6 +282,33 @@ async def list_history_vouchers(
     return ApiResponse.ok(data=[dict(row) for row in rows])
 
 
+@router.get("/history/vouchers/{voucher_id}/lines", response_model=ApiResponse)
+async def list_history_voucher_lines(
+    voucher_id: int,
+    limit: int = Query(default=200, ge=1, le=500),
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT id, voucher_id, line_no, line_source_pk, account_code, summary,
+                       currency_code, exchange_rate, debit_amount, credit_amount, raw_dimensions,
+                       source_system, source_database, voucher_no, voucher_date,
+                       fiscal_year, fiscal_period, historical_marker
+                FROM fin_read.history_voucher_line
+                WHERE voucher_id = :voucher_id
+                ORDER BY line_no, id
+                LIMIT :limit
+                """
+            ),
+            {"voucher_id": voucher_id, "limit": limit},
+        )
+    ).mappings().all()
+    return ApiResponse.ok(data=[dict(row) for row in rows])
+
+
 @router.post("/vouchers", response_model=ApiResponse)
 async def create_voucher_draft(
     body: VoucherDraftInput,

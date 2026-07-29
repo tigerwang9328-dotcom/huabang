@@ -31,6 +31,26 @@ test("V2 workspace reads periods, postable accounts, and voucher workflow state 
   }
 });
 
+test("V2 workspace exposes immutable historical Kingdee vouchers and their marked line details", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("listHistoryVouchers"));
+  assert.ok(api.includes("listHistoryVoucherLines"));
+  assert.ok(workspace.includes("历史金蝶凭证"));
+  assert.ok(workspace.includes("historical_marker"));
+  assert.ok(workspace.includes("viewHistoryVoucher"));
+});
+
+test("finance center navigation does not present V2 history or current accounts as already production-published", () => {
+  const modules = read("src/config/financeCenterModules.ts");
+
+  assert.ok(modules.includes("待恢复副本验证"));
+  assert.ok(modules.includes("正式报表保持阻断"));
+  assert.ok(!modules.includes("三套正式账套已写入正式账簿"));
+  assert.ok(!modules.includes("416 个科目、1,125 条正式月余额已上线"));
+});
+
 test("V2 workspace exposes write actions only through server-reported Gate readiness", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

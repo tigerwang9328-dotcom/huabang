@@ -49,6 +49,40 @@
       </div>
     </el-card>
 
+    <el-card v-loading="historyLoading" shadow="never" class="history-card">
+      <template #header>
+        <div class="title-row">
+          <div>
+            <strong>历史金蝶凭证（只读存档）</strong>
+            <p class="subtle">仅展示已完成校验并发布的 fin_history 数据，不参与 V2 当前账制单或过账。</p>
+          </div>
+          <el-button :loading="historyLoading" text type="primary" @click="loadHistoryVouchers">刷新</el-button>
+        </div>
+      </template>
+      <el-alert
+        title="每条凭证及其分录均带“历史数据”标记；原始金蝶账套只读保留，导入失败或未发布批次不会出现在这里。"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <el-alert v-if="historyLoadError" class="history-error" :title="`历史凭证读取失败：${historyLoadError}`" type="error" :closable="false" show-icon />
+      <el-table :data="historyVouchers" max-height="360" empty-text="尚未发布可查询的历史金蝶凭证">
+        <el-table-column prop="voucher_date" label="日期" min-width="110" />
+        <el-table-column prop="voucher_no" label="凭证号" min-width="110" />
+        <el-table-column prop="voucher_group" label="字" min-width="70" />
+        <el-table-column prop="fiscal_period" label="期间" min-width="80" />
+        <el-table-column prop="total_debit" label="借方合计" min-width="110" />
+        <el-table-column prop="total_credit" label="贷方合计" min-width="110" />
+        <el-table-column prop="source_database" label="来源账套" min-width="150" />
+        <el-table-column label="数据标记" min-width="100">
+          <template #default="{ row }"><el-tag :type="row.historical_marker ? 'info' : 'danger'" effect="plain">{{ row.historical_marker ? "历史数据" : "标记异常" }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }"><el-button text type="primary" @click="viewHistoryVoucher(row)">查看分录</el-button></template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card v-if="selectedBookId" v-loading="workspaceLoading" shadow="never">
       <template #header><strong>当前账工作区（只读）</strong></template>
       <el-alert title="这里展示的是 fin_current 的账期、可制单科目和凭证状态；写入仍受后端 Gate 强制控制。" type="info" :closable="false" show-icon />
@@ -115,6 +149,19 @@
         </el-table>
       </section>
     </el-card>
+
+    <el-drawer v-model="historyDrawerOpen" :title="`历史凭证分录${selectedHistoryVoucher ? ` · ${selectedHistoryVoucher.voucher_no}` : ''}`" size="760px">
+      <el-alert title="分录来自已发布的历史导入批次，仅供核对；不能在此修改、审核或过账。" type="info" :closable="false" show-icon />
+      <el-table v-loading="historyLineLoading" :data="historyVoucherLines" max-height="620" empty-text="该历史凭证没有可查询分录">
+        <el-table-column prop="line_no" label="行号" width="70" />
+        <el-table-column prop="account_code" label="科目编码" min-width="110" />
+        <el-table-column prop="summary" label="摘要" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="debit_amount" label="借方" min-width="110" />
+        <el-table-column prop="credit_amount" label="贷方" min-width="110" />
+        <el-table-column prop="currency_code" label="币种" width="80" />
+        <el-table-column label="数据标记" width="100"><template #default="{ row }"><el-tag :type="row.historical_marker ? 'info' : 'danger'" effect="plain">{{ row.historical_marker ? "历史数据" : "标记异常" }}</el-tag></template></el-table-column>
+      </el-table>
+    </el-drawer>
   </section>
 </template>
 
@@ -125,6 +172,8 @@ import {
   financeV2Api,
   type FinanceV2Account,
   type FinanceV2Book,
+  type FinanceV2HistoryVoucher,
+  type FinanceV2HistoryVoucherLine,
   type FinanceV2Period,
   type FinanceV2Voucher,
   type FinanceV2VoucherLineInput,
@@ -136,12 +185,19 @@ const selectedBookId = ref<number>();
 const periods = ref<FinanceV2Period[]>([]);
 const accounts = ref<FinanceV2Account[]>([]);
 const vouchers = ref<FinanceV2Voucher[]>([]);
+const historyVouchers = ref<FinanceV2HistoryVoucher[]>([]);
+const historyVoucherLines = ref<FinanceV2HistoryVoucherLine[]>([]);
+const selectedHistoryVoucher = ref<FinanceV2HistoryVoucher>();
 const writeReadiness = ref<FinanceV2WriteReadiness>();
 const loading = ref(false);
+const historyLoading = ref(false);
+const historyLineLoading = ref(false);
 const workspaceLoading = ref(false);
 const draftSaving = ref(false);
 const commandLoading = ref("");
 const loadError = ref("");
+const historyLoadError = ref("");
+const historyDrawerOpen = ref(false);
 const today = () => new Date().toISOString().slice(0, 10);
 const newRequestId = () => globalThis.crypto?.randomUUID?.() || `finance-v2-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const draft = reactive({ book_id: 0, period_id: 0, voucher_date: today(), request_id: newRequestId(), entries: [] as FinanceV2VoucherLineInput[] });
@@ -169,11 +225,40 @@ async function loadBooks() {
     const response = await financeV2Api.listBooks();
     books.value = response.data || [];
     if (!selectedBookId.value && books.value.length) selectedBookId.value = books.value[0].id;
-    await loadWorkspace();
+    await Promise.all([loadWorkspace(), loadHistoryVouchers()]);
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : "请求失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadHistoryVouchers() {
+  historyLoading.value = true;
+  historyLoadError.value = "";
+  try {
+    const response = await financeV2Api.listHistoryVouchers({ limit: 100 });
+    historyVouchers.value = response.data || [];
+  } catch (error) {
+    historyVouchers.value = [];
+    historyLoadError.value = error instanceof Error ? error.message : "请求失败";
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function viewHistoryVoucher(voucher: FinanceV2HistoryVoucher) {
+  selectedHistoryVoucher.value = voucher;
+  historyVoucherLines.value = [];
+  historyDrawerOpen.value = true;
+  historyLineLoading.value = true;
+  try {
+    const response = await financeV2Api.listHistoryVoucherLines(voucher.id, { limit: 500 });
+    historyVoucherLines.value = response.data || [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "历史凭证分录读取失败");
+  } finally {
+    historyLineLoading.value = false;
   }
 }
 
@@ -276,6 +361,9 @@ onMounted(loadBooks);
 .title-row h1 { margin: 2px 0 0; font-size: 22px; }
 .eyebrow { margin: 0; color: var(--el-color-primary); font-size: 12px; font-weight: 600; }
 .book-card { min-height: 260px; }
+.history-card { min-height: 260px; }
+.subtle { margin: 6px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
+.history-error { margin-top: 12px; }
 .workspace-filter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .gate-alert { margin-top: 16px; }
 .draft-section { margin-top: 20px; }

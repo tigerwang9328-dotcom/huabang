@@ -39,3 +39,15 @@ def test_history_migration_uses_staging_and_published_read_view():
     assert "fin_history.staging_voucher" in migration
     assert "fin_read.history_voucher" in migration
     assert "published facts are immutable" in migration
+
+
+def test_history_read_model_exposes_published_lines_without_exposing_staging_rows():
+    versions = Path(__file__).parents[1] / "alembic" / "versions"
+    migration_path = next(
+        path for path in versions.glob("*.py") if "CREATE OR REPLACE VIEW fin_read.history_voucher_line" in path.read_text(encoding="utf-8")
+    )
+    migration = migration_path.read_text(encoding="utf-8")
+
+    assert "JOIN fin_history.import_batch b" in migration
+    assert "b.status='published'" in migration
+    assert "staging_voucher" not in migration

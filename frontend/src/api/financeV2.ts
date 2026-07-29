@@ -42,6 +42,41 @@ export interface FinanceV2Voucher {
   posted_by: string | null;
 }
 
+export interface FinanceV2HistoryVoucher {
+  id: number;
+  voucher_no: string;
+  voucher_group: string | null;
+  voucher_date: string;
+  fiscal_year: number;
+  fiscal_period: number;
+  total_debit: number;
+  total_credit: number;
+  source_system: string;
+  source_database: string;
+  historical_marker: boolean;
+}
+
+export interface FinanceV2HistoryVoucherLine {
+  id: number;
+  voucher_id: number;
+  line_no: number;
+  line_source_pk: string;
+  account_code: string;
+  summary: string;
+  currency_code: string;
+  exchange_rate: number;
+  debit_amount: number;
+  credit_amount: number;
+  raw_dimensions: unknown;
+  source_system: string;
+  source_database: string;
+  voucher_no: string;
+  voucher_date: string;
+  fiscal_year: number;
+  fiscal_period: number;
+  historical_marker: boolean;
+}
+
 export interface FinanceV2WriteReadiness {
   book_id: number;
   role: "finance_manager" | "super_admin";
@@ -76,6 +111,14 @@ export const financeV2Api = {
   listVouchers: (bookId: number, params?: { period_id?: number; status?: string; limit?: number }) => request.get<FinanceV2Voucher[]>(
     "/finance-center/v2/vouchers",
     { params: { book_id: bookId, ...params } },
+  ),
+  listHistoryVouchers: (params?: { limit?: number }) => request.get<FinanceV2HistoryVoucher[]>(
+    "/finance-center/v2/history/vouchers",
+    { params },
+  ),
+  listHistoryVoucherLines: (voucherId: number, params?: { limit?: number }) => request.get<FinanceV2HistoryVoucherLine[]>(
+    `/finance-center/v2/history/vouchers/${voucherId}/lines`,
+    { params },
   ),
   createDraft: (payload: FinanceV2DraftInput) => request.post("/finance-center/v2/vouchers", payload),
   executeCommand: (voucherId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>
