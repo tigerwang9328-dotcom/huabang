@@ -115,4 +115,3 @@ def require_roles(*role_codes: str):
             raise PermissionDeniedException("角色权限不足")
         return current_user
     return check_role
-
