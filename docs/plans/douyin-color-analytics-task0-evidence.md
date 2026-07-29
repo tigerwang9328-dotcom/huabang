@@ -56,6 +56,34 @@ point = { key: "mm:ss", value: number }
 `analysis_type=7` 仍仅命名为 `platform_bounce_curve_value`，并保持报告开关关闭，
 不得标为跳出率或参与排名。
 
+## 单真实账号预配置
+
+目录接口的当前页目录项只有一个 `user_id`，其原值只在浏览器内用于计算
+`SHA-256("douyin-color-v31-creator-fingerprint:" + user_id)`；记录的预期创作者
+指纹为 `6a89363b783fa2d435dc56a63f64d5cc4df59f71f69c5857c41da2e7adf12d2a`，没有
+保存原始 ID。由于 Task 1 的账号表尚未创建，受控主机上已经准备了 inert 的
+`/etc/huabang/douyin-color-analytics-preprod.conf`：`root:root`、0600，账户别名为
+`primary`、状态为 `preconfigured`，且 `DOUYIN_COLOR_FEATURE_ENABLED=false`。文件
+不含 Cookie、token、原始创作者 ID 或签名请求；Task 1 的账号 bootstrap 必须显式
+读取该指纹才可启用，不能在当前阶段自行启用。
+
+当前隔离工作树的 `frontend/src` 共扫描 87 个 Vue/TypeScript 文件，未发现
+“新增账号”“账号管理”或抖音账号创建入口；首期运营页面因此没有可自行新增账号的
+路径。该结论是当前未部署模块的静态基线证据，不代表 Task 4/7 前端已完成。
+
+## v3.1 历史夹具
+
+`backend/tests/fixtures/douyin/historical-20260728.sanitized.json` 及其 SHA-256
+旁车文件已作为 v3.1 专属夹具提交。它由已脱敏的原始 48 条采集资料机械重封装，
+schema 版本为 `douyin-color-v3.1-task0-fixture-v1`，并在测试中固定验证：48 个
+目录项、46 条视频、2 条跳过项、64 位作品 ID 字符串、空曲线、HTTP 429、非零
+业务错误、相同重复快照记录和 SHA-256。
+
+夹具包含递归安全扫描器及刻意污染的负向样本，拒绝敏感键
+`token/cookie/password/signature/captcha/query/url/hash/authorization`（唯一允许的
+业务去重键为 `source_snapshot_hash`），并拒绝 URL、Cookie、Bearer、`msToken`、
+`a_bogus` 等敏感值。夹具没有这些会话或签名内容。
+
 ## v3.1 专属合约证明
 
 - 独立文件：`backend/app/poc/douyin_color_analysis_task0_contract.py` 与
@@ -92,7 +120,7 @@ point = { key: "mm:ss", value: number }
 
 - 在重新基线后的工作树中，用生产同版本虚拟环境并将 `PYTHONPATH` 指向隔离工作树
   执行 `pytest tests/test_douyin_color_analysis_task0_contract_v31.py -q`，结果为
-  `5 passed in 0.70s`。旧 v3.2 垂直环测试文件已不在当前生产基线，不能作为本次
+  `8 passed in 0.76s`。旧 v3.2 垂直环测试文件已不在当前生产基线，不能作为本次
   v3.1 回归命令。
 - `alembic heads` 与 `alembic current` 均为 `1fdf4577d7d8`。`alembic check`
   使用现有应用数据库角色时稳定失败于 `permission denied for schema fin_current`：
