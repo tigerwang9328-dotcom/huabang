@@ -24,3 +24,8 @@
 - 已推送并发布 `bcdc1e9` 至 `/srv/huabang-ai-center`；后端于 15:06:38 UTC 重启，`/health` 返回数据库和 Redis 已连接。
 - 生产 `fin_app` 只读探针确认可读取 `fin_current.opening_balance_batch`；未运行迁移、未更改任何 V2 Gate、未写入任何账务/期初数据。
 - 浏览器工具连接到另一枚抖音 Chrome 标签，不能证明华邦中台已登录用户验收；该 Gate 保持未完成，不将 401 未授权路由探针冒充为业务验收。
+
+## 2026-07-29 Phase 4.5 预演期初制备开始
+
+- 已以失败测试驱动实现 `create_batch`：创建预演/最终期初草稿时写入来源行、命令幂等记录和审计事件，但不改变账簿启用日、不锁定期初、也不改变 V2 写 Gate。
+- 完整的 validate/lock/discard 重建语义需要 `version`、审批、核对项、获批断档和锁定触发器；迁移 revision 已按当前 head 生成过用于核实图，但尚未提交或执行，待完整工作流与恢复副本用例一起落盘。
