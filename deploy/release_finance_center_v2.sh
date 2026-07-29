@@ -254,6 +254,7 @@ elif mode == "history_import":
 elif mode != "shared":
     raise SystemExit(f"unsupported backend execution mode: {mode}")
 os.chdir(backend_dir)
+os.environ["PYTHONPATH"] = backend_dir + os.pathsep + os.environ.get("PYTHONPATH", "")
 os.execv(sys.executable, [sys.executable, *command])
 PY
 }

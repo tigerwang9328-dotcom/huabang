@@ -29,6 +29,7 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
         "fin_migrator",
         "fin_history_importer",
         "FINANCE_DB_USER",
+        "PYTHONPATH",
         "seed_finance_v2_permissions.py",
         "import_finance_v2_history.py",
         "verify_finance_center_v2.py",
