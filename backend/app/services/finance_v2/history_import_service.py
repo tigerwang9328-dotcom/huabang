@@ -173,6 +173,10 @@ class FinanceV2HistoryImportService:
                     status="loaded",
                 )
             )
+        # The session factory disables autoflush.  Validation and publication
+        # run in this same outer transaction, so make every staged record
+        # visible before either method queries the staging table.
+        await self.db.flush()
         batch.actual_counts = {
             "vouchers": len(plan.new_records),
             "entries": sum(len(record.lines) for record in plan.new_records),
@@ -185,10 +189,6 @@ class FinanceV2HistoryImportService:
         batch = await self.db.get(FinanceV2HistoryBatch, batch_id, with_for_update=True)
         if batch is None:
             raise HistoryPublicationError("history batch does not exist")
-        try:
-            _advance(batch, "start_validation")
-        except HistoryBatchError as exc:
-            raise HistoryPublicationError(str(exc)) from exc
         staged = list(
             (
                 await self.db.execute(
@@ -198,6 +198,12 @@ class FinanceV2HistoryImportService:
                 )
             ).scalars().all()
         )
+        if not staged:
+            raise HistoryPublicationError("history validation requires at least one staged voucher")
+        try:
+            _advance(batch, "start_validation")
+        except HistoryBatchError as exc:
+            raise HistoryPublicationError(str(exc)) from exc
         errors = [
             {"source_pk": row.source_pk, "errors": _validate_staging_payload(row.payload, row.source_hash)}
             for row in staged
@@ -226,6 +232,8 @@ class FinanceV2HistoryImportService:
                 )
             ).scalars().all()
         )
+        if not staged:
+            raise HistoryPublicationError("history publication requires at least one staged voucher")
         for row in staged:
             errors = _validate_staging_payload(row.payload, row.source_hash)
             if errors:
