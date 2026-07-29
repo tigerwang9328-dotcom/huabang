@@ -5,13 +5,18 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_roles
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.finance_v2 import FinanceV2AccountingBook, FinanceV2Voucher
+from app.models.finance_v2 import (
+    FinanceV2AccountVersion,
+    FinanceV2AccountingBook,
+    FinanceV2FiscalPeriod,
+    FinanceV2Voucher,
+)
 from app.models.finance_v2_operations import FinanceV2FeatureGate
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
@@ -108,6 +113,114 @@ async def list_books(
                 "formal_report_blocked": row.formal_report_blocked,
             }
             for row in books
+        ]
+    )
+
+
+@router.get("/books/{book_id}/periods", response_model=ApiResponse)
+async def list_book_periods(
+    book_id: int,
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            select(FinanceV2FiscalPeriod)
+            .where(FinanceV2FiscalPeriod.book_id == book_id)
+            .order_by(FinanceV2FiscalPeriod.start_date.desc())
+        )
+    ).scalars().all()
+    return ApiResponse.ok(
+        data=[
+            {
+                "id": row.id,
+                "period_code": row.period_code,
+                "start_date": row.start_date,
+                "end_date": row.end_date,
+                "status": row.status,
+                "version": row.version,
+            }
+            for row in rows
+        ]
+    )
+
+
+@router.get("/books/{book_id}/accounts", response_model=ApiResponse)
+async def list_book_accounts(
+    book_id: int,
+    active_on: date | None = Query(default=None),
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    statement = (
+        select(FinanceV2AccountVersion)
+        .where(
+            FinanceV2AccountVersion.book_id == book_id,
+            FinanceV2AccountVersion.is_postable.is_(True),
+        )
+        .order_by(FinanceV2AccountVersion.account_code)
+    )
+    if active_on:
+        statement = statement.where(
+            FinanceV2AccountVersion.effective_from <= active_on,
+            or_(
+                FinanceV2AccountVersion.effective_to.is_(None),
+                FinanceV2AccountVersion.effective_to >= active_on,
+            ),
+        )
+    rows = (await db.execute(statement)).scalars().all()
+    return ApiResponse.ok(
+        data=[
+            {
+                "id": row.id,
+                "account_code": row.account_code,
+                "account_name": row.account_name,
+                "normal_balance": row.normal_balance,
+                "effective_from": row.effective_from,
+                "effective_to": row.effective_to,
+            }
+            for row in rows
+        ]
+    )
+
+
+@router.get("/vouchers", response_model=ApiResponse)
+async def list_vouchers(
+    book_id: int,
+    period_id: int | None = Query(default=None),
+    status: str | None = Query(default=None, max_length=16),
+    limit: int = Query(default=100, ge=1, le=200),
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    statement = select(FinanceV2Voucher).where(FinanceV2Voucher.book_id == book_id)
+    if period_id is not None:
+        statement = statement.where(FinanceV2Voucher.period_id == period_id)
+    if status is not None:
+        statement = statement.where(FinanceV2Voucher.status == status)
+    rows = (
+        await db.execute(
+            statement.order_by(FinanceV2Voucher.voucher_date.desc(), FinanceV2Voucher.id.desc()).limit(limit)
+        )
+    ).scalars().all()
+    return ApiResponse.ok(
+        data=[
+            {
+                "id": row.id,
+                "period_id": row.period_id,
+                "voucher_no": row.voucher_no,
+                "voucher_group": row.voucher_group,
+                "voucher_date": row.voucher_date,
+                "status": row.status,
+                "version": row.version,
+                "total_debit": row.total_debit,
+                "total_credit": row.total_credit,
+                "prepared_by": row.prepared_by,
+                "reviewer_id": row.reviewer_id,
+                "approved_by": row.approved_by,
+                "posted_by": row.posted_by,
+            }
+            for row in rows
         ]
     )
 

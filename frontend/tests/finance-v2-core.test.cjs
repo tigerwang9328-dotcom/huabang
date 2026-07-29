@@ -18,3 +18,15 @@ test("finance center base URL opens the V2 core workspace with the existing fina
     "the finance center route family must use the existing finance read permission",
   );
 });
+
+test("V2 workspace reads periods, postable accounts, and voucher workflow state from isolated endpoints", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  for (const token of ["listPeriods", "listAccounts", "listVouchers"]) {
+    assert.ok(api.includes(token), `missing ${token} API`);
+  }
+  for (const token of ["selectedBookId", "loadWorkspace", "vouchers", "accounts"]) {
+    assert.ok(workspace.includes(token), `missing ${token} workspace state`);
+  }
+});

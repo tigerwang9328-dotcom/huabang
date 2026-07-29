@@ -40,16 +40,71 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-if="books.length" class="workspace-filter">
+        <el-select v-model="selectedBookId" aria-label="选择 V2 当前账账簿" @change="loadWorkspace">
+          <el-option v-for="book in books" :key="book.id" :label="`${book.book_code} · ${book.book_name}`" :value="book.id" />
+        </el-select>
+        <el-button :loading="workspaceLoading" text type="primary" @click="loadWorkspace">刷新账期与凭证</el-button>
+      </div>
+    </el-card>
+
+    <el-card v-if="selectedBookId" v-loading="workspaceLoading" shadow="never">
+      <template #header><strong>当前账工作区（只读）</strong></template>
+      <el-alert title="这里展示的是 fin_current 的账期、可制单科目和凭证状态；写入仍受后端 Gate 强制控制。" type="info" :closable="false" show-icon />
+      <div class="workspace-grid">
+        <section>
+          <h2>会计期间</h2>
+          <el-table :data="periods" max-height="240" empty-text="当前账尚无会计期间">
+            <el-table-column prop="period_code" label="期间" min-width="100" />
+            <el-table-column prop="status" label="状态" min-width="90" />
+            <el-table-column prop="start_date" label="开始" min-width="110" />
+            <el-table-column prop="end_date" label="结束" min-width="110" />
+          </el-table>
+        </section>
+        <section>
+          <h2>可制单科目</h2>
+          <el-table :data="accounts" max-height="240" empty-text="当前账尚无可制单科目">
+            <el-table-column prop="account_code" label="编码" min-width="100" />
+            <el-table-column prop="account_name" label="科目" min-width="150" />
+            <el-table-column prop="normal_balance" label="余额方向" min-width="90" />
+          </el-table>
+        </section>
+      </div>
+      <section class="voucher-section">
+        <h2>凭证工作流</h2>
+        <el-table :data="vouchers" max-height="300" empty-text="当前账尚无凭证">
+          <el-table-column prop="voucher_date" label="日期" min-width="110" />
+          <el-table-column prop="voucher_no" label="凭证号" min-width="110"><template #default="{ row }">{{ row.voucher_no || "待人工过账编号" }}</template></el-table-column>
+          <el-table-column prop="status" label="状态" min-width="100" />
+          <el-table-column prop="total_debit" label="借方合计" min-width="110" />
+          <el-table-column prop="total_credit" label="贷方合计" min-width="110" />
+          <el-table-column prop="prepared_by" label="制单人" min-width="100" />
+          <el-table-column prop="reviewer_id" label="审核人" min-width="100" />
+          <el-table-column prop="posted_by" label="过账人" min-width="100" />
+        </el-table>
+      </section>
     </el-card>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { financeV2Api, type FinanceV2Book } from "@/api/financeV2";
+import {
+  financeV2Api,
+  type FinanceV2Account,
+  type FinanceV2Book,
+  type FinanceV2Period,
+  type FinanceV2Voucher,
+} from "@/api/financeV2";
 
 const books = ref<FinanceV2Book[]>([]);
+const selectedBookId = ref<number>();
+const periods = ref<FinanceV2Period[]>([]);
+const accounts = ref<FinanceV2Account[]>([]);
+const vouchers = ref<FinanceV2Voucher[]>([]);
 const loading = ref(false);
+const workspaceLoading = ref(false);
 const loadError = ref("");
 
 const gateMessage = computed(() => {
@@ -64,10 +119,36 @@ async function loadBooks() {
   try {
     const response = await financeV2Api.listBooks();
     books.value = response.data || [];
+    if (!selectedBookId.value && books.value.length) selectedBookId.value = books.value[0].id;
+    await loadWorkspace();
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : "请求失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadWorkspace() {
+  if (!selectedBookId.value) {
+    periods.value = [];
+    accounts.value = [];
+    vouchers.value = [];
+    return;
+  }
+  workspaceLoading.value = true;
+  try {
+    const [periodResponse, accountResponse, voucherResponse] = await Promise.all([
+      financeV2Api.listPeriods(selectedBookId.value),
+      financeV2Api.listAccounts(selectedBookId.value),
+      financeV2Api.listVouchers(selectedBookId.value),
+    ]);
+    periods.value = periodResponse.data || [];
+    accounts.value = accountResponse.data || [];
+    vouchers.value = voucherResponse.data || [];
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : "工作区读取失败";
+  } finally {
+    workspaceLoading.value = false;
   }
 }
 
@@ -81,4 +162,9 @@ onMounted(loadBooks);
 .title-row h1 { margin: 2px 0 0; font-size: 22px; }
 .eyebrow { margin: 0; color: var(--el-color-primary); font-size: 12px; font-weight: 600; }
 .book-card { min-height: 260px; }
+.workspace-filter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.workspace-grid h2, .voucher-section h2 { margin: 0 0 10px; font-size: 15px; }
+.voucher-section { margin-top: 20px; }
+@media (max-width: 900px) { .workspace-grid { grid-template-columns: 1fr; } }
 </style>
