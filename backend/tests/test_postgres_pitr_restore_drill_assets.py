@@ -17,6 +17,7 @@ def test_pitr_restore_drill_uses_an_isolated_socket_and_never_touches_production
     assert "restore_command" in source
     assert "postgresql.conf" in source
     assert "pg_hba.conf" in source
+    assert "pg_ident.conf" in source
     assert "pg_ctl" in source
     assert "--port" in source
     assert "pitr-drill-" in source

@@ -54,6 +54,7 @@ cat > "$restore_dir/pg_hba.conf" <<'EOF'
 local   all             postgres                                peer
 host    all             all             127.0.0.1/32            trust
 EOF
+: > "$restore_dir/pg_ident.conf"
 cat > "$restore_dir/postgresql.conf" <<EOF
 data_directory = '$restore_dir'
 hba_file = '$restore_dir/pg_hba.conf'
