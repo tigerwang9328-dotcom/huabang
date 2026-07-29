@@ -15,8 +15,21 @@ depends_on = None
 
 def upgrade() -> None:
     # This schema is deliberately separate from legacy `fin`: V2 first ships
-    # read-only and must never become an accidental second formal writer.
-    op.execute("CREATE SCHEMA IF NOT EXISTS fin_current")
+    # read-only and must never become an accidental second formal writer.  Its
+    # owner schema is provisioned by the DBA role bootstrap so this migration
+    # never needs database-level CREATE privilege.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF to_regnamespace('fin_current') IS NULL THEN
+                RAISE EXCEPTION
+                    'fin_current is missing; execute bootstrap_finance_database_roles.sql before Finance V2 migration';
+            END IF;
+        END
+        $$;
+        """
+    )
     op.execute(
         """
         CREATE TABLE fin_current.accounting_book (
