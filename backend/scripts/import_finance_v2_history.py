@@ -52,10 +52,10 @@ async def _execute(manifest_path: Path, records, *, publish: bool) -> list[dict]
     grouped = _group_records(records)
     results: list[dict] = []
     async with AsyncSessionLocal() as db:
-        current_user = await db.scalar(text("select current_user"))
-        if current_user != "fin_history_importer":
-            raise HistoryPublicationError("history import must run as fin_history_importer")
         async with db.begin():
+            current_user = await db.scalar(text("select current_user"))
+            if current_user != "fin_history_importer":
+                raise HistoryPublicationError("history import must run as fin_history_importer")
             service = FinanceV2HistoryImportService(db)
             for database, source_records in sorted(grouped.items()):
                 stage = await service.stage(

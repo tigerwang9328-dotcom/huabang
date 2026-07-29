@@ -23,3 +23,9 @@ def test_history_import_dry_run_does_not_eagerly_load_database_settings():
     assert "from app.services.finance_v2.history_import_service" not in before_execute
     assert "from app.services.finance_v2.history_import_plan import HistoryPublicationError, plan_history_import" in before_execute
     assert "from app.core.database import AsyncSessionLocal" in source
+
+
+def test_history_execute_checks_dedicated_role_inside_its_single_transaction():
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "async with db.begin():\n            current_user = await db.scalar" in source
