@@ -30,3 +30,15 @@ test("V2 workspace reads periods, postable accounts, and voucher workflow state 
     assert.ok(workspace.includes(token), `missing ${token} workspace state`);
   }
 });
+
+test("V2 workspace exposes write actions only through server-reported Gate readiness", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getWriteReadiness"));
+  assert.ok(api.includes("createDraft"));
+  assert.ok(api.includes("executeCommand"));
+  assert.ok(workspace.includes("writeReadiness"));
+  assert.ok(workspace.includes("draftEnabled"));
+  assert.ok(workspace.includes("runCommand"));
+});

@@ -52,6 +52,31 @@
     <el-card v-if="selectedBookId" v-loading="workspaceLoading" shadow="never">
       <template #header><strong>当前账工作区（只读）</strong></template>
       <el-alert title="这里展示的是 fin_current 的账期、可制单科目和凭证状态；写入仍受后端 Gate 强制控制。" type="info" :closable="false" show-icon />
+      <el-alert
+        class="gate-alert"
+        :title="writeGateMessage"
+        :type="draftEnabled || reviewEnabled || postEnabled ? 'warning' : 'info'"
+        :closable="false"
+        show-icon
+      />
+      <section v-if="draftEnabled" class="draft-section">
+        <div class="section-head"><h2>人工凭证草稿</h2><span>保存后仍需提交、审核和人工过账</span></div>
+        <div class="draft-meta">
+          <el-select v-model="draft.period_id" placeholder="选择开放期间">
+            <el-option v-for="period in openPeriods" :key="period.id" :label="period.period_code" :value="period.id" />
+          </el-select>
+          <el-date-picker v-model="draft.voucher_date" type="date" value-format="YYYY-MM-DD" :clearable="false" />
+          <el-button type="primary" :loading="draftSaving" @click="saveDraft">保存草稿</el-button>
+        </div>
+        <el-table :data="draft.entries" max-height="260" empty-text="请至少保留两条分录">
+          <el-table-column label="科目" min-width="220"><template #default="{ row }"><el-select v-model="row.account_version_id" filterable placeholder="选择可制单科目"><el-option v-for="account in accounts" :key="account.id" :label="`${account.account_code} · ${account.account_name}`" :value="account.id" /></el-select></template></el-table-column>
+          <el-table-column label="摘要" min-width="160"><template #default="{ row }"><el-input v-model="row.summary" maxlength="512" /></template></el-table-column>
+          <el-table-column label="借方" width="150"><template #default="{ row }"><el-input-number v-model="row.debit_amount" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
+          <el-table-column label="贷方" width="150"><template #default="{ row }"><el-input-number v-model="row.credit_amount" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
+          <el-table-column width="80"><template #default="{ $index }"><el-button text type="danger" :disabled="draft.entries.length <= 2" @click="removeDraftLine($index)">删除</el-button></template></el-table-column>
+        </el-table>
+        <el-button text type="primary" @click="addDraftLine">添加分录</el-button>
+      </section>
       <div class="workspace-grid">
         <section>
           <h2>会计期间</h2>
@@ -82,6 +107,11 @@
           <el-table-column prop="prepared_by" label="制单人" min-width="100" />
           <el-table-column prop="reviewer_id" label="审核人" min-width="100" />
           <el-table-column prop="posted_by" label="过账人" min-width="100" />
+          <el-table-column label="操作" min-width="250" fixed="right">
+            <template #default="{ row }">
+              <el-button v-for="action in availableActions(row)" :key="action" size="small" text type="primary" :loading="commandLoading === `${row.id}:${action}`" @click="runCommand(row, action)">{{ actionLabel(action) }}</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </section>
     </el-card>
@@ -89,13 +119,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import {
   financeV2Api,
   type FinanceV2Account,
   type FinanceV2Book,
   type FinanceV2Period,
   type FinanceV2Voucher,
+  type FinanceV2VoucherLineInput,
+  type FinanceV2WriteReadiness,
 } from "@/api/financeV2";
 
 const books = ref<FinanceV2Book[]>([]);
@@ -103,9 +136,25 @@ const selectedBookId = ref<number>();
 const periods = ref<FinanceV2Period[]>([]);
 const accounts = ref<FinanceV2Account[]>([]);
 const vouchers = ref<FinanceV2Voucher[]>([]);
+const writeReadiness = ref<FinanceV2WriteReadiness>();
 const loading = ref(false);
 const workspaceLoading = ref(false);
+const draftSaving = ref(false);
+const commandLoading = ref("");
 const loadError = ref("");
+const today = () => new Date().toISOString().slice(0, 10);
+const newRequestId = () => globalThis.crypto?.randomUUID?.() || `finance-v2-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const draft = reactive({ book_id: 0, period_id: 0, voucher_date: today(), request_id: newRequestId(), entries: [] as FinanceV2VoucherLineInput[] });
+
+const draftEnabled = computed(() => Boolean(writeReadiness.value?.commands.draft.enabled));
+const reviewEnabled = computed(() => Boolean(writeReadiness.value?.commands.review.enabled));
+const postEnabled = computed(() => Boolean(writeReadiness.value?.commands.post.enabled));
+const openPeriods = computed(() => periods.value.filter((period) => period.status === "open"));
+const writeGateMessage = computed(() => {
+  if (!writeReadiness.value) return "正在读取服务器写入 Gate；未确认前不显示可写操作。";
+  const disabled = Object.entries(writeReadiness.value.commands).filter(([, value]) => !value.enabled).map(([command]) => command);
+  return disabled.length ? `当前禁用：${disabled.join("、")}。实际写入仍由后端再次校验。` : "已按当前用户和账簿确认 Gate；每次写入仍由后端强制复核。";
+});
 
 const gateMessage = computed(() => {
   if (loadError.value) return `无法读取 V2 账簿：${loadError.value}`;
@@ -133,22 +182,87 @@ async function loadWorkspace() {
     periods.value = [];
     accounts.value = [];
     vouchers.value = [];
+    writeReadiness.value = undefined;
     return;
   }
   workspaceLoading.value = true;
   try {
-    const [periodResponse, accountResponse, voucherResponse] = await Promise.all([
+    const [periodResponse, accountResponse, voucherResponse, readinessResponse] = await Promise.all([
       financeV2Api.listPeriods(selectedBookId.value),
       financeV2Api.listAccounts(selectedBookId.value),
       financeV2Api.listVouchers(selectedBookId.value),
+      financeV2Api.getWriteReadiness(selectedBookId.value),
     ]);
     periods.value = periodResponse.data || [];
     accounts.value = accountResponse.data || [];
     vouchers.value = voucherResponse.data || [];
+    writeReadiness.value = readinessResponse.data;
+    draft.book_id = selectedBookId.value;
+    if (!openPeriods.value.some((period) => period.id === draft.period_id)) draft.period_id = openPeriods.value[0]?.id || 0;
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : "工作区读取失败";
   } finally {
     workspaceLoading.value = false;
+  }
+}
+
+function addDraftLine() {
+  draft.entries.push({ account_version_id: 0, summary: "", debit_amount: 0, credit_amount: 0 });
+}
+
+function removeDraftLine(index: number) {
+  draft.entries.splice(index, 1);
+}
+
+function resetDraft() {
+  draft.request_id = newRequestId();
+  draft.voucher_date = today();
+  draft.entries.splice(0, draft.entries.length, ...[0, 1].map(() => ({ account_version_id: 0, summary: "", debit_amount: 0, credit_amount: 0 })));
+}
+
+async function saveDraft() {
+  if (!draft.book_id || !draft.period_id) return ElMessage.warning("请选择账簿和开放期间");
+  draftSaving.value = true;
+  try {
+    await financeV2Api.createDraft({ ...draft, entries: draft.entries.map((entry) => ({ ...entry })) });
+    ElMessage.success("凭证草稿已保存");
+    resetDraft();
+    await loadWorkspace();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "保存草稿失败");
+  } finally {
+    draftSaving.value = false;
+  }
+}
+
+const actionLabel = (action: string) => ({ submit: "提交", start_review: "领取审核", approve: "批准", reject: "驳回", reopen: "重新打开", withdraw: "撤回", cancel: "取消", post: "人工过账" } as Record<string, string>)[action] || action;
+const actionGate = (action: string) => action === "post" ? postEnabled.value : ["start_review", "approve", "reject"].includes(action) ? reviewEnabled.value : draftEnabled.value;
+function availableActions(voucher: FinanceV2Voucher) {
+  const candidates: Record<string, string[]> = { draft: ["submit", "cancel"], submitted: ["start_review", "cancel"], reviewing: ["approve", "reject", "cancel"], rejected: ["reopen"], approved: ["withdraw", "cancel", "post"] };
+  return (candidates[voucher.status] || []).filter(actionGate);
+}
+
+async function runCommand(voucher: FinanceV2Voucher, action: string) {
+  const reasonRequired = ["reject", "reopen", "withdraw", "cancel", "post"].includes(action);
+  let reason: string | undefined;
+  if (reasonRequired) {
+    try {
+      const response = await ElMessageBox.prompt(`${actionLabel(action)}原因将写入审计记录。`, actionLabel(action), { inputPattern: /\S+/, inputErrorMessage: "必须填写原因", confirmButtonText: "确认", cancelButtonText: "取消" });
+      reason = response.value;
+    } catch {
+      return;
+    }
+  }
+  const key = `${voucher.id}:${action}`;
+  commandLoading.value = key;
+  try {
+    await financeV2Api.executeCommand(voucher.id, { action, command_id: newRequestId(), expected_version: voucher.version, reason });
+    ElMessage.success(`${actionLabel(action)}已提交`);
+    await loadWorkspace();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : `${actionLabel(action)}失败，请刷新后确认凭证状态`);
+  } finally {
+    commandLoading.value = "";
   }
 }
 
@@ -163,8 +277,13 @@ onMounted(loadBooks);
 .eyebrow { margin: 0; color: var(--el-color-primary); font-size: 12px; font-weight: 600; }
 .book-card { min-height: 260px; }
 .workspace-filter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.gate-alert { margin-top: 16px; }
+.draft-section { margin-top: 20px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.section-head h2 { margin: 0; font-size: 15px; }.section-head span { color: var(--el-text-color-secondary); font-size: 12px; }
+.draft-meta { display: flex; gap: 12px; margin-bottom: 12px; }
 .workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .workspace-grid h2, .voucher-section h2 { margin: 0 0 10px; font-size: 15px; }
 .voucher-section { margin-top: 20px; }
-@media (max-width: 900px) { .workspace-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .workspace-grid { grid-template-columns: 1fr; } .draft-meta { flex-direction: column; } }
 </style>

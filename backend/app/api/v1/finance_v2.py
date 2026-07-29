@@ -117,6 +117,40 @@ async def list_books(
     )
 
 
+@router.get("/books/{book_id}/write-readiness", response_model=ApiResponse)
+async def get_book_write_readiness(
+    book_id: int,
+    current_user: SysUser = Depends(require_roles("finance_manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(select(FinanceV2FeatureGate))).scalars().all()
+    gates = [
+        GateScope(
+            scope_type=row.scope_type,
+            scope_key=row.scope_key,
+            gate_name=row.gate_name,
+            enabled=row.enabled,
+        )
+        for row in rows
+    ]
+    role = _finance_gate_role(current_user)
+    readiness = {}
+    for command in ("draft", "review", "post"):
+        try:
+            assert_command_enabled(
+                gates,
+                command=command,
+                environment=settings.APP_ENV,
+                book=str(book_id),
+                role=role,
+            )
+        except FeatureGateError as error:
+            readiness[command] = {"enabled": False, "reason": str(error)}
+        else:
+            readiness[command] = {"enabled": True, "reason": None}
+    return ApiResponse.ok(data={"book_id": book_id, "role": role, "commands": readiness})
+
+
 @router.get("/books/{book_id}/periods", response_model=ApiResponse)
 async def list_book_periods(
     book_id: int,
