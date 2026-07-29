@@ -63,3 +63,14 @@
 
 - **Go：** 生产 Finance V2 历史账只读发布、历史标记保留、受限 `fin_app` 查询和中台权限入口。
 - **No-Go：** V2 草稿、财务审核、人工过账、期间结账、来源同步及任何 `fin_current` 写入；原因仍为 PITR/RTO/保留策略、期初与期间连续性和已授权财务用户端到端验收未完成。
+
+## 备份恢复链实证（2026-07-29，后补）
+
+| 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- | --- |
+| 失效 cron 的根因 | `xiaohu` 的原全库逻辑备份任务把输出重定向至不可写的 `/var/log`；修正日志后，应用数据库账户在 `fin_current` 上被最小权限正确拒绝。该任务已从 crontab 移除，未通过扩大应用权限“修复” | 生产运行时 | 故障复现与根因证据 | 原 cron 不能作为 RPO 证据 |
+| 逻辑备份 timer | `huabang-postgres-backup.timer` 已 active；root 拥有的运行脚本以 PostgreSQL OS 用户执行。custom dump `huabang_ai_20260729T125202Z.dump` 及其 SHA-256 清单通过校验 | 生产执行 | 生产备份证据 | 满足本机逻辑恢复前置 |
+| WAL 与物理基线 | `archive_mode=on`、归档命令已运行；`pg_stat_archiver` 成功归档且失败数 0。`huabang-postgres-basebackup.timer` 已 active，物理基线包含 `base.tar`、`pg_wal.tar` 与 `SHA256SUMS` | 生产运行时 | 生产 PITR 链路证据 | 可进入隔离 PITR 演练 |
+| 隔离 PITR 恢复 | 独立 PostgreSQL 实例使用归档 WAL 在端口 `55432` 恢复后，核验 `alembic=1fdf4577d7d8`、`history_vouchers=339`、`history_entries=4596`、`current_vouchers=0`；第二次完整演练耗时 16 秒且实例自动关闭/清理 | 生产形态隔离恢复 | 恢复演练证据 | 本机 RTO 技术演练通过；不等同于异机灾备 |
+
+**更新后的限制：** PITR 的技术链路已从 “未验证” 更新为 “本机已验证”；由于没有异机或异存储副本，它仍不能证明主机损坏场景下的 RPO/RTO。当前账开写 Gate 继续关闭，直至该副本和期初/期间/业务验收证据齐备。
