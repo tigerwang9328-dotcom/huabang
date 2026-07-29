@@ -65,3 +65,13 @@ def test_voucher_number_counter_and_reservation_preserve_period_scoped_audit_ide
     )
     assert "fin_current.voucher_number_counter" in migration_sources
     assert "fin_current.voucher_number_reservation" in migration_sources
+
+
+def test_operation_events_have_a_database_level_immutability_guard():
+    migration_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (Path(__file__).parents[1] / "alembic" / "versions").glob("*.py")
+    )
+
+    assert "tr_fin_current_operation_event_immutable" in migration_sources
+    assert "operation_event records are append-only" in migration_sources

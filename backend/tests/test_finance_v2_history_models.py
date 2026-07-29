@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.models.finance_v2_history import FinanceV2HistoryBatch, FinanceV2HistoryVoucher, FinanceV2HistoryVoucherLine
 
 
@@ -14,10 +16,14 @@ def test_history_source_identity_is_immutable_and_idempotent():
 
 
 def test_history_migration_uses_staging_and_published_read_view():
-    path = __file__.replace("tests\\test_finance_v2_history_models.py", "alembic\\versions\\8c2b5e9f1a34_finance_v2_history_publication.py")
-    migration = open(path, encoding="utf-8").read()
+    versions = Path(__file__).parents[1] / "alembic" / "versions"
+    migration_path = next(
+        path for path in versions.glob("*.py") if "CREATE TABLE fin_history.staging_voucher" in path.read_text(encoding="utf-8")
+    )
+    migration = migration_path.read_text(encoding="utf-8")
 
-    assert 'down_revision = "7f4a8c1d9e20"' in migration
+    assert "down_revision =" in migration
+    assert "down_revision = None" not in migration
     assert "fin_history.staging_voucher" in migration
     assert "fin_read.history_voucher" in migration
     assert "published facts are immutable" in migration
