@@ -59,6 +59,17 @@ def test_stale_expected_version_is_a_conflict():
         apply_voucher_command(_draft(version=3), VoucherCommand("submit", "maker-1", 2), _balanced_lines())
 
 
+def test_default_duty_separation_rejects_self_review_and_self_posting():
+    submitted = VoucherDraft("voucher-1", "submitted", 2, "maker-1", None)
+    with pytest.raises(FinanceV2DomainError, match="preparer"):
+        apply_voucher_command(submitted, VoucherCommand("start_review", "maker-1", 2), _balanced_lines())
+
+    reviewing = apply_voucher_command(submitted, VoucherCommand("start_review", "reviewer-1", 2), _balanced_lines())
+    approved = apply_voucher_command(reviewing, VoucherCommand("approve", "reviewer-1", 3), _balanced_lines())
+    with pytest.raises(FinanceV2DomainError, match="duty separation"):
+        apply_voucher_command(approved, VoucherCommand("post", "reviewer-1", 4, reason="人工过账"), _balanced_lines())
+
+
 def test_submit_rejects_unbalanced_or_double_sided_lines():
     with pytest.raises(FinanceV2DomainError, match="not balanced"):
         validate_voucher_lines([VoucherLineDraft(account_version_id="1001", summary="x", debit=Decimal("1"))])

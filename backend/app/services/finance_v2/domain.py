@@ -101,6 +101,12 @@ def apply_voucher_command(
     target = _TRANSITIONS.get(voucher.status, {}).get(command.action)
     if target is None:
         raise FinanceV2DomainError(f"invalid voucher transition: {voucher.status} -> {command.action}")
+    if command.action == "start_review" and command.actor_id == voucher.prepared_by:
+        raise FinanceV2DomainError("preparer cannot review the same voucher by default")
+    if command.action in {"approve", "reject"} and command.actor_id != voucher.reviewer_id:
+        raise FinanceV2DomainError("only the active reviewer can approve or reject this voucher")
+    if command.action == "post" and command.actor_id in {voucher.prepared_by, voucher.reviewer_id}:
+        raise FinanceV2DomainError("duty separation forbids preparer or reviewer from posting by default")
     if command.action in _REASON_REQUIRED and not (command.reason or "").strip():
         raise FinanceV2DomainError(f"reason is required for {command.action}")
     if command.action in _BALANCE_REQUIRED:
