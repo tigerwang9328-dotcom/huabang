@@ -21,6 +21,7 @@ test("finance center base URL opens the V2 core workspace with the platform Fina
 
 test("finance center navigation uses the platform Finance V2 read permission", () => {
   const modules = read("src/config/financeCenterModules.ts");
+  const layout = read("src/layouts/MainLayout.vue");
   const router = read("src/router/index.ts");
 
   assert.ok(modules.includes('permission: "finance:center:view"'));
@@ -28,6 +29,14 @@ test("finance center navigation uses the platform Finance V2 read permission", (
   assert.ok(
     router.includes('["/app/finance-center/core-workspace", "finance:center:view"]'),
     "a finance-only user must land on the V2 workspace after login",
+  );
+  assert.ok(
+    layout.includes('import { financeProfitNavigation } from "@/config/financeCenterModules";'),
+    "the rendered sidebar must use the central finance navigation policy",
+  );
+  assert.ok(
+    layout.includes("items: financeProfitNavigation,"),
+    "the rendered sidebar must not duplicate the finance center permission with the legacy profit permission",
   );
 });
 
