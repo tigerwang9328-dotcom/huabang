@@ -101,3 +101,14 @@
 | 菜单权限修正 | 侧边栏不再复制财务菜单或以 `finance:profit:view` 控制“财务中心”；改为复用 `financeProfitNavigation` 单一配置，财务中心及其下级菜单统一要求 `finance:center:view` | 本地测试、生产静态资源切换 | 回归测试、类型检查、生产运行时 | 消除旧利润权限与财务中心权限的漂移；不改变任何角色授权 |
 | 生产静态资源验证 | 代码提交 `872cb674554b8dd8ed86d0b28a15c41ecc15d725` 已在 `/srv/huabang-ai-center`；服务器完成类型检查与构建，候选静态目录经 `www-data` 读取验证后原子切换。`/app/dashboard`、`/app/finance-center/core-workspace` 均为 HTTP 200，后端保持 active | 生产运行时 | 生产部署验证 | 菜单与路由可达；未等同于已登录财务用户端到端验收 |
 | 写入保护复核 | `fin_current.feature_gate` 无启用记录，`fin_current.voucher=0` | 生产数据库只读核验 | 生产运行时 | 本次只发布前端权限一致性，不开启草稿、审核、过账或结账 |
+
+## 当前账凭证工作台发布实证（2026-07-29，后补）
+
+| 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- | --- |
+| 发布提交与范围 | `/srv/huabang-ai-center` 已切换至 `367bbeea56d94777f3a7d337c1a801e3159a4994`。本次仅发布凭证详情/草稿编辑 API、审计展示和前端工作台；不含 Alembic 迁移、不执行历史导入、不修改功能 Gate | 生产执行，2026-07-29 14:28 UTC | 生产磁盘与运行时 | 不改变已关闭的当前账写入范围 |
+| 草稿服务保护 | 草稿创建会写入分录汇总和可追溯的创建命令 ID；草稿整体替换仅限 `draft` 状态，使用命令幂等和版本比较，且拒绝关闭期间或期间外日期。非草稿、并发旧版本不会先删除分录 | 本地 TDD 与回归 | 本地测试 | 证明实现具备受控开写前置，不等同于生产已允许写入 |
+| 生产运行验证 | `huabang-backend.service` 重启后为 `active`；`/health` 返回数据库和 Redis connected。`/api/v1/finance-center/v2/monitoring/summary` 未登录返回 401；OpenAPI 含 `/api/v1/finance-center/v2/vouchers/{voucher_id}` 的 GET、PUT；`/app/finance-center/core-workspace` 返回 200 | 生产运行时，2026-07-29 14:28–14:30 UTC | 生产运行时 | 后端已加载、路由仍受中台鉴权；不构成已登录用户业务验收 |
+| 本地回归 | 财务后端定向套件 119 passed；前端静态回归 10 passed、`vue-tsc --noEmit` 与 Vite 构建成功。构建仅保留既有 Vite CJS / Rollup 注释警告 | 本地，2026-07-29 | 本地测试与构建 | 可作为发布代码质量证据，不替代生产写入或浏览器验收 |
+
+**保持 No-Go：** 本次未开启 `draft_enabled`、`review_enabled`、`post_enabled` 或 `period_close_enabled`，也未生成当前账凭证。异机/异存储恢复、最终期初与期间连续性、非空生产形态性能数据、真实告警通知闭环，以及已登录财务/超级管理员浏览器验收仍是正式开写前置。
