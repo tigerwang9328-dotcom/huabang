@@ -26,6 +26,8 @@ class OpeningBalanceState:
     status: str
     coverage_continuous: bool
     approved_by: str | None = None
+    coverage_gap_approved: bool = False
+    formal_report_blocked: bool = False
 
 
 def validate_opening_balance(lines: list[OpeningBalanceLine]) -> tuple[Decimal, Decimal]:
@@ -48,8 +50,10 @@ def approve_opening_balance(
 ) -> OpeningBalanceState:
     if state.status != "validated":
         raise OpeningBalanceError("opening balance must be validated before approval")
-    if not state.coverage_continuous:
+    if not state.coverage_continuous and not state.coverage_gap_approved:
         raise OpeningBalanceError("coverage gap blocks opening-balance approval")
+    if not state.coverage_continuous and not state.formal_report_blocked:
+        raise OpeningBalanceError("approved coverage gap must block formal reports")
     if not approver.strip():
         raise OpeningBalanceError("opening balance approver is required")
     validate_opening_balance(lines)
@@ -59,5 +63,5 @@ def approve_opening_balance(
 def assert_current_writes_allowed(state: OpeningBalanceState) -> None:
     if state.batch_kind != "final" or state.status != "locked" or not state.approved_by:
         raise OpeningBalanceError("final locked opening balance is required before current writes")
-    if not state.coverage_continuous:
-        raise OpeningBalanceError("coverage gap blocks current writes")
+    if not state.coverage_continuous and (not state.coverage_gap_approved or not state.formal_report_blocked):
+        raise OpeningBalanceError("coverage gap is not approved with formal reports blocked")

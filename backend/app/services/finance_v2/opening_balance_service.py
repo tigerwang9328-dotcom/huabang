@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finance_v2 import FinanceV2AccountingBook, FinanceV2CommandIdempotency, FinanceV2OperationEvent
-from app.models.finance_v2_opening import FinanceV2OpeningBalanceBatch, FinanceV2OpeningBalanceLine
+from app.models.finance_v2_opening import FinanceV2CoverageGap, FinanceV2OpeningBalanceBatch, FinanceV2OpeningBalanceLine
 from app.services.finance_v2.opening_balance_domain import (
     OpeningBalanceError,
     OpeningBalanceState,
@@ -154,8 +154,22 @@ class FinanceV2OpeningBalanceService:
         if not batch:
             raise OpeningBalanceError("final locked opening balance is required before current writes")
 
+        coverage_gap_approved = False
         if batch.history_coverage_end_date + timedelta(days=1) != batch.go_live_date:
-            raise OpeningBalanceError("history coverage endpoint must immediately precede current go-live date")
+            coverage_gap_id = getattr(batch, "coverage_gap_id", None)
+            if not coverage_gap_id:
+                raise OpeningBalanceError("history coverage gap is not approved for the current go-live boundary")
+            gap = await self.db.get(FinanceV2CoverageGap, coverage_gap_id)
+            expected_start = batch.history_coverage_end_date + timedelta(days=1)
+            expected_end = batch.go_live_date - timedelta(days=1)
+            coverage_gap_approved = bool(
+                gap
+                and gap.status == "approved"
+                and gap.gap_start_date == expected_start
+                and gap.gap_end_date == expected_end
+            )
+            if not coverage_gap_approved:
+                raise OpeningBalanceError("history coverage gap is not approved for the current go-live boundary")
 
         assert_current_writes_allowed(
             OpeningBalanceState(
@@ -163,6 +177,8 @@ class FinanceV2OpeningBalanceService:
                 status=batch.status,
                 coverage_continuous=bool(batch.coverage_continuous),
                 approved_by=batch.approved_by,
+                coverage_gap_approved=coverage_gap_approved,
+                formal_report_blocked=bool(getattr(book, "formal_report_blocked", False)),
             )
         )
 

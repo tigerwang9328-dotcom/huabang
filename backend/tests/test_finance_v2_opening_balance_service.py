@@ -57,8 +57,36 @@ async def test_final_opening_with_a_date_gap_cannot_enable_current_writes():
         async def execute(self, _statement):
             return _Result(batch)
 
-    with pytest.raises(OpeningBalanceError, match="immediately precede"):
+    with pytest.raises(OpeningBalanceError, match="gap is not approved"):
         await FinanceV2OpeningBalanceService(Db()).assert_current_writes_allowed(book_id=3)
+
+
+@pytest.mark.asyncio
+async def test_approved_coverage_gap_allows_current_writes_only_when_formal_reports_are_blocked():
+    book = SimpleNamespace(current_book_go_live_date=date(2026, 8, 2), formal_report_blocked=True)
+    batch = SimpleNamespace(
+        batch_kind="final",
+        status="locked",
+        coverage_continuous=False,
+        coverage_gap_id=9,
+        approved_by="finance-manager",
+        history_coverage_end_date=date(2026, 7, 30),
+        go_live_date=date(2026, 8, 2),
+    )
+    gap = SimpleNamespace(
+        status="approved",
+        gap_start_date=date(2026, 7, 31),
+        gap_end_date=date(2026, 8, 1),
+    )
+
+    class Db:
+        async def get(self, _model, item_id):
+            return book if item_id == 3 else gap
+
+        async def execute(self, _statement):
+            return _Result(batch)
+
+    await FinanceV2OpeningBalanceService(Db()).assert_current_writes_allowed(book_id=3)
 
 
 @pytest.mark.asyncio
