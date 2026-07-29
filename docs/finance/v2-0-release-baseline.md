@@ -11,7 +11,7 @@
 | 生产仓库 | `feature/huabang-ai-mvp` / `1cdafd03674081ad3620ae7d723cf280774f3d0b` | 已核实，未部署 V2 本地分支 |
 | 生产 Alembic | 单一 head/current `6c1e4a7d2f09` | 已核实，发布前须再次执行 `alembic heads --verbose` 与 `alembic current --verbose` |
 | 生产运行方式 | `huabang-backend.service` → Uvicorn `app.main:app`，监听 `127.0.0.1:8000`，Nginx active | 已核实；只有 Gate 全通过后才允许重启 |
-| 本地后端验证 | V2 定向测试与角色核验 32 passed（临时非生产配置） | 已核实 |
+| 本地后端验证 | V2 定向测试与角色核验 34 passed（临时非生产配置） | 已核实 |
 | 本地前端验证 | 类型检查与 Vite 构建成功 | 已核实 |
 
 ## 回滚基线与限制
