@@ -168,10 +168,18 @@ async def test_manual_post_assigns_and_finalizes_a_reserved_voucher_number(monke
         async def rebuild_period(self, *_args, **_kwargs):
             pass
 
+    class FakeAttemptRecorder:
+        async def start(self, **kwargs):
+            assert kwargs == {"voucher_id": 7, "command_id": "post-20260729-001"}
+            return 42
+
+        async def mark_failed(self, *_args, **_kwargs):
+            raise AssertionError("a successful posting must not mark the attempt failed")
+
     monkeypatch.setattr(voucher_workflow, "FinanceV2VoucherNumberService", FakeNumberService)
     monkeypatch.setattr(voucher_workflow, "FinanceV2LedgerService", FakeLedgerService)
 
-    result = await FinanceV2VoucherWorkflow(db).command(
+    result = await FinanceV2VoucherWorkflow(db, posting_attempt_recorder=FakeAttemptRecorder()).command(
         voucher_id=7,
         action="post",
         actor_id="poster",
@@ -183,3 +191,4 @@ async def test_manual_post_assigns_and_finalizes_a_reserved_voucher_number(monke
     assert voucher.voucher_no == "0007"
     assert reservation.status == "used"
     assert result["voucher_no"] == "0007"
+    assert result["posting_attempt_id"] == 42

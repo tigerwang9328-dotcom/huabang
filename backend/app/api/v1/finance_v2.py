@@ -290,8 +290,9 @@ async def execute_voucher_command(
         book_id=voucher.book_id,
         role=_finance_gate_role(current_user),
     )
+    workflow = FinanceV2VoucherWorkflow(db)
     try:
-        result = await FinanceV2VoucherWorkflow(db).command(
+        result = await workflow.command(
             voucher_id=voucher_id,
             action=body.action,
             actor_id=_actor(current_user),
@@ -299,6 +300,17 @@ async def execute_voucher_command(
             reason=body.reason,
             command_id=body.command_id,
         )
+        if body.action == "post":
+            attempt_id = result.get("posting_attempt_id")
+            if attempt_id is None:
+                raise RuntimeError("posted voucher result is missing posting_attempt_id")
+            try:
+                await db.commit()
+            except Exception as error:
+                await db.rollback()
+                await workflow.mark_posting_attempt_failed(attempt_id, error)
+                raise
+            await workflow.mark_posting_attempt_succeeded(attempt_id)
     except FinanceV2DomainError as error:
         raise _domain_error(error) from error
     return ApiResponse.ok(data=result, message="V2 凭证命令已执行")

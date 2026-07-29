@@ -27,14 +27,16 @@ from app.services.finance_v2.domain import (
     canonical_dimension_hash,
 )
 from app.services.finance_v2.ledger_service import FinanceV2LedgerService
+from app.services.finance_v2.posting_attempt_service import FinanceV2PostingAttemptRecorder
 from app.services.finance_v2.voucher_number_service import FinanceV2VoucherNumberService
 
 
 class FinanceV2VoucherWorkflow:
     """The only service allowed to change V2 voucher business state."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, posting_attempt_recorder: FinanceV2PostingAttemptRecorder | None = None):
         self.db = db
+        self._posting_attempt_recorder = posting_attempt_recorder or FinanceV2PostingAttemptRecorder()
 
     async def create_draft(
         self,
@@ -161,54 +163,85 @@ class FinanceV2VoucherWorkflow:
             VoucherCommand(action, actor_id, expected_version, reason),
             domain_lines,
         )
-        values = {
-            "status": after.status,
-            "version": after.version,
-            "reviewer_id": after.reviewer_id,
-            "posted_by": after.posted_by,
-        }
-        if action == "approve":
-            values["approved_by"] = actor_id
-        reservation = None
+        posting_attempt_id = None
         if action == "post":
-            reservation = await FinanceV2VoucherNumberService(self.db).reserve(
-                book_id=voucher.book_id,
-                period_id=voucher.period_id,
-                voucher_group=voucher.voucher_group,
-                command_id=command_id,
+            posting_attempt_id = await self._posting_attempt_recorder.start(
                 voucher_id=voucher.id,
+                command_id=command_id,
             )
-            values["voucher_no"] = reservation.voucher_no
-        result = await self.db.execute(
-            update(FinanceV2Voucher)
-            .where(FinanceV2Voucher.id == voucher_id, FinanceV2Voucher.version == expected_version)
-            .values(**values)
+        try:
+            values = {
+                "status": after.status,
+                "version": after.version,
+                "reviewer_id": after.reviewer_id,
+                "posted_by": after.posted_by,
+            }
+            if action == "approve":
+                values["approved_by"] = actor_id
+            reservation = None
+            if action == "post":
+                reservation = await FinanceV2VoucherNumberService(self.db).reserve(
+                    book_id=voucher.book_id,
+                    period_id=voucher.period_id,
+                    voucher_group=voucher.voucher_group,
+                    command_id=command_id,
+                    voucher_id=voucher.id,
+                )
+                values["voucher_no"] = reservation.voucher_no
+            result = await self.db.execute(
+                update(FinanceV2Voucher)
+                .where(FinanceV2Voucher.id == voucher_id, FinanceV2Voucher.version == expected_version)
+                .values(**values)
+            )
+            if result.rowcount != 1:
+                raise FinanceV2DomainError("version conflict: voucher changed concurrently")
+            for key, value in values.items():
+                setattr(voucher, key, value)
+            if action == "post":
+                await FinanceV2LedgerService().rebuild_period(
+                    self.db,
+                    book_id=voucher.book_id,
+                    period_id=voucher.period_id,
+                )
+                FinanceV2VoucherNumberService.mark_used(reservation)
+            result_payload = self._snapshot(voucher)
+            if posting_attempt_id is not None:
+                result_payload["posting_attempt_id"] = posting_attempt_id
+            self.db.add(
+                FinanceV2CommandIdempotency(
+                    book_id=voucher.book_id,
+                    command_name=f"voucher.{action}",
+                    idempotency_key=command_id,
+                    request_hash=request_hash,
+                    result_payload=result_payload,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            await self._event(voucher, actor_id, f"voucher.{action}", command_id, reason, before)
+            await self.db.flush()
+            return result_payload
+        except Exception as error:
+            if posting_attempt_id is not None:
+                await self._posting_attempt_recorder.mark_failed(
+                    posting_attempt_id,
+                    error_code=type(error).__name__,
+                    error_context={"message": str(error), "voucher_id": voucher_id, "command_id": command_id},
+                )
+            raise
+
+    async def mark_posting_attempt_succeeded(self, attempt_id: int) -> None:
+        """Call only after the primary V2 posting transaction has committed."""
+
+        await self._posting_attempt_recorder.mark_succeeded(attempt_id)
+
+    async def mark_posting_attempt_failed(self, attempt_id: int, error: Exception) -> None:
+        """Record a primary-transaction commit failure in the independent attempt session."""
+
+        await self._posting_attempt_recorder.mark_failed(
+            attempt_id,
+            error_code=type(error).__name__,
+            error_context={"message": str(error)},
         )
-        if result.rowcount != 1:
-            raise FinanceV2DomainError("version conflict: voucher changed concurrently")
-        for key, value in values.items():
-            setattr(voucher, key, value)
-        if action == "post":
-            await FinanceV2LedgerService().rebuild_period(
-                self.db,
-                book_id=voucher.book_id,
-                period_id=voucher.period_id,
-            )
-            FinanceV2VoucherNumberService.mark_used(reservation)
-        result_payload = self._snapshot(voucher)
-        self.db.add(
-            FinanceV2CommandIdempotency(
-                book_id=voucher.book_id,
-                command_name=f"voucher.{action}",
-                idempotency_key=command_id,
-                request_hash=request_hash,
-                result_payload=result_payload,
-                completed_at=datetime.now(timezone.utc),
-            )
-        )
-        await self._event(voucher, actor_id, f"voucher.{action}", command_id, reason, before)
-        await self.db.flush()
-        return result_payload
 
     async def _empty_dimension_set_id(self, book_id: int) -> int:
         stable_hash = canonical_dimension_hash({})

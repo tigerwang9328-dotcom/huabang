@@ -141,3 +141,112 @@ async def test_v2_write_gate_uses_super_admin_role_for_an_administrator(monkeypa
     )
 
     assert response.data["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_v2_post_commits_primary_transaction_before_marking_attempt_success(monkeypatch):
+    instances = []
+
+    class FakeWorkflow:
+        def __init__(self, _db):
+            self.completed_attempt_id = None
+            instances.append(self)
+
+        async def command(self, **_kwargs):
+            return {"status": "posted", "posting_attempt_id": 42}
+
+        async def mark_posting_attempt_succeeded(self, attempt_id):
+            self.completed_attempt_id = attempt_id
+
+    gates = [SimpleNamespace(scope_type="global", scope_key="*", gate_name="post_enabled", enabled=True)]
+
+    class GateResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return gates
+
+    class GateDb:
+        committed = False
+
+        async def execute(self, _statement):
+            return GateResult()
+
+        async def get(self, _model, _voucher_id):
+            return SimpleNamespace(book_id=100)
+
+        async def commit(self):
+            self.committed = True
+
+    monkeypatch.setattr(finance_v2, "FinanceV2VoucherWorkflow", FakeWorkflow)
+    db = GateDb()
+
+    response = await finance_v2.execute_voucher_command(
+        7,
+        finance_v2.VoucherCommandInput(
+            action="post", command_id="post-route-test-1", expected_version=4, reason="人工过账"
+        ),
+        current_user=SimpleNamespace(id=1, username="poster"),
+        db=db,
+    )
+
+    assert response.data["status"] == "posted"
+    assert db.committed is True
+    assert instances[0].completed_attempt_id == 42
+
+
+@pytest.mark.asyncio
+async def test_v2_post_marks_independent_attempt_failed_when_primary_commit_fails(monkeypatch):
+    instances = []
+
+    class FakeWorkflow:
+        def __init__(self, _db):
+            self.failed_attempt_id = None
+            instances.append(self)
+
+        async def command(self, **_kwargs):
+            return {"status": "posted", "posting_attempt_id": 43}
+
+        async def mark_posting_attempt_failed(self, attempt_id, _error):
+            self.failed_attempt_id = attempt_id
+
+    gates = [SimpleNamespace(scope_type="global", scope_key="*", gate_name="post_enabled", enabled=True)]
+
+    class GateResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return gates
+
+    class GateDb:
+        rolled_back = False
+
+        async def execute(self, _statement):
+            return GateResult()
+
+        async def get(self, _model, _voucher_id):
+            return SimpleNamespace(book_id=100)
+
+        async def commit(self):
+            raise RuntimeError("primary commit failed")
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    monkeypatch.setattr(finance_v2, "FinanceV2VoucherWorkflow", FakeWorkflow)
+    db = GateDb()
+
+    with pytest.raises(RuntimeError, match="primary commit failed"):
+        await finance_v2.execute_voucher_command(
+            7,
+            finance_v2.VoucherCommandInput(
+                action="post", command_id="post-route-test-2", expected_version=4, reason="人工过账"
+            ),
+            current_user=SimpleNamespace(id=1, username="poster"),
+            db=db,
+        )
+
+    assert db.rolled_back is True
+    assert instances[0].failed_attempt_id == 43
