@@ -150,3 +150,13 @@ from app.models.finance_v2_operations import (
     FinanceV2VoucherNumberCounter,
     FinanceV2VoucherNumberReservation,
 )
+from app.models.douyin_color_analytics import (
+    CollectionBatch,
+    CollectionBatchPart,
+    CollectionItem,
+    CollectorInstance,
+    DouyinCreatorAccount,
+    DouyinUploadToken,
+    Video,
+    VideoAnalysisSnapshot,
+)

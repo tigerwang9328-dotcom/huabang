@@ -13,6 +13,7 @@ from app.core.store_whitelist import ALLOWED_STORE_CODES, ALLOWED_INVENTORY_CODE
 from app.models.sys import SysUser, SysRole, SysUserRole, SysDepartment, SysMenu, SysParam, SysPermission, SysRolePermission, SysRegisterApplication, SysOperationLog, SysUserStore, SysFieldPermission
 from app.schemas.common import ApiResponse
 from app.services.size_wall_service import SizeWallService
+from app.services.operation_audit_service import write_operation_audit
 
 router = APIRouter(prefix="/system", tags=["系统管理"])
 
@@ -26,7 +27,17 @@ class SizeWallSyncRequest(BaseModel):
     analysis_date: Optional[date] = None
 
 async def write_operation_log(db, user, module, action, target_type=None, target_id=None, before_data=None, after_data=None, request=None):
-    db.add(SysOperationLog(user_id=user.id if user else None, username=user.username if user else None, module=module, action=action, target_type=target_type, target_id=str(target_id) if target_id is not None else None, before_data=before_data, after_data=after_data, ip=request.client.host if request and request.client else None, user_agent=request.headers.get("user-agent") if request else None))
+    return await write_operation_audit(
+        db,
+        actor=user,
+        module=module,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        before_data=before_data,
+        after_data=after_data,
+        request=request,
+    )
 
 async def sync_user_stores(db, user_id:int, store_code:Optional[str], store_codes:list[str]):
     codes=[]

@@ -9,6 +9,7 @@ from app.core.exceptions import AppException
 from app.api.v1.deps import get_current_user
 from app.models.sys import SysUser, SysUserRole, SysRole, SysRolePermission, SysPermission, SysParam, SysRegisterApplication, SysOperationLog
 from app.schemas.common import ApiResponse
+from app.services.operation_audit_service import write_operation_audit
 from pydantic import BaseModel
 from typing import Optional
 import logging
@@ -60,7 +61,17 @@ async def _security_settings(db: AsyncSession) -> dict:
     return values
 
 async def _auth_log(db: AsyncSession, request: Request, action: str, user: Optional[SysUser] = None, username: Optional[str] = None, data=None):
-    db.add(SysOperationLog(user_id=user.id if user else None, username=user.username if user else username, module="auth", action=action, target_type="user", target_id=str(user.id) if user else username, after_data=data, ip=request.client.host if request.client else None, user_agent=request.headers.get("user-agent")))
+    return await write_operation_audit(
+        db,
+        actor=user,
+        actor_username=username,
+        module="auth",
+        action=action,
+        target_type="user",
+        target_id=user.id if user and user.id is not None else username,
+        after_data=data,
+        request=request,
+    )
 
 def _password_policy_error(password: str, sec: dict) -> Optional[str]:
     import re
@@ -247,4 +258,3 @@ async def change_password(
     await _auth_log(db, request, "password.change_success", user=user)
     await db.commit()
     return ApiResponse.ok(message="密码修改成功，请重新登录")
-
