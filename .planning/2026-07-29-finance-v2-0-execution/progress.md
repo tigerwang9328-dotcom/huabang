@@ -117,3 +117,10 @@
 - 发布期间的 5 次 `127.0.0.1:8000` 连接失败发生在服务重启健康重试窗口；后续服务启动日志显示两个 worker 均完成 application startup，当前健康检查正常。
 - 一次独立核验误查了不存在的 `huabang-ai-center.service`，其 inactive 不代表服务故障；真实服务单元为 `huabang-backend.service`。另有自 2026-07-29 起挂起的旧 `sudo -S systemctl restart huabang-backend.service` 父子进程；本轮未终止或修改它，因当前服务已正常运行，留待单独运维清理评审。
 - 本轮未开启 `draft_enabled`、`review_enabled`、`post_enabled`、`period_close_enabled` 或来源写入，也未创建任何 `fin_current` 凭证。下一阶段仅做只读验收和开写前外部 Gate，不得将本次只读发布表述为正式记账上线。
+
+## 2026-07-30 发布后本地回归与浏览器验收前置
+
+- 以无敏感进程级测试配置运行实际存在的 `test_finance_v2_*.py`、历史导入脚本和数据库角色定向套件，结果为 `148 passed`；仅有既有 `pytest-asyncio` fixture loop scope 弃用警告。首次按实施计划中的旧测试文件名运行时在收集前发现文件不存在，未执行测试；已改为当前工作树实际清单后重跑，不把首次命令视为测试失败。
+- 前端 `npm run type-check` 与 `npm run build` 均通过；构建为 2,384 modules，财务核心工作台产物已生成。仅保留既有 Vite CJS 与 Rollup `#__PURE__` 注释警告。
+- Browser Use 已能连接 Chrome，但其华邦财务中心标签被重定向到 `/login`，说明该受控浏览器没有华邦登录会话；没有输入密码、验证码或切换账号。生产页面的 HTTP 200 与未登录 API 401 仍仅为静态/鉴权边界证据，已登录财务角色和超级管理员端到端验收继续待完成。
+- 生产最新逻辑备份定时任务于 03:03 UTC 成功，物理基线任务于 01:30 UTC 成功；两种备份路径仍在本机根文件系统，不能视作异机/异存储 RPO/RTO 证明。钉钉凭据和流服务存在，但全局推送在运行健康信息中为关闭，且未发现 `finance-v2-oncall` 的接收人配置；不得自行打开或发送财务告警。
