@@ -48,6 +48,8 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST") in routes
     assert ("/finance-center/v2/history/vouchers", "GET") in routes
     assert ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET") in routes
+    assert ("/finance-center/v2/source-inbox", "GET") in routes
+    assert ("/finance-center/v2/source-inbox/{source_inbox_id}/previews", "GET") in routes
 
 
 def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency():
@@ -70,6 +72,8 @@ def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency(
         ("/finance-center/v2/vouchers/{voucher_id}", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/history/vouchers", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/history/vouchers/{voucher_id}/lines", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/source-inbox", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/source-inbox/{source_inbox_id}/previews", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/vouchers", "POST"): FINANCE_V2_WRITE_PERMISSION,
         ("/finance-center/v2/vouchers/{voucher_id}", "PUT"): FINANCE_V2_WRITE_PERMISSION,
         ("/finance-center/v2/vouchers/{voucher_id}/commands", "POST"): FINANCE_V2_WRITE_PERMISSION,

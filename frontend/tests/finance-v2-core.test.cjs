@@ -63,6 +63,18 @@ test("V2 workspace exposes immutable historical Kingdee vouchers and their marke
   assert.ok(workspace.includes("viewHistoryVoucher"));
 });
 
+test("V2 workspace shows only persisted source dry-run receipts and never an auto-draft action", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("listSourceInbox"));
+  assert.ok(api.includes("listSourcePreviews"));
+  assert.ok(workspace.includes("来源收件箱与 dry-run 预览"));
+  assert.ok(workspace.includes("sourceInbox"));
+  assert.ok(workspace.includes("loadSourceInbox"));
+  assert.ok(!workspace.includes("自动生成来源草稿"));
+});
+
 test("finance center navigation does not present V2 history or current accounts as already production-published", () => {
   const modules = read("src/config/financeCenterModules.ts");
 

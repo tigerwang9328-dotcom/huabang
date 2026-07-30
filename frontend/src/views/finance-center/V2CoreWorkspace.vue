@@ -71,6 +71,27 @@
       </el-table>
     </el-card>
 
+    <el-card v-loading="sourceInboxLoading" shadow="never" class="history-card">
+      <template #header>
+        <div class="title-row">
+          <div>
+            <strong>来源收件箱与 dry-run 预览</strong>
+            <p class="subtle">仅显示已受控写入的来源快照与预览结果；V2.0 不从这里自动创建、审核或过账凭证。</p>
+          </div>
+          <el-button :loading="sourceInboxLoading" text type="primary" @click="loadSourceInbox">刷新</el-button>
+        </div>
+      </template>
+      <el-alert title="华邦来源数据必须先进入版本化收件箱。相同来源键+哈希幂等，哈希变化进入异常；本页没有来源写入或自动草稿入口。" type="warning" :closable="false" show-icon />
+      <el-table :data="sourceInbox" max-height="300" empty-text="尚无受控来源快照；这不代表来源数据为零或已完成核对。">
+        <el-table-column prop="source_system" label="来源" min-width="130" />
+        <el-table-column prop="business_type" label="业务类型" min-width="110" />
+        <el-table-column prop="source_pk" label="来源键" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="source_occurred_at" label="业务时间" min-width="160" />
+        <el-table-column prop="status" label="状态" min-width="130" />
+        <el-table-column label="预览" width="100"><template #default="{ row }"><el-button text type="primary" @click="viewSourcePreviews(row)">查看</el-button></template></el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card v-loading="historyLoading" shadow="never" class="history-card">
       <template #header>
         <div class="title-row">
@@ -255,6 +276,17 @@
       <el-skeleton v-else-if="voucherDetailLoading" :rows="6" animated />
     </el-drawer>
 
+    <el-drawer v-model="sourcePreviewDrawerOpen" :title="`来源 dry-run 预览${selectedSourceInbox ? ` · ${selectedSourceInbox.source_pk}` : ''}`" size="760px">
+      <el-alert title="以下是已持久化的 dry-run 结果，不会创建草稿，也不会改变余额、审核或过账状态。" type="info" :closable="false" show-icon />
+      <el-table v-loading="sourcePreviewLoading" :data="sourcePreviews" max-height="620" empty-text="该来源没有已持久化的预览结果">
+        <el-table-column prop="created_at" label="预览时间" min-width="170" />
+        <el-table-column prop="status" label="状态" min-width="130" />
+        <el-table-column prop="posting_rule_version_id" label="规则版本 ID" min-width="130" />
+        <el-table-column prop="exception_code" label="异常" min-width="160"><template #default="{ row }">{{ row.exception_code || "—" }}</template></el-table-column>
+        <el-table-column label="草稿" min-width="100"><template #default="{ row }">{{ row.creates_draft ? "异常" : "不创建" }}</template></el-table-column>
+      </el-table>
+    </el-drawer>
+
     <el-drawer v-model="periodCloseDrawerOpen" :title="`结账检查${selectedClosePeriod ? ` · ${selectedClosePeriod.period_code}` : ''}`" size="720px">
       <el-alert title="结账前必须全部通过未过账、借贷平衡、来源异常和余额重算检查；人工操作仍受独立 period_close Gate 控制。" type="warning" :closable="false" show-icon />
       <template v-if="periodCloseReadiness">
@@ -341,6 +373,8 @@ import {
   type FinanceV2PeriodCommandInput,
   type FinanceV2PeriodCloseReadiness,
   type FinanceV2ReportReadiness,
+  type FinanceV2SourceInboxItem,
+  type FinanceV2SourcePreview,
   type FinanceV2TrialBalance,
   type FinanceV2Period,
   type FinanceV2Voucher,
@@ -356,6 +390,9 @@ const accounts = ref<FinanceV2Account[]>([]);
 const vouchers = ref<FinanceV2Voucher[]>([]);
 const selectedVoucher = ref<FinanceV2VoucherDetail>();
 const historyVouchers = ref<FinanceV2HistoryVoucher[]>([]);
+const sourceInbox = ref<FinanceV2SourceInboxItem[]>([]);
+const sourcePreviews = ref<FinanceV2SourcePreview[]>([]);
+const selectedSourceInbox = ref<FinanceV2SourceInboxItem>();
 const historyVoucherLines = ref<FinanceV2HistoryVoucherLine[]>([]);
 const selectedHistoryVoucher = ref<FinanceV2HistoryVoucher>();
 const selectedClosePeriod = ref<FinanceV2Period>();
@@ -369,6 +406,8 @@ const openingBalances = ref<FinanceV2OpeningBalanceBatch[]>([]);
 const selectedProfitClosingVoucherId = ref<number>();
 const loading = ref(false);
 const historyLoading = ref(false);
+const sourceInboxLoading = ref(false);
+const sourcePreviewLoading = ref(false);
 const historyLineLoading = ref(false);
 const periodCloseLoading = ref(false);
 const trialBalanceLoading = ref(false);
@@ -384,6 +423,7 @@ const loadError = ref("");
 const historyLoadError = ref("");
 const monitoringError = ref("");
 const historyDrawerOpen = ref(false);
+const sourcePreviewDrawerOpen = ref(false);
 const voucherDrawerOpen = ref(false);
 const voucherDetailLoading = ref(false);
 const voucherEditOpen = ref(false);
@@ -439,6 +479,34 @@ async function loadHistoryVouchers() {
     historyLoadError.value = error instanceof Error ? error.message : "请求失败";
   } finally {
     historyLoading.value = false;
+  }
+}
+
+async function loadSourceInbox() {
+  sourceInboxLoading.value = true;
+  try {
+    const response = await financeV2Api.listSourceInbox({ limit: 100 });
+    sourceInbox.value = response.data || [];
+  } catch (error) {
+    sourceInbox.value = [];
+    ElMessage.error(error instanceof Error ? error.message : "来源收件箱读取失败");
+  } finally {
+    sourceInboxLoading.value = false;
+  }
+}
+
+async function viewSourcePreviews(item: FinanceV2SourceInboxItem) {
+  selectedSourceInbox.value = item;
+  sourcePreviews.value = [];
+  sourcePreviewDrawerOpen.value = true;
+  sourcePreviewLoading.value = true;
+  try {
+    const response = await financeV2Api.listSourcePreviews(item.id, { limit: 100 });
+    sourcePreviews.value = response.data || [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "来源预览读取失败");
+  } finally {
+    sourcePreviewLoading.value = false;
   }
 }
 
@@ -839,7 +907,7 @@ async function runCommand(voucher: FinanceV2Voucher, action: string) {
   }
 }
 
-onMounted(() => Promise.all([loadBooks(), loadMonitoring()]));
+onMounted(() => Promise.all([loadBooks(), loadMonitoring(), loadSourceInbox()]));
 </script>
 
 <style scoped>

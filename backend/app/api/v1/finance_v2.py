@@ -26,6 +26,12 @@ from app.models.finance_v2_opening import FinanceV2OpeningBalanceBatch
 from app.models.finance_v2_opening import FinanceV2CoverageGap
 from app.models.finance_v2_period_close import FinanceV2PeriodCloseBatch
 from app.models.finance_v2_reports import FinanceV2ReportMapping, FinanceV2ReportTemplate
+from app.models.finance_v2_sources import (
+    FinanceV2PreviewRun,
+    FinanceV2SourceDocument,
+    FinanceV2SourceDocumentVersion,
+    FinanceV2SourceInbox,
+)
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
@@ -847,6 +853,85 @@ async def get_voucher_detail(
                 for event in events
             ],
         }
+    )
+
+
+@router.get("/source-inbox", response_model=ApiResponse)
+async def list_source_inbox(
+    status: str | None = Query(default=None, pattern=r"^(received|preview_ready|pending_mapping|exception|ignored)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: SysUser = Depends(require_finance_v2_read),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    """List controlled source-preview receipts without exposing raw source payloads."""
+
+    statement = (
+        select(FinanceV2SourceInbox, FinanceV2SourceDocumentVersion, FinanceV2SourceDocument)
+        .join(FinanceV2SourceDocumentVersion, FinanceV2SourceDocumentVersion.id == FinanceV2SourceInbox.source_document_version_id)
+        .join(FinanceV2SourceDocument, FinanceV2SourceDocument.id == FinanceV2SourceDocumentVersion.source_document_id)
+        .order_by(FinanceV2SourceInbox.received_at.desc(), FinanceV2SourceInbox.id.desc())
+        .limit(limit)
+    )
+    if status:
+        statement = statement.where(FinanceV2SourceInbox.status == status)
+    rows = (await db.execute(statement)).all()
+    return ApiResponse.ok(
+        data=[
+            {
+                "id": inbox.id,
+                "status": inbox.status,
+                "received_at": inbox.received_at,
+                "last_previewed_at": inbox.last_previewed_at,
+                "source_system": source.source_system,
+                "source_pk": source.source_pk,
+                "business_type": source.business_type,
+                "legal_entity_code": source.legal_entity_code,
+                "organization_code": source.organization_code,
+                "book_id": source.book_id,
+                "source_version_no": version.version_no,
+                "source_hash": version.source_hash,
+                "source_occurred_at": version.source_occurred_at,
+            }
+            for inbox, version, source in rows
+        ]
+    )
+
+
+@router.get("/source-inbox/{source_inbox_id}/previews", response_model=ApiResponse)
+async def list_source_previews(
+    source_inbox_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: SysUser = Depends(require_finance_v2_read),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    """Expose only persisted dry-run output; no endpoint creates a source draft."""
+
+    inbox = await db.get(FinanceV2SourceInbox, source_inbox_id)
+    if not inbox:
+        raise HTTPException(status_code=404, detail="Finance V2 source inbox item not found")
+    rows = (
+        await db.execute(
+            select(FinanceV2PreviewRun)
+            .where(FinanceV2PreviewRun.source_inbox_id == source_inbox_id)
+            .order_by(FinanceV2PreviewRun.created_at.desc(), FinanceV2PreviewRun.id.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return ApiResponse.ok(
+        data=[
+            {
+                "id": row.id,
+                "source_inbox_id": row.source_inbox_id,
+                "posting_rule_version_id": row.posting_rule_version_id,
+                "status": row.status,
+                "input_hash": row.input_hash,
+                "result_payload": row.result_payload,
+                "exception_code": row.exception_code,
+                "created_at": row.created_at,
+                "creates_draft": False,
+            }
+            for row in rows
+        ]
     )
 
 

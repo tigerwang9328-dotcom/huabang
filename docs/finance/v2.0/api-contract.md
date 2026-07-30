@@ -19,6 +19,7 @@
 | 写入 readiness | `GET /books/{id}/write-readiness` | 只返回 Gate 与期初边界结论，不能开启 Gate |
 | 期初核对 | `GET /books/{id}/opening-balances` | 只读批次状态 |
 | 正式报表就绪 | `GET /books/{id}/periods/{period}/reports/{balance_sheet\|profit_statement}/readiness` | 只返回版本化模板、映射、覆盖范围和会计等式的就绪状态；绝不导出或生成正式报表 |
+| 来源收件箱 | `GET /source-inbox`、`GET /source-inbox/{id}/previews` | 只返回已持久化的来源身份、版本、异常和 dry-run 结果；绝不提供来源写入、自动草稿、自动审核或自动过账 |
 
 旧 `/api/v1/finance/*` 与 `/api/v1/finance-center/*` 在只读验收期仍是旧系统的正式制单、审核、过账路径；V2 不关闭、不替代且不双写这些路径。
 
@@ -33,6 +34,12 @@
 - 仅以上条件全部通过才返回 `ready`。`ready` 只表示技术就绪，仍不等于财务确认或对外法定报表授权。
 
 报告模板、映射和快照没有应用写入 API；应用角色只读，受控数据库发布流程生成新版本。已发布模板及其映射、报告快照均由数据库触发器保护为不可变（已发布模板只能退役）。
+
+## 来源 preview 契约
+
+来源身份以 `(source_system, source_pk)` 固定；相同来源键与相同哈希为幂等重试，哈希变化必须进入冲突/异常处理，不能覆盖原版本。规则仅在状态为 `published`、来源/法人/组织/账簿范围与业务日期均相符时参与选择；同一优先级和范围的多条规则必须返回 `ambiguous_rule`。
+
+应用角色对 `source_document`、`source_document_version`、`source_inbox`、`posting_rule`、`posting_rule_version`、`mapping_exception` 与 `preview_run` 仅有读取能力。V2.0 不提供来源写入 Web API；受控导入身份尚未配置前，收件箱为空是正确的安全状态，不得改用 `fin_app` 绕过。
 
 ## 期初余额命令
 

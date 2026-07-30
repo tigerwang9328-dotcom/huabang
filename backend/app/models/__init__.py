@@ -135,6 +135,15 @@ from app.models.finance_v2_opening import (
 )
 from app.models.finance_v2_period_close import FinanceV2PeriodCloseApproval, FinanceV2PeriodCloseBatch
 from app.models.finance_v2_reports import FinanceV2ReportMapping, FinanceV2ReportSnapshot, FinanceV2ReportTemplate
+from app.models.finance_v2_sources import (
+    FinanceV2MappingException,
+    FinanceV2PostingRule,
+    FinanceV2PostingRuleVersion,
+    FinanceV2PreviewRun,
+    FinanceV2SourceDocument,
+    FinanceV2SourceDocumentVersion,
+    FinanceV2SourceInbox,
+)
 from app.models.finance_v2_operations import (
     FinanceV2FeatureGate,
     FinanceV2PostingAttempt,

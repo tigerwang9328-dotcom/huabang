@@ -105,6 +105,34 @@ export interface FinanceV2HistoryVoucherLine {
   historical_marker: boolean;
 }
 
+export interface FinanceV2SourceInboxItem {
+  id: number;
+  status: "received" | "preview_ready" | "pending_mapping" | "exception" | "ignored";
+  received_at: string;
+  last_previewed_at: string | null;
+  source_system: string;
+  source_pk: string;
+  business_type: string;
+  legal_entity_code: string | null;
+  organization_code: string | null;
+  book_id: number | null;
+  source_version_no: number;
+  source_hash: string;
+  source_occurred_at: string | null;
+}
+
+export interface FinanceV2SourcePreview {
+  id: number;
+  source_inbox_id: number;
+  posting_rule_version_id: number | null;
+  status: "preview_ready" | "pending_mapping" | "exception";
+  input_hash: string;
+  result_payload: Record<string, unknown>;
+  exception_code: string | null;
+  created_at: string;
+  creates_draft: false;
+}
+
 export interface FinanceV2WriteReadiness {
   book_id: number;
   role: "finance_manager" | "super_admin";
@@ -270,6 +298,14 @@ export const financeV2Api = {
   ),
   listHistoryVoucherLines: (voucherId: number, params?: { limit?: number }) => request.get<FinanceV2HistoryVoucherLine[]>(
     `/finance-center/v2/history/vouchers/${voucherId}/lines`,
+    { params },
+  ),
+  listSourceInbox: (params?: { status?: FinanceV2SourceInboxItem["status"]; limit?: number }) => request.get<FinanceV2SourceInboxItem[]>(
+    "/finance-center/v2/source-inbox",
+    { params },
+  ),
+  listSourcePreviews: (sourceInboxId: number, params?: { limit?: number }) => request.get<FinanceV2SourcePreview[]>(
+    `/finance-center/v2/source-inbox/${sourceInboxId}/previews`,
     { params },
   ),
   createDraft: (payload: FinanceV2DraftInput) => request.post("/finance-center/v2/vouchers", payload),
