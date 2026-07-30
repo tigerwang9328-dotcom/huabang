@@ -173,8 +173,16 @@ test("V2 API client unwraps the platform ApiResponse before workspace consumers 
   const api = read("src/api/financeV2.ts");
 
   assert.ok(api.includes("function unwrapFinanceV2"));
-  assert.ok(api.includes("result.data.data"));
+  assert.ok(api.includes("payload.data"));
   assert.ok(api.includes("unwrapFinanceV2(request.get"));
+});
+
+test("V2 API client preserves a payload that was already unwrapped by the request boundary", () => {
+  const api = read("src/api/financeV2.ts");
+
+  assert.ok(api.includes("const payload = result.data"));
+  assert.ok(api.includes("\"code\" in payload && \"success\" in payload && \"data\" in payload"));
+  assert.ok(api.includes("return { data }"));
 });
 
 test("V2 workspace exposes versioned formal-report readiness without presenting an export action", () => {

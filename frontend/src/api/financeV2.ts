@@ -1,7 +1,13 @@
 import request, { type ApiResponse } from "./request";
 
-function unwrapFinanceV2<T>(response: Promise<{ data: ApiResponse<T> }>) {
-  return response.then((result) => ({ data: result.data.data }));
+function unwrapFinanceV2<T>(response: Promise<{ data: ApiResponse<T> | T }>) {
+  return response.then((result) => {
+    const payload = result.data;
+    const data = payload && typeof payload === "object" && "code" in payload && "success" in payload && "data" in payload
+      ? payload.data
+      : payload;
+    return { data };
+  });
 }
 
 export interface FinanceV2Book {
