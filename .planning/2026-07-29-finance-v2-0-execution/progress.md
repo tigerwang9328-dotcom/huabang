@@ -56,3 +56,4 @@
 - 原实施计划列出的 `docs/finance/v2.0/api-contract.md` 与 `docs/finance/v2-0-opening-balance-reconciliation.md` 在当前工作树不存在；尚未创建替代文件，先确认有效目录与现有文档再补齐，不能把缺失文件当成已有交付物。
 - 已补齐上述 API 契约和期初核对文档，并更新证据登记册。复审发现验证/锁定命令在状态校验前没有返回已完成命令的原结果；已以失败测试修复为先按命令键/请求哈希幂等返回。预演期初锁定不要求最终切换 Gate，最终期初锁定才要求 `cutover_enabled`。
 - 最终本地验证：后端 V2 定向套件 `133 passed`、单一 head `016cfd3c1454`、compileall 通过；前端静态回归 `11 passed`、类型检查与 Vite 构建通过（保留既有依赖警告）。
+- 已提交并推送 `e66be05 feat: complete finance V2 opening balance workflow` 到 `origin/feature/huabang-full-finance-center`；生产运行提交仍为 `bcdc1e9`，未迁移、未重启、未开启 Gate。
