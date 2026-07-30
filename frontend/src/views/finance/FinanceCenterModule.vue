@@ -24,7 +24,7 @@
     </section>
 
     <section v-else-if="module.key === 'vouchers'" class="module-panel">
-      <FormalLedger />
+      <V2CoreWorkspace />
     </section>
 
     <section v-else-if="module.key === 'ledger' || module.key === 'reports'" class="module-panel">
@@ -50,7 +50,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import FormalLedger from "@/views/finance/FormalLedger.vue";
+import V2CoreWorkspace from "@/views/finance-center/V2CoreWorkspace.vue";
 import V2HistoryArchive from "@/views/finance-center/V2HistoryArchive.vue";
 import { financeCenterModuleMap, type FinanceModuleStatus } from "@/config/financeCenterModules";
 

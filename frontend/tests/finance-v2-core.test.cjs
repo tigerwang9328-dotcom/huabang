@@ -71,6 +71,14 @@ test("finance center archive uses the isolated V2 history view instead of the le
   assert.ok(!module.includes("import HistoricalFinance"));
 });
 
+test("finance center voucher entry uses the Gate-protected V2 workspace instead of the legacy formal ledger", () => {
+  const module = read("src/views/finance/FinanceCenterModule.vue");
+
+  assert.ok(module.includes('import V2CoreWorkspace from "@/views/finance-center/V2CoreWorkspace.vue";'));
+  assert.ok(module.includes("<V2CoreWorkspace />"));
+  assert.ok(!module.includes("import FormalLedger"));
+});
+
 test("V2 workspace shows only persisted source dry-run receipts and never an auto-draft action", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
