@@ -227,3 +227,12 @@
 | 已确认的等价拆分 | 会计核心/工作流/命令幂等分别落在 `finance_v2.py`、`voucher_workflow.py`、`finance_v2_operations.py`；期初、历史、期间、前端历史标记和凭证工作台也以拆分模块或 `V2CoreWorkspace.vue` 实现。 | 这些路径差异须继续按行为和测试映射，不可仅凭改名宣告覆盖。 |
 | 确认未落地的切换资产 | `final-delta-cutover.md`、`import_finance_cutover_delta.py`、`test_finance_v2_cutover_delta.py` 和 `final-cutover-evidence.md` 不存在。 | 默认期边切换不依赖月中增量工具；若期边方案不可行，这些能力必须先实现并在恢复副本验证。 |
 | 当前审计状态 | Phase 1 的“计划—实现映射”已重新打开，尚需逐阶段对照行为、测试和外部 Gate。 | 在审计完成前不得把 V2.0 全部计划称为完成。 |
+
+## 历史存档 V2 数据源纠正（2026-07-30，本地）
+
+| 项目 | 已核实事实 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- |
+| 浏览器验收发现 | `/app/finance-center/archive` 的页面文案标注 `fin_history`，但实际复用了旧 `HistoricalFinance.vue` 与 `/finance/*` 金蝶查询接口，导致旧系统中的测试账套被展示。未删除、修改或写入任何历史数据。 | 已登录浏览器与代码调用链 | 此入口不应作为 V2 历史验收依据，必须纠正数据源。 |
+| 最小纠正 | 新建 `V2HistoryArchive.vue`，仅调用 `/api/v1/finance-center/v2/history/vouchers` 及其分录只读接口；财务中心“历史数据存档”入口不再导入旧 `HistoricalFinance.vue`。接口增加受限 `offset` 分页，归档页可读取 339 张已发布历史凭证而不受单页 200 条上限静默截断。 | 本地 TDD、代码审阅 | 保持 `fin_read` 已发布视图、历史标记和中台只读鉴权边界；不改变任何写 Gate。 |
+| 本地验证 | 先新增路由/数据源回归并观察失败；后端分页与发布视图定向测试 `19 passed`，完整财务 V2 定向套件 `149 passed`，前端静态回归 `14 passed`、`vue-tsc --noEmit` 与 Vite build 均通过。仅保留既有 Pydantic、Vite CJS 和 Rollup 注释警告。 | 本地测试与构建 | 可进入生产部署前复核；不替代生产已登录浏览器验收。 |
+| 版本与发布状态 | 本地提交 `dd7aae17c4492dbbb03691147cb3575df60f35d8`；预提交文档同步钩子因本机 Codex 模型缓存字段错误未完成，本次提交保留测试证据后使用 `--no-verify`。随后对 `100.94.89.49:22` 的 SSH 与 Git 推送均超时，尚未推送、部署、重启或变更生产数据。 | 本地 Git 与网络探针 | 生产仍运行此前只读版本；恢复 SSH 后必须重新核实远端提交、推送、部署和已登录浏览器验收。 |
