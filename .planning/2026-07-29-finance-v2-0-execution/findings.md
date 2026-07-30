@@ -56,3 +56,8 @@
 - 生产实际 Alembic baseline 为 `1fdf4577d7d8`，本地 head 为 `e951b2d0a6c4`。从该 baseline 进行 `--sql` 预检可完整渲染三项待验证迁移；从数据库零版本进行离线渲染会触发既有迁移 `d5e6f7a8b9c0` 的运行时数据查询，不适合作为 V2 增量迁移校验。
 - `rehearse_finance_v2_migrations.sh` 只对 `huabang_ai_finance_drill_*` 名称的恢复库执行，要求 baseline 精确匹配并在清理临时迁移口令后离开 recovery DB 于 head；生产库名无法通过参数校验。
 - 当前 SSH 账户没有无交互 sudo，不能以应用账户执行 DDL，也不能安全代入任何管理员秘密。真实恢复库迁移仍需要受控 sudo/DBA 执行窗口。
+
+## 2026-07-30 生产只读发布状态复核
+
+- 生产主机当前提交为 `a52a679894d6e533d87efcb3d79e81b43f696793`，并非已推送的 V2 发布提交 `cd47fbb`；`huabang-backend.service` 处于 `active`，健康检查显示数据库与 Redis 已连接。
+- 仓库根 `.finance-v2-release.lock` 为空，时间戳为 2026-07-29 12:12:19 UTC，且无运行中的发布/演练脚本进程。发布脚本使用 `flock` 的文件描述符锁，因此该无持锁进程的遗留文件不阻断下一次受控发布；不清理该文件。
