@@ -68,3 +68,5 @@
 - 失败发生在历史导入前校验：发布输入的 `canonical_import/manifest.json` 将 `AIS20251127140257` 标为 official account set，但其 `databases` 元数据没有该 database；`load_kingdee_history_records()` 按设计拒绝“official 未提供数据库快照元数据”的输入，未执行历史暂存/发布写入。
 - 发布脚本失败 trap 仅恢复代码/配置/前端到 `a52a679`，刻意保留财务 schema；独立只读 `alembic current` 已报 `Can't locate revision identified by 'e951b2d0a6c4'`，证明旧代码没有这三个 revision 而生产数据库已在 V2 head。这是必须先修复的代码—schema 不一致，不能以重试或手工删除元数据解决。
 - 首次远程 manifest probe 受本地 JavaScript base64 helper 不可用而未执行；第二次 Python 单行 probe 的引号转义失败，但其后续只读命令执行并确认目标 snapshot 路径下没有 `databases/` 目录，且确认数据库 migration mismatch。后续只用与 PowerShell 兼容的简单远程命令或上传临时只读脚本，避免重复该转义形式。
+- Windows `scp -r` 对 12,826 个文件的复制不完整，不能作为完整快照同步证据。导入器只读取并逐文件 SHA-256 校验 3 个账套各自的 `t_Account`、`t_Voucher`、`t_VoucherEntry`；已把这 9 个必需文件与原生根 manifest 显式传到不覆盖旧文件的候选目录，并在服务器上 dry-run 得到 339/4,596、0 冲突。
+- 发布脚本原有 trap 的“保留 schema、回退旧运行时”组合会使任何迁移后失败留下代码—schema 不一致。修复策略是：生成并写入候选 `fin_app` 会话配置后才执行迁移；迁移成功后若任何后续步骤失败，保留迁移兼容的候选代码/配置和 `fin_app` 口令，并重启后端载入候选运行时；只有迁移前失败才回退旧运行时并清除临时应用口令。

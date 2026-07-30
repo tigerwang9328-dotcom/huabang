@@ -30,6 +30,7 @@ next_dist=""
 credentials_file=""
 release_succeeded=false
 runtime_activated=false
+migration_applied=false
 sudo_keepalive_pid=""
 
 usage() {
@@ -199,31 +200,38 @@ rollback_runtime() {
   if [[ "$release_succeeded" == true ]]; then
     return
   fi
-  echo "Finance V2 release failed; restoring only code/config/frontend runtime. Finance schema/history data is retained for audit."
   set +e
-  if [[ -n "$previous_commit" ]]; then
-    if [[ -n "$previous_ref" ]]; then
-      git -C "$PROJECT_ROOT" checkout "$previous_ref"
-      git -C "$PROJECT_ROOT" reset --hard "$previous_commit"
-    else
-      git -C "$PROJECT_ROOT" checkout --detach "$previous_commit"
-    fi
-  fi
-  restore_env_file
-  if [[ -n "$previous_dist" && -d "$previous_dist" ]]; then
-    if [[ -d "$FRONTEND_DIR/dist" ]]; then
-      mv "$FRONTEND_DIR/dist" "${FRONTEND_DIR}/.finance-v2-failed-dist-$(date -u +%s)"
-    fi
-    mv "$previous_dist" "$FRONTEND_DIR/dist"
-  fi
-  if [[ "$runtime_activated" == true ]]; then
+  if [[ "$migration_applied" == true ]]; then
+    echo "Finance V2 release failed after schema migration; retaining migration-compatible code and finance environment for recovery."
     sudo_run systemctl restart huabang-backend.service
+  else
+    echo "Finance V2 release failed before schema migration; restoring previous code/config/frontend runtime."
+    if [[ -n "$previous_commit" ]]; then
+      if [[ -n "$previous_ref" ]]; then
+        git -C "$PROJECT_ROOT" checkout "$previous_ref"
+        git -C "$PROJECT_ROOT" reset --hard "$previous_commit"
+      else
+        git -C "$PROJECT_ROOT" checkout --detach "$previous_commit"
+      fi
+    fi
+    restore_env_file
+    if [[ -n "$previous_dist" && -d "$previous_dist" ]]; then
+      if [[ -d "$FRONTEND_DIR/dist" ]]; then
+        mv "$FRONTEND_DIR/dist" "${FRONTEND_DIR}/.finance-v2-failed-dist-$(date -u +%s)"
+      fi
+      mv "$previous_dist" "$FRONTEND_DIR/dist"
+    fi
+    if [[ "$runtime_activated" == true ]]; then
+      sudo_run systemctl restart huabang-backend.service
+    fi
   fi
   if [[ -n "$credentials_file" && -f "$credentials_file" ]]; then
     rm -f "$credentials_file"
   fi
   clear_temporary_role_passwords
-  clear_fin_app_password_after_failed_release
+  if [[ "$migration_applied" != true ]]; then
+    clear_fin_app_password_after_failed_release
+  fi
   stop_sudo_keepalive
   trap - EXIT
   exit "$failure_status"
@@ -287,50 +295,6 @@ postgres_sql "ALTER ROLE fin_migrator PASSWORD '$(read_credential fin_migrator)'
 postgres_sql "ALTER ROLE fin_app PASSWORD '$(read_credential fin_app)';"
 postgres_sql "ALTER ROLE fin_history_importer PASSWORD '$(read_credential fin_history_importer)';"
 
-run_backend_with_env() {
-  local mode="$1"
-  shift
-  "$VENV_PYTHON" - "$mode" "$ENV_FILE" "$credentials_file" "$BACKEND_DIR" "$@" <<'PY'
-import os
-import sys
-from pathlib import Path
-
-from dotenv import dotenv_values
-
-mode, env_file, credential_file, backend_dir, *command = sys.argv[1:]
-values = dotenv_values(env_file)
-for key, value in values.items():
-    if value is not None:
-        os.environ[key] = value
-credentials = dict(
-    line.split("=", 1)
-    for line in Path(credential_file).read_text(encoding="utf-8").splitlines()
-    if "=" in line
-)
-if mode == "migrate":
-    os.environ["DB_USER"] = "fin_migrator"
-    os.environ["DB_PASSWORD"] = credentials["fin_migrator"]
-    os.environ["PGOPTIONS"] = "-c role=fin_schema_owner"
-elif mode == "history_import":
-    os.environ["DB_USER"] = "fin_history_importer"
-    os.environ["DB_PASSWORD"] = credentials["fin_history_importer"]
-elif mode != "shared":
-    raise SystemExit(f"unsupported backend execution mode: {mode}")
-os.chdir(backend_dir)
-os.environ["PYTHONPATH"] = backend_dir + os.pathsep + os.environ.get("PYTHONPATH", "")
-os.execv(sys.executable, [sys.executable, *command])
-PY
-}
-
-run_backend_with_env migrate -m alembic -c alembic.ini upgrade head
-run_backend_with_env shared scripts/verify_finance_database_roles.py
-run_backend_with_env shared scripts/seed_finance_v2_permissions.py
-
-history_import_args=(scripts/import_finance_v2_history.py "$history_manifest" --execute --publish "${history_snapshot_args[@]}")
-run_backend_with_env history_import "${history_import_args[@]}"
-
-clear_temporary_role_passwords
-
 previous_env_backup="$ENV_FILE.finance-v2-pre-release-$backup_stamp"
 cp -p "$ENV_FILE" "$previous_env_backup"
 "$VENV_PYTHON" - "$ENV_FILE" "$credentials_file" <<'PY'
@@ -371,6 +335,51 @@ temporary.write_text(content, encoding="utf-8")
 os.chmod(temporary, 0o600)
 os.replace(temporary, env_path)
 PY
+
+run_backend_with_env() {
+  local mode="$1"
+  shift
+  "$VENV_PYTHON" - "$mode" "$ENV_FILE" "$credentials_file" "$BACKEND_DIR" "$@" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+from dotenv import dotenv_values
+
+mode, env_file, credential_file, backend_dir, *command = sys.argv[1:]
+values = dotenv_values(env_file)
+for key, value in values.items():
+    if value is not None:
+        os.environ[key] = value
+credentials = dict(
+    line.split("=", 1)
+    for line in Path(credential_file).read_text(encoding="utf-8").splitlines()
+    if "=" in line
+)
+if mode == "migrate":
+    os.environ["DB_USER"] = "fin_migrator"
+    os.environ["DB_PASSWORD"] = credentials["fin_migrator"]
+    os.environ["PGOPTIONS"] = "-c role=fin_schema_owner"
+elif mode == "history_import":
+    os.environ["DB_USER"] = "fin_history_importer"
+    os.environ["DB_PASSWORD"] = credentials["fin_history_importer"]
+elif mode != "shared":
+    raise SystemExit(f"unsupported backend execution mode: {mode}")
+os.chdir(backend_dir)
+os.environ["PYTHONPATH"] = backend_dir + os.pathsep + os.environ.get("PYTHONPATH", "")
+os.execv(sys.executable, [sys.executable, *command])
+PY
+}
+
+run_backend_with_env migrate -m alembic -c alembic.ini upgrade head
+migration_applied=true
+run_backend_with_env shared scripts/verify_finance_database_roles.py
+run_backend_with_env shared scripts/seed_finance_v2_permissions.py
+
+history_import_args=(scripts/import_finance_v2_history.py "$history_manifest" --execute --publish "${history_snapshot_args[@]}")
+run_backend_with_env history_import "${history_import_args[@]}"
+
+clear_temporary_role_passwords
 
 cd "$FRONTEND_DIR"
 npm ci --no-audit --no-fund

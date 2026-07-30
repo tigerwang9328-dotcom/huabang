@@ -63,6 +63,18 @@ def test_release_validates_the_history_snapshot_before_any_privileged_release_ac
     assert "import_finance_v2_history.py" in source
 
 
+def test_release_keeps_a_migration_compatible_runtime_after_the_schema_changes():
+    source = (DEPLOY / "release_finance_center_v2.sh").read_text(encoding="utf-8")
+
+    assert "migration_applied=false" in source
+    assert source.index('run_backend_with_env migrate -m alembic -c alembic.ini upgrade head') < source.index(
+        "migration_applied=true"
+    )
+    assert source.index('if [[ "$migration_applied" == true ]]') < source.index(
+        'git -C "$PROJECT_ROOT" checkout "$previous_ref"'
+    )
+
+
 def test_recovery_migration_rehearsal_is_explicitly_scoped_to_a_non_production_database():
     script = DEPLOY / "rehearse_finance_v2_migrations.sh"
     assert script.exists()
