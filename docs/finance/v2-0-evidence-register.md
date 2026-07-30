@@ -112,3 +112,15 @@
 | 本地回归 | 财务后端定向套件 119 passed；前端静态回归 10 passed、`vue-tsc --noEmit` 与 Vite 构建成功。构建仅保留既有 Vite CJS / Rollup 注释警告 | 本地，2026-07-29 | 本地测试与构建 | 可作为发布代码质量证据，不替代生产写入或浏览器验收 |
 
 **保持 No-Go：** 本次未开启 `draft_enabled`、`review_enabled`、`post_enabled` 或 `period_close_enabled`，也未生成当前账凭证。异机/异存储恢复、最终期初与期间连续性、非空生产形态性能数据、真实告警通知闭环，以及已登录财务/超级管理员浏览器验收仍是正式开写前置。
+
+## 期初工作流与生产连接复核（2026-07-30，后补）
+
+| 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- | --- |
+| 本地期初工作流 | 本地新增期初批次的列表、草稿创建、验证和锁定 API，以及工作台人工核对入口。批次状态为 `draft → validated → locked`；验证不改变账簿启用边界，最终锁定额外要求 `cutover_enabled`，且不自动开启 draft/review/post Gate。命令在状态检查前按命令键和请求哈希返回原结果，避免网络重试造成假冲突 | 本地，2026-07-30 | 本地测试与构建 | 代码可继续进入恢复副本验证；不代表生产已部署或允许开写 |
+| 本地验证 | 财务 V2、数据库角色与历史导入定向套件共 131 项通过；期初增量定向套件 29 项通过；前端静态回归 11 项、`vue-tsc --noEmit` 与 Vite 构建均通过。仅有既有 Pydantic 弃用和 Vite/Rollup 注释警告 | 本地，2026-07-30 | 本地测试与构建 | 不替代恢复副本、生产迁移或已登录浏览器验收 |
+| 生产服务与代码 | `hbreare-server` 可达，`huabang-backend.service` 为 active；运行提交 `bcdc1e932e448908e25601f2ba03eb1386f7c77b`，生产 Alembic head 为 `1fdf4577d7d8`。本地工作树 head 已到 `dda0e6b`，其中包含未部署的 `016cfd3c1454` 期初控制迁移 | 生产只读与本地，2026-07-30 | 生产运行时与本地 Git | 新期初工作流未部署；禁止将本地新 head 当成生产完成 |
+| 生产专用财务会话 | 实际 V2 会话为 `fin_app`，对 `fin_current` 与 `fin_read` 有 USAGE、无 CREATE；对 `fin_history` 无 schema USAGE。它可读已发布视图（339 历史凭证、4,596 历史分录）、可读当前账 0 凭证与 0 启用 Gate；直接读取 `fin_history` 与 `alembic_version` 均被拒绝 | 生产只读，2026-07-30 | 生产运行时 | 最小权限边界仍有效；通用 `huabang` 账户探针不能替代 `fin_app` 结论 |
+| 恢复副本可用性 | `/srv/huabang-ai-center/backups/pre_finance_center_db_20260720T082348Z.dump` 为 PostgreSQL 16 custom archive，位于与项目相同文件系统。通用应用账户创建独立恢复库被 PostgreSQL 拒绝，未创建任何库；因此本轮未对 `016cfd3c1454` 完成恢复副本 upgrade/downgrade/触发器验证 | 生产只读与受控失败尝试，2026-07-30 | 生产控制面 | 新迁移和任何部署维持 No-Go，直至由 PostgreSQL DBA 创建/提供独立恢复副本并完成验证 |
+
+**当前新增 No-Go：** `016cfd3c1454` 的期初控制迁移尚未在恢复副本通过。即使生产历史只读查询可用，也不得部署该迁移、开启 `cutover_enabled` 或创建/锁定生产期初批次。

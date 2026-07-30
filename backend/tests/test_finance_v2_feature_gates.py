@@ -30,3 +30,9 @@ def test_period_close_requires_its_own_explicit_write_gate():
     gates = [GateScope("global", "*", "period_close_enabled", True)]
 
     assert_command_enabled(gates, command="period_close", environment="prod", book="book-1", role="finance_manager")
+
+
+def test_final_cutover_requires_its_own_explicit_gate():
+    gates = [GateScope("global", "*", "cutover_enabled", True)]
+
+    assert_command_enabled(gates, command="cutover", environment="prod", book="book-1", role="finance_manager")

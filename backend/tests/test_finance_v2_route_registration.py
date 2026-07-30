@@ -31,6 +31,10 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/books/{book_id}/periods", "GET") in routes
     assert ("/finance-center/v2/books/{book_id}/accounts", "GET") in routes
     assert ("/finance-center/v2/books/{book_id}/write-readiness", "GET") in routes
+    assert ("/finance-center/v2/books/{book_id}/opening-balances", "GET") in routes
+    assert ("/finance-center/v2/books/{book_id}/opening-balances", "POST") in routes
+    assert ("/finance-center/v2/books/{book_id}/opening-balances/{batch_id}/validate", "POST") in routes
+    assert ("/finance-center/v2/books/{book_id}/opening-balances/{batch_id}/lock", "POST") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/close-readiness", "GET") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/commands", "POST") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/trial-balance", "GET") in routes
@@ -49,6 +53,10 @@ def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency(
     expected = {
         ("/finance-center/v2/books", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/write-readiness", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/opening-balances", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/opening-balances", "POST"): FINANCE_V2_WRITE_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/opening-balances/{batch_id}/validate", "POST"): FINANCE_V2_WRITE_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/opening-balances/{batch_id}/lock", "POST"): FINANCE_V2_WRITE_PERMISSION,
         ("/finance-center/v2/books/{book_id}/periods", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/periods/{period_id}/close-readiness", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/periods/{period_id}/commands", "POST"): FINANCE_V2_WRITE_PERMISSION,
@@ -439,6 +447,72 @@ async def test_v2_write_gate_rejects_enabled_command_until_final_opening_balance
         )
 
     assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_final_opening_lock_is_fail_closed_until_the_cutover_gate_is_enabled(monkeypatch):
+    class FakeOpeningService:
+        def __init__(self, _db):
+            pass
+
+        async def lock_batch(self, **_kwargs):
+            return {"status": "locked"}
+
+    class EmptyGateResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class GateDb:
+        async def get(self, _model, batch_id):
+            assert batch_id == 7
+            return SimpleNamespace(book_id=1, batch_kind="final")
+
+        async def execute(self, _statement):
+            return EmptyGateResult()
+
+    monkeypatch.setattr(finance_v2, "FinanceV2OpeningBalanceService", FakeOpeningService)
+
+    with pytest.raises(HTTPException) as error:
+        await finance_v2.lock_opening_balance(
+            1,
+            7,
+            finance_v2.OpeningBalanceLockInput(command_id="opening-lock-test", expected_version=1, reason="切换演练"),
+            current_user=SimpleNamespace(id=1, username="finance"),
+            db=GateDb(),
+        )
+
+    assert error.value.status_code == 403
+    assert "cutover_enabled" in str(error.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_provisional_opening_lock_does_not_require_the_final_cutover_gate(monkeypatch):
+    class FakeOpeningService:
+        def __init__(self, _db):
+            pass
+
+        async def lock_batch(self, **_kwargs):
+            return {"status": "locked"}
+
+    class GateDb:
+        async def get(self, _model, batch_id):
+            assert batch_id == 7
+            return SimpleNamespace(book_id=1, batch_kind="provisional")
+
+    monkeypatch.setattr(finance_v2, "FinanceV2OpeningBalanceService", FakeOpeningService)
+
+    response = await finance_v2.lock_opening_balance(
+        1,
+        7,
+        finance_v2.OpeningBalanceLockInput(command_id="opening-provisional-lock-test", expected_version=1, reason="预演核对完成"),
+        current_user=SimpleNamespace(id=1, username="finance"),
+        db=GateDb(),
+    )
+
+    assert response.data["status"] == "locked"
 
 
 @pytest.mark.asyncio

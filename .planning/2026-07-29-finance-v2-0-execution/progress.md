@@ -34,3 +34,25 @@
 
 - 新 revision `016cfd3c1454` 基于当日真实 head 生成，包含批次版本、获批断档、期初审批、逐科目/维度/币种核对项、废弃批次释放重建范围，以及锁定批次/行的数据库触发器保护。
 - 迁移尚未在恢复副本或生产执行；在恢复副本完成 `upgrade`、`downgrade`、锁定触发器和回滚边界测试前，保持未部署状态。
+
+## 2026-07-30 连通性恢复与恢复副本前置复核
+
+- SSH 已恢复。2026-07-30 01:03 UTC 生产主机 `hbreare-server` 在线，`huabang-backend.service` 为 `active`，`/health` 显示数据库、Redis 已连接；运行提交仍为 `bcdc1e9`。
+- 本地当前工作树干净，后续期初工作流提交最高为 `dda0e6b`，包含未部署的数据库迁移 `016cfd3c1454`；尚不可将本地迁移或代码状态表述为生产完成。
+- 恢复副本、备份可用性、生产数据库角色与远程分支仍需重新只读核实；在此之前禁止迁移与开写。
+- 2026-07-30 首次读取计划时使用错误仓库根 `D:\huabang` 查找 `.planning`，未发生写入；已转入唯一目标工作树的活动计划。
+- 生产数据库只读探针首次因远程 shell 与 Python f-string 的转义冲突而在 Python 解析阶段失败，未建立数据库连接；下一次改用 `.format()` 并保留同一只读查询范围。
+- 改用 SQLAlchemy async 引擎后，生产只读探针确认运行身份为 `huabang`、数据库为 `huabang_ai`、PostgreSQL 16.14、生产 Alembic 版本为 `1fdf4577d7d8`；该身份对 `fin_current`、`fin_history`、`fin_read` 的 `USAGE` 和 `CREATE` 均为 false。后续需判断服务实际注入环境是否与 shell 配置一致，不能假设已存在最小权限角色。
+- 后续探针尝试直接在远程 heredoc 中查询可见 schema 时再次遇到 shell 转义语法错误，未执行 SQL；改用 base64 传输 Python 只读探针。
+- 将远程 probe 改为 base64 脚本传输后，`awk` 的 `$2` 仍被本地 PowerShell 插值破坏；没有执行数据库 SQL。下一次改为不含 `$` 的 `sed` 变换，避免重复同一转义方式。
+- 第三种 probe（base64 Bash 加 `sed`）成功：systemd 读取 `/srv/huabang-ai-center/backend/.env`；应用身份能枚举三个财务 schema 但看不到表。生产与本地 migration head、远程功能分支均存在差异，未作推送、迁移或部署。
+- 恢复副本 Gate：`huabang_finance_v2_restore_20260730` 未创建。应用账户执行 `CREATE DATABASE` 得到 PostgreSQL `InsufficientPrivilegeError`；此前以数据库对象权限代替 `CREATEDB` 属性的探针结论已纠正。需要 DBA/超级用户创建独立恢复库并授予恢复所需最小权限，或提供已有恢复副本；在此之前禁止生产迁移。
+
+## 2026-07-30 Phase 4.5 期初工作台补齐
+
+- 以失败测试驱动增加 V2 期初批次列表、草稿创建、平衡验证和最终锁定接口，以及工作台的人工核对界面。验证不改变账簿边界；最终锁定须单独 `cutover_enabled` Gate，且不会开启 draft/review/post Gate。
+- 后端定向回归 `28 passed`。一次组合验证在 `backend` 工作目录误执行前端 Node/NPM 命令，产生路径不存在错误，未执行前端验证；下一次切换至 `frontend` 工作目录重跑。
+- 完整 V2 回归通过 `131 passed`（1 条既有 Pydantic 未来弃用警告）；本地 Alembic 单一 head 为 `016cfd3c1454`，后端 compileall 与前端静态测试、类型检查、生产构建均通过。
+- 原实施计划列出的 `docs/finance/v2.0/api-contract.md` 与 `docs/finance/v2-0-opening-balance-reconciliation.md` 在当前工作树不存在；尚未创建替代文件，先确认有效目录与现有文档再补齐，不能把缺失文件当成已有交付物。
+- 已补齐上述 API 契约和期初核对文档，并更新证据登记册。复审发现验证/锁定命令在状态校验前没有返回已完成命令的原结果；已以失败测试修复为先按命令键/请求哈希幂等返回。预演期初锁定不要求最终切换 Gate，最终期初锁定才要求 `cutover_enabled`。
+- 最终本地验证：后端 V2 定向套件 `133 passed`、单一 head `016cfd3c1454`、compileall 通过；前端静态回归 `11 passed`、类型检查与 Vite 构建通过（保留既有依赖警告）。

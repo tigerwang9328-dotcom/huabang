@@ -18,6 +18,7 @@ from app.services.finance_v2.opening_balance_domain import (
     OpeningBalanceState,
     approve_opening_balance,
     assert_current_writes_allowed,
+    validate_opening_balance,
 )
 
 
@@ -139,6 +140,102 @@ class FinanceV2OpeningBalanceService:
         await self.db.flush()
         return result
 
+    async def validate_batch(
+        self,
+        *,
+        book_id: int,
+        batch_id: int,
+        actor_id: str,
+        expected_version: int,
+        command_id: str,
+        reason: str | None,
+    ) -> dict:
+        """Validate a draft without changing the book's effective boundary."""
+
+        book = await self.db.get(FinanceV2AccountingBook, book_id)
+        if not book:
+            raise OpeningBalanceError("opening balance book was not found")
+        request_hash = self._payload_hash(
+            {"batch_id": batch_id, "actor_id": actor_id, "expected_version": expected_version, "reason": reason}
+        )
+        existing = (
+            await self.db.execute(
+                select(FinanceV2CommandIdempotency).where(
+                    FinanceV2CommandIdempotency.book_id == book_id,
+                    FinanceV2CommandIdempotency.command_name == "opening.validate",
+                    FinanceV2CommandIdempotency.idempotency_key == command_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            if existing.request_hash != request_hash:
+                raise OpeningBalanceError("opening balance command id was already used with different parameters")
+            return {**dict(existing.result_payload), "idempotent": True}
+        batch = (
+            await self.db.execute(
+                select(FinanceV2OpeningBalanceBatch)
+                .where(FinanceV2OpeningBalanceBatch.id == batch_id, FinanceV2OpeningBalanceBatch.book_id == book_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not batch:
+            raise OpeningBalanceError("opening balance batch was not found")
+        if batch.status != "draft":
+            raise OpeningBalanceError("only a draft opening balance batch can be validated")
+        if batch.version != expected_version:
+            raise OpeningBalanceError("version conflict: opening balance batch changed concurrently")
+        rows = (
+            await self.db.execute(
+                select(FinanceV2OpeningBalanceLine)
+                .where(FinanceV2OpeningBalanceLine.batch_id == batch_id)
+                .order_by(FinanceV2OpeningBalanceLine.id)
+            )
+        ).scalars().all()
+        validate_opening_balance(
+            [
+                OpeningBalanceLine(
+                    str(row.account_version_id),
+                    str(row.dimension_set_id),
+                    row.currency_code,
+                    Decimal(row.debit_amount),
+                    Decimal(row.credit_amount),
+                    row.source_system,
+                )
+                for row in rows
+            ]
+        )
+        result = await self.db.execute(
+            update(FinanceV2OpeningBalanceBatch)
+            .where(FinanceV2OpeningBalanceBatch.id == batch_id, FinanceV2OpeningBalanceBatch.version == expected_version)
+            .values(status="validated", version=expected_version + 1)
+        )
+        if result.rowcount != 1:
+            raise OpeningBalanceError("version conflict: opening balance batch changed concurrently")
+        batch.status, batch.version = "validated", expected_version + 1
+        payload = {"batch_id": batch_id, "book_id": book_id, "status": "validated", "version": batch.version}
+        self.db.add(
+            FinanceV2CommandIdempotency(
+                book_id=book_id,
+                command_name="opening.validate",
+                idempotency_key=command_id,
+                request_hash=request_hash,
+                result_payload=payload,
+            )
+        )
+        self.db.add(
+            FinanceV2OperationEvent(
+                book_id=book_id,
+                command_id=command_id,
+                actor_id=actor_id,
+                action="opening.validate",
+                reason=reason,
+                before_data={"status": "draft", "version": expected_version},
+                after_data=payload,
+            )
+        )
+        await self.db.flush()
+        return payload
+
     async def lock_batch(
         self,
         *,
@@ -152,17 +249,6 @@ class FinanceV2OpeningBalanceService:
         book = await self.db.get(FinanceV2AccountingBook, book_id)
         if not book:
             raise OpeningBalanceError("opening balance book was not found")
-        batch = (
-            await self.db.execute(
-                select(FinanceV2OpeningBalanceBatch)
-                .where(FinanceV2OpeningBalanceBatch.id == batch_id, FinanceV2OpeningBalanceBatch.book_id == book_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        if not batch:
-            raise OpeningBalanceError("opening balance batch was not found")
-        if batch.version != expected_version:
-            raise OpeningBalanceError("version conflict: opening balance batch changed concurrently")
         request_hash = self._payload_hash({"batch_id": batch_id, "actor_id": actor_id, "expected_version": expected_version, "reason": reason})
         existing = (
             await self.db.execute(
@@ -177,6 +263,17 @@ class FinanceV2OpeningBalanceService:
             if existing.request_hash != request_hash:
                 raise OpeningBalanceError("opening balance command id was already used with different parameters")
             return {**dict(existing.result_payload), "idempotent": True}
+        batch = (
+            await self.db.execute(
+                select(FinanceV2OpeningBalanceBatch)
+                .where(FinanceV2OpeningBalanceBatch.id == batch_id, FinanceV2OpeningBalanceBatch.book_id == book_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not batch:
+            raise OpeningBalanceError("opening balance batch was not found")
+        if batch.version != expected_version:
+            raise OpeningBalanceError("version conflict: opening balance batch changed concurrently")
         rows = (
             await self.db.execute(
                 select(FinanceV2OpeningBalanceLine)

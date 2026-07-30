@@ -111,6 +111,40 @@ export interface FinanceV2WriteReadiness {
   commands: Record<"draft" | "review" | "post" | "period_close", { enabled: boolean; reason: string | null }>;
 }
 
+export interface FinanceV2OpeningBalanceBatch {
+  id: number;
+  book_id: number;
+  batch_kind: "provisional" | "final";
+  status: "draft" | "validated" | "locked" | "discarded";
+  history_coverage_end_date: string;
+  go_live_date: string;
+  coverage_continuous: boolean;
+  coverage_gap_id: number | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  locked_at: string | null;
+  version: number;
+}
+
+export interface FinanceV2OpeningBalanceLineInput {
+  account_version_id: number;
+  dimension_set_id: number;
+  currency_code?: string;
+  debit_amount: number;
+  credit_amount: number;
+  source_system: string;
+  source_reference?: string;
+}
+
+export interface FinanceV2OpeningBalanceCreateInput {
+  batch_kind: "provisional" | "final";
+  history_coverage_end_date: string;
+  go_live_date: string;
+  coverage_continuous: boolean;
+  command_id: string;
+  lines: FinanceV2OpeningBalanceLineInput[];
+}
+
 export interface FinanceV2PeriodCloseReadiness {
   book_id: number;
   period_id: number;
@@ -194,6 +228,13 @@ export const financeV2Api = {
   listBooks: () => request.get<FinanceV2Book[]>("/finance-center/v2/books"),
   listPeriods: (bookId: number) => request.get<FinanceV2Period[]>(`/finance-center/v2/books/${bookId}/periods`),
   getWriteReadiness: (bookId: number) => request.get<FinanceV2WriteReadiness>(`/finance-center/v2/books/${bookId}/write-readiness`),
+  listOpeningBalances: (bookId: number) => request.get<FinanceV2OpeningBalanceBatch[]>(`/finance-center/v2/books/${bookId}/opening-balances`),
+  createOpeningBalance: (bookId: number, payload: FinanceV2OpeningBalanceCreateInput) =>
+    request.post(`/finance-center/v2/books/${bookId}/opening-balances`, payload),
+  validateOpeningBalance: (bookId: number, batchId: number, payload: { command_id: string; expected_version: number; reason?: string }) =>
+    request.post(`/finance-center/v2/books/${bookId}/opening-balances/${batchId}/validate`, payload),
+  lockOpeningBalance: (bookId: number, batchId: number, payload: { command_id: string; expected_version: number; reason?: string }) =>
+    request.post(`/finance-center/v2/books/${bookId}/opening-balances/${batchId}/lock`, payload),
   getPeriodCloseReadiness: (bookId: number, periodId: number) => request.get<FinanceV2PeriodCloseReadiness>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/close-readiness`,
   ),

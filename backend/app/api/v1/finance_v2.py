@@ -22,6 +22,7 @@ from app.models.finance_v2 import (
 )
 from app.models.finance_v2_operations import FinanceV2FeatureGate
 from app.models.finance_v2_operations import FinanceV2PostingAttempt
+from app.models.finance_v2_opening import FinanceV2OpeningBalanceBatch
 from app.models.finance_v2_period_close import FinanceV2PeriodCloseBatch
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
@@ -83,11 +84,41 @@ class PeriodCommandInput(BaseModel):
     voucher_id: int | None = Field(default=None, ge=1)
 
 
+class OpeningBalanceLineInput(BaseModel):
+    account_version_id: int = Field(ge=1)
+    dimension_set_id: int = Field(ge=1)
+    currency_code: str = Field(default="CNY", min_length=1, max_length=16)
+    debit_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    credit_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    source_system: str = Field(min_length=1, max_length=32)
+    source_reference: str | None = Field(default=None, max_length=256)
+
+
+class OpeningBalanceCreateInput(BaseModel):
+    batch_kind: str = Field(pattern=r"^(provisional|final)$")
+    history_coverage_end_date: date
+    go_live_date: date
+    coverage_continuous: bool
+    command_id: str = Field(min_length=1, max_length=128)
+    lines: list[OpeningBalanceLineInput] = Field(min_length=1)
+
+
+class OpeningBalanceLockInput(BaseModel):
+    command_id: str = Field(min_length=1, max_length=128)
+    expected_version: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 def _actor(user: SysUser) -> str:
     return str(getattr(user, "username", None) or getattr(user, "name", None) or user.id)
 
 
 def _domain_error(error: FinanceV2DomainError) -> HTTPException:
+    message = str(error)
+    return HTTPException(status_code=409 if "conflict" in message else 400, detail=message)
+
+
+def _opening_balance_error(error: OpeningBalanceError) -> HTTPException:
     message = str(error)
     return HTTPException(status_code=409 if "conflict" in message else 400, detail=message)
 
@@ -128,6 +159,31 @@ async def _assert_v2_write_enabled(db: AsyncSession, *, command: str, book_id: i
     try:
         await FinanceV2OpeningBalanceService(db).assert_current_writes_allowed(book_id=book_id)
     except OpeningBalanceError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+async def _assert_v2_cutover_enabled(db: AsyncSession, *, book_id: int, role: str) -> None:
+    """Final opening locks are an explicit cutover action, not ordinary drafting."""
+
+    rows = (await db.execute(select(FinanceV2FeatureGate))).scalars().all()
+    gates = [
+        GateScope(
+            scope_type=row.scope_type,
+            scope_key=row.scope_key,
+            gate_name=row.gate_name,
+            enabled=row.enabled,
+        )
+        for row in rows
+    ]
+    try:
+        assert_command_enabled(
+            gates,
+            command="cutover",
+            environment=settings.APP_ENV,
+            book=str(book_id),
+            role=role,
+        )
+    except FeatureGateError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
 
 
@@ -192,6 +248,116 @@ async def get_book_write_readiness(
                 "reason": opening_balance_reason,
             }
     return ApiResponse.ok(data={"book_id": book_id, "role": role, "commands": readiness})
+
+
+@router.get("/books/{book_id}/opening-balances", response_model=ApiResponse)
+async def list_opening_balances(
+    book_id: int,
+    current_user: SysUser = Depends(require_finance_v2_read),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    rows = (
+        await db.execute(
+            select(FinanceV2OpeningBalanceBatch)
+            .where(FinanceV2OpeningBalanceBatch.book_id == book_id)
+            .order_by(FinanceV2OpeningBalanceBatch.go_live_date.desc(), FinanceV2OpeningBalanceBatch.id.desc())
+        )
+    ).scalars().all()
+    return ApiResponse.ok(
+        data=[
+            {
+                "id": row.id,
+                "book_id": row.book_id,
+                "batch_kind": row.batch_kind,
+                "status": row.status,
+                "history_coverage_end_date": row.history_coverage_end_date,
+                "go_live_date": row.go_live_date,
+                "coverage_continuous": row.coverage_continuous,
+                "coverage_gap_id": row.coverage_gap_id,
+                "approved_by": row.approved_by,
+                "approved_at": row.approved_at,
+                "locked_at": row.locked_at,
+                "version": row.version,
+            }
+            for row in rows
+        ]
+    )
+
+
+@router.post("/books/{book_id}/opening-balances", response_model=ApiResponse)
+async def create_opening_balance(
+    book_id: int,
+    body: OpeningBalanceCreateInput,
+    current_user: SysUser = Depends(require_finance_v2_write),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    try:
+        result = await FinanceV2OpeningBalanceService(db).create_batch(
+            book_id=book_id,
+            batch_kind=body.batch_kind,
+            history_coverage_end_date=body.history_coverage_end_date,
+            go_live_date=body.go_live_date,
+            coverage_continuous=body.coverage_continuous,
+            actor_id=_actor(current_user),
+            command_id=body.command_id,
+            lines=[line.model_dump() for line in body.lines],
+        )
+    except OpeningBalanceError as error:
+        raise _opening_balance_error(error) from error
+    return ApiResponse.ok(data=result, message="V2 期初余额草稿已保存；尚未开启当前账写入")
+
+
+@router.post("/books/{book_id}/opening-balances/{batch_id}/validate", response_model=ApiResponse)
+async def validate_opening_balance(
+    book_id: int,
+    batch_id: int,
+    body: OpeningBalanceLockInput,
+    current_user: SysUser = Depends(require_finance_v2_write),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    try:
+        result = await FinanceV2OpeningBalanceService(db).validate_batch(
+            book_id=book_id,
+            batch_id=batch_id,
+            actor_id=_actor(current_user),
+            expected_version=body.expected_version,
+            command_id=body.command_id,
+            reason=body.reason,
+        )
+    except OpeningBalanceError as error:
+        raise _opening_balance_error(error) from error
+    return ApiResponse.ok(data=result, message="V2 期初余额已通过平衡校验；尚未锁定或开启当前账写入")
+
+
+@router.post("/books/{book_id}/opening-balances/{batch_id}/lock", response_model=ApiResponse)
+async def lock_opening_balance(
+    book_id: int,
+    batch_id: int,
+    body: OpeningBalanceLockInput,
+    current_user: SysUser = Depends(require_finance_v2_write),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    batch = await db.get(FinanceV2OpeningBalanceBatch, batch_id)
+    if not batch or batch.book_id != book_id:
+        raise HTTPException(status_code=404, detail="V2 opening balance batch not found")
+    if batch.batch_kind == "final":
+        await _assert_v2_cutover_enabled(
+            db,
+            book_id=book_id,
+            role=_finance_gate_role(current_user),
+        )
+    try:
+        result = await FinanceV2OpeningBalanceService(db).lock_batch(
+            book_id=book_id,
+            batch_id=batch_id,
+            actor_id=_actor(current_user),
+            expected_version=body.expected_version,
+            command_id=body.command_id,
+            reason=body.reason,
+        )
+    except OpeningBalanceError as error:
+        raise _opening_balance_error(error) from error
+    return ApiResponse.ok(data=result, message="V2 期初余额已锁定；当前账写入仍受功能 Gate 控制")
 
 
 @router.get("/books/{book_id}/periods", response_model=ApiResponse)

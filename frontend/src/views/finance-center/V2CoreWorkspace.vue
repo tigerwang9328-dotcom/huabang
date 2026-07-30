@@ -115,6 +115,25 @@
         :closable="false"
         show-icon
       />
+      <section class="opening-section">
+        <div class="section-head">
+          <div><h2>期初余额批次</h2><span>预演和最终期初均须人工核对；锁定批次本身不开放当前账写入。</span></div>
+          <div class="close-actions">
+            <el-button :loading="openingLoading" text type="primary" @click="loadOpeningBalances">刷新批次</el-button>
+            <el-button type="primary" @click="openOpeningBalanceEditor">新建期初批次</el-button>
+          </div>
+        </div>
+        <el-alert title="最终期初只能在旧系统冻结、最终增量导入并完成逐余额核对后锁定。当前账写入仍受功能 Gate 控制。" type="warning" :closable="false" show-icon />
+        <el-table :data="openingBalances" max-height="240" empty-text="尚未创建期初余额批次">
+          <el-table-column prop="batch_kind" label="类型" min-width="100"><template #default="{ row }">{{ row.batch_kind === 'final' ? '最终期初' : '预演期初' }}</template></el-table-column>
+          <el-table-column prop="status" label="状态" min-width="100" />
+          <el-table-column prop="history_coverage_end_date" label="历史截止日" min-width="120" />
+          <el-table-column prop="go_live_date" label="启用日" min-width="120" />
+          <el-table-column label="覆盖连续" min-width="100"><template #default="{ row }">{{ row.coverage_continuous ? '是' : '否（须获批断档）' }}</template></el-table-column>
+          <el-table-column prop="approved_by" label="锁定人" min-width="110"><template #default="{ row }">{{ row.approved_by || '—' }}</template></el-table-column>
+          <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button v-if="row.status === 'draft'" text type="primary" @click="validateOpeningBalance(row)">验证</el-button><el-button v-else-if="row.status === 'validated'" text type="danger" @click="confirmOpeningBalanceLock(row)">锁定</el-button></template></el-table-column>
+        </el-table>
+      </section>
       <section v-if="draftEnabled" class="draft-section">
         <div class="section-head"><h2>人工凭证草稿</h2><span>保存后仍需提交、审核和人工过账</span></div>
         <div class="draft-meta">
@@ -272,6 +291,25 @@
       </template>
       <el-skeleton v-else-if="periodCloseLoading" :rows="5" animated />
     </el-drawer>
+
+    <el-drawer v-model="openingBalanceEditorOpen" title="新建期初余额批次" size="820px">
+      <el-alert title="此操作只创建待核对批次，不会开启制单、审核或过账。请使用来源系统的逐科目、维度、币种余额；缺依据的余额不得默认填零。" type="info" :closable="false" show-icon />
+      <div class="draft-meta opening-meta">
+        <el-select v-model="openingBalance.batch_kind" aria-label="期初批次类型"><el-option label="预演期初" value="provisional" /><el-option label="最终期初" value="final" /></el-select>
+        <el-date-picker v-model="openingBalance.history_coverage_end_date" type="date" value-format="YYYY-MM-DD" placeholder="历史截止日" :clearable="false" />
+        <el-date-picker v-model="openingBalance.go_live_date" type="date" value-format="YYYY-MM-DD" placeholder="V2 启用日" :clearable="false" />
+        <el-switch v-model="openingBalance.coverage_continuous" active-text="历史连续" inactive-text="存在断档" />
+      </div>
+      <el-table :data="openingBalance.lines" max-height="430" empty-text="请至少录入两条平衡的期初明细">
+        <el-table-column label="科目" min-width="220"><template #default="{ row }"><el-select v-model="row.account_version_id" filterable placeholder="选择可制单科目"><el-option v-for="account in accounts" :key="account.id" :label="`${account.account_code} · ${account.account_name}`" :value="account.id" /></el-select></template></el-table-column>
+        <el-table-column label="维度集 ID" width="150"><template #default="{ row }"><el-input-number v-model="row.dimension_set_id" :min="1" controls-position="right" /></template></el-table-column>
+        <el-table-column label="借方" width="135"><template #default="{ row }"><el-input-number v-model="row.debit_amount" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
+        <el-table-column label="贷方" width="135"><template #default="{ row }"><el-input-number v-model="row.credit_amount" :min="0" :precision="2" controls-position="right" /></template></el-table-column>
+        <el-table-column label="来源" min-width="140"><template #default="{ row }"><el-input v-model="row.source_system" maxlength="32" placeholder="如 kingdee" /></template></el-table-column>
+        <el-table-column width="72"><template #default="{ $index }"><el-button text type="danger" :disabled="openingBalance.lines.length <= 2" @click="removeOpeningBalanceLine($index)">删除</el-button></template></el-table-column>
+      </el-table>
+      <div class="close-actions"><el-button text type="primary" @click="addOpeningBalanceLine">添加明细</el-button><el-button type="primary" :loading="openingBalanceSaving" @click="saveOpeningBalance">保存待核对批次</el-button></div>
+    </el-drawer>
   </section>
 </template>
 
@@ -285,6 +323,8 @@ import {
   type FinanceV2HistoryVoucher,
   type FinanceV2HistoryVoucherLine,
   type FinanceV2MonitoringSummary,
+  type FinanceV2OpeningBalanceBatch,
+  type FinanceV2OpeningBalanceLineInput,
   type FinanceV2PeriodCommandInput,
   type FinanceV2PeriodCloseReadiness,
   type FinanceV2TrialBalance,
@@ -310,6 +350,7 @@ const periodCloseReadiness = ref<FinanceV2PeriodCloseReadiness>();
 const trialBalance = ref<FinanceV2TrialBalance>();
 const monitoringSummary = ref<FinanceV2MonitoringSummary>();
 const closePostedVouchers = ref<FinanceV2Voucher[]>([]);
+const openingBalances = ref<FinanceV2OpeningBalanceBatch[]>([]);
 const selectedProfitClosingVoucherId = ref<number>();
 const loading = ref(false);
 const historyLoading = ref(false);
@@ -317,6 +358,8 @@ const historyLineLoading = ref(false);
 const periodCloseLoading = ref(false);
 const trialBalanceLoading = ref(false);
 const monitoringLoading = ref(false);
+const openingLoading = ref(false);
+const openingBalanceSaving = ref(false);
 const workspaceLoading = ref(false);
 const draftSaving = ref(false);
 const commandLoading = ref("");
@@ -330,9 +373,11 @@ const voucherDetailLoading = ref(false);
 const voucherEditOpen = ref(false);
 const voucherEditSaving = ref(false);
 const periodCloseDrawerOpen = ref(false);
+const openingBalanceEditorOpen = ref(false);
 const today = () => new Date().toISOString().slice(0, 10);
 const newRequestId = () => globalThis.crypto?.randomUUID?.() || `finance-v2-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const draft = reactive({ book_id: 0, period_id: 0, voucher_date: today(), request_id: newRequestId(), entries: [] as FinanceV2VoucherLineInput[] });
+const openingBalance = reactive({ batch_kind: "provisional" as "provisional" | "final", history_coverage_end_date: "", go_live_date: "", coverage_continuous: true, lines: [] as FinanceV2OpeningBalanceLineInput[] });
 const voucherEdit = reactive({ voucher_date: "", expected_version: 0, entries: [] as FinanceV2VoucherLineInput[] });
 
 const draftEnabled = computed(() => Boolean(writeReadiness.value?.commands.draft.enabled));
@@ -392,6 +437,102 @@ async function loadMonitoring() {
     monitoringError.value = error instanceof Error ? error.message : "请求失败";
   } finally {
     monitoringLoading.value = false;
+  }
+}
+
+async function loadOpeningBalances() {
+  if (!selectedBookId.value) {
+    openingBalances.value = [];
+    return;
+  }
+  openingLoading.value = true;
+  try {
+    const response = await financeV2Api.listOpeningBalances(selectedBookId.value);
+    openingBalances.value = response.data || [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "期初余额批次读取失败");
+  } finally {
+    openingLoading.value = false;
+  }
+}
+
+function emptyOpeningBalanceLine(): FinanceV2OpeningBalanceLineInput {
+  return { account_version_id: 0, dimension_set_id: 0, debit_amount: 0, credit_amount: 0, source_system: "kingdee" };
+}
+
+function openOpeningBalanceEditor() {
+  openingBalance.batch_kind = "provisional";
+  openingBalance.history_coverage_end_date = "";
+  openingBalance.go_live_date = "";
+  openingBalance.coverage_continuous = true;
+  openingBalance.lines.splice(0, openingBalance.lines.length, emptyOpeningBalanceLine(), emptyOpeningBalanceLine());
+  openingBalanceEditorOpen.value = true;
+}
+
+function addOpeningBalanceLine() {
+  openingBalance.lines.push(emptyOpeningBalanceLine());
+}
+
+function removeOpeningBalanceLine(index: number) {
+  openingBalance.lines.splice(index, 1);
+}
+
+async function saveOpeningBalance() {
+  if (!selectedBookId.value) return;
+  if (!openingBalance.history_coverage_end_date || !openingBalance.go_live_date) return ElMessage.warning("请填写历史截止日与 V2 启用日");
+  openingBalanceSaving.value = true;
+  try {
+    await financeV2Api.createOpeningBalance(selectedBookId.value, {
+      batch_kind: openingBalance.batch_kind,
+      history_coverage_end_date: openingBalance.history_coverage_end_date,
+      go_live_date: openingBalance.go_live_date,
+      coverage_continuous: openingBalance.coverage_continuous,
+      command_id: newRequestId(),
+      lines: openingBalance.lines.map((line) => ({ ...line })),
+    });
+    ElMessage.success("期初余额待核对批次已保存；当前账写入仍受功能 Gate 控制");
+    openingBalanceEditorOpen.value = false;
+    await loadOpeningBalances();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "期初余额批次保存失败");
+  } finally {
+    openingBalanceSaving.value = false;
+  }
+}
+
+async function confirmOpeningBalanceLock(batch: FinanceV2OpeningBalanceBatch) {
+  if (!selectedBookId.value) return;
+  let reason: string;
+  try {
+    const response = await ElMessageBox.prompt("锁定会写入审批审计记录。仅在旧系统冻结、最终增量核对完成后执行。", "锁定期初余额", { inputPattern: /\S+/, inputErrorMessage: "必须填写锁定原因", confirmButtonText: "锁定", cancelButtonText: "取消" });
+    reason = response.value;
+  } catch {
+    return;
+  }
+  try {
+    await financeV2Api.lockOpeningBalance(selectedBookId.value, batch.id, { command_id: newRequestId(), expected_version: batch.version, reason });
+    ElMessage.success("期初余额已锁定；请继续完成功能 Gate 和切换核对");
+    await Promise.all([loadOpeningBalances(), loadWorkspace()]);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "期初余额锁定失败，请刷新后确认批次版本");
+  }
+}
+
+async function validateOpeningBalance(batch: FinanceV2OpeningBalanceBatch) {
+  if (!selectedBookId.value) return;
+  let reason: string;
+  try {
+    const response = await ElMessageBox.prompt("验证将检查借贷平衡与来源字段，不会改变账簿启用边界。", "验证期初余额", { inputPattern: /\S+/, inputErrorMessage: "必须填写核对说明", confirmButtonText: "验证", cancelButtonText: "取消" });
+    reason = response.value;
+  } catch {
+    return;
+  }
+  try {
+    await financeV2Api.validateOpeningBalance(selectedBookId.value, batch.id, { command_id: newRequestId(), expected_version: batch.version, reason });
+    ElMessage.success("期初余额已验证；最终期初仍须经切换 Gate 锁定");
+    await loadOpeningBalances();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "期初余额验证失败，请刷新后检查明细");
   }
 }
 
@@ -530,20 +671,23 @@ async function loadWorkspace() {
     accounts.value = [];
     vouchers.value = [];
     writeReadiness.value = undefined;
+    openingBalances.value = [];
     return;
   }
   workspaceLoading.value = true;
   try {
-    const [periodResponse, accountResponse, voucherResponse, readinessResponse] = await Promise.all([
+    const [periodResponse, accountResponse, voucherResponse, readinessResponse, openingResponse] = await Promise.all([
       financeV2Api.listPeriods(selectedBookId.value),
       financeV2Api.listAccounts(selectedBookId.value),
       financeV2Api.listVouchers(selectedBookId.value),
       financeV2Api.getWriteReadiness(selectedBookId.value),
+      financeV2Api.listOpeningBalances(selectedBookId.value),
     ]);
     periods.value = periodResponse.data || [];
     accounts.value = accountResponse.data || [];
     vouchers.value = voucherResponse.data || [];
     writeReadiness.value = readinessResponse.data;
+    openingBalances.value = openingResponse.data || [];
     draft.book_id = selectedBookId.value;
     if (!openPeriods.value.some((period) => period.id === draft.period_id)) draft.period_id = openPeriods.value[0]?.id || 0;
   } catch (error) {
@@ -678,6 +822,8 @@ onMounted(() => Promise.all([loadBooks(), loadMonitoring()]));
 .close-actions { display: flex; gap: 10px; margin-top: 16px; }
 .workspace-filter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .gate-alert { margin-top: 16px; }
+.opening-section { margin-top: 20px; }
+.opening-meta { flex-wrap: wrap; }
 .draft-section { margin-top: 20px; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .section-head h2 { margin: 0; font-size: 15px; }.section-head span { color: var(--el-text-color-secondary); font-size: 12px; }

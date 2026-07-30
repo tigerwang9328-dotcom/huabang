@@ -84,6 +84,19 @@ test("V2 workspace exposes write actions only through server-reported Gate readi
   assert.ok(workspace.includes("runCommand"));
 });
 
+test("V2 workspace exposes the opening-balance cutover boundary without treating it as a write Gate", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  for (const token of ["listOpeningBalances", "createOpeningBalance", "validateOpeningBalance", "lockOpeningBalance"]) {
+    assert.ok(api.includes(token), `missing ${token} API`);
+  }
+  for (const token of ["期初余额批次", "openingBalances", "openingBalance", "validateOpeningBalance"] ) {
+    assert.ok(workspace.includes(token), `missing ${token} workspace state`);
+  }
+  assert.ok(workspace.includes("当前账写入仍受功能 Gate 控制"));
+});
+
 test("V2 workspace can inspect current voucher lines and audit events, while editing only a Gate-enabled draft", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

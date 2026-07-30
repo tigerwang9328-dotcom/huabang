@@ -222,7 +222,7 @@ async def test_locking_a_final_opening_updates_book_boundary_and_records_approva
 
         async def execute(self, _statement):
             self.calls += 1
-            return [Result(batch), Result(None), Result(lines), Result(rowcount=1)][self.calls - 1]
+            return [Result(None), Result(batch), Result(lines), Result(rowcount=1)][self.calls - 1]
 
         def add(self, item):
             self.added.append(item)
@@ -239,3 +239,86 @@ async def test_locking_a_final_opening_updates_book_boundary_and_records_approva
     assert book.current_book_go_live_date == date(2026, 8, 2)
     assert book.formal_report_blocked is True
     assert any(type(item).__name__ == "FinanceV2OpeningBalanceApproval" for item in db.added)
+
+
+@pytest.mark.asyncio
+async def test_validating_an_opening_draft_checks_balance_and_advances_its_version_without_changing_go_live_boundary():
+    book = SimpleNamespace(id=3, current_book_go_live_date=None)
+    batch = SimpleNamespace(id=8, book_id=3, batch_kind="provisional", status="draft", version=1)
+    lines = [
+        SimpleNamespace(account_version_id=10, dimension_set_id=20, currency_code="CNY", debit_amount="100", credit_amount="0", source_system="kingdee"),
+        SimpleNamespace(account_version_id=30, dimension_set_id=20, currency_code="CNY", debit_amount="0", credit_amount="100", source_system="kingdee"),
+    ]
+
+    class Result:
+        def __init__(self, value=None, *, rowcount=None):
+            self.value = value
+            self.rowcount = rowcount
+
+        def scalar_one_or_none(self):
+            return self.value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.value
+
+    class Db:
+        def __init__(self):
+            self.calls = 0
+            self.added = []
+
+        async def get(self, _model, book_id):
+            assert book_id == 3
+            return book
+
+        async def execute(self, _statement):
+            self.calls += 1
+            return [Result(None), Result(batch), Result(lines), Result(rowcount=1)][self.calls - 1]
+
+        def add(self, item):
+            self.added.append(item)
+
+        async def flush(self):
+            pass
+
+    db = Db()
+    result = await FinanceV2OpeningBalanceService(db).validate_batch(
+        book_id=3, batch_id=8, actor_id="finance-manager", expected_version=1, command_id="opening-validate-001", reason="逐余额核对完成"
+    )
+
+    assert result == {"batch_id": 8, "book_id": 3, "status": "validated", "version": 2}
+    assert batch.status == "validated"
+    assert batch.version == 2
+    assert book.current_book_go_live_date is None
+
+
+@pytest.mark.asyncio
+async def test_repeating_a_completed_opening_validation_returns_its_original_result_before_state_checks():
+    service = FinanceV2OpeningBalanceService(None)
+    request_hash = service._payload_hash(
+        {"batch_id": 8, "actor_id": "finance-manager", "expected_version": 1, "reason": "逐余额核对完成"}
+    )
+    existing = SimpleNamespace(
+        request_hash=request_hash,
+        result_payload={"batch_id": 8, "book_id": 3, "status": "validated", "version": 2},
+    )
+
+    class Result:
+        def scalar_one_or_none(self):
+            return existing
+
+    class Db:
+        async def get(self, _model, book_id):
+            assert book_id == 3
+            return SimpleNamespace(id=3)
+
+        async def execute(self, _statement):
+            return Result()
+
+    result = await FinanceV2OpeningBalanceService(Db()).validate_batch(
+        book_id=3, batch_id=8, actor_id="finance-manager", expected_version=1, command_id="opening-validate-001", reason="逐余额核对完成"
+    )
+
+    assert result == {"batch_id": 8, "book_id": 3, "status": "validated", "version": 2, "idempotent": True}

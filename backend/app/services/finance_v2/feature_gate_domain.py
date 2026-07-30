@@ -22,6 +22,7 @@ _COMMAND_GATES = {
     "review": "review_enabled",
     "post": "post_enabled",
     "period_close": "period_close_enabled",
+    "cutover": "cutover_enabled",
     "source_sync": "source_sync_enabled",
 }
 
