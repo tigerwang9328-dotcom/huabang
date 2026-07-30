@@ -1,10 +1,4 @@
-"""Idempotently register Douyin analytics permissions in Huabang RBAC.
-
-First release is intentionally broad for internal users: every currently
-enabled platform role receives view, annotation, and product-maintenance
-permissions. Export and account configuration remain administrator-only
-through the existing ``is_admin`` bypass in ``require_permission``.
-"""
+"""Idempotently register the frozen v3.1 Douyin permissions in Huabang RBAC."""
 
 import asyncio
 
@@ -16,16 +10,24 @@ from app.services.operation_audit_service import write_operation_audit
 
 
 PERMISSIONS = {
-    "douyin_color:view": ("抖音颜色分析查看", "查看采集健康、视频和报告"),
-    "douyin_color:annotate": ("抖音颜色分析标注", "维护视频片段和穿搭/商品标注"),
-    "douyin_color:manage": ("抖音颜色分析维护", "维护商品、颜色、SKU 和业务配置"),
-    "douyin_color:export": ("抖音颜色分析导出", "导出颜色分析报告"),
-    "douyin_color:account_config": ("抖音颜色账号配置", "配置账号、令牌和采集开关"),
+    "douyin.collector.write": ("抖音采集器写入", "仅供采集令牌访问配置、心跳、事件和批次接口"),
+    "douyin.annotation.edit": ("抖音标注编辑", "维护草稿和提交主要衣物标注"),
+    "douyin.annotation.approve": ("抖音标注审核", "审批标注和跨色重叠"),
+    "douyin.report.view": ("抖音报告查看", "只读颜色报告和视频钻取"),
+    "douyin.report.export": ("抖音报告导出", "导出颜色分析报告"),
+    "douyin.admin": ("抖音模块管理", "管理商品、账号、令牌、语义和功能开关"),
+    "douyin.audit.read": ("抖音审计查看", "查看模块操作审计"),
 }
-BROAD_FIRST_RELEASE_CODES = {
-    "douyin_color:view",
-    "douyin_color:annotate",
-    "douyin_color:manage",
+
+# Only platform roles with a business need get an assignment. ``is_admin``
+# remains the canonical administrator bypass in the existing dependency.
+ROLE_PERMISSION_CODES = {
+    "operation_manager": {"douyin.annotation.edit", "douyin.report.view"},
+    "product_manager": {"douyin.annotation.edit", "douyin.report.view"},
+    "product_specialist": {"douyin.annotation.edit"},
+    "boss": {"douyin.report.view"},
+    "ceo": {"douyin.report.view", "douyin.report.export"},
+    "finance_manager": {"douyin.audit.read"},
 }
 
 
@@ -45,7 +47,7 @@ async def main() -> None:
         roles = (await db.execute(select(SysRole).where(SysRole.status == 1))).scalars().all()
         created_assignments = 0
         for role in roles:
-            for code in BROAD_FIRST_RELEASE_CODES:
+            for code in ROLE_PERMISSION_CODES.get(role.code, set()):
                 existing = await db.execute(
                     select(SysRolePermission.id).where(
                         SysRolePermission.role_id == role.id,
@@ -65,7 +67,7 @@ async def main() -> None:
             target_id="first_release",
             after_data={
                 "permissions": sorted(PERMISSIONS),
-                "broad_first_release_permissions": sorted(BROAD_FIRST_RELEASE_CODES),
+                "role_permission_codes": {key: sorted(value) for key, value in ROLE_PERMISSION_CODES.items()},
                 "active_role_count": len(roles),
                 "created_assignments": created_assignments,
             },

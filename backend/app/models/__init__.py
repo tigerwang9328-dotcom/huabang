@@ -151,12 +151,23 @@ from app.models.finance_v2_operations import (
     FinanceV2VoucherNumberReservation,
 )
 from app.models.douyin_color_analytics import (
+    CalculationJob,
     CollectionBatch,
     CollectionBatchPart,
     CollectionItem,
+    CollectorEvent,
+    CollectorExpectedSchedule,
     CollectorInstance,
+    ColorPerformanceSnapshot,
     DouyinCreatorAccount,
     DouyinUploadToken,
+    GarmentColor,
+    GarmentSku,
+    GarmentStyle,
+    MetricSemanticValidation,
     Video,
     VideoAnalysisSnapshot,
+    VideoCatalogSnapshot,
+    VideoClip,
+    VideoColorMetric,
 )

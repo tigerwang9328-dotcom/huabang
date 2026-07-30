@@ -52,7 +52,7 @@ def test_account_scoped_foreign_keys_carry_account_id_in_their_constraint():
         tuple(foreign_key_constraint.column_keys)
         for foreign_key_constraint in VideoAnalysisSnapshot.__table__.foreign_key_constraints
     }
-    assert ("account_id", "batch_id") in collection_item_fk_columns
+    assert ("account_id", "batch_id", "part_id") in collection_item_fk_columns
     assert ("account_id", "video_id") in snapshot_fk_columns
 
 
@@ -123,34 +123,34 @@ def test_existing_system_and_auth_audit_helpers_delegate_to_the_uniform_writer()
     assert "return await write_operation_audit(" in auth_source
 
 
-def test_dedicated_migrator_assets_do_not_grant_finance_access_or_use_global_alembic_chain():
+def test_dedicated_migrator_assets_do_not_grant_finance_access_or_create_a_second_alembic_head():
     backend_root = Path(__file__).resolve().parents[1]
     repository_root = backend_root.parent
     runner = (repository_root / "deploy" / "run_douyin_color_migrations.sh").read_text(encoding="utf-8")
     bootstrap = (repository_root / "deploy" / "bootstrap_douyin_color_migrator.sql").read_text(encoding="utf-8")
-    env = (backend_root / "alembic_douyin" / "env.py").read_text(encoding="utf-8")
 
-    assert "alembic_douyin.ini" in runner
+    assert "alembic.ini" in runner
+    assert "alembic_douyin" not in runner
     assert "huabang_douyin_migrator" in bootstrap
-    assert "SET ROLE huabang_douyin_migrator" in env
-    assert "connection.commit()" in env
-    assert 'version_table_schema="douyin"' in env
-    assert "from app.models" not in env
     assert "CREATE SCHEMA IF NOT EXISTS douyin AUTHORIZATION huabang_douyin_migrator" in bootstrap
     assert "fin_current" not in bootstrap
     assert "fin_history" not in bootstrap
     assert "GRANT .* ON ALL TABLES IN SCHEMA fin" not in bootstrap
 
 
-def test_rbac_bootstrap_uses_existing_platform_roles_but_keeps_sensitive_actions_admin_only():
+def test_rbac_bootstrap_uses_the_frozen_v31_platform_permission_codes():
     backend_root = Path(__file__).resolve().parents[1]
     source = (backend_root / "scripts" / "bootstrap_douyin_color_permissions.py").read_text(encoding="utf-8")
 
     assert "select(SysRole).where(SysRole.status == 1)" in source
-    assert '"douyin_color:view"' in source
-    assert '"douyin_color:annotate"' in source
-    assert '"douyin_color:manage"' in source
-    assert '"douyin_color:export"' in source
-    assert '"douyin_color:account_config"' in source
-    assert "BROAD_FIRST_RELEASE_CODES" in source
-    assert '"douyin_color:export"' not in source.split("BROAD_FIRST_RELEASE_CODES", 1)[1].split("async def", 1)[0]
+    for permission_code in (
+        "douyin.collector.write",
+        "douyin.annotation.edit",
+        "douyin.annotation.approve",
+        "douyin.report.view",
+        "douyin.report.export",
+        "douyin.admin",
+        "douyin.audit.read",
+    ):
+        assert permission_code in source
+    assert "douyin_color:" not in source

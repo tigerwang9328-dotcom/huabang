@@ -133,8 +133,8 @@ def test_life_data_migration_has_one_resolvable_head():
     config.set_main_option("script_location", str(_ALEMBIC_DIR))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["2b0f6a7b8c94"]
-    assert script.get_current_head() == "2b0f6a7b8c94"
+    assert script.get_heads() == ["2d7c4a9e8b10"]
+    assert script.get_current_head() == "2d7c4a9e8b10"
 
 
 def test_investment_merge_revision_preserves_both_existing_heads():
