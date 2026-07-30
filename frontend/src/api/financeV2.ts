@@ -292,7 +292,7 @@ export const financeV2Api = {
     { params: { book_id: bookId, ...params } },
   ),
   getVoucherDetail: (voucherId: number) => request.get<FinanceV2VoucherDetail>(`/finance-center/v2/vouchers/${voucherId}`),
-  listHistoryVouchers: (params?: { limit?: number }) => request.get<FinanceV2HistoryVoucher[]>(
+  listHistoryVouchers: (params?: { limit?: number; offset?: number }) => request.get<FinanceV2HistoryVoucher[]>(
     "/finance-center/v2/history/vouchers",
     { params },
   ),

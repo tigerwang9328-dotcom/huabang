@@ -20,7 +20,7 @@
     </section>
 
     <section v-if="module.key === 'archive'" class="module-panel">
-      <HistoricalFinance />
+      <V2HistoryArchive />
     </section>
 
     <section v-else-if="module.key === 'vouchers'" class="module-panel">
@@ -51,7 +51,7 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import FormalLedger from "@/views/finance/FormalLedger.vue";
-import HistoricalFinance from "@/views/finance/HistoricalFinance.vue";
+import V2HistoryArchive from "@/views/finance-center/V2HistoryArchive.vue";
 import { financeCenterModuleMap, type FinanceModuleStatus } from "@/config/financeCenterModules";
 
 const route = useRoute();

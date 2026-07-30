@@ -63,6 +63,14 @@ test("V2 workspace exposes immutable historical Kingdee vouchers and their marke
   assert.ok(workspace.includes("viewHistoryVoucher"));
 });
 
+test("finance center archive uses the isolated V2 history view instead of the legacy Kingdee query view", () => {
+  const module = read("src/views/finance/FinanceCenterModule.vue");
+
+  assert.ok(module.includes('import V2HistoryArchive from "@/views/finance-center/V2HistoryArchive.vue";'));
+  assert.ok(module.includes("<V2HistoryArchive />"));
+  assert.ok(!module.includes("import HistoricalFinance"));
+});
+
 test("V2 workspace shows only persisted source dry-run receipts and never an auto-draft action", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

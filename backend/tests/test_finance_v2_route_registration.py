@@ -144,6 +144,37 @@ async def test_current_voucher_detail_includes_lines_and_append_only_operation_e
 
 
 @pytest.mark.asyncio
+async def test_v2_history_voucher_endpoint_pages_only_the_published_read_view():
+    captured = {}
+
+    class MappingResult:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [{"id": 201, "historical_marker": True}]
+
+    class ReadOnlyDb:
+        async def execute(self, statement, params):
+            captured["statement"] = str(statement)
+            captured["params"] = params
+            return MappingResult()
+
+    response = await finance_v2.list_history_vouchers(
+        limit=200,
+        offset=200,
+        current_user=SimpleNamespace(id=1, username="finance"),
+        db=ReadOnlyDb(),
+    )
+
+    assert response.data == [{"id": 201, "historical_marker": True}]
+    assert "fin_read.history_voucher" in captured["statement"]
+    assert "fin_history.voucher" not in captured["statement"]
+    assert "OFFSET :offset" in captured["statement"]
+    assert captured["params"] == {"limit": 200, "offset": 200}
+
+
+@pytest.mark.asyncio
 async def test_v2_history_line_endpoint_reads_only_the_published_read_view():
     captured = {}
 

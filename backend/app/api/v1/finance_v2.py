@@ -938,6 +938,7 @@ async def list_source_previews(
 @router.get("/history/vouchers", response_model=ApiResponse)
 async def list_history_vouchers(
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: SysUser = Depends(require_finance_v2_read),
     db: AsyncSession = Depends(get_finance_db),
 ):
@@ -950,9 +951,10 @@ async def list_history_vouchers(
                 FROM fin_read.history_voucher
                 ORDER BY voucher_date DESC, id DESC
                 LIMIT :limit
+                OFFSET :offset
                 """
             ),
-            {"limit": limit},
+            {"limit": limit, "offset": offset},
         )
     ).mappings().all()
     return ApiResponse.ok(data=[dict(row) for row in rows])
