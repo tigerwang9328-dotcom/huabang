@@ -55,6 +55,30 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
     assert "--no-verify" not in source
 
 
+def test_recovery_migration_rehearsal_is_explicitly_scoped_to_a_non_production_database():
+    script = DEPLOY / "rehearse_finance_v2_migrations.sh"
+    assert script.exists()
+    subprocess.run(["bash", "-n"], input=script.read_bytes(), check=True)
+
+    source = script.read_text(encoding="utf-8")
+    for required in (
+        "set -euo pipefail",
+        "--database-name",
+        "--execute",
+        "flock",
+        "^huabang_ai_finance_drill_",
+        "1fdf4577d7d8",
+        "run_migrator -m alembic -c alembic.ini upgrade head",
+        "run_migrator -m alembic -c alembic.ini downgrade \"$BASELINE_REVISION\"",
+        "verify_finance_database_roles.py",
+        "fin_migrator",
+        "fin_schema_owner",
+    ):
+        assert required in source
+    assert "systemctl" not in source
+    assert "sudo -S" not in source
+
+
 def test_release_verifier_checks_fin_app_history_visibility_and_closed_write_gates():
     verifier = DEPLOY / "verify_finance_center_v2.py"
     assert verifier.exists()

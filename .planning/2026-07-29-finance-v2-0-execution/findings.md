@@ -50,3 +50,9 @@
 - 以运行账户 `huabang` 在生产 `huabang_ai` 做只读元数据和计数核验：`dwd.dwd_sales_detail` 有 466 条、唯一明细键 466 个，日期仅为 2026-06-14 至 2026-06-16；`dwd.dwd_return_detail` 有 1 条，日期为 2026-06-16。
 - `dwd.dwd_finance_expense` 与 `dwd.dwd_finance_cash` 均为 0 行。销售、退货表没有收款/结算、税、法人、会计科目或已审核会计期间等完整记账事实。
 - 因此本轮禁止把 DWD 汇总或经营明细直接映射成当前账凭证；可作为未来来源收件箱的只读快照候选，仍必须先补齐来源版本、法人/组织/账簿范围、收款结算与规则映射证据。
+
+## 2026-07-30 增量迁移演练发现
+
+- 生产实际 Alembic baseline 为 `1fdf4577d7d8`，本地 head 为 `e951b2d0a6c4`。从该 baseline 进行 `--sql` 预检可完整渲染三项待验证迁移；从数据库零版本进行离线渲染会触发既有迁移 `d5e6f7a8b9c0` 的运行时数据查询，不适合作为 V2 增量迁移校验。
+- `rehearse_finance_v2_migrations.sh` 只对 `huabang_ai_finance_drill_*` 名称的恢复库执行，要求 baseline 精确匹配并在清理临时迁移口令后离开 recovery DB 于 head；生产库名无法通过参数校验。
+- 当前 SSH 账户没有无交互 sudo，不能以应用账户执行 DDL，也不能安全代入任何管理员秘密。真实恢复库迁移仍需要受控 sudo/DBA 执行窗口。
