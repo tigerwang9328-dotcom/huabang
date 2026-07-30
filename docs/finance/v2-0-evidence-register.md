@@ -197,3 +197,14 @@
 | 迁移后失败语义 | 新回归要求迁移成功后的异常不得回退到不认识新 revision 的旧运行时。候选 `fin_app` 环境在迁移前准备；迁移后异常保留候选代码/环境及应用口令、重启后端进入 migration-compatible 状态。 | 本地 TDD | 防止再次出现代码、schema 与财务会话三者不一致。 |
 
 **当前 Go / No-Go：** 历史输入完整性 dry-run为 **Go**；生产运行时修复、生产只读发布验收和全部写入能力均为 **No-Go**，直至候选提交以经验证输入成功完成受控发布并由独立只读探针确认。
+
+## 生产 Finance V2 只读发布完成（2026-07-30）
+
+| 项目 | 已核实事实 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- |
+| 受控发布结果 | 项目管理员在 SSH TTY 运行受控发布入口；日志 `/srv/huabang-ai-center/.finance-v2-release-logs/release-20260730T084651Z.log` 最终返回 `status=ready`。发布结果为历史凭证 339、历史分录 4,596、当前凭证 0、启用写 Gate 为空。 | 项目管理员发布输出 | 生产只读发布成功；不授权任何写入。 |
+| 运行代码与迁移 | 独立 SSH 只读核验确认生产提交和发布脚本提交均为 `e26e7199bbd14f3e260bcc9e06d18b26052b9322`；Alembic `current` 为 `e951b2d0a6c4 (head)`。 | 生产 Git 与运行时 | 代码、schema 与财务运行时一致。 |
+| 服务与入口 | `huabang-backend.service` 为 active；`/health` 返回数据库与 Redis connected；`/app/finance-center/core-workspace` 返回 HTTP 200。发布期间本机 8000 的短暂连接失败发生于重启重试窗口，随后两个 worker 均完成 application startup。 | 生产运行时 | 证明发布后服务与静态入口可用；不替代已登录用户验收。 |
+| 数据与权限复核 | 独立 `verify_finance_center_v2.py` 再次返回 ready 和 339/4,596/0；OpenAPI 含 48 个 `/api/v1/finance*` 路由，未登录 V2 监控端点为 HTTP 401。 | 生产运行时 | 只读数据已发布，接口仍经华邦中台鉴权；未验证财务/超级管理员真实操作。 |
+
+**当前 Go / No-Go：** 生产 Finance V2 **只读发布为 Go**。`draft_enabled`、`review_enabled`、`post_enabled`、`period_close_enabled` 和来源写入继续为 **No-Go**；已登录财务/超级管理员浏览器验收、通知闭环、非空生产形态性能、异机恢复演练、最终期初与批准的期边冻结窗口仍为正式开写前置。

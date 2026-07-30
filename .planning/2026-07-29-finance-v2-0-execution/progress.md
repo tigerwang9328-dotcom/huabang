@@ -108,3 +108,12 @@
 - 已按测试先行补充发布脚本回归：历史快照 dry-run 必须发生在 `--execute` 分支、`sudo_init`、备份和迁移之前。该测试先失败（缺少该行为），最小实现后 `tests/test_finance_v2_release_assets.py` 为 6 passed。独立 `bash -n` 的首次 Windows 路径调用错误，脚本的同类语法检查已由该测试的 `bash -n` 输入通过；后续使用 WSL 路径或 Python 测试验证，避免此路径形式。
 - 已在本地发现完整原生快照根 `D:\huabang\invest_kingdee\results\K3MIG_20260717_172928\manifest.json`，总计 12,826 个文件、403,191,671 字节。该根 manifest 的 loader dry-run 产生 339 凭证、4,596 分录、0 冲突；其 SHA-256 为 `BBE9676545C413A5AE077796D766C04E572A75D1F918B1053FA9548F1D8DB1FD`。Windows `scp -r` 只上传了部分无关文件，未将其表述为完整同步；随后仅显式补齐导入所需 9 个哈希校验表文件与根 manifest 到新的服务器 candidate 目录。该候选在服务器 dry-run 同样为 339/4,596、0 冲突，未覆盖旧 canonical 输入或写入财务表。
 - 已增加第二条失败测试：迁移成功后，release trap 必须保留兼容候选运行时而非回退旧提交。测试先失败，最小实现后 `test_finance_v2_release_assets.py` 为 7 passed；候选 `FINANCE_DB_*` 配置已前移到迁移前，且迁移后的失败会重启候选后端而保留 `fin_app` 口令。仍未对生产执行该修复。
+
+## 2026-07-30 生产只读发布完成与独立核验
+
+- 项目管理员已通过受控 SSH TTY 完成发布。发布脚本构建前端、完成历史导入并输出 `status=ready`：`fin_app` 会话下历史凭证 339、历史分录 4,596、当前凭证 0、启用的 V2 写 Gate 为空；发布日志为 `/srv/huabang-ai-center/.finance-v2-release-logs/release-20260730T084651Z.log`。
+- 独立 SSH 只读核验确认生产提交为 `e26e7199bbd14f3e260bcc9e06d18b26052b9322`，部署脚本也来自同一提交；`huabang-backend.service` 为 active，`/health` 返回数据库与 Redis connected，前端 `/app/finance-center/core-workspace` 为 HTTP 200。
+- 生产 Alembic `current` 为 `e951b2d0a6c4 (head)`；独立 `verify_finance_center_v2.py` 再次返回 `status=ready` 和相同的 339/4,596/0 数据事实。OpenAPI 含 48 个 `/api/v1/finance*` 路由，未登录的 V2 监控接口返回 HTTP 401，证明路由由中台鉴权层保护，但不替代已登录用户端到端验收。
+- 发布期间的 5 次 `127.0.0.1:8000` 连接失败发生在服务重启健康重试窗口；后续服务启动日志显示两个 worker 均完成 application startup，当前健康检查正常。
+- 一次独立核验误查了不存在的 `huabang-ai-center.service`，其 inactive 不代表服务故障；真实服务单元为 `huabang-backend.service`。另有自 2026-07-29 起挂起的旧 `sudo -S systemctl restart huabang-backend.service` 父子进程；本轮未终止或修改它，因当前服务已正常运行，留待单独运维清理评审。
+- 本轮未开启 `draft_enabled`、`review_enabled`、`post_enabled`、`period_close_enabled` 或来源写入，也未创建任何 `fin_current` 凭证。下一阶段仅做只读验收和开写前外部 Gate，不得将本次只读发布表述为正式记账上线。
