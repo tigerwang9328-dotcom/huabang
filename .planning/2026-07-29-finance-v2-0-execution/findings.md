@@ -61,3 +61,10 @@
 
 - 生产主机当前提交为 `a52a679894d6e533d87efcb3d79e81b43f696793`，并非已推送的 V2 发布提交 `cd47fbb`；`huabang-backend.service` 处于 `active`，健康检查显示数据库与 Redis 已连接。
 - 仓库根 `.finance-v2-release.lock` 为空，时间戳为 2026-07-29 12:12:19 UTC，且无运行中的发布/演练脚本进程。发布脚本使用 `flock` 的文件描述符锁，因此该无持锁进程的遗留文件不阻断下一次受控发布；不清理该文件。
+
+## 2026-07-30 生产只读发布失败根因与状态
+
+- 项目管理员执行了受控发布。发布前 custom 备份成功；角色引导、`1fdf4577d7d8 → 016cfd3c1454 → c82e5a1f9d70 → e951b2d0a6c4` 三项迁移、角色核验和权限种子均成功。
+- 失败发生在历史导入前校验：发布输入的 `canonical_import/manifest.json` 将 `AIS20251127140257` 标为 official account set，但其 `databases` 元数据没有该 database；`load_kingdee_history_records()` 按设计拒绝“official 未提供数据库快照元数据”的输入，未执行历史暂存/发布写入。
+- 发布脚本失败 trap 仅恢复代码/配置/前端到 `a52a679`，刻意保留财务 schema；独立只读 `alembic current` 已报 `Can't locate revision identified by 'e951b2d0a6c4'`，证明旧代码没有这三个 revision 而生产数据库已在 V2 head。这是必须先修复的代码—schema 不一致，不能以重试或手工删除元数据解决。
+- 首次远程 manifest probe 受本地 JavaScript base64 helper 不可用而未执行；第二次 Python 单行 probe 的引号转义失败，但其后续只读命令执行并确认目标 snapshot 路径下没有 `databases/` 目录，且确认数据库 migration mismatch。后续只用与 PowerShell 兼容的简单远程命令或上传临时只读脚本，避免重复该转义形式。

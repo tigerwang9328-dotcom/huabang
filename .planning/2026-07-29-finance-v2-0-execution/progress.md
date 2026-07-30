@@ -99,3 +99,11 @@
 - 只读 SSH 复核显示生产仍运行 `a52a679894d6e533d87efcb3d79e81b43f696793`，服务 active，健康检查中数据库与 Redis 均 connected。当前不能把恢复副本演练或 dry preflight 表述为生产只读发布。
 - 根目录 `.finance-v2-release.lock` 是 2026-07-29 的空遗留文件，未发现持锁发布进程。发布脚本使用 `flock`，因此文件存在不等于互斥锁被占用；未清理或修改该文件。
 - 使用当前功能分支头 `a8ede7058504cf3614ec9a71d572bc93a30d1550`、同一金蝶清单哈希及 339/4,596 预期值重新运行发布脚本无写 preflight；输入被成功回显。`--execute` 仍未运行。
+
+## 2026-07-30 生产只读发布失败调查
+
+- 用户已执行 `--execute`。备份、权限引导、三项 V2 迁移、角色核验和权限种子成功；历史导入被 `AIS20251127140257: missing database snapshot metadata` 安全阻断，未完成发布。
+- 发布 trap 将运行时代码恢复至 `a52a679`，但生产 database 保持于 `e951b2d0a6c4`；独立 `alembic current` 因旧代码缺少该 revision 而失败。这是当前最高优先级：先查明有效快照与发布脚本 preflight 缺口，再以兼容代码修复生产运行态；禁止手动降库、删除 schema 或开启 V2 Gate。
+- 根因调查已确认服务器上只存在一个 manifest，且其 `databases=[]`、不存在 `canonical_import/databases/`，因此不是完整可导入的原生快照。第一次远程 session probe 因 PowerShell 展开 `$FINANCE_*` 而未执行；后续改用 PowerShell 单引号封装整个远程命令。
+- 已按测试先行补充发布脚本回归：历史快照 dry-run 必须发生在 `--execute` 分支、`sudo_init`、备份和迁移之前。该测试先失败（缺少该行为），最小实现后 `tests/test_finance_v2_release_assets.py` 为 6 passed。独立 `bash -n` 的首次 Windows 路径调用错误，脚本的同类语法检查已由该测试的 `bash -n` 输入通过；后续使用 WSL 路径或 Python 测试验证，避免此路径形式。
+- 已在本地发现完整原生快照根 `D:\huabang\invest_kingdee\results\K3MIG_20260717_172928\manifest.json`，总计 12,826 个文件、403,191,671 字节。该根 manifest 的 loader dry-run 产生 339 凭证、4,596 分录、0 冲突；其 SHA-256 为 `BBE9676545C413A5AE077796D766C04E572A75D1F918B1053FA9548F1D8DB1FD`。Windows `scp -r` 只上传了部分无关文件，未将其表述为完整同步；随后仅显式补齐导入所需 9 个哈希校验表文件与根 manifest 到新的服务器 candidate 目录。该候选在服务器 dry-run 同样为 339/4,596、0 冲突，未覆盖旧 canonical 输入或写入财务表。

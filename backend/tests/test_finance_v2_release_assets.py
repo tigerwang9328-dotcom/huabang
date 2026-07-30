@@ -55,6 +55,14 @@ def test_linux_release_entrypoint_is_syntax_valid_and_explicitly_read_only():
     assert "--no-verify" not in source
 
 
+def test_release_validates_the_history_snapshot_before_any_privileged_release_action():
+    source = (DEPLOY / "release_finance_center_v2.sh").read_text(encoding="utf-8")
+
+    assert 'validate_history_snapshot\n\nif [[ "$execute" != true ]]' in source
+    assert source.index('validate_history_snapshot\n\nif [[ "$execute" != true ]]') < source.index("sudo_init")
+    assert "import_finance_v2_history.py" in source
+
+
 def test_recovery_migration_rehearsal_is_explicitly_scoped_to_a_non_production_database():
     script = DEPLOY / "rehearse_finance_v2_migrations.sh"
     assert script.exists()

@@ -86,6 +86,25 @@ is_positive_integer "$expected_history_entries" || die "--expected-history-entri
 actual_manifest_sha256="$(sha256sum "$history_manifest" | awk '{print $1}')"
 [[ "${actual_manifest_sha256,,}" == "${history_manifest_sha256,,}" ]] || die "history manifest digest does not match the approved input"
 
+history_snapshot_args=()
+for account_set in "${OFFICIAL_ACCOUNT_SETS[@]}"; do
+  history_snapshot_args+=(--account-set "$account_set")
+done
+
+validate_history_snapshot() {
+  local snapshot_summary=""
+  if ! snapshot_summary="$(
+    "$VENV_PYTHON" "$BACKEND_DIR/scripts/import_finance_v2_history.py" \
+      "$history_manifest" "${history_snapshot_args[@]}"
+  )"; then
+    printf '%s\n' "$snapshot_summary" >&2
+    die "history snapshot dry-run preflight failed; no backup, migration, restart, or history write was attempted"
+  fi
+  printf 'Finance V2 verified history snapshot preflight: %s\n' "$snapshot_summary"
+}
+
+validate_history_snapshot
+
 if [[ "$execute" != true ]]; then
   echo "Finance V2 release is a dry preflight. Re-run with --execute after recording this immutable input set:"
   printf 'release_ref=%s\nexpected_commit=%s\nhistory_manifest=%s\nexpected_history_vouchers=%s\nexpected_history_entries=%s\n' \
@@ -307,10 +326,7 @@ run_backend_with_env migrate -m alembic -c alembic.ini upgrade head
 run_backend_with_env shared scripts/verify_finance_database_roles.py
 run_backend_with_env shared scripts/seed_finance_v2_permissions.py
 
-history_import_args=(scripts/import_finance_v2_history.py "$history_manifest" --execute --publish)
-for account_set in "${OFFICIAL_ACCOUNT_SETS[@]}"; do
-  history_import_args+=(--account-set "$account_set")
-done
+history_import_args=(scripts/import_finance_v2_history.py "$history_manifest" --execute --publish "${history_snapshot_args[@]}")
 run_backend_with_env history_import "${history_import_args[@]}"
 
 clear_temporary_role_passwords
