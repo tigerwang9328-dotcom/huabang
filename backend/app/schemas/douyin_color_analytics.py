@@ -7,6 +7,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+_MACHINE_IDENTIFIER = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+_MACHINE_LABEL = r"^[a-z][a-z0-9_]{0,63}$"
+
+
 class FocusStatus(str, Enum):
     clear_primary = "clear_primary"
     multi_focus = "multi_focus"
@@ -100,7 +104,7 @@ class BatchPartEnvelope(BaseModel):
     source_date_start: date | None = None
     source_date_end: date | None = None
     created_at: datetime
-    installation_id: str = Field(min_length=1, max_length=64)
+    installation_id: str = Field(min_length=1, max_length=64, pattern=_MACHINE_IDENTIFIER)
     observed_creator_id: str = Field(min_length=1, max_length=128)
     observed_account_name: str | None = Field(default=None, max_length=128)
     part_number: int = Field(ge=1)
@@ -112,14 +116,14 @@ class BatchPartEnvelope(BaseModel):
 class CollectorHeartbeatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    installation_id: str = Field(min_length=1, max_length=64)
+    installation_id: str = Field(min_length=1, max_length=64, pattern=_MACHINE_IDENTIFIER)
     script_version: str = Field(min_length=1, max_length=64)
     schema_version: int = Field(ge=1)
     observed_creator_id: str | None = Field(default=None, max_length=128)
     observed_account_name: str | None = Field(default=None, max_length=128)
     current_page_path: str | None = Field(default=None, max_length=512)
-    current_page_type: str | None = Field(default=None, max_length=64)
-    document_visibility: str | None = Field(default=None, max_length=16)
+    current_page_type: str | None = Field(default=None, max_length=64, pattern=_MACHINE_LABEL)
+    document_visibility: str | None = Field(default=None, pattern="^(visible|hidden|prerender)$")
     queued_batch_count: int = Field(ge=0)
     queued_bytes: int = Field(ge=0)
     drift_ms: int | None = None
@@ -128,11 +132,11 @@ class CollectorHeartbeatRequest(BaseModel):
 class CollectorEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    installation_id: str = Field(min_length=1, max_length=64)
-    event_type: str = Field(min_length=1, max_length=64)
+    installation_id: str = Field(min_length=1, max_length=64, pattern=_MACHINE_IDENTIFIER)
+    event_type: str = Field(min_length=1, max_length=64, pattern=_MACHINE_LABEL)
     occurred_at: datetime
-    error_category: str | None = Field(default=None, max_length=64)
-    endpoint_name: str | None = Field(default=None, max_length=64)
+    error_category: str | None = Field(default=None, max_length=64, pattern=_MACHINE_LABEL)
+    endpoint_name: str | None = Field(default=None, max_length=64, pattern=_MACHINE_LABEL)
     http_status: int | None = Field(default=None, ge=100, le=599)
     business_status_code: int | None = None
     retry_count: int | None = Field(default=None, ge=0, le=5)
