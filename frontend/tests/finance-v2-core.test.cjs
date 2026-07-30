@@ -169,6 +169,14 @@ test("V2 workspace renders the structured monitoring policy without treating una
   assert.ok(workspace.includes("loadMonitoring"));
 });
 
+test("V2 API client unwraps the platform ApiResponse before workspace consumers read data", () => {
+  const api = read("src/api/financeV2.ts");
+
+  assert.ok(api.includes("function unwrapFinanceV2"));
+  assert.ok(api.includes("result.data.data"));
+  assert.ok(api.includes("unwrapFinanceV2(request.get"));
+});
+
 test("V2 workspace exposes versioned formal-report readiness without presenting an export action", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

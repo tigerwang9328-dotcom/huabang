@@ -1,4 +1,8 @@
-import request from "./request";
+import request, { type ApiResponse } from "./request";
+
+function unwrapFinanceV2<T>(response: Promise<{ data: ApiResponse<T> }>) {
+  return response.then((result) => ({ data: result.data.data }));
+}
 
 export interface FinanceV2Book {
   id: number;
@@ -263,56 +267,56 @@ export interface FinanceV2DraftInput {
 }
 
 export const financeV2Api = {
-  listBooks: () => request.get<FinanceV2Book[]>("/finance-center/v2/books"),
-  listPeriods: (bookId: number) => request.get<FinanceV2Period[]>(`/finance-center/v2/books/${bookId}/periods`),
-  getWriteReadiness: (bookId: number) => request.get<FinanceV2WriteReadiness>(`/finance-center/v2/books/${bookId}/write-readiness`),
-  listOpeningBalances: (bookId: number) => request.get<FinanceV2OpeningBalanceBatch[]>(`/finance-center/v2/books/${bookId}/opening-balances`),
+  listBooks: () => unwrapFinanceV2(request.get<ApiResponse<FinanceV2Book[]>>("/finance-center/v2/books")),
+  listPeriods: (bookId: number) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2Period[]>>(`/finance-center/v2/books/${bookId}/periods`)),
+  getWriteReadiness: (bookId: number) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2WriteReadiness>>(`/finance-center/v2/books/${bookId}/write-readiness`)),
+  listOpeningBalances: (bookId: number) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2OpeningBalanceBatch[]>>(`/finance-center/v2/books/${bookId}/opening-balances`)),
   createOpeningBalance: (bookId: number, payload: FinanceV2OpeningBalanceCreateInput) =>
-    request.post(`/finance-center/v2/books/${bookId}/opening-balances`, payload),
+    unwrapFinanceV2(request.post<ApiResponse<unknown>>(`/finance-center/v2/books/${bookId}/opening-balances`, payload)),
   validateOpeningBalance: (bookId: number, batchId: number, payload: { command_id: string; expected_version: number; reason?: string }) =>
-    request.post(`/finance-center/v2/books/${bookId}/opening-balances/${batchId}/validate`, payload),
+    unwrapFinanceV2(request.post<ApiResponse<unknown>>(`/finance-center/v2/books/${bookId}/opening-balances/${batchId}/validate`, payload)),
   lockOpeningBalance: (bookId: number, batchId: number, payload: { command_id: string; expected_version: number; reason?: string }) =>
-    request.post(`/finance-center/v2/books/${bookId}/opening-balances/${batchId}/lock`, payload),
-  getPeriodCloseReadiness: (bookId: number, periodId: number) => request.get<FinanceV2PeriodCloseReadiness>(
+    unwrapFinanceV2(request.post<ApiResponse<unknown>>(`/finance-center/v2/books/${bookId}/opening-balances/${batchId}/lock`, payload)),
+  getPeriodCloseReadiness: (bookId: number, periodId: number) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2PeriodCloseReadiness>>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/close-readiness`,
-  ),
-  getTrialBalance: (bookId: number, periodId: number) => request.get<FinanceV2TrialBalance>(
+  )),
+  getTrialBalance: (bookId: number, periodId: number) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2TrialBalance>>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/trial-balance`,
-  ),
-  getReportReadiness: (bookId: number, periodId: number, reportCode: FinanceV2ReportReadiness["report_code"]) => request.get<FinanceV2ReportReadiness>(
+  )),
+  getReportReadiness: (bookId: number, periodId: number, reportCode: FinanceV2ReportReadiness["report_code"]) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2ReportReadiness>>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/reports/${reportCode}/readiness`,
-  ),
-  getMonitoringSummary: () => request.get<FinanceV2MonitoringSummary>("/finance-center/v2/monitoring/summary"),
-  listAccounts: (bookId: number, activeOn?: string) => request.get<FinanceV2Account[]>(
+  )),
+  getMonitoringSummary: () => unwrapFinanceV2(request.get<ApiResponse<FinanceV2MonitoringSummary>>("/finance-center/v2/monitoring/summary")),
+  listAccounts: (bookId: number, activeOn?: string) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2Account[]>>(
     `/finance-center/v2/books/${bookId}/accounts`,
     { params: activeOn ? { active_on: activeOn } : undefined },
-  ),
-  listVouchers: (bookId: number, params?: { period_id?: number; status?: string; limit?: number }) => request.get<FinanceV2Voucher[]>(
+  )),
+  listVouchers: (bookId: number, params?: { period_id?: number; status?: string; limit?: number }) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2Voucher[]>>(
     "/finance-center/v2/vouchers",
     { params: { book_id: bookId, ...params } },
-  ),
-  getVoucherDetail: (voucherId: number) => request.get<FinanceV2VoucherDetail>(`/finance-center/v2/vouchers/${voucherId}`),
-  listHistoryVouchers: (params?: { limit?: number; offset?: number }) => request.get<FinanceV2HistoryVoucher[]>(
+  )),
+  getVoucherDetail: (voucherId: number) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2VoucherDetail>>(`/finance-center/v2/vouchers/${voucherId}`)),
+  listHistoryVouchers: (params?: { limit?: number; offset?: number }) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2HistoryVoucher[]>>(
     "/finance-center/v2/history/vouchers",
     { params },
-  ),
-  listHistoryVoucherLines: (voucherId: number, params?: { limit?: number }) => request.get<FinanceV2HistoryVoucherLine[]>(
+  )),
+  listHistoryVoucherLines: (voucherId: number, params?: { limit?: number }) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2HistoryVoucherLine[]>>(
     `/finance-center/v2/history/vouchers/${voucherId}/lines`,
     { params },
-  ),
-  listSourceInbox: (params?: { status?: FinanceV2SourceInboxItem["status"]; limit?: number }) => request.get<FinanceV2SourceInboxItem[]>(
+  )),
+  listSourceInbox: (params?: { status?: FinanceV2SourceInboxItem["status"]; limit?: number }) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2SourceInboxItem[]>>(
     "/finance-center/v2/source-inbox",
     { params },
-  ),
-  listSourcePreviews: (sourceInboxId: number, params?: { limit?: number }) => request.get<FinanceV2SourcePreview[]>(
+  )),
+  listSourcePreviews: (sourceInboxId: number, params?: { limit?: number }) => unwrapFinanceV2(request.get<ApiResponse<FinanceV2SourcePreview[]>>(
     `/finance-center/v2/source-inbox/${sourceInboxId}/previews`,
     { params },
-  ),
-  createDraft: (payload: FinanceV2DraftInput) => request.post("/finance-center/v2/vouchers", payload),
+  )),
+  createDraft: (payload: FinanceV2DraftInput) => unwrapFinanceV2(request.post<ApiResponse<unknown>>("/finance-center/v2/vouchers", payload)),
   updateDraft: (voucherId: number, payload: { voucher_date: string; entries: FinanceV2VoucherLineInput[]; command_id: string; expected_version: number }) =>
-    request.put(`/finance-center/v2/vouchers/${voucherId}`, payload),
+    unwrapFinanceV2(request.put<ApiResponse<unknown>>(`/finance-center/v2/vouchers/${voucherId}`, payload)),
   executePeriodCommand: (bookId: number, periodId: number, payload: FinanceV2PeriodCommandInput) =>
-    request.post(`/finance-center/v2/books/${bookId}/periods/${periodId}/commands`, payload),
+    unwrapFinanceV2(request.post<ApiResponse<unknown>>(`/finance-center/v2/books/${bookId}/periods/${periodId}/commands`, payload)),
   executeCommand: (voucherId: number, payload: { action: string; command_id: string; expected_version: number; reason?: string }) =>
-    request.post(`/finance-center/v2/vouchers/${voucherId}/commands`, payload),
+    unwrapFinanceV2(request.post<ApiResponse<unknown>>(`/finance-center/v2/vouchers/${voucherId}/commands`, payload)),
 };
