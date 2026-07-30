@@ -6,7 +6,8 @@
 set -euo pipefail
 umask 077
 
-readonly PROJECT_ROOT="/srv/huabang-ai-center"
+readonly SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly BACKEND_DIR="$PROJECT_ROOT/backend"
 readonly ENV_FILE="$BACKEND_DIR/.env"
 readonly VENV_PYTHON="$BACKEND_DIR/.venv/bin/python"

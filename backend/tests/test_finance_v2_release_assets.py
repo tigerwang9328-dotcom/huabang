@@ -63,6 +63,7 @@ def test_recovery_migration_rehearsal_is_explicitly_scoped_to_a_non_production_d
     source = script.read_text(encoding="utf-8")
     for required in (
         "set -euo pipefail",
+        "BASH_SOURCE[0]",
         "--database-name",
         "--execute",
         "flock",
@@ -77,6 +78,7 @@ def test_recovery_migration_rehearsal_is_explicitly_scoped_to_a_non_production_d
         assert required in source
     assert "systemctl" not in source
     assert "sudo -S" not in source
+    assert 'readonly PROJECT_ROOT="/srv/huabang-ai-center"' not in source
 
 
 def test_release_verifier_checks_fin_app_history_visibility_and_closed_write_gates():
