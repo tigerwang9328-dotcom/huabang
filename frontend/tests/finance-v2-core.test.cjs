@@ -79,6 +79,14 @@ test("finance center voucher entry uses the Gate-protected V2 workspace instead 
   assert.ok(!module.includes("import FormalLedger"));
 });
 
+test("finance center ledger and report entries never link back to legacy finance routes", () => {
+  const module = read("src/views/finance/FinanceCenterModule.vue");
+
+  assert.ok(!module.includes('to="/app/fin/'));
+  assert.ok(module.includes("module.key === 'ledger' || module.key === 'reports'"));
+  assert.ok(module.includes("<V2CoreWorkspace />"));
+});
+
 test("V2 workspace shows only persisted source dry-run receipts and never an auto-draft action", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

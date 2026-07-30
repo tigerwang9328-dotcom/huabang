@@ -28,15 +28,7 @@
     </section>
 
     <section v-else-if="module.key === 'ledger' || module.key === 'reports'" class="module-panel">
-      <div class="linked-actions">
-        <router-link v-if="module.key === 'ledger'" to="/app/fin/history/account-balances">科目余额</router-link>
-        <router-link v-if="module.key === 'ledger'" to="/app/fin/formal-ledger">正式账簿</router-link>
-        <router-link v-if="module.key === 'reports'" to="/app/fin/history/statements">历史报表</router-link>
-        <router-link v-if="module.key === 'reports'" to="/app/fin/formal-ledger">生成报表</router-link>
-      </div>
-      <div class="object-grid">
-        <div v-for="item in module.primaryObjects" :key="item" class="object-tile">{{ item }}</div>
-      </div>
+      <V2CoreWorkspace />
     </section>
 
     <section v-else class="module-panel">
@@ -75,8 +67,6 @@ const statusMeta = computed(() => statusMap[module.value.status]);
 .module-summary span { display: block; color: #64748b; font-size: 12px; margin-bottom: 6px; }
 .module-summary strong { display: block; font-size: 14px; line-height: 1.55; font-weight: 600; }
 .module-panel { padding: 16px; }
-.linked-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
-.linked-actions a { color: #2563eb; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 6px; padding: 7px 10px; text-decoration: none; font-size: 13px; }
 .object-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .object-tile { min-height: 54px; display: flex; align-items: center; padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: #f8fafc; color: #334155; font-weight: 600; }
 @media (max-width: 860px) {
