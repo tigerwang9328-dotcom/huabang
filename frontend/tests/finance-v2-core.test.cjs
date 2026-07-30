@@ -133,6 +133,17 @@ test("V2 workspace renders the structured monitoring policy without treating una
   assert.ok(workspace.includes("loadMonitoring"));
 });
 
+test("V2 workspace exposes versioned formal-report readiness without presenting an export action", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getReportReadiness"));
+  assert.ok(workspace.includes("正式报表就绪检查"));
+  assert.ok(workspace.includes("reportReadiness"));
+  assert.ok(workspace.includes("loadReportReadiness"));
+  assert.ok(!workspace.includes("导出正式报表"));
+});
+
 test("V2 workspace requires an explicit manual profit-closing voucher before starting a close with activity", () => {
   const api = read("src/api/financeV2.ts");
   const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");

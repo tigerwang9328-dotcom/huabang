@@ -23,7 +23,9 @@ from app.models.finance_v2 import (
 from app.models.finance_v2_operations import FinanceV2FeatureGate
 from app.models.finance_v2_operations import FinanceV2PostingAttempt
 from app.models.finance_v2_opening import FinanceV2OpeningBalanceBatch
+from app.models.finance_v2_opening import FinanceV2CoverageGap
 from app.models.finance_v2_period_close import FinanceV2PeriodCloseBatch
+from app.models.finance_v2_reports import FinanceV2ReportMapping, FinanceV2ReportTemplate
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.finance_v2.domain import FinanceV2DomainError
@@ -36,6 +38,11 @@ from app.services.finance_v2.voucher_workflow import FinanceV2VoucherWorkflow
 from app.services.finance_v2.platform_permissions import (
     FINANCE_V2_READ_PERMISSION,
     FINANCE_V2_WRITE_PERMISSION,
+)
+from app.services.finance_v2.report_readiness import (
+    ReportMapping,
+    ReportTemplate,
+    build_report_readiness,
 )
 
 
@@ -479,6 +486,111 @@ async def get_trial_balance(
                 }
                 for balance, account in rows
             ],
+        }
+    )
+
+
+@router.get("/books/{book_id}/periods/{period_id}/reports/{report_code}/readiness", response_model=ApiResponse)
+async def get_report_readiness(
+    book_id: int,
+    period_id: int,
+    report_code: str,
+    current_user: SysUser = Depends(require_finance_v2_read),
+    db: AsyncSession = Depends(get_finance_db),
+):
+    """Return a versioned, read-only readiness result; never emits a formal report."""
+
+    if report_code not in {"balance_sheet", "profit_statement"}:
+        raise HTTPException(status_code=404, detail="unsupported Finance V2 report code")
+    book = await db.get(FinanceV2AccountingBook, book_id)
+    period = await db.get(FinanceV2FiscalPeriod, period_id)
+    if not book or not period or period.book_id != book_id:
+        raise HTTPException(status_code=404, detail="V2 accounting book or fiscal period not found")
+
+    templates = (
+        await db.execute(
+            select(FinanceV2ReportTemplate)
+            .where(
+                FinanceV2ReportTemplate.book_id == book_id,
+                FinanceV2ReportTemplate.report_code == report_code,
+                FinanceV2ReportTemplate.status == "published",
+                FinanceV2ReportTemplate.effective_from <= period.end_date,
+                or_(
+                    FinanceV2ReportTemplate.effective_to.is_(None),
+                    FinanceV2ReportTemplate.effective_to >= period.start_date,
+                ),
+            )
+            .order_by(FinanceV2ReportTemplate.approved_at.desc(), FinanceV2ReportTemplate.id.desc())
+        )
+    ).scalars().all()
+    if len(templates) != 1:
+        return ApiResponse.ok(
+            data={
+                "report_code": report_code,
+                "status": "pending_mapping",
+                "reason_code": "ambiguous_published_template" if templates else "missing_published_template",
+                "formal_export_allowed": False,
+                "template_version": None,
+                "rows": {},
+                "unmapped_account_version_ids": [],
+            }
+        )
+    template = templates[0]
+    mappings = (
+        await db.execute(
+            select(FinanceV2ReportMapping).where(FinanceV2ReportMapping.template_id == template.id)
+        )
+    ).scalars().all()
+    balances = (
+        await db.execute(
+            select(FinanceV2LedgerBalance).where(
+                FinanceV2LedgerBalance.book_id == book_id,
+                FinanceV2LedgerBalance.period_id == period_id,
+            )
+        )
+    ).scalars().all()
+    has_approved_coverage_gap = bool(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(FinanceV2CoverageGap)
+                .where(
+                    FinanceV2CoverageGap.book_id == book_id,
+                    FinanceV2CoverageGap.status == "approved",
+                )
+            )
+        ).scalar_one()
+    )
+    line_codes = tuple((template.line_definition or {}).get("line_codes") or ())
+    result = build_report_readiness(
+        report_code=report_code,
+        template=ReportTemplate(
+            report_code=template.report_code,
+            version_code=template.version_code,
+            status=template.status,
+            line_codes=line_codes,
+        ),
+        mappings=[
+            ReportMapping(
+                line_code=row.line_code,
+                account_version_id=row.account_version_id,
+                multiplier=Decimal(row.multiplier),
+            )
+            for row in mappings
+        ],
+        balances=balances,
+        formal_report_blocked=bool(book.formal_report_blocked),
+        has_approved_coverage_gap=has_approved_coverage_gap,
+    )
+    return ApiResponse.ok(
+        data={
+            "report_code": report_code,
+            "status": result.status,
+            "reason_code": result.reason_code,
+            "formal_export_allowed": result.formal_export_allowed,
+            "template_version": result.template_version,
+            "rows": result.rows,
+            "unmapped_account_version_ids": result.unmapped_account_version_ids,
         }
     )
 

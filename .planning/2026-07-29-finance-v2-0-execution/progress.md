@@ -58,3 +58,9 @@
 - 最终本地验证：后端 V2 定向套件 `133 passed`、单一 head `016cfd3c1454`、compileall 通过；前端静态回归 `11 passed`、类型检查与 Vite 构建通过（保留既有依赖警告）。
 - 已提交并推送 `e66be05 feat: complete finance V2 opening balance workflow` 到 `origin/feature/huabang-full-finance-center`；生产运行提交仍为 `bcdc1e9`，未迁移、未重启、未开启 Gate。
 - 找到可复用恢复副本 `huabang_ai_finance_drill_20260729_r2`，其历史账与当前账状态适合验证 `016cfd3c1454`。但当前可用配置仅含受限 `fin_app` 登录，`fin_migrator`/schema owner 无可用受控连接；迁移测试暂不能执行，不触碰恢复库或生产库。
+
+## 2026-07-30 Phase 5 报表元数据与只读就绪检查
+
+- 以失败测试驱动实现资产负债表/利润表的模板、映射、覆盖范围和会计等式检查。V2 工作台可读取两类报告的结构化就绪结果，但没有正式报表导出或应用侧模板写入入口。
+- 新 migration `c82e5a1f9d70` 将模板、映射与快照放入 `fin_current`，并限制 `fin_app` 为只读；已发布/退役模板、非草稿映射和快照均在数据库层拒绝变更。
+- 本地完整财务 V2/角色/历史导入定向回归 138 项、前端静态回归 12 项和类型检查/生产构建通过；仍未进行恢复副本迁移测试、生产部署或浏览器验收。

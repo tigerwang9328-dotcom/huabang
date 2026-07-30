@@ -185,6 +185,16 @@ export interface FinanceV2TrialBalance {
   rows: Array<{ account_version_id: number; account_code: string; account_name: string; dimension_set_id: number; currency_code: string; opening_debit: number; opening_credit: number; period_debit: number; period_credit: number; closing_debit: number; closing_credit: number }>;
 }
 
+export interface FinanceV2ReportReadiness {
+  report_code: "balance_sheet" | "profit_statement";
+  status: "ready" | "blocked" | "pending_mapping" | "pending_data" | "pending_gap";
+  reason_code: string | null;
+  formal_export_allowed: boolean;
+  template_version: string | null;
+  rows: Record<string, number>;
+  unmapped_account_version_ids: number[];
+}
+
 export interface FinanceV2MonitoringMetric {
   metric_key: string;
   availability: "available" | "unavailable";
@@ -240,6 +250,9 @@ export const financeV2Api = {
   ),
   getTrialBalance: (bookId: number, periodId: number) => request.get<FinanceV2TrialBalance>(
     `/finance-center/v2/books/${bookId}/periods/${periodId}/trial-balance`,
+  ),
+  getReportReadiness: (bookId: number, periodId: number, reportCode: FinanceV2ReportReadiness["report_code"]) => request.get<FinanceV2ReportReadiness>(
+    `/finance-center/v2/books/${bookId}/periods/${periodId}/reports/${reportCode}/readiness`,
   ),
   getMonitoringSummary: () => request.get<FinanceV2MonitoringSummary>("/finance-center/v2/monitoring/summary"),
   listAccounts: (bookId: number, activeOn?: string) => request.get<FinanceV2Account[]>(

@@ -279,6 +279,19 @@
           <el-table-column prop="period_debit" label="本期借" min-width="100" /><el-table-column prop="period_credit" label="本期贷" min-width="100" />
           <el-table-column prop="closing_debit" label="期末借" min-width="100" /><el-table-column prop="closing_credit" label="期末贷" min-width="100" />
         </el-table>
+        <section class="report-readiness-section">
+          <div class="section-head">
+            <div><h2>正式报表就绪检查</h2><span>仅检查模板、映射、覆盖范围与会计等式；本阶段不提供正式报表导出。</span></div>
+            <el-button text type="primary" :loading="reportReadinessLoading" @click="loadReportReadiness">检查资产负债表与利润表</el-button>
+          </div>
+          <el-table :data="Object.values(reportReadiness)" max-height="220" empty-text="尚未执行报表就绪检查">
+            <el-table-column prop="report_code" label="报表" min-width="140"><template #default="{ row }">{{ row.report_code === "balance_sheet" ? "资产负债表" : "利润表" }}</template></el-table-column>
+            <el-table-column prop="status" label="状态" min-width="130" />
+            <el-table-column prop="reason_code" label="阻断原因" min-width="220"><template #default="{ row }">{{ row.reason_code || "—" }}</template></el-table-column>
+            <el-table-column prop="template_version" label="模板版本" min-width="130"><template #default="{ row }">{{ row.template_version || "—" }}</template></el-table-column>
+            <el-table-column label="正式输出" min-width="120"><template #default="{ row }"><el-tag :type="row.formal_export_allowed ? 'success' : 'warning'" effect="plain">{{ row.formal_export_allowed ? "可评审" : "已阻断" }}</el-tag></template></el-table-column>
+          </el-table>
+        </section>
         <div v-if="periodCloseEnabled && periodCloseReadiness.status === 'open' && periodCloseReadiness.checks.profit_closing_evidence_missing_count" class="close-actions">
           <el-select v-model="selectedProfitClosingVoucherId" placeholder="选择已过账的手工损益结转凭证" clearable style="width: 320px">
             <el-option v-for="voucher in closePostedVouchers" :key="voucher.id" :label="`${voucher.voucher_no || `凭证#${voucher.id}`} · 借${voucher.total_debit} / 贷${voucher.total_credit}`" :value="voucher.id" />
@@ -327,6 +340,7 @@ import {
   type FinanceV2OpeningBalanceLineInput,
   type FinanceV2PeriodCommandInput,
   type FinanceV2PeriodCloseReadiness,
+  type FinanceV2ReportReadiness,
   type FinanceV2TrialBalance,
   type FinanceV2Period,
   type FinanceV2Voucher,
@@ -348,6 +362,7 @@ const selectedClosePeriod = ref<FinanceV2Period>();
 const writeReadiness = ref<FinanceV2WriteReadiness>();
 const periodCloseReadiness = ref<FinanceV2PeriodCloseReadiness>();
 const trialBalance = ref<FinanceV2TrialBalance>();
+const reportReadiness = ref<Record<string, FinanceV2ReportReadiness>>({});
 const monitoringSummary = ref<FinanceV2MonitoringSummary>();
 const closePostedVouchers = ref<FinanceV2Voucher[]>([]);
 const openingBalances = ref<FinanceV2OpeningBalanceBatch[]>([]);
@@ -357,6 +372,7 @@ const historyLoading = ref(false);
 const historyLineLoading = ref(false);
 const periodCloseLoading = ref(false);
 const trialBalanceLoading = ref(false);
+const reportReadinessLoading = ref(false);
 const monitoringLoading = ref(false);
 const openingLoading = ref(false);
 const openingBalanceSaving = ref(false);
@@ -634,6 +650,7 @@ async function viewPeriodCloseReadiness(period: FinanceV2Period) {
   selectedClosePeriod.value = period;
   periodCloseReadiness.value = undefined;
   trialBalance.value = undefined;
+  reportReadiness.value = {};
   closePostedVouchers.value = [];
   selectedProfitClosingVoucherId.value = undefined;
   periodCloseDrawerOpen.value = true;
@@ -662,6 +679,25 @@ async function loadTrialBalance() {
     ElMessage.error(error instanceof Error ? error.message : "试算表读取失败");
   } finally {
     trialBalanceLoading.value = false;
+  }
+}
+
+async function loadReportReadiness() {
+  if (!selectedBookId.value || !selectedClosePeriod.value) return;
+  reportReadinessLoading.value = true;
+  try {
+    const [balanceSheet, profitStatement] = await Promise.all([
+      financeV2Api.getReportReadiness(selectedBookId.value, selectedClosePeriod.value.id, "balance_sheet"),
+      financeV2Api.getReportReadiness(selectedBookId.value, selectedClosePeriod.value.id, "profit_statement"),
+    ]);
+    reportReadiness.value = {
+      balance_sheet: balanceSheet.data,
+      profit_statement: profitStatement.data,
+    };
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "正式报表就绪检查读取失败");
+  } finally {
+    reportReadinessLoading.value = false;
   }
 }
 

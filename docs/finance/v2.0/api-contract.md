@@ -18,8 +18,21 @@
 | 已发布历史金蝶 | `GET /history/vouchers`、`GET /history/vouchers/{id}/lines` | 只读 `fin_read` 视图，必须显示历史标记 |
 | 写入 readiness | `GET /books/{id}/write-readiness` | 只返回 Gate 与期初边界结论，不能开启 Gate |
 | 期初核对 | `GET /books/{id}/opening-balances` | 只读批次状态 |
+| 正式报表就绪 | `GET /books/{id}/periods/{period}/reports/{balance_sheet\|profit_statement}/readiness` | 只返回版本化模板、映射、覆盖范围和会计等式的就绪状态；绝不导出或生成正式报表 |
 
 旧 `/api/v1/finance/*` 与 `/api/v1/finance-center/*` 在只读验收期仍是旧系统的正式制单、审核、过账路径；V2 不关闭、不替代且不双写这些路径。
+
+## 基础报表就绪状态
+
+`balance_sheet` 与 `profit_statement` 仅可使用一个与账簿、期间相符且状态为 `published` 的模板版本。模板中的非空且不重复 `line_definition.line_codes`、其科目映射和映射倍率均须完整；资产负债表至少含 `assets` 与 `liabilities_equity`，利润表至少含 `revenue` 与 `expense`。倍率是模板版本的一部分，避免程序猜测借贷方向。
+
+- 返回 `pending_mapping`：没有唯一已发布模板、模板行或当前余额科目没有完整映射；
+- 返回 `pending_gap`：存在经批准的历史覆盖断档；
+- 返回 `pending_data`：资产负债表的资产与负债加所有者权益不相等；
+- 返回 `blocked`：账簿 `formal_report_blocked=true`；
+- 仅以上条件全部通过才返回 `ready`。`ready` 只表示技术就绪，仍不等于财务确认或对外法定报表授权。
+
+报告模板、映射和快照没有应用写入 API；应用角色只读，受控数据库发布流程生成新版本。已发布模板及其映射、报告快照均由数据库触发器保护为不可变（已发布模板只能退役）。
 
 ## 期初余额命令
 

@@ -38,6 +38,7 @@ def test_v2_routes_are_separate_from_legacy_write_paths_during_read_only_gate():
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/close-readiness", "GET") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/commands", "POST") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/trial-balance", "GET") in routes
+    assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/reports/{report_code}/readiness", "GET") in routes
     assert ("/finance-center/v2/books/{book_id}/periods/{period_id}/ledger-lines", "GET") in routes
     assert ("/finance-center/v2/monitoring/summary", "GET") in routes
     assert ("/finance-center/v2/vouchers", "POST") in routes
@@ -61,6 +62,7 @@ def test_every_finance_v2_route_uses_the_huabang_platform_permission_dependency(
         ("/finance-center/v2/books/{book_id}/periods/{period_id}/close-readiness", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/periods/{period_id}/commands", "POST"): FINANCE_V2_WRITE_PERMISSION,
         ("/finance-center/v2/books/{book_id}/periods/{period_id}/trial-balance", "GET"): FINANCE_V2_READ_PERMISSION,
+        ("/finance-center/v2/books/{book_id}/periods/{period_id}/reports/{report_code}/readiness", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/periods/{period_id}/ledger-lines", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/monitoring/summary", "GET"): FINANCE_V2_READ_PERMISSION,
         ("/finance-center/v2/books/{book_id}/accounts", "GET"): FINANCE_V2_READ_PERMISSION,

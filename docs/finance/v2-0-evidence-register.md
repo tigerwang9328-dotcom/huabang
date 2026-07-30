@@ -124,3 +124,13 @@
 | 恢复副本可用性 | `/srv/huabang-ai-center/backups/pre_finance_center_db_20260720T082348Z.dump` 为 PostgreSQL 16 custom archive，位于与项目相同文件系统。通用应用账户创建独立恢复库被 PostgreSQL 拒绝，未创建任何库；因此本轮未对 `016cfd3c1454` 完成恢复副本 upgrade/downgrade/触发器验证 | 生产只读与受控失败尝试，2026-07-30 | 生产控制面 | 新迁移和任何部署维持 No-Go，直至由 PostgreSQL DBA 创建/提供独立恢复副本并完成验证 |
 
 **当前新增 No-Go：** `016cfd3c1454` 的期初控制迁移尚未在恢复副本通过。即使生产历史只读查询可用，也不得部署该迁移、开启 `cutover_enabled` 或创建/锁定生产期初批次。
+
+## 报表元数据与只读就绪检查（2026-07-30，本地）
+
+| 项目 | 已核实事实 | 环境与时间 | 证据层级 | Gate 影响 |
+| --- | --- | --- | --- | --- |
+| 版本化元数据 | 新 migration `c82e5a1f9d70` 定义 `fin_current.report_template`、`report_mapping`、`report_snapshot`。模板要求非空行定义和发布审批信息；映射倍率不得为零。应用角色 `fin_app` 被显式撤销三张表的 INSERT/UPDATE/DELETE。 | 本地代码审阅，2026-07-30 | 本地代码 | 尚未迁移或授予生产对象权限；不构成正式报表发布。 |
+| 不可变性与阻断 | 已发布模板只能退役，退役模板、非草稿模板映射与报告快照由数据库触发器拒绝变更。只读 API 对缺模板/映射、已批准覆盖断档、资产负债不平和账簿阻断返回结构化状态；没有导出或生成正式报表的 API。 | 本地 TDD 与代码审阅，2026-07-30 | 本地测试与代码 | 保持“先映射核对、后报告发布”的 No-Go。 |
+| 本地验证 | 财务 V2、角色与历史导入定向套件 `138 passed`；Alembic 单一 head 为 `c82e5a1f9d70`；后端 compileall、前端静态回归 `12 passed`、`vue-tsc --noEmit` 和 Vite build 均通过。保留既有 Pydantic、Vite CJS 和 Rollup 注释警告。 | 本地，2026-07-30 | 本地测试与构建 | 不替代恢复副本迁移/降级/触发器验证、生产部署或已登录浏览器验收。 |
+
+**新增 No-Go：** `c82e5a1f9d70` 依赖未验证的 `016cfd3c1454`，两者必须先以 `fin_migrator`/`fin_schema_owner` 在独立恢复副本完成升级、降级和权限验证，才可评审只读生产发布。
