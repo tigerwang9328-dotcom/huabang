@@ -37,3 +37,4 @@
 - 2026-07-30 恢复副本创建尝试以全新数据库名 `huabang_finance_v2_restore_20260730` 被 PostgreSQL 明确拒绝：`permission denied to create database`。事前 `has_database_privilege(..., 'CREATE')` 只证明当前数据库内权限，不能推导 `CREATEDB` 角色属性；无恢复库、无生产表、无正式数据被创建或修改。
 - 期初批次原先只有 `draft` 与 `locked` 服务操作，领域规则却要求 `validated` 才能锁定，导致任何草稿无法走到锁定。现已补齐显式验证命令及界面，并把最终锁定放在独立 `cutover_enabled` Gate 后；该 Gate 与 draft/review/post Gate 相互独立。
 - 有效实施计划列为应创建的 API 契约和期初核对文档目前均不存在。这是文档交付缺口，不可据此推断接口、切换依据或人工核对说明已归档。
+- 2026-07-30 再核实发现服务器仍保留 `huabang_ai_finance_drill_20260729_r2` 恢复副本：以 `fin_app` 可连接、含 `fin_current/fin_history/fin_read`、339 张已发布历史凭证和 0 当前账凭证。专用角色均存在，但生产环境文件只有 `FINANCE_DB_*`（运行 `fin_app`）凭据，未提供 `fin_migrator` 或 schema owner 的迁移连接；不能以 `fin_app` 执行 DDL。
