@@ -587,3 +587,40 @@ class OutfitColorMetric(DouyinColorModel):
     retention_calculation_status = Column(String(32), nullable=False, default="pending")
     bounce_calculation_status = Column(String(32), nullable=False, default="pending")
     calculated_at = Column(DateTime(timezone=True))
+
+
+
+class ReleaseStageConfiguration(DouyinColorModel):
+    """Per-account A/B/C/D release stage switch for v3.1 staged rollout.
+
+    Each account gets its own row so the four-phase rollout (A: collectors +
+    base storage, B: annotation + metrics, C: reports + ranking, D: full
+    release including ``bounce_report_enabled``) can proceed independently.
+    Stage transitions only move forward; the ``bounce_report_enabled`` flag is
+    gated by ``bounce_semantics_status`` via ``ck_release_stage_bounce_gating``.
+    """
+
+    __tablename__ = "release_stage_configurations"
+    __table_args__ = (
+        CheckConstraint(
+            "current_stage IN ('A','B','C','D')",
+            name="ck_release_stage_current",
+        ),
+        CheckConstraint(
+            "bounce_report_enabled = false OR bounce_semantics_status IN ('verified_lower_is_better','verified_higher_is_better')",
+            name="ck_release_stage_bounce_gating",
+        ),
+        {"schema": "douyin"},
+    )
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    account_id = Column(BigInteger, nullable=False)
+    current_stage = Column(String(1), nullable=False, default="A")
+    bounce_report_enabled = Column(Boolean, nullable=False, default=False)
+    bounce_semantics_status = Column(String(32), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

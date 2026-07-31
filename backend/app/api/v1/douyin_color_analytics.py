@@ -9,14 +9,15 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import require_permission
+from app.api.v1.deps import require_permission, require_any_permission
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.douyin_color_analytics import (
+    CalculationJob,
     CollectionBatch,
     CollectionBatchPart,
     CollectionItem,
@@ -71,6 +72,34 @@ router = APIRouter(prefix="/douyin-color-analytics", tags=["抖音颜色分析"]
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 _MAX_COMPRESSED_UPLOAD_BYTES = 1 * 1024 * 1024
 _MINIMUM_SCRIPT_VERSION = "3.1.0"
+
+
+# ---------------------------------------------------------------------------
+# Permission role registry — maps each Douyin role to its granted permission
+# codes.  ``douyin.admin`` is the superset; ``douyin.viewer`` is the minimal
+# read-only grant every role inherits.
+# ---------------------------------------------------------------------------
+
+DOUYIN_PERMISSION_CODES = frozenset({
+    "douyin.admin",
+    "douyin.auditor",
+    "douyin.operator",
+    "douyin.annotator",
+    "douyin.analyst",
+    "douyin.viewer",
+    "douyin.annotation.edit",
+    "douyin.annotation.approve",
+})
+
+DOUYIN_ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "douyin.admin": set(DOUYIN_PERMISSION_CODES),
+    "douyin.auditor": {"douyin.auditor", "douyin.viewer"},
+    "douyin.operator": {"douyin.operator", "douyin.viewer"},
+    "douyin.annotator": {"douyin.annotator", "douyin.annotation.edit", "douyin.viewer"},
+    "douyin.analyst": {"douyin.analyst", "douyin.viewer"},
+    "douyin.viewer": {"douyin.viewer"},
+}
+
 
 
 def collector_config_payload(*, account_key: str) -> dict[str, object]:
@@ -659,6 +688,88 @@ async def create_expected_schedule(
                     "timezone": schedule.timezone, "enabled": schedule.enabled}, request=request,
     )
     return ApiResponse.ok({"id": schedule.id, "account_id": schedule.account_id})
+
+
+
+@router.get("/health", response_model=ApiResponse)
+async def get_health(
+    request: Request,
+    current_user: SysUser = Depends(require_any_permission("douyin.admin", "douyin.operator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return collector status, queue capacity, and feature flags for operators."""
+    collectors = (await db.execute(select(CollectorInstance))).scalars().all()
+    collector_status = [
+        {
+            "account_id": c.account_id,
+            "current_status": c.current_status,
+            "queued_batch_count": c.queued_batch_count,
+            "queued_bytes": c.queued_bytes,
+        }
+        for c in collectors
+    ]
+    queued_count = (await db.execute(
+        select(func.count()).select_from(CalculationJob).where(CalculationJob.status == "queued")
+    )).scalar() or 0
+    return ApiResponse.ok({
+        "collector_status": collector_status,
+        "queue_capacity": {"queued_jobs": queued_count},
+        "feature_flags": {"color_analysis_enabled": True, "annotation_review_enabled": True},
+    })
+
+
+
+
+@router.post("/accounts/{account_id}/upload-tokens/rotate", response_model=ApiResponse)
+async def rotate_upload_tokens(
+    account_id: int,
+    request: Request,
+    current_user: SysUser = Depends(require_permission("douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke all active upload tokens for an account and issue a fresh one."""
+    account = (await db.execute(select(DouyinCreatorAccount).where(
+        DouyinCreatorAccount.id == account_id,
+    ))).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail="account_not_found")
+
+    active_tokens = (await db.execute(
+        select(DouyinUploadToken).where(
+            DouyinUploadToken.account_id == account_id,
+            DouyinUploadToken.status == "active",
+        )
+    )).scalars().all()
+
+    revoked_prefixes = []
+    now = datetime.now(timezone.utc)
+    for token in active_tokens:
+        token.status = "revoked"
+        token.revoked_by = current_user.id
+        token.revoked_at = now
+        revoked_prefixes.append(token.token_prefix)
+    await db.flush()
+
+    token_value = f"dyup_{secrets.token_urlsafe(32)}"
+    new_token = DouyinUploadToken(
+        account_id=account.id, token_hash=hash_upload_token(token_value), token_prefix=token_value[:12],
+        created_by=current_user.id, status="active", expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+    )
+    db.add(new_token)
+    await db.flush()
+    await write_operation_audit(
+        db, actor=current_user, module="douyin_color_analytics", action="rotate_upload_token",
+        target_type="douyin_upload_token", target_id=new_token.id,
+        before_data={"revoked_token_prefixes": revoked_prefixes},
+        after_data={"account_id": account.id, "new_token_prefix": new_token.token_prefix,
+                    "expires_at": new_token.expires_at.isoformat()},
+        request=request,
+    )
+    return ApiResponse.ok({
+        "upload_token": token_value,
+        "expires_at": new_token.expires_at,
+        "revoked_count": len(revoked_prefixes),
+    })
 
 from app.api.v1.douyin_color_annotation_routes import annotation_router
 router.include_router(annotation_router)
