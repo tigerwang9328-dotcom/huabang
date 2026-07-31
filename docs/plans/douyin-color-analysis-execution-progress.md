@@ -36,3 +36,53 @@
 - 使用应用角色对生产库运行 `alembic current`/`alembic check` 均报告 `Can't locate revision identified by 'e951b2d0a6c4'`。未执行迁移、stamp、downgrade 或任何生产写入。
 - 应用角色 `huabang` 的 `rolcreatedb=false`；现有隔离恢复库 `huabang_ai_task0_restore` 未包含 `douyin.collection_batches` 或 `douyin.collection_items`。因此不能安全地以生产库或恢复库代替 Task 2 的真实 PostgreSQL 集成/并发测试。
 - 下一步必须由具备建库权限的迁移角色提供一次性独立临时数据库（建议 `huabang_ai_douyin_task2_test`），从当前隔离工作树执行迁移后运行并发、过期提交、跨账号令牌和快照/采集项幂等测试；完成后立即删除该临时库并记录结果。
+
+## 2026-07-31 接手复核与 Phase A 阻塞记录
+
+### 重新核实结果（不盲信先前文档）
+- 生产 commit：2a4265740e3e9bc3ca260d50ce6a12a8783cc389（Task 0-4 已部署；标注 CRUD 在 backend/app/api/v1/douyin_color_annotation_routes.py，由 douyin_color_analytics.router.include_router(annotation_router) 挂载）。
+- 隔离工作树已 fast-forward 到 2a42657（原 47f334b 为其祖先）。
+- Alembic 单一 head：3a2d7e951b2c。
+- 后端由 systemd huabang-backend.service 管理（User=xiaohu, Restart=on-failure, EnvironmentFile=.env, WorkingDirectory=backend），监听 127.0.0.1:8000。
+- 匿名 GET /collector-config 返回 401（令牌保护，符合预期）。
+
+### 已完成的服务端准备
+- 运行 scripts/bootstrap_douyin_color_permissions.py（PYTHONPATH 修正后成功），sys_permission 已种子化全部 7 个 douyin.* 权限；角色按脚本映射分配（douyin.admin 仅 admin 用户 is_admin 绕过）。
+- backend/.env 已追加 DOUYIN_COLOR_COLLECTION_ENABLED=true（备份于 .env.bak.douyin-prephaseA）；尚未生效，需重启后端。
+- 确认 admin(id=1, is_admin=True) 是唯一可绕过 douyin.admin 的用户；xiaohu/DJF 虽有 super_admin 角色但 is_admin=False，不能绕过 require_permission。
+
+### Phase A 真实采集闭环——两个外部阻塞（需用户动作）
+1. 后端重启需 sudo：xiaohu 无 NOPASSWD sudo；Restart=on-failure 且 SIGTERM 不触发重启，故无法用 kill 干净重启。.env 改动已 staged 但未生效。
+   - 用户动作：sudo systemctl restart huabang-backend
+2. 浏览器自动化无法接入用户已登录 Chrome：browser_use 代理运行的是隔离空白浏览器（about:blank），非用户会话；服务器与本机均未见 Chrome remote-debugging 端口。同源抖音采集与华邦 admin 会话均无法由代理代为执行。
+   - 用户动作二选一：(a) 在自己的 Chrome 内手工完成：用 admin 登录华邦中台创建 active 账号 + 签发短期 token（token 仅留在浏览器），通过油猴菜单「配置本机采集令牌」粘贴 token 与创作者 ID，触发采集；或 (b) 将 Chrome 以 --remote-debugging-port=9222 启动以便代理接入（仍需解决抖音登录态）。
+   - 安全约束：token 不得经我输出/落盘；账号创建走 admin API 由用户浏览器执行最安全。
+
+### 下一步
+- Phase A 阻塞期间，自动继续不依赖浏览器的 Task 5/6/7 代码工作（TDD，隔离工作树 + 独立测试库）。
+- 用户完成上述两项动作后，回到 Phase A：验证生产 DB douyin schema 落库、记录脱敏证据、推进 A 阶段 shadow。
+
+## 2026-07-31 v4.0 排名规格变更
+
+### 变更内容
+用户确认 v3.1 的\ 禁止整套穿搭\约束与业务需求冲突，升级为 v4.0 排名规格：
+- 新增 3 个排名对象：整套穿搭、上衣（含外套）、裤子（含裙）
+- AI 不做衣物识别，全部运营人工输入文字标注
+- 整套穿搭 = 同视频 ≥2 件合格衣物组合（2件套/3件套均可，缺外套允许）
+- 衣物位枚举：outer / top / bottom / none
+- 上衣分榜 = outer+top；裤子分榜 = bottom；none/other 不排名
+
+### 落地文件
+- 新增：docs/plans/douyin-color-analysis-v4.0-ranking-amendment.md
+- v3.1 其余约束（采集、安全、审计、迁移、四阶段开关）继续有效
+
+### 对 Task 5 的影响
+Task 5 范围扩大：
+1. 数据模型变更：garment_styles 加 garment_position 字段；新增 outfit_combinations、outfit_color_metrics 表
+2. 指标计算分两路：单件指标（video_color_metrics，按 garment_position 分榜）+ 整套指标（outfit_color_metrics）
+3. 新增 Alembic 迁移，不动既有迁移
+
+### 下一步
+1. 先做 v4.0 数据模型变更（models + migration），TDD
+2. 再做 Task 5 曲线归一化 + 单件指标 + 整套指标
+3. 生产迁移前必须备份 huabang_ai
