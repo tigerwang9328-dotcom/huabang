@@ -4,12 +4,15 @@
       <div>
         <p class="panel-kicker">独立税务台账</p>
         <h2>税务</h2>
-        <p>仅展示独立税务记录与到期预警；申报、缴纳和凭证动作均未开放。</p>
+        <p>独立税务记录：草稿录入 → 财务审核 → 人工缴税；不自动生成凭证，不反审核。</p>
       </div>
-      <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
+      <div class="heading-actions">
+        <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
+        <el-button :disabled="!bookId" @click="openCreate">录入草稿</el-button>
+      </div>
     </div>
     <div class="filters">
-      <el-select v-model="bookId" placeholder="选择独立账簿" clearable>
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
     </div>
@@ -23,6 +26,7 @@
         </template>
       </el-alert>
       <el-alert v-else type="success" :closable="false" show-icon title="当前没有临期或逾期的独立税务记录" />
+
       <el-table :data="records" empty-text="暂无独立税务记录" stripe>
         <el-table-column prop="tax_name" label="税种" min-width="160" />
         <el-table-column prop="period" label="所属期间" width="120" />
@@ -32,16 +36,93 @@
         <el-table-column label="已缴" width="140" align="right">
           <template #default="scope">{{ money(scope.row.paid_amount) }}</template>
         </el-table-column>
+        <el-table-column label="未缴" width="140" align="right">
+          <template #default="scope">
+            <span :class="Number(scope.row.unpaid_amount) > 0 ? 'text-danger' : 'text-ok'">{{ money(scope.row.unpaid_amount) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="due_date" label="截止日" width="130" />
-        <el-table-column prop="status" label="状态" width="110" />
+        <el-table-column label="状态" width="120">
+          <template #default="scope">
+            <el-tag :type="statusTagType(scope.row)" size="small">{{ statusLabel(scope.row) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="170">
+          <template #default="scope">
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
+            <span v-if="scope.row.status === 'paid'" class="done-text">已缴税</span>
+          </template>
+        </el-table-column>
       </el-table>
     </template>
     <el-empty v-else description="请选择独立账簿后查询税务台账" />
+
+    <!-- 录入税务草稿对话框 -->
+    <el-dialog v-model="showCreate" title="录入税务草稿" width="480px" destroy-on-close :close-on-click-modal="false">
+      <el-form :model="form" label-width="90px">
+        <el-form-item label="税种 ID" required>
+          <el-input-number v-model="form.tax_type_id" :min="1" :controls="false" style="width:100%" placeholder="税种 ID" />
+          <p class="field-hint">税种列表接口待接入；请填写已配置的税种 ID（由系统管理员在账簿中维护）。</p>
+        </el-form-item>
+        <el-form-item label="所属期间" required>
+          <el-date-picker v-model="form.period" type="month" value-format="YYYY-MM" style="width:100%" placeholder="如 2026-07" />
+        </el-form-item>
+        <el-form-item label="应纳税额" required>
+          <el-input-number v-model="form.tax_amount" :min="0" :precision="2" :controls="false" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="申报截止">
+          <el-date-picker v-model="form.due_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCreate = false">取消</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">保存草稿</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 人工缴税对话框 -->
+    <el-dialog v-model="showPay" title="人工缴税确认" width="420px" destroy-on-close :close-on-click-modal="false">
+      <el-form :model="payForm" label-width="90px">
+        <el-form-item label="税种">
+          <el-input :value="payTarget?.tax_name" disabled />
+        </el-form-item>
+        <el-form-item label="应缴">
+          <el-input :value="money(payTarget?.tax_amount)" disabled />
+        </el-form-item>
+        <el-form-item label="未缴">
+          <el-input :value="money(payTarget?.unpaid_amount)" disabled />
+        </el-form-item>
+        <el-form-item label="缴纳金额" required>
+          <el-input-number v-model="payForm.amount" :min="0" :precision="2" :controls="false" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="缴税日期" required>
+          <el-date-picker v-model="payForm.payment_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="payForm.remark" type="textarea" :rows="2" maxlength="500" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPay = false">取消</el-button>
+        <el-button type="primary" :loading="paying" :disabled="!canPay" @click="confirmPay">确认缴税</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
+
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { mumarenFinanceCenterApi, type MumarenFinanceBook, type MumarenTaxAlert, type MumarenTaxRecord } from "@/api/mumarenFinanceCenter";
+import { computed, onMounted, reactive, ref } from "vue";
+import { ElMessage } from "element-plus";
+import {
+  mumarenFinanceCenterApi,
+  type MumarenFinanceBook,
+  type MumarenTaxAlert,
+  type MumarenTaxRecord,
+} from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
 const bookId = ref<number>();
@@ -50,7 +131,23 @@ const records = ref<MumarenTaxRecord[]>([]);
 const error = ref("");
 const loading = ref(false);
 const loaded = ref(false);
-const money = (value: number) => new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
+const actingId = ref<number>(); // 当前正在审核/缴税的记录 id
+
+const money = (value: number | undefined) =>
+  new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
+
+// 状态展示契约:缴税状态读取后端 status(pending/paid),
+// 不得把 workflow_status 误判为 paid(后端缴税后 workflow_status 仍为 reviewed)。
+const statusLabel = (row: MumarenTaxRecord) => {
+  if (row.workflow_status === "draft") return "草稿";
+  if (row.status === "paid") return "已缴税";
+  return "已审核";
+};
+const statusTagType = (row: MumarenTaxRecord): "" | "warning" | "success" => {
+  if (row.workflow_status === "draft") return "";
+  if (row.status === "paid") return "success";
+  return "warning";
+};
 
 const load = async () => {
   if (!bookId.value) {
@@ -75,6 +172,13 @@ const load = async () => {
   }
 };
 
+const onBookChange = () => {
+  // 切换账簿时清空已加载数据,必须由用户主动点击"查询税务"
+  loaded.value = false;
+  alerts.value = [];
+  records.value = [];
+};
+
 onMounted(async () => {
   // 仅加载账簿列表,不自动选择账簿,不自动请求税务接口。
   // 用户必须主动选择独立账簿后才能查询税务台账。
@@ -84,15 +188,122 @@ onMounted(async () => {
     error.value = "无法加载独立账簿。";
   }
 });
+
+// ── 审核(状态机:draft → reviewed,禁止反向) ──
+const review = async (row: MumarenTaxRecord) => {
+  actingId.value = row.id;
+  try {
+    await mumarenFinanceCenterApi.reviewTaxRecord(row.id);
+    ElMessage.success("税务单据已审核");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "审核失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+// ── 录入草稿对话框 ──
+const showCreate = ref(false);
+const saving = ref(false);
+const form = reactive({
+  tax_type_id: undefined as number | undefined,
+  period: new Date().toISOString().slice(0, 7),
+  tax_amount: 0,
+  due_date: "",
+  remark: "",
+});
+const canCreate = computed(() => !!bookId.value && !!form.tax_type_id && !!form.period && form.tax_amount >= 0);
+
+const openCreate = () => {
+  if (!bookId.value) {
+    ElMessage.warning("请先选择独立账簿");
+    return;
+  }
+  form.tax_type_id = undefined;
+  form.period = new Date().toISOString().slice(0, 7);
+  form.tax_amount = 0;
+  form.due_date = "";
+  form.remark = "";
+  showCreate.value = true;
+};
+
+const save = async () => {
+  if (!bookId.value || !canCreate.value) return;
+  saving.value = true;
+  try {
+    await mumarenFinanceCenterApi.createTaxRecord({
+      book_id: bookId.value,
+      tax_type_id: form.tax_type_id as number,
+      period: form.period,
+      tax_amount: form.tax_amount,
+      due_date: form.due_date || null,
+      remark: form.remark || null,
+    });
+    ElMessage.success("税务草稿已创建");
+    showCreate.value = false;
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "保存失败");
+  } finally {
+    saving.value = false;
+  }
+};
+
+// ── 人工缴税对话框 ──
+const showPay = ref(false);
+const paying = ref(false);
+const payTarget = ref<MumarenTaxRecord>();
+const payForm = reactive({
+  amount: 0,
+  payment_date: new Date().toISOString().slice(0, 10),
+  remark: "",
+});
+const canPay = computed(
+  () => !!payTarget.value && payForm.amount > 0 && !!payForm.payment_date && payForm.amount <= Number(payTarget.value.unpaid_amount || 0) + 0.001,
+);
+
+const openPay = (row: MumarenTaxRecord) => {
+  payTarget.value = row;
+  payForm.amount = Number(row.unpaid_amount || 0);
+  payForm.payment_date = new Date().toISOString().slice(0, 10);
+  payForm.remark = "";
+  showPay.value = true;
+};
+
+const confirmPay = async () => {
+  if (!payTarget.value || !canPay.value) return;
+  paying.value = true;
+  try {
+    await mumarenFinanceCenterApi.payTaxRecord(payTarget.value.id, {
+      payment_date: payForm.payment_date,
+      amount: payForm.amount,
+      remark: payForm.remark || null,
+    });
+    ElMessage.success("税务单据已缴税");
+    showPay.value = false;
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "缴税失败");
+  } finally {
+    paying.value = false;
+  }
+};
 </script>
+
 <style scoped>
 .panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }
 .heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.heading-actions { display: flex; gap: 8px; }
 .filters { display: flex; gap: 12px; }
 .filters > * { max-width: 280px; }
 .panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
 .alert-row { display: block; margin: 4px 0; }
-@media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } }
+.done-text { color: #909399; font-size: 13px; }
+.text-danger { color: #f56c6c; font-weight: 600; }
+.text-ok { color: #67c23a; }
+.field-hint { margin: 4px 0 0; color: #9b5b00; font-size: 12px; line-height: 1.5; }
+@media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } }
 </style>
