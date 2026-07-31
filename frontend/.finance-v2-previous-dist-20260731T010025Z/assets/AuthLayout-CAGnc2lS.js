@@ -1,0 +1,1 @@
+import{_ as o,o as t,c,g as s,m as a}from"./index-COpFP646.js";const r={},n={class:"auth-layout"};function _(d,u){const e=a("router-view");return t(),c("div",n,[s(e)])}const i=o(r,[["render",_],["__scopeId","data-v-622df17b"]]);export{i as default};
