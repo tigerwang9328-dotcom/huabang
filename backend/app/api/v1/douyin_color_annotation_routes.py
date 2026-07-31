@@ -77,14 +77,30 @@ async def _ensure_unique(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=error_code)
 
 
-async def _annotation_account(db: AsyncSession) -> DouyinCreatorAccount:
+async def _annotation_account(
+    db: AsyncSession, *, account_hint: int | None = None,
+) -> DouyinCreatorAccount:
+    """Derive the sole first-release account; request IDs are hints, never authority."""
+
     accounts = (await db.execute(select(DouyinCreatorAccount).where(
         DouyinCreatorAccount.status == "active",
     ))).scalars().all()
     if len(accounts) != 1:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="active_account_not_configured")
-    return accounts[0]
+    account = accounts[0]
+    if account_hint is not None and account_hint != account.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_scope_mismatch")
+    return account
 
+
+
+async def _request_account(
+    db: AsyncSession, *, query_account_id: int | None = None, payload_account_id: int | None = None,
+) -> DouyinCreatorAccount:
+    account = await _annotation_account(db, account_hint=query_account_id)
+    if payload_account_id is not None and payload_account_id != account.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_scope_mismatch")
+    return account
 
 def _clip_response(clip: VideoClip) -> dict[str, object]:
     return {
@@ -110,7 +126,11 @@ async def _validate_clip_payload(
     if payload.account_id != account_id:
         raise AnnotationValidationError("account_scope_mismatch")
     validate_primary_assignment(payload.focus_status.value, style_id=payload.style_id, color_id=payload.color_id)
-    video = await _scoped_record(db, Video, account_id=account_id, record_id=payload.video_id, error_code="video_not_found")
+    video = (await db.execute(
+        select(Video).where(Video.account_id == account_id, Video.id == payload.video_id).with_for_update()
+    )).scalar_one_or_none()
+    if video is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video_not_found")
     start_ms, end_ms = snap_clip_bounds(
         input_start_ms=payload.input_start_ms, input_end_ms=payload.input_end_ms,
         curve_resolution_ms=payload.curve_resolution_ms, video_duration_ms=video.duration_ms,
@@ -145,7 +165,7 @@ async def annotation_context(_: SysUser = Depends(require_permission("douyin.ann
 
 @annotation_router.get("/videos", response_model=ApiResponse)
 async def list_annotation_videos(account_id: int, _: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
-    await _scoped_record(db, DouyinCreatorAccount, account_id=account_id, record_id=account_id, error_code="account_not_found")
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     videos = (await db.execute(select(Video).where(Video.account_id == account_id).order_by(Video.published_at.desc(), Video.id.desc()))).scalars().all()
     return ApiResponse.ok({"items": [{
         "id": video.id, "video_id_string": video.video_id_string, "title": video.title,
@@ -156,6 +176,7 @@ async def list_annotation_videos(account_id: int, _: SysUser = Depends(require_p
 
 @annotation_router.get("/videos/{video_id_string}", response_model=ApiResponse)
 async def get_annotation_video(video_id_string: str, account_id: int, _: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     video = (await db.execute(select(Video).where(
         Video.account_id == account_id, Video.video_id_string == video_id_string,
     ))).scalar_one_or_none()
@@ -170,6 +191,7 @@ async def get_annotation_video(video_id_string: str, account_id: int, _: SysUser
 
 @annotation_router.get("/styles", response_model=ApiResponse)
 async def list_garment_styles(account_id: int, _: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     items = (await db.execute(select(GarmentStyle).where(GarmentStyle.account_id == account_id).order_by(GarmentStyle.style_code))).scalars().all()
     return ApiResponse.ok({"items": [{
         "id": item.id, "account_id": item.account_id, "style_code": item.style_code, "style_name": item.style_name,
@@ -179,7 +201,7 @@ async def list_garment_styles(account_id: int, _: SysUser = Depends(require_perm
 
 @annotation_router.post("/styles", response_model=ApiResponse)
 async def create_garment_style(payload: GarmentStyleCreateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.admin")), db: AsyncSession = Depends(get_db)):
-    await _scoped_record(db, DouyinCreatorAccount, account_id=payload.account_id, record_id=payload.account_id, error_code="account_not_found")
+    account_id = (await _request_account(db, payload_account_id=payload.account_id)).id
     await _ensure_unique(db, GarmentStyle, account_id=payload.account_id, field="style_code", value=payload.style_code.strip(), error_code="style_code_conflict")
     item = GarmentStyle(
         account_id=payload.account_id, style_code=payload.style_code.strip(),
@@ -193,6 +215,7 @@ async def create_garment_style(payload: GarmentStyleCreateRequest, request: Requ
 
 @annotation_router.patch("/styles/{style_id}", response_model=ApiResponse)
 async def update_garment_style(style_id: int, account_id: int, payload: GarmentStyleUpdateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.admin")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     item = await _scoped_record(db, GarmentStyle, account_id=account_id, record_id=style_id, error_code="style_not_found")
     before = {"style_code": item.style_code, "style_name": item.style_name, "status": item.status}
     if payload.style_code is not None:
@@ -205,6 +228,7 @@ async def update_garment_style(style_id: int, account_id: int, payload: GarmentS
 
 @annotation_router.get("/styles/{style_id}/colors", response_model=ApiResponse)
 async def list_garment_colors(style_id: int, account_id: int, _: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     await _scoped_record(db, GarmentStyle, account_id=account_id, record_id=style_id, error_code="style_not_found")
     items = (await db.execute(select(GarmentColor).where(
         GarmentColor.account_id == account_id, GarmentColor.style_id == style_id,
@@ -217,6 +241,7 @@ async def list_garment_colors(style_id: int, account_id: int, _: SysUser = Depen
 
 @annotation_router.post("/styles/{style_id}/colors", response_model=ApiResponse)
 async def create_garment_color(style_id: int, payload: GarmentColorCreateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.admin")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, payload_account_id=payload.account_id)).id
     style = await _scoped_record(db, GarmentStyle, account_id=payload.account_id, record_id=style_id, error_code="style_not_found")
     await _ensure_unique(db, GarmentColor, account_id=style.account_id, style_id=style.id, field="color_code", value=payload.color_code.strip(), error_code="color_code_conflict")
     item = GarmentColor(account_id=style.account_id, style_id=style.id, color_code=payload.color_code.strip(), color_name=sanitize_douyin_text(payload.color_name), color_image=payload.color_image, status=payload.status)
@@ -228,6 +253,7 @@ async def create_garment_color(style_id: int, payload: GarmentColorCreateRequest
 
 @annotation_router.patch("/styles/{style_id}/colors/{color_id}", response_model=ApiResponse)
 async def update_garment_color(style_id: int, color_id: int, account_id: int, payload: GarmentColorUpdateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.admin")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     item = await _scoped_record(db, GarmentColor, account_id=account_id, record_id=color_id, error_code="color_not_found")
     if item.style_id != style_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="color_not_found")
@@ -242,6 +268,7 @@ async def update_garment_color(style_id: int, color_id: int, account_id: int, pa
 
 @annotation_router.get("/skus", response_model=ApiResponse)
 async def list_garment_skus(account_id: int, _: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     items = (await db.execute(select(GarmentSku).where(GarmentSku.account_id == account_id).order_by(GarmentSku.sku_code))).scalars().all()
     return ApiResponse.ok({"items": [{
         "id": item.id, "account_id": item.account_id, "color_id": item.color_id, "sku_code": item.sku_code,
@@ -251,6 +278,7 @@ async def list_garment_skus(account_id: int, _: SysUser = Depends(require_permis
 
 @annotation_router.post("/skus", response_model=ApiResponse)
 async def create_garment_sku(payload: GarmentSkuCreateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.admin")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, payload_account_id=payload.account_id)).id
     color = await _scoped_record(db, GarmentColor, account_id=payload.account_id, record_id=payload.color_id, error_code="color_not_found")
     await _ensure_unique(db, GarmentSku, account_id=color.account_id, field="sku_code", value=payload.sku_code.strip(), error_code="sku_code_conflict")
     item = GarmentSku(account_id=color.account_id, color_id=color.id, sku_code=payload.sku_code.strip(), size_name=sanitize_douyin_text(payload.size_name), status=payload.status)
@@ -262,6 +290,7 @@ async def create_garment_sku(payload: GarmentSkuCreateRequest, request: Request,
 
 @annotation_router.patch("/skus/{sku_id}", response_model=ApiResponse)
 async def update_garment_sku(sku_id: int, account_id: int, payload: GarmentSkuUpdateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.admin")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     item = await _scoped_record(db, GarmentSku, account_id=account_id, record_id=sku_id, error_code="sku_not_found")
     data = payload.model_dump(exclude_unset=True)
     if data.get("color_id") is not None:
@@ -277,6 +306,7 @@ async def update_garment_sku(sku_id: int, account_id: int, payload: GarmentSkuUp
 
 @annotation_router.get("/video-clips", response_model=ApiResponse)
 async def list_video_clips(account_id: int, video_id: int | None = None, _: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     query = select(VideoClip).where(VideoClip.account_id == account_id)
     if video_id is not None:
         query = query.where(VideoClip.video_id == video_id)
@@ -286,6 +316,7 @@ async def list_video_clips(account_id: int, video_id: int | None = None, _: SysU
 
 @annotation_router.post("/video-clips", response_model=ApiResponse)
 async def create_video_clip(payload: VideoClipCreateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, payload_account_id=payload.account_id)).id
     try:
         start_ms, end_ms, overlap_status = await _validate_clip_payload(db=db, account_id=payload.account_id, payload=payload)
     except AnnotationValidationError as error:
@@ -305,6 +336,7 @@ async def create_video_clip(payload: VideoClipCreateRequest, request: Request, c
 
 @annotation_router.patch("/video-clips/{clip_id}", response_model=ApiResponse)
 async def update_video_clip(clip_id: int, account_id: int, payload: VideoClipUpdateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+    account_id = (await _request_account(db, query_account_id=account_id, payload_account_id=payload.account_id)).id
     clip = await _scoped_record(db, VideoClip, account_id=account_id, record_id=clip_id, error_code="video_clip_not_found", lock=True)
     try:
         assert_expected_version(current_version=clip.version, expected_version=payload.expected_version)
@@ -329,6 +361,7 @@ async def delete_video_clip(clip_id: int, account_id: int, payload: AnnotationAc
 
 
 async def _transition_video_clip(*, clip_id: int, account_id: int, payload: AnnotationActionRequest, target_status: str, action: str, request: Request, current_user: SysUser, db: AsyncSession) -> ApiResponse:
+    account_id = (await _request_account(db, query_account_id=account_id)).id
     clip = await _scoped_record(db, VideoClip, account_id=account_id, record_id=clip_id, error_code="video_clip_not_found", lock=True)
     try:
         assert_expected_version(current_version=clip.version, expected_version=payload.expected_version)

@@ -166,3 +166,42 @@ def test_annotation_mutations_lock_clip_versions_and_return_explicit_product_con
     assert "style_code_conflict" in route_source
     assert "color_code_conflict" in route_source
     assert "sku_code_conflict" in route_source
+
+@pytest.mark.asyncio
+async def test_annotation_account_is_derived_from_the_single_active_account_and_rejects_client_hint_mismatch():
+    from fastapi import HTTPException
+
+    from app.api.v1.douyin_color_annotation_routes import _annotation_account
+
+    class ScalarResult:
+        def __init__(self, accounts):
+            self._accounts = accounts
+
+        def all(self):
+            return self._accounts
+
+    class Result:
+        def __init__(self, accounts):
+            self._accounts = accounts
+
+        def scalars(self):
+            return ScalarResult(self._accounts)
+
+    class Db:
+        async def execute(self, _query):
+            return Result([type("Account", (), {"id": 7})()])
+
+    assert (await _annotation_account(Db(), account_hint=7)).id == 7
+    with pytest.raises(HTTPException) as error:
+        await _annotation_account(Db(), account_hint=8)
+    assert error.value.status_code == 403
+    assert error.value.detail == "account_scope_mismatch"
+
+
+def test_annotation_clip_validation_locks_the_parent_video_before_overlap_query():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "douyin_color_annotation_routes.py").read_text(encoding="utf-8")
+
+    assert "select(Video).where(Video.account_id == account_id, Video.id == payload.video_id).with_for_update()" in source
+    assert "_scoped_record(db, DouyinCreatorAccount" not in source
