@@ -72,8 +72,28 @@ test("annotation editor exposes safe preview, whole-second clip maintenance, val
     "review status",
     "version",
     "updated_by",
-    "review_note",
+    "overlap_reason",
   ]) {
     assert.ok(editor.includes(token), `missing clip maintenance/audit detail: ${token}`);
   }
+});
+
+test("annotation action payloads and catalog creates match the minimal backend contract", () => {
+  const api = read("src/api/douyinColorAnalytics.ts");
+  const editor = read("src/views/douyinColorAnalytics/Annotate.vue");
+  const styles = read("src/views/douyinColorAnalytics/Styles.vue");
+
+  assert.ok(!api.includes("review_note?: string"), "action requests must not invent a persisted review note");
+  assert.ok(!editor.includes("ElMessageBox.prompt"), "the UI must not collect a rejection note the backend drops");
+  assert.ok(!editor.includes("row.review_note"), "the UI must not display a rejection note as persisted");
+  assert.ok(styles.includes("await load();"), "style create must reload the ID-only create response");
+  assert.ok(styles.includes("await showColors(selectedStyle.value);"), "color create must reload the ID-only create response");
+  assert.equal((api.match(/const \{ account_id, \.\.\.body \} = payload/g) || []).length, 2, "style/color patch requests must move account_id out of JSON");
+});
+
+test("catalog create responses are treated as ID acknowledgements", () => {
+  const api = read("src/api/douyinColorAnalytics.ts");
+
+  assert.ok(api.includes("export interface DouyinCreateResult"));
+  assert.equal((api.match(/request\.post<DouyinCreateResult>/g) || []).length, 2);
 });

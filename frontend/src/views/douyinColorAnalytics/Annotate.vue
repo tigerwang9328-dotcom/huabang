@@ -82,7 +82,7 @@
         <el-table-column label="重叠" width="150"><template #default="{ row }">{{ row.overlap_status || "not_required" }}</template></el-table-column>
         <el-table-column label="版本" width="72"><template #default="{ row }">v{{ row.version }}</template></el-table-column>
         <el-table-column label="操作人" min-width="130"><template #default="{ row }">{{ row.updated_by || row.created_by || "—" }}</template></el-table-column>
-        <el-table-column label="审核说明" min-width="160"><template #default="{ row }">{{ row.review_note || row.overlap_reason || "—" }}</template></el-table-column>
+        <el-table-column label="重叠说明" min-width="160"><template #default="{ row }">{{ row.overlap_reason || "—" }}</template></el-table-column>
         <el-table-column label="操作" min-width="240" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" @click="editClip(row)">编辑</el-button>
@@ -213,8 +213,7 @@ async function save() {
 async function runAction(clip: DouyinVideoClip, action: "submit" | "approve" | "reject" | "restore") {
   if (!context.value) return;
   try {
-    const review_note = action === "reject" ? (await ElMessageBox.prompt("请填写驳回说明", "驳回片段", { inputPattern: /\S+/, inputErrorMessage: "驳回必须说明原因" })).value : undefined;
-    const payload = { account_id: context.value.account.id, expected_version: clip.version, review_note };
+    const payload = { account_id: context.value.account.id, expected_version: clip.version };
     const response = action === "submit" ? await douyinColorAnalyticsApi.submitVideoClip(clip.id, payload)
       : action === "approve" ? await douyinColorAnalyticsApi.approveVideoClip(clip.id, payload)
       : action === "reject" ? await douyinColorAnalyticsApi.rejectVideoClip(clip.id, payload)

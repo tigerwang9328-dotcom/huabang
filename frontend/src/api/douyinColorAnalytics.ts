@@ -76,7 +76,6 @@ export interface DouyinVideoClip {
   annotation_status: DouyinAnnotationStatus;
   overlap_status: string | null;
   overlap_reason: string | null;
-  review_note?: string | null;
   version: number;
   created_by: string | null;
   updated_by: string | null;
@@ -107,7 +106,10 @@ export interface DouyinVideoClipPatch extends Omit<DouyinVideoClipInput, "video_
 export interface DouyinClipActionInput {
   account_id: number;
   expected_version: number;
-  review_note?: string | null;
+}
+
+export interface DouyinCreateResult {
+  id: number;
 }
 
 export interface DouyinPagedResult<T> {
@@ -170,18 +172,20 @@ export const douyinColorAnalyticsApi = {
     return unwrapDouyinColorAnalytics(request.get<DouyinPagedResult<DouyinGarmentStyle>>(`${basePath}/styles`, { params: { account_id: accountId } }));
   },
   createStyle(payload: DouyinStyleInput) {
-    return unwrapDouyinColorAnalytics(request.post<DouyinGarmentStyle>(`${basePath}/styles`, payload));
+    return unwrapDouyinColorAnalytics(request.post<DouyinCreateResult>(`${basePath}/styles`, payload));
   },
   updateStyle(styleId: number, payload: Partial<DouyinStyleInput> & Pick<DouyinStyleInput, "account_id">) {
-    return unwrapDouyinColorAnalytics(request.patch<DouyinGarmentStyle>(`${basePath}/styles/${styleId}`, payload, { params: { account_id: payload.account_id } }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.patch<DouyinGarmentStyle>(basePath + "/styles/" + styleId, body, { params: { account_id } }));
   },
   listColors(styleId: number, accountId: number) {
     return unwrapDouyinColorAnalytics(request.get<DouyinPagedResult<DouyinGarmentColor>>(`${basePath}/styles/${styleId}/colors`, { params: { account_id: accountId } }));
   },
   createColor(styleId: number, payload: DouyinColorInput) {
-    return unwrapDouyinColorAnalytics(request.post<DouyinGarmentColor>(`${basePath}/styles/${styleId}/colors`, payload));
+    return unwrapDouyinColorAnalytics(request.post<DouyinCreateResult>(`${basePath}/styles/${styleId}/colors`, payload));
   },
   updateColor(styleId: number, colorId: number, payload: Partial<DouyinColorInput> & Pick<DouyinColorInput, "account_id">) {
-    return unwrapDouyinColorAnalytics(request.patch<DouyinGarmentColor>(`${basePath}/styles/${styleId}/colors/${colorId}`, payload, { params: { account_id: payload.account_id } }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.patch<DouyinGarmentColor>(basePath + "/styles/" + styleId + "/colors/" + colorId, body, { params: { account_id } }));
   },
 };
