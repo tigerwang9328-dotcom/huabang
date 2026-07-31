@@ -6,6 +6,11 @@ Covers:
 - outfit_color_metrics table and model
 - video_color_metrics.garment_position derived field
 - pure functions for combination key generation and split-ranking eligibility
+
+v4.0 revised: one curve (clip) maps to one whole outfit (>=2 garments).
+combination_key excludes color_id; garments are distinguished by SKU.
+focus_status semantics: clear_primary=整套穿搭清晰可见; multi_focus=多套穿搭同屏;
+unclear=无法判断整套穿搭.
 """
 
 import pytest
@@ -104,17 +109,21 @@ def test_outfit_color_metric_model_exists_with_outfit_key():
 
 
 def test_build_combination_key_sorts_by_garment_position_ascending():
-    """combination_key must be deterministic: sorted by garment_position then style:color."""
+    """combination_key must be deterministic: sorted by business order outer->top->bottom.
+
+    v4.0: key format is "position:style_id" (no color_id); garments are
+    distinguished by SKU, not color.
+    """
 
     participants = [
-        {"garment_position": "bottom", "style_id": 100, "color_id": 200},
-        {"garment_position": "outer", "style_id": 300, "color_id": 400},
-        {"garment_position": "top", "style_id": 500, "color_id": 600},
+        {"garment_position": "bottom", "style_id": 100, "sku_code": "WZ001-BLACK-M"},
+        {"garment_position": "outer", "style_id": 300, "sku_code": "WZ003-RED-L"},
+        {"garment_position": "top", "style_id": 500, "sku_code": "WZ005-BLUE-M"},
     ]
     key = build_combination_key(participants)
-    assert key == "outer:300:400|top:500:600|bottom:100:200", (
-        "combination_key must sort by garment_position ascending (bottom < outer < top alphabetically, "
-        "but business order is outer -> top -> bottom)"
+    assert key == "outer:300|top:500|bottom:100", (
+        "combination_key must sort by business order outer -> top -> bottom and "
+        "exclude color_id"
     )
 
 
@@ -123,7 +132,7 @@ def test_build_combination_key_rejects_fewer_than_two_participants():
 
     with pytest.raises(OutfitCompositionError, match="insufficient_participants"):
         build_combination_key([
-            {"garment_position": "top", "style_id": 500, "color_id": 600},
+            {"garment_position": "top", "style_id": 500, "sku_code": "WZ005-BLUE-M"},
         ])
 
 
@@ -132,33 +141,74 @@ def test_build_combination_key_rejects_none_or_other_positions():
 
     with pytest.raises(OutfitCompositionError, match="invalid_garment_position"):
         build_combination_key([
-            {"garment_position": "none", "style_id": 1, "color_id": 2},
-            {"garment_position": "top", "style_id": 3, "color_id": 4},
+            {"garment_position": "none", "style_id": 1, "sku_code": None},
+            {"garment_position": "top", "style_id": 3, "sku_code": "WZ003-RED-M"},
         ])
 
 
 def test_derive_outfit_participants_collects_approved_clear_primary_clips():
-    """Only clear_primary + approved + overlap-approved clips join an outfit."""
+    """Only clear_primary + approved + overlap-approved clips join an outfit.
+
+    v4.0: each qualifying clip carries outfit_parts_json describing the whole
+    outfit; participants are collected from those parts (deduplicated).
+    """
 
     clips = [
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "outer", "style_id": 10, "color_id": 20},
+         "outfit_parts_json": [{"position": "outer", "style_id": 10, "sku_code": "WZ010-RED-M"}]},
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "approved",
-         "garment_position": "top", "style_id": 30, "color_id": 40},
+         "outfit_parts_json": [{"position": "top", "style_id": 30, "sku_code": "WZ030-BLUE-M"}]},
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "bottom", "style_id": 50, "color_id": 60},
+         "outfit_parts_json": [{"position": "bottom", "style_id": 50, "sku_code": "WZ050-BLACK-L"}]},
         {"focus_status": "multi_focus", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "top", "style_id": 70, "color_id": 80},
+         "outfit_parts_json": [{"position": "top", "style_id": 70, "sku_code": "WZ070-GREEN-M"}]},
         {"focus_status": "clear_primary", "annotation_status": "submitted", "overlap_status": "not_required",
-         "garment_position": "bottom", "style_id": 90, "color_id": 100},
+         "outfit_parts_json": [{"position": "bottom", "style_id": 90, "sku_code": "WZ090-BLACK-L"}]},
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "pending_approval",
-         "garment_position": "outer", "style_id": 110, "color_id": 120},
+         "outfit_parts_json": [{"position": "outer", "style_id": 110, "sku_code": "WZ110-RED-L"}]},
     ]
     participants = derive_outfit_participants(clips)
     positions = sorted(p["garment_position"] for p in participants)
     assert positions == ["bottom", "outer", "top"], (
         "only clear_primary+approved+overlap(approved|not_required) clips qualify"
     )
+    # sku_code is carried through, color_id is absent
+    assert all("color_id" not in p for p in participants)
+    assert all("sku_code" in p for p in participants)
+
+
+def test_derive_outfit_participants_deduplicates_repeated_outfit_parts():
+    """Multiple clips showing the same outfit must not double-count garments."""
+
+    clips = [
+        {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
+         "outfit_parts_json": [
+             {"position": "top", "style_id": 30, "sku_code": "WZ030-BLUE-M"},
+             {"position": "bottom", "style_id": 50, "sku_code": "WZ050-BLACK-L"},
+         ]},
+        {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
+         "outfit_parts_json": [
+             {"position": "top", "style_id": 30, "sku_code": "WZ030-BLUE-M"},
+             {"position": "bottom", "style_id": 50, "sku_code": "WZ050-BLACK-L"},
+         ]},
+    ]
+    participants = derive_outfit_participants(clips)
+    assert len(participants) == 2  # deduplicated
+
+
+def test_derive_outfit_participants_allows_null_sku_code():
+    """sku_code may be None when the SKU is not yet resolved."""
+
+    clips = [
+        {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
+         "outfit_parts_json": [
+             {"position": "top", "style_id": 30, "sku_code": None},
+             {"position": "bottom", "style_id": 50, "sku_code": None},
+         ]},
+    ]
+    participants = derive_outfit_participants(clips)
+    assert all(p["sku_code"] is None for p in participants)
+    assert len(participants) == 2
 
 
 def test_is_eligible_for_outfit_ranking_requires_at_least_two_qualifying_garments():
@@ -166,19 +216,23 @@ def test_is_eligible_for_outfit_ranking_requires_at_least_two_qualifying_garment
 
     assert is_eligible_for_outfit_ranking([
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "top", "style_id": 1, "color_id": 2},
+         "outfit_parts_json": [{"position": "top", "style_id": 1, "sku_code": "WZ001-M"}]},
     ]) is False
 
     assert is_eligible_for_outfit_ranking([
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "top", "style_id": 1, "color_id": 2},
-        {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "bottom", "style_id": 3, "color_id": 4},
+         "outfit_parts_json": [
+             {"position": "top", "style_id": 1, "sku_code": "WZ001-M"},
+             {"position": "bottom", "style_id": 3, "sku_code": "WZ003-L"},
+         ]},
     ]) is True
 
 
 def test_is_eligible_for_single_ranking_keeps_clear_primary_approved_only():
-    """Single-garment ranking eligibility reuses v3.1 semantics."""
+    """Single-garment ranking eligibility reuses v3.1 semantics.
+
+    clear_primary = a whole outfit is clearly visible.
+    """
 
     assert is_eligible_for_single_ranking(
         focus_status="clear_primary", annotation_status="approved", overlap_status="not_required"
@@ -223,16 +277,17 @@ def test_outfit_combination_supports_two_piece_without_outer():
     """2-piece outfit (top+bottom, no outer) is valid per v4.0."""
 
     participants = [
-        {"garment_position": "top", "style_id": 100, "color_id": 200},
-        {"garment_position": "bottom", "style_id": 300, "color_id": 400},
+        {"garment_position": "top", "style_id": 100, "sku_code": "WZ100-M"},
+        {"garment_position": "bottom", "style_id": 300, "sku_code": "WZ300-L"},
     ]
     key = build_combination_key(participants)
-    assert key == "top:100:200|bottom:300:400"
+    assert key == "top:100|bottom:300"
     assert is_eligible_for_outfit_ranking([
         {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "top", "style_id": 100, "color_id": 200},
-        {"focus_status": "clear_primary", "annotation_status": "approved", "overlap_status": "not_required",
-         "garment_position": "bottom", "style_id": 300, "color_id": 400},
+         "outfit_parts_json": [
+             {"position": "top", "style_id": 100, "sku_code": "WZ100-M"},
+             {"position": "bottom", "style_id": 300, "sku_code": "WZ300-L"},
+         ]},
     ]) is True
 
 
@@ -240,9 +295,9 @@ def test_outfit_combination_supports_three_piece_with_outer():
     """3-piece outfit (outer+top+bottom) is valid per v4.0."""
 
     participants = [
-        {"garment_position": "outer", "style_id": 100, "color_id": 200},
-        {"garment_position": "top", "style_id": 300, "color_id": 400},
-        {"garment_position": "bottom", "style_id": 500, "color_id": 600},
+        {"garment_position": "outer", "style_id": 100, "sku_code": "WZ100-L"},
+        {"garment_position": "top", "style_id": 300, "sku_code": "WZ300-M"},
+        {"garment_position": "bottom", "style_id": 500, "sku_code": "WZ500-L"},
     ]
     key = build_combination_key(participants)
-    assert key == "outer:100:200|top:300:400|bottom:500:600"
+    assert key == "outer:100|top:300|bottom:500"

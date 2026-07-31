@@ -1,11 +1,11 @@
 """Task 5: video-color metrics computation with independent snapshot selection.
 
-Covers v3.1 §4.2:
+Covers v3.1 §4.2 + v4.0 revised whole-outfit semantics:
 - Independent retention/bounce snapshot selection (latest qualifying)
-- metric_input_hash and annotation_set_hash computation
-- Multi-clip aggregation per video-color
+- metric_input_hash and annotation_set_hash computation (outfit_parts, no color)
+- Per-garment metric derivation from outfit_parts (whole-outfit curve reused)
 - Bounce stays platform_bounce_curve_value, never ranked until semantic verification
-- v4.0 garment_position split-ranking integration
+- v4.0 garment_position/sku_code split-ranking integration
 """
 
 import hashlib
@@ -103,12 +103,23 @@ def test_select_bounce_snapshot_returns_none_when_missing():
 
 # --- hash computation ---
 
+def _hash_clip(clip_id, version=1, start_ms=0, end_ms=2000, parts=None, status="approved"):
+    if parts is None:
+        parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
+    return {
+        "id": clip_id, "version": version,
+        "start_ms": start_ms, "end_ms": end_ms,
+        "outfit_parts_json": parts,
+        "annotation_status": status,
+    }
+
+
 def test_compute_annotation_set_hash_is_deterministic_and_order_independent():
     """annotation_set_hash must be stable regardless of clip input order."""
 
     clips_a = [
-        {"id": 1, "version": 1, "start_ms": 0, "end_ms": 2000, "style_id": 10, "color_id": 20, "annotation_status": "approved"},
-        {"id": 2, "version": 1, "start_ms": 3000, "end_ms": 5000, "style_id": 10, "color_id": 20, "annotation_status": "approved"},
+        _hash_clip(1, parts=[{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]),
+        _hash_clip(2, parts=[{"position": "bottom", "style_id": 20, "sku_code": "WZ020-L"}]),
     ]
     clips_b = list(reversed(clips_a))
     assert compute_annotation_set_hash(clips_a) == compute_annotation_set_hash(clips_b)
@@ -117,9 +128,32 @@ def test_compute_annotation_set_hash_is_deterministic_and_order_independent():
 def test_compute_annotation_set_hash_changes_when_clips_change():
     """Different clips produce different hashes."""
 
-    clips_a = [{"id": 1, "version": 1, "start_ms": 0, "end_ms": 2000, "style_id": 10, "color_id": 20, "annotation_status": "approved"}]
-    clips_b = [{"id": 1, "version": 2, "start_ms": 0, "end_ms": 2000, "style_id": 10, "color_id": 20, "annotation_status": "approved"}]
+    clips_a = [_hash_clip(1, version=1)]
+    clips_b = [_hash_clip(1, version=2)]
     assert compute_annotation_set_hash(clips_a) != compute_annotation_set_hash(clips_b)
+
+
+def test_compute_annotation_set_hash_excludes_color_and_uses_sku_code():
+    """v4.0: hash is driven by outfit_parts (position/style_id/sku_code), not color_id."""
+
+    base_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
+    clip = _hash_clip(1, parts=base_parts)
+    hash_with_sku = compute_annotation_set_hash([clip])
+
+    # Changing sku_code changes the hash
+    changed_sku = _hash_clip(1, parts=[{"position": "top", "style_id": 10, "sku_code": "WZ010-L"}])
+    assert hash_with_sku != compute_annotation_set_hash([changed_sku])
+
+    # outfit_parts_json order within a clip does not change the hash
+    reordered = _hash_clip(1, parts=[
+        {"position": "bottom", "style_id": 20, "sku_code": "WZ020-L"},
+        {"position": "top", "style_id": 10, "sku_code": "WZ010-M"},
+    ])
+    same_set_diff_order = _hash_clip(1, parts=[
+        {"position": "top", "style_id": 10, "sku_code": "WZ010-M"},
+        {"position": "bottom", "style_id": 20, "sku_code": "WZ020-L"},
+    ])
+    assert compute_annotation_set_hash([reordered]) == compute_annotation_set_hash([same_set_diff_order])
 
 
 def test_compute_metric_input_hash_is_deterministic():
@@ -164,7 +198,9 @@ def test_compute_metric_input_hash_changes_when_bounce_changes():
 
 # --- video-color metric computation ---
 
-def _make_qualifying_clip(*, clip_id, start_ms, end_ms, style_id=10, color_id=20):
+def _make_qualifying_clip(*, clip_id, start_ms, end_ms, outfit_parts=None):
+    if outfit_parts is None:
+        outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
     return {
         "id": clip_id,
         "version": 1,
@@ -176,9 +212,7 @@ def _make_qualifying_clip(*, clip_id, start_ms, end_ms, style_id=10, color_id=20
         "focus_status": "clear_primary",
         "annotation_status": "approved",
         "overlap_status": "not_required",
-        "style_id": style_id,
-        "color_id": color_id,
-        "garment_position": "top",
+        "outfit_parts_json": outfit_parts,
     }
 
 
@@ -207,6 +241,35 @@ def _make_bounce_snapshot(*, curve, snapshot_id=2, source_hash="bounce_hash_1"):
     }
 
 
+def test_compute_video_color_metric_derives_one_metric_per_outfit_part():
+    """v4.0: each garment in outfit_parts produces one metric dict."""
+
+    curve = [
+        {"second": 0, "value": 0.5},
+        {"second": 1, "value": 0.7},
+        {"second": 2, "value": 0.9},
+    ]
+    outfit_parts = [
+        {"position": "top", "style_id": 10, "sku_code": "WZ010-M"},
+        {"position": "bottom", "style_id": 30, "sku_code": "WZ030-L"},
+    ]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=2000, outfit_parts=outfit_parts)]
+    retention = _make_retention_snapshot(curve=curve)
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts,
+        retention_snapshot=retention, bounce_snapshot=None,
+        video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
+        bounce_semantics_status="unverified",
+    )
+    assert len(metrics) == 2
+    positions = sorted(m["garment_position"] for m in metrics)
+    assert positions == ["bottom", "top"]
+    assert all(m["sku_code"] is not None for m in metrics)
+    # both share the whole-outfit curve retention
+    assert all(m["retention_calculation_status"] == "computed" for m in metrics)
+    assert all(m["average_retention"] is not None for m in metrics)
+
+
 def test_compute_video_color_metric_aggregates_single_clip():
     """Single qualifying clip produces a metric with average_retention from that clip."""
 
@@ -215,26 +278,27 @@ def test_compute_video_color_metric_aggregates_single_clip():
         {"second": 1, "value": 0.7},
         {"second": 2, "value": 0.9},
     ]
-    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=2000)]
+    outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=2000, outfit_parts=outfit_parts)]
     retention = _make_retention_snapshot(curve=curve)
-    metric = compute_video_color_metric(
-        clips=clips,
-        retention_snapshot=retention,
-        bounce_snapshot=None,
-        video_duration_ms=10000,
-        observation_window="t7",
-        metric_version="v1.0",
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts,
+        retention_snapshot=retention, bounce_snapshot=None,
+        video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
+    assert len(metrics) == 1
+    metric = metrics[0]
     assert metric["retention_calculation_status"] == "computed"
     assert metric["average_retention"] is not None
     assert metric["clip_count"] == 1
     assert metric["bounce_snapshot_id"] is None
     assert metric["bounce_calculation_status"] == "insufficient_data"
+    assert metric["sku_code"] == "WZ010-M"
 
 
 def test_compute_video_color_metric_aggregates_multiple_clips_by_duration():
-    """Multiple qualifying clips aggregate by duration-weighted average."""
+    """Multiple qualifying clips aggregate by duration-weighted average (whole-outfit curve)."""
 
     curve = [
         {"second": 0, "value": 0.5},
@@ -244,20 +308,19 @@ def test_compute_video_color_metric_aggregates_multiple_clips_by_duration():
         {"second": 4, "value": 0.8},
         {"second": 5, "value": 0.4},
     ]
+    outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
     clips = [
-        _make_qualifying_clip(clip_id=1, start_ms=0, end_ms=2000),
-        _make_qualifying_clip(clip_id=2, start_ms=3000, end_ms=5000),
+        _make_qualifying_clip(clip_id=1, start_ms=0, end_ms=2000, outfit_parts=outfit_parts),
+        _make_qualifying_clip(clip_id=2, start_ms=3000, end_ms=5000, outfit_parts=outfit_parts),
     ]
     retention = _make_retention_snapshot(curve=curve)
-    metric = compute_video_color_metric(
-        clips=clips,
-        retention_snapshot=retention,
-        bounce_snapshot=None,
-        video_duration_ms=10000,
-        observation_window="t7",
-        metric_version="v1.0",
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts,
+        retention_snapshot=retention, bounce_snapshot=None,
+        video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
+    metric = metrics[0]
     assert metric["clip_count"] == 2
     assert metric["total_clip_duration_ms"] == 4000
     assert metric["retention_calculation_status"] == "computed"
@@ -267,24 +330,27 @@ def test_compute_video_color_metric_computes_bounce_when_semantics_verified():
     """Bounce computes only when semantics_status is verified_*_is_better."""
 
     curve = [{"second": 0, "value": 0.3}, {"second": 1, "value": 0.5}]
-    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000)]
+    outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000, outfit_parts=outfit_parts)]
     retention = _make_retention_snapshot(curve=curve)
     bounce = _make_bounce_snapshot(curve=curve)
 
-    metric_verified = compute_video_color_metric(
-        clips=clips, retention_snapshot=retention, bounce_snapshot=bounce,
+    metrics_verified = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts, retention_snapshot=retention, bounce_snapshot=bounce,
         video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="verified_lower_is_better",
     )
+    metric_verified = metrics_verified[0]
     assert metric_verified["bounce_calculation_status"] == "computed"
     assert metric_verified["average_platform_bounce_curve_value"] is not None
     assert metric_verified["bounce_snapshot_id"] is not None
 
-    metric_unverified = compute_video_color_metric(
-        clips=clips, retention_snapshot=retention, bounce_snapshot=bounce,
+    metrics_unverified = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts, retention_snapshot=retention, bounce_snapshot=bounce,
         video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
+    metric_unverified = metrics_unverified[0]
     # Bounce snapshot exists but semantics unverified -> bounce not ranked, stays as platform_bounce_curve_value
     assert metric_unverified["bounce_calculation_status"] == "computed"
     assert metric_unverified["average_platform_bounce_curve_value"] is not None
@@ -294,59 +360,83 @@ def test_compute_video_color_metric_excludes_non_qualifying_clips():
     """multi_focus, unclear, submitted, and pending_approval clips are excluded."""
 
     curve = [{"second": 0, "value": 0.5}, {"second": 1, "value": 0.7}]
+    outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
     clips = [
-        _make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000),
-        {**_make_qualifying_clip(clip_id=2, start_ms=2000, end_ms=3000), "focus_status": "multi_focus"},
-        {**_make_qualifying_clip(clip_id=3, start_ms=4000, end_ms=5000), "annotation_status": "submitted"},
-        {**_make_qualifying_clip(clip_id=4, start_ms=6000, end_ms=7000), "overlap_status": "pending_approval"},
+        _make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000, outfit_parts=outfit_parts),
+        {**_make_qualifying_clip(clip_id=2, start_ms=2000, end_ms=3000, outfit_parts=outfit_parts), "focus_status": "multi_focus"},
+        {**_make_qualifying_clip(clip_id=3, start_ms=4000, end_ms=5000, outfit_parts=outfit_parts), "annotation_status": "submitted"},
+        {**_make_qualifying_clip(clip_id=4, start_ms=6000, end_ms=7000, outfit_parts=outfit_parts), "overlap_status": "pending_approval"},
     ]
     retention = _make_retention_snapshot(curve=curve)
-    metric = compute_video_color_metric(
-        clips=clips, retention_snapshot=retention, bounce_snapshot=None,
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts, retention_snapshot=retention, bounce_snapshot=None,
         video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
-    assert metric["clip_count"] == 1  # only clip 1 qualifies
+    assert metrics[0]["clip_count"] == 1  # only clip 1 qualifies
 
 
-def test_compute_video_color_metric_includes_garment_position_for_split_ranking():
-    """v4.0: metric includes garment_position for split-ranking bucket assignment."""
+def test_compute_video_color_metric_carries_garment_position_and_sku_per_part():
+    """v4.0: each metric carries garment_position and sku_code from its outfit_part."""
 
     curve = [{"second": 0, "value": 0.5}, {"second": 1, "value": 0.7}]
-    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000)]
-    clips[0]["garment_position"] = "bottom"
+    outfit_parts = [
+        {"position": "outer", "style_id": 100, "sku_code": "WZ100-L"},
+        {"position": "bottom", "style_id": 300, "sku_code": "WZ300-L"},
+    ]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000, outfit_parts=outfit_parts)]
     retention = _make_retention_snapshot(curve=curve)
-    metric = compute_video_color_metric(
-        clips=clips, retention_snapshot=retention, bounce_snapshot=None,
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts, retention_snapshot=retention, bounce_snapshot=None,
         video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
-    assert metric["garment_position"] == "bottom"
+    by_pos = {m["garment_position"]: m for m in metrics}
+    assert by_pos["outer"]["style_id"] == 100
+    assert by_pos["outer"]["sku_code"] == "WZ100-L"
+    assert by_pos["bottom"]["style_id"] == 300
+    assert by_pos["bottom"]["sku_code"] == "WZ300-L"
 
 
 def test_compute_video_color_metric_computes_position_segment():
-    """dominant_position_segment is computed from clip start position."""
+    """dominant_position_segment is computed from the earliest clip start position."""
 
     curve = [{"second": 0, "value": 0.5}, {"second": 1, "value": 0.7}]
     # clip at 8000ms in a 10000ms video -> 0.8 -> rear
-    clips = [_make_qualifying_clip(clip_id=1, start_ms=8000, end_ms=9000)]
+    outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=8000, end_ms=9000, outfit_parts=outfit_parts)]
     retention = _make_retention_snapshot(curve=curve)
-    metric = compute_video_color_metric(
-        clips=clips, retention_snapshot=retention, bounce_snapshot=None,
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts, retention_snapshot=retention, bounce_snapshot=None,
         video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
-    assert metric["dominant_position_segment"] == "rear"
+    assert metrics[0]["dominant_position_segment"] == "rear"
 
 
 def test_compute_video_color_metric_returns_insufficient_data_when_no_retention():
     """No retention snapshot -> retention_calculation_status=insufficient_data."""
 
-    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000)]
-    metric = compute_video_color_metric(
-        clips=clips, retention_snapshot=None, bounce_snapshot=None,
+    outfit_parts = [{"position": "top", "style_id": 10, "sku_code": "WZ010-M"}]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000, outfit_parts=outfit_parts)]
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=outfit_parts, retention_snapshot=None, bounce_snapshot=None,
         video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
         bounce_semantics_status="unverified",
     )
-    assert metric["retention_calculation_status"] == "insufficient_data"
-    assert metric["average_retention"] is None
+    assert metrics[0]["retention_calculation_status"] == "insufficient_data"
+    assert metrics[0]["average_retention"] is None
+
+
+def test_compute_video_color_metric_returns_empty_list_for_no_outfit_parts():
+    """Empty outfit_parts -> empty list (no per-garment metrics)."""
+
+    curve = [{"second": 0, "value": 0.5}, {"second": 1, "value": 0.7}]
+    clips = [_make_qualifying_clip(clip_id=1, start_ms=0, end_ms=1000, outfit_parts=[])]
+    retention = _make_retention_snapshot(curve=curve)
+    metrics = compute_video_color_metric(
+        clips=clips, outfit_parts=[], retention_snapshot=retention, bounce_snapshot=None,
+        video_duration_ms=10000, observation_window="t7", metric_version="v1.0",
+        bounce_semantics_status="unverified",
+    )
+    assert metrics == []

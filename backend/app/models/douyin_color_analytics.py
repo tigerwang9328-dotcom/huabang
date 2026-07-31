@@ -347,7 +347,7 @@ class VideoClip(DouyinColorModel):
         CheckConstraint("input_start_ms >= 0 AND input_end_ms > input_start_ms", name="ck_douyin_clip_input_bounds"),
         CheckConstraint("curve_resolution_ms > 0", name="ck_douyin_clip_resolution"),
         CheckConstraint("version >= 1", name="ck_douyin_clip_version"),
-        CheckConstraint("(focus_status = 'clear_primary' AND style_id IS NOT NULL AND color_id IS NOT NULL) OR (focus_status IN ('multi_focus','unclear') AND style_id IS NULL AND color_id IS NULL)", name="ck_douyin_clip_focus_assignment"),
+        CheckConstraint("(focus_status = 'clear_primary' AND jsonb_array_length(outfit_parts_json) >= 2) OR (focus_status IN ('multi_focus','unclear') AND jsonb_array_length(outfit_parts_json) = 0)", name="ck_douyin_clip_outfit_composition"),
         CheckConstraint("focus_status IN ('clear_primary','multi_focus','unclear')", name="ck_douyin_clip_focus_status"),
         CheckConstraint("annotation_status IN ('draft','submitted','approved','rejected','deleted')", name="ck_douyin_clip_annotation_status"),
         UniqueConstraint("account_id", "id", name="uq_douyin_clip_account_id"),
@@ -366,6 +366,7 @@ class VideoClip(DouyinColorModel):
     input_end_ms = Column(BigInteger, nullable=False)
     curve_resolution_ms = Column(Integer, nullable=False)
     focus_status = Column(String(32), nullable=False)
+    outfit_parts_json = Column(JSON, nullable=False, default=list)
     focus_note = Column(Text)
     annotation_status = Column(String(16), nullable=False, default="draft")
     overlap_reason = Column(Text)
@@ -431,6 +432,7 @@ class VideoColorMetric(DouyinColorModel):
     metric_input_hash = Column(String(64), nullable=False)
     metric_version = Column(String(32), nullable=False)
     garment_position = Column(String(16), nullable=False, default="none")
+    sku_code = Column(String(64))
     average_retention = Column(Numeric(12, 8))
     retention_drop = Column(Numeric(12, 8))
     average_platform_bounce_curve_value = Column(Numeric(12, 8))

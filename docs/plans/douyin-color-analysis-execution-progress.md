@@ -122,3 +122,27 @@ Task 5 范围扩大：
 
 ### Phase A 浏览器闭环
 仍被阻塞：需要用户手工创建 active 账号 + 签发 token + 配置油猴
+
+## 2026-07-31 v4.0 重大澄清：整套穿搭为基本单位
+
+### 用户澄清
+- 目的是分析整套穿搭的数据
+- 一段曲线归一套穿搭（不再是单件衣物）
+- 视频中都是以一套穿搭为单位的
+- 单件上衣/外套和下衣的对比排名是次要目标
+
+### 设计决策（用户确认）
+1. 存储：不写死件数，用 JSON 数组存 [{position, style_id, color_id}]，适配 2~N 件
+2. 单件分榜：复用整套曲线，不拆分时段
+3. focus_status 改为整套语义：clear_primary=整套清晰；multi_focus=多套同屏；unclear=无法判断
+
+### 规格修订
+- v4.0 补丁文档已修订：douyin-color-analysis-v4.0-ranking-amendment.md
+- 核心变更：video_clips 从\ 单主衣物\改为\一套穿搭时段\
+- 主要指标：outfit_color_metrics（整套穿搭）
+- 次要指标：video_color_metrics（单件分榜，复用整套曲线）
+
+### 对已实现代码的影响
+- 需调整：video_clips 模型（加 outfit_parts_json）、compute_video_color_metric、compute_outfit_metric
+- 保留：garment_position、outfit 表、curve_service、outfit_service 组合键函数
+- Task 6 导出测试暂停，先完成 v4.0 模型调整
