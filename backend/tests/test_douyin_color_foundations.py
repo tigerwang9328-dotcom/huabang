@@ -138,6 +138,24 @@ def test_dedicated_migrator_assets_do_not_grant_finance_access_or_create_a_secon
     assert "GRANT .* ON ALL TABLES IN SCHEMA fin" not in bootstrap
 
 
+def test_douyin_migration_runner_reads_bootstrap_sql_as_the_deployment_user():
+    backend_root = Path(__file__).resolve().parents[1]
+    repository_root = backend_root.parent
+    runner = (repository_root / "deploy" / "run_douyin_color_migrations.sh").read_text(encoding="utf-8")
+
+    assert 'psql -v ON_ERROR_STOP=1 -d "$database_name" < "$repo_root/deploy/bootstrap_douyin_color_migrator.sql"' in runner
+    assert '-f "$repo_root/deploy/bootstrap_douyin_color_migrator.sql"' not in runner
+    assert 'migration_workspace=$(mktemp -d)' in runner
+    assert 'cp -a "$backend_root/alembic" "$migration_workspace/alembic"' in runner
+    assert 'cp -a "$backend_root/app" "$migration_workspace/app"' in runner
+    assert 'script_location = $migration_workspace/alembic' in runner
+    assert '-c "$migration_workspace/alembic.ini"' in runner
+    assert 'exec sudo -u postgres env' not in runner
+    assert 'chmod 755 "$migration_workspace"' in runner
+    assert 'sudo chown -R postgres:postgres "$migration_workspace/alembic" "$migration_workspace/app" "$migration_workspace/alembic.ini"' in runner
+    assert 'sudo rm -rf -- "$migration_workspace"' in runner
+
+
 def test_rbac_bootstrap_uses_the_frozen_v31_platform_permission_codes():
     backend_root = Path(__file__).resolve().parents[1]
     source = (backend_root / "scripts" / "bootstrap_douyin_color_permissions.py").read_text(encoding="utf-8")

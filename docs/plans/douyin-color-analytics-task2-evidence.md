@@ -1,6 +1,14 @@
 # 抖音颜色分析 v3.1 Task 2 证据与剩余门槛
 
-状态：PASSED。真实 PostgreSQL/ASGI 验收与最终独立复审均已通过；可进入 Task 3，仍不得部署或开启 A 阶段开关。
+状态：PASSED（已于 2026-07-31 重新验证）。可进入 Task 3，仍不得部署或开启 A 阶段开关。
+
+## 2026-07-31 重新验证（当前权威证据）
+
+- 复核发现旧 `huabang_ai_douyin_task2_test_20260730a` 至 `d` 虽标记 `3a2d7e951b2c`，但 `douyin` 表数为 0；它们不再作为迁移或集成验收证据。
+- 新建独立、仅结构克隆库 `huabang_ai_douyin_task2_test_20260731e`，从生产 `e951b2d0a6c4` 结构版本开始；未复制生产业务数据，未写生产 `huabang_ai`。
+- 修复 `deploy/run_douyin_color_migrations.sh` 的工作树可读性、配置路径和临时目录清理问题后，真实 runner 成功执行 `1fdf4577d7d8 -> 2d7c4a9e8b10 -> 3a2d7e951b2c`；数据库核对为 19 张 `douyin` 表和 24 个外键。
+- 在该新库上直接运行 `DOUYIN_TASK2_POSTGRES_ACCEPTANCE=1 pytest tests/integration/test_douyin_color_task2_postgres.py -q`：`1 passed, 1 warning`。覆盖并发同 part 幂等、同视频两分片快照去重、原子计数和过期 finalize 的已提交 409 状态。
+- runner 相关修复均先以 `test_douyin_migration_runner_reads_bootstrap_sql_as_the_deployment_user` 取得失败证据，再修复并通过；仅保留既有 Pydantic/pytest-asyncio 弃用警告。
 
 ## 2026-07-30 真实隔离验收
 
