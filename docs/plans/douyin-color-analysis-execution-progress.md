@@ -86,3 +86,39 @@ Task 5 范围扩大：
 1. 先做 v4.0 数据模型变更（models + migration），TDD
 2. 再做 Task 5 曲线归一化 + 单件指标 + 整套指标
 3. 生产迁移前必须备份 huabang_ai
+
+## 2026-07-31 Task 5 进度
+
+### v4.0 数据模型变更（commit 2a2a63c）
+- garment_styles 加 garment_position (outer/top/bottom/none)
+- video_color_metrics 加 garment_position（分榜筛选）
+- 新增 outfit_combinations 表（整套穿搭组合）
+- 新增 outfit_color_metrics 表（整套指标）
+- 新增 douyin_color_outfit_service.py（组合键、参与者派生、分榜映射）
+- Migration: 8a3f6b2c1d90（单 head，SET ROLE）
+- 测试：14 新增 + 66 回归 = 80 passed
+
+### Task 5 曲线归一化 + 指标计算（commit bf99c4a）
+- douyin_color_curve_service.py:
+  - detect_value_unit (ratio_0_1 / percent_0_100 / unknown)
+  - normalize_curve (0..1 归一化，拒绝 unknown 和 out_of_range)
+  - assess_curve_quality (ok/out_of_range/non_monotonic_time/duplicate_time/missing_fields/empty)
+  - compute_clip_average (等间隔算术平均，不等间隔梯形积分，边界插值，1秒分辨率检查)
+  - resolve_observation_window (t2/t7/t30/ad_hoc)
+  - resolve_position_segment (front/middle/rear)
+- douyin_color_metrics_service.py:
+  - select_retention_snapshot (analysis_type=1，最新合格)
+  - select_bounce_snapshot (analysis_type=7，独立选择)
+  - compute_annotation_set_hash (确定性，顺序无关)
+  - compute_metric_input_hash (含 retention/bounce/annotation/window/version)
+  - compute_video_color_metric (多片段时长加权聚合，bounce 保持 platform_bounce_curve_value)
+- 测试：26 curve + 17 metrics = 43 新增
+- 全量回归：123 passed
+- Alembic head: 8a3f6b2c1d90（单 head）
+
+### Task 5 仍需完成
+- outfit_color_metrics 计算函数（整套穿搭聚合指标）
+- 独立审查
+
+### Phase A 浏览器闭环
+仍被阻塞：需要用户手工创建 active 账号 + 签发 token + 配置油猴

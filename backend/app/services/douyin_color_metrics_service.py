@@ -16,6 +16,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from app.services.douyin_color_outfit_service import (
+    OutfitCompositionError,
+    build_combination_key,
+    derive_outfit_participants,
+)
 from app.services.douyin_color_curve_service import (
     CurveQualityError,
     compute_clip_average,
@@ -262,3 +267,51 @@ def compute_video_color_metric(
         "video_duration_ms": video_duration_ms,
         "calculated_at": datetime.now(timezone.utc),
     }
+
+def compute_outfit_metric(
+    *,
+    clips: list[dict],
+    retention_snapshot: dict | None,
+    bounce_snapshot: dict | None,
+    video_duration_ms: int,
+    observation_window: str,
+    metric_version: str,
+    bounce_semantics_status: str,
+) -> dict | None:
+    """Compute outfit-level metric from >=2 qualifying garments.
+
+    Returns None if fewer than 2 qualifying garments exist.
+    Aggregation is duration-weighted across all qualifying clips (cross-garment).
+    """
+
+    participants = derive_outfit_participants(clips)
+    if len(participants) < 2:
+        return None
+
+    try:
+        combination_key = build_combination_key(participants)
+    except OutfitCompositionError:
+        return None
+
+    # Reuse the single-garment metric computation but override key fields
+    base_metric = compute_video_color_metric(
+        clips=clips,
+        retention_snapshot=retention_snapshot,
+        bounce_snapshot=bounce_snapshot,
+        video_duration_ms=video_duration_ms,
+        observation_window=observation_window,
+        metric_version=metric_version,
+        bounce_semantics_status=bounce_semantics_status,
+    )
+
+    # Override fields for outfit-level metric
+    base_metric["combination_key"] = combination_key
+    base_metric["participant_count"] = len(participants)
+    # Remove single-garment specific fields not in outfit_color_metrics
+    base_metric.pop("style_id", None)
+    base_metric.pop("color_id", None)
+    base_metric.pop("video_id", None)
+    base_metric.pop("garment_position", None)
+    base_metric.pop("dominant_position_segment", None)
+
+    return base_metric
