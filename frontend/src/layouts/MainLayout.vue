@@ -166,6 +166,7 @@ import { useAuthStore } from "@/stores/auth";
 import { authApi } from "@/api/auth";
 import BossAiFloatingAssistant from "@/components/ai/BossAiFloatingAssistant.vue";
 import { financeProfitNavigation } from "@/config/financeCenterModules";
+import { mumarenFinanceCenterMenuItem } from "@/config/mumarenFinanceCenter";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   ArrowRight,
@@ -333,7 +334,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
   {
     label: "财务利润",
     icon: Money,
-    items: financeProfitNavigation,
+    items: [mumarenFinanceCenterMenuItem, ...financeProfitNavigation],
   },
   {
     label: "人力资源",

@@ -171,3 +171,29 @@ from app.models.douyin_color_analytics import (
     VideoClip,
     VideoColorMetric,
 )
+from app.models.mumaren_finance_center import (
+    FinanceCenterMumarenAccount,
+    FinanceCenterMumarenAuditLog,
+    FinanceCenterMumarenBook,
+    FinanceCenterMumarenFiscalPeriod,
+    FinanceCenterMumarenHistoryImportBatch,
+    FinanceCenterMumarenHistoryVoucher,
+    FinanceCenterMumarenHistoryVoucherLine,
+    FinanceCenterMumarenVoucher,
+    FinanceCenterMumarenVoucherLine,
+)
+from app.models.mumaren_finance_center_domains import (
+    FinanceCenterMumarenArApSettlement,
+    FinanceCenterMumarenCashAccount,
+    FinanceCenterMumarenCashFlow,
+    FinanceCenterMumarenCounterparty,
+    FinanceCenterMumarenFixedAsset,
+    FinanceCenterMumarenInvoice,
+    FinanceCenterMumarenPayableOrder,
+    FinanceCenterMumarenPayableOrderLine,
+    FinanceCenterMumarenPayroll,
+    FinanceCenterMumarenReceivableOrder,
+    FinanceCenterMumarenReceivableOrderLine,
+    FinanceCenterMumarenTaxRecord,
+    FinanceCenterMumarenTaxType,
+)
