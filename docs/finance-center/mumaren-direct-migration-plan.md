@@ -13,6 +13,13 @@
 
 ## 映射
 
+> **源模块核验结论（2026-07-31）：** `mumaren_finance_module` 提供的是财务
+> API 结构、领域规则和宿主注入协议，并不包含可独立运行的 ORM、Alembic、前端、
+> 月报服务实现或测试。不得直接加载其 `plugin.py` / `compat.py`；后者会劫持
+> Python 的 `app.*` 模块缓存。华邦接入以源 API 的领域语义为准，在本模块独立
+> schema 内实现真实模型、迁移和服务。`sales_monthly_report.py` 所需的 schemas/
+> service 未随源模块交付，是后续完整月报的外部依赖，不能伪称已移植。
+
 | 牧马人来源 | 华邦目标 | 处理 |
 | --- | --- | --- |
 | `finance_module/api/books.py` | `backend/app/api/v1/mumaren_finance_center.py`、`backend/app/services/mumaren_finance_center/` | 直接移植账套、科目、辅助核算领域语义，改为独立模型与华邦认证 |
