@@ -15,6 +15,14 @@ function unwrapDouyinColorAnalytics<T>(response: Promise<{ data: ApiResponse<T> 
 export type DouyinFocusStatus = "clear_primary" | "multi_focus" | "unclear";
 export type DouyinAnnotationStatus = "draft" | "submitted" | "approved" | "rejected" | "deleted";
 
+export type GarmentPosition = "outer" | "top" | "bottom" | "none";
+
+export interface OutfitPart {
+  position: GarmentPosition;
+  style_id: number;
+  sku_code: string | null;
+}
+
 export interface DouyinAnnotationContext {
   account: {
     id: number;
@@ -64,8 +72,7 @@ export interface DouyinGarmentColor {
 export interface DouyinVideoClip {
   id: number;
   video_id: number;
-  style_id: number | null;
-  color_id: number | null;
+  outfit_parts_json: OutfitPart[];
   start_ms: number;
   end_ms: number;
   input_start_ms: number;
@@ -94,8 +101,7 @@ export interface DouyinVideoClipInput {
   input_end_ms: number;
   curve_resolution_ms: number;
   focus_status: DouyinFocusStatus;
-  style_id?: number | null;
-  color_id?: number | null;
+  outfit_parts_json?: OutfitPart[];
   focus_note?: string | null;
 }
 
@@ -187,5 +193,116 @@ export const douyinColorAnalyticsApi = {
   updateColor(styleId: number, colorId: number, payload: Partial<DouyinColorInput> & Pick<DouyinColorInput, "account_id">) {
     const { account_id, ...body } = payload;
     return unwrapDouyinColorAnalytics(request.patch<DouyinGarmentColor>(basePath + "/styles/" + styleId + "/colors/" + colorId, body, { params: { account_id } }));
+  },
+};
+
+// ====== Task 18: 颜色留存报告 API ======
+export type DouyinColorReportTab = "outfit" | "top" | "bottom";
+export type DouyinColorExportFormat = "csv" | "xlsx";
+
+export interface DouyinColorRankingParams {
+  observation_window: string;
+  position_segment: string;
+}
+
+export interface DouyinColorRankingRow {
+  combination_key: string;
+  avg_retention: number | null;
+  avg_rank: number | null;
+  stability_rank: number | null;
+  sample_count: number;
+  position_segment: string;
+  observation_window: string;
+  sku_color_code: string | null;
+  sku_color_name: string | null;
+}
+
+export interface DouyinColorRankingResult {
+  items: DouyinColorRankingRow[];
+  total?: number;
+}
+
+export interface DouyinColorExportResult {
+  download_url: string | null;
+  format: DouyinColorExportFormat;
+  tab: DouyinColorReportTab;
+}
+
+export const douyinColorReportApi = {
+  getOutfitRankings(accountId: number, params: DouyinColorRankingParams) {
+    return unwrapDouyinColorAnalytics(request.get<DouyinColorRankingResult>(`${basePath}/accounts/${accountId}/report/outfit`, { params }));
+  },
+  getTopRankings(accountId: number, params: DouyinColorRankingParams) {
+    return unwrapDouyinColorAnalytics(request.get<DouyinColorRankingResult>(`${basePath}/accounts/${accountId}/report/top`, { params }));
+  },
+  getBottomRankings(accountId: number, params: DouyinColorRankingParams) {
+    return unwrapDouyinColorAnalytics(request.get<DouyinColorRankingResult>(`${basePath}/accounts/${accountId}/report/bottom`, { params }));
+  },
+  exportReport(accountId: number, params: { format: DouyinColorExportFormat; tab: DouyinColorReportTab }) {
+    return unwrapDouyinColorAnalytics(request.post<DouyinColorExportResult>(`${basePath}/accounts/${accountId}/report/export`, params));
+  },
+};
+
+// ====== Task 19: 健康与发布阶段管理 API ======
+export type DouyinColorReleaseStage = "A" | "B" | "C" | "D";
+
+export interface DouyinColorCollectorStatus {
+  current_status: string;
+  queued_batch_count: number;
+  queued_bytes: number;
+  last_heartbeat_at: string | null;
+}
+
+export interface DouyinColorQueueCapacity {
+  calculation_job_queued: number;
+  calculation_job_capacity: number;
+}
+
+export interface DouyinColorFeatureFlags {
+  current_stage: DouyinColorReleaseStage;
+  bounce_report_enabled: boolean;
+  bounce_semantics_status: string;
+}
+
+export interface DouyinColorHealth {
+  collector_status: DouyinColorCollectorStatus;
+  queue_capacity: DouyinColorQueueCapacity;
+  feature_flags: DouyinColorFeatureFlags;
+}
+
+export interface DouyinColorActiveToken {
+  token_prefix: string;
+  expires_at: string | null;
+  is_active: boolean;
+}
+
+export interface DouyinColorTokenRotateResult {
+  upload_token: string;
+  token_prefix: string;
+  expires_at: string;
+}
+
+export interface DouyinColorReleaseStageInfo {
+  current_stage: DouyinColorReleaseStage;
+  bounce_report_enabled: boolean;
+  bounce_semantics_status: string;
+  active_token: DouyinColorActiveToken | null;
+}
+
+export const douyinColorAdminApi = {
+  getHealth() {
+    return unwrapDouyinColorAnalytics(request.get<DouyinColorHealth>(`${basePath}/health`));
+  },
+  rotateToken(accountId: number) {
+    return unwrapDouyinColorAnalytics(request.post<DouyinColorTokenRotateResult>(`${basePath}/accounts/${accountId}/upload-tokens/rotate`, {}));
+  },
+  getReleaseStage(accountId: number) {
+    return unwrapDouyinColorAnalytics(request.get<DouyinColorReleaseStageInfo>(`${basePath}/accounts/${accountId}/release-stage`));
+  },
+  advanceStage(accountId: number, target_stage: string) {
+    return unwrapDouyinColorAnalytics(request.post<DouyinColorReleaseStageInfo>(`${basePath}/accounts/${accountId}/release-stage/advance`, { target_stage }));
+  },
+  toggleBounceReport(accountId: number, enabled: boolean) {
+    return unwrapDouyinColorAnalytics(request.post<DouyinColorReleaseStageInfo>(`${basePath}/accounts/${accountId}/release-stage/bounce-report`, { enabled }));
   },
 };

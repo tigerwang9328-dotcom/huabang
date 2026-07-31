@@ -34,6 +34,8 @@ const routes = [
       { path: "douyin-color-analytics/videos", name: "DouyinColorVideoList", component: () => import("@/views/douyinColorAnalytics/VideoList.vue"), meta: { title: "抖音颜色标注" } },
       { path: "douyin-color-analytics/videos/:videoId/annotate", name: "DouyinColorAnnotation", component: () => import("@/views/douyinColorAnalytics/Annotate.vue"), meta: { title: "视频片段标注" } },
       { path: "douyin-color-analytics/styles", name: "DouyinColorStyles", component: () => import("@/views/douyinColorAnalytics/Styles.vue"), meta: { title: "款号与颜色" } },
+      { path: "douyin-color-analytics/report", name: "DouyinColorReport", component: () => import("@/views/douyinColorAnalytics/Report.vue"), meta: { title: "颜色留存报告" } },
+      { path: "douyin-color-analytics/admin", name: "DouyinColorAdmin", component: () => import("@/views/douyinColorAnalytics/Admin.vue"), meta: { title: "管理与健康" } },
       { path: "report", name: "BusinessReport", component: () => import("@/views/report/Index.vue"), meta: { title: "经营日报" } },
       { path: "boss", name: "Boss", component: () => import("@/views/boss/Index.vue"), meta: { title: "经营日报" } },
       { path: "ai-diagnosis", name: "AiDiagnosis", redirect: "/app/ai-diagnosis/overview", meta: { title: "AI经营诊断" } },
