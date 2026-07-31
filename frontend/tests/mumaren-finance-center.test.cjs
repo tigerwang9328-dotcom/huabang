@@ -116,4 +116,8 @@ test('税务页面必须先选择独立账簿，无账簿时不请求后端并�
   assert.match(tax, /listTaxRecords\(\s*\{\s*book_id:\s*bookId/)
   // 不允许在未选账簿时 onMounted 直接调用税务接口
   assert.doesNotMatch(tax, /onMounted\(load\)/)
+  // onMounted 内不允许自动选择第一个账簿(用户必须主动选择)
+  assert.doesNotMatch(tax, /books\.value\[0\]\?\.id/)
+  // onMounted 回调内不允许调用 load()(只能在用户主动点击查询时触发)
+  assert.doesNotMatch(tax, /onMounted\(async\s*\(\)\s*=>\s*\{[\s\S]*?await\s+load\(\)/)
 })

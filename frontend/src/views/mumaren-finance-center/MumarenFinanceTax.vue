@@ -76,10 +76,10 @@ const load = async () => {
 };
 
 onMounted(async () => {
+  // 仅加载账簿列表,不自动选择账簿,不自动请求税务接口。
+  // 用户必须主动选择独立账簿后才能查询税务台账。
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
-    if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
   }
