@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.douyin_color_analytics import (
     CollectionBatch,
@@ -62,9 +63,28 @@ from app.services.operation_audit_service import write_operation_audit
 
 
 router = APIRouter(prefix="/douyin-color-analytics", tags=["抖音颜色分析"])
-_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 _MAX_COMPRESSED_UPLOAD_BYTES = 1 * 1024 * 1024
 _MINIMUM_SCRIPT_VERSION = "3.1.0"
+
+
+def collector_config_payload(*, account_key: str) -> dict[str, object]:
+    """Return the versioned, non-sensitive collector control-plane contract."""
+    return {
+        "account_key": account_key,
+        "schema_version": 1,
+        "supported_schema_versions": [1],
+        "minimum_script_version": _MINIMUM_SCRIPT_VERSION,
+        "recommended_script_version": _MINIMUM_SCRIPT_VERSION,
+        "collection_enabled": settings.DOUYIN_COLOR_COLLECTION_ENABLED,
+        "max_part_records": 50,
+        "max_part_uncompressed_bytes": _MAX_UPLOAD_BYTES,
+        "max_local_batches": 100,
+        "max_local_bytes": 500 * 1024 * 1024,
+        "global_start_interval_ms": 1000,
+        "max_in_flight_requests": 2,
+        "batch_expiry_hours": 24,
+    }
 
 
 class CreatorAccountCreateRequest(BaseModel):
@@ -225,13 +245,7 @@ async def _materialize_record(
 
 @router.get("/collector-config", response_model=ApiResponse)
 async def collector_config(account: DouyinCreatorAccount = Depends(_collector_account)):
-    return ApiResponse.ok({
-        "account_key": account.account_key,
-        "schema_version": 1,
-        "minimum_script_version": _MINIMUM_SCRIPT_VERSION,
-        "max_part_uncompressed_bytes": _MAX_UPLOAD_BYTES,
-        "batch_expiry_hours": 24,
-    })
+    return ApiResponse.ok(collector_config_payload(account_key=account.account_key))
 
 
 @router.post("/collector-heartbeats", response_model=ApiResponse)

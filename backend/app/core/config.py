@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     APP_DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:3000"
 
+    # 抖音颜色分析：仅在受控上线阶段显式开启采集控制面。
+    DOUYIN_COLOR_COLLECTION_ENABLED: bool = False
+
     # 数据库
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432

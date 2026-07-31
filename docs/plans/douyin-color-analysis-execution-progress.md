@@ -2,7 +2,7 @@
 
 ## 运行边界
 
-- 实现工作树：`/home/xiaohu/worktrees/huabang-douyin-color-v31`
+- 实现工作树：`/home/xiaohu/worktrees/huabang-douyin-color-v31-rebased`（以生产提交 `5257d40` 为基底；已补入完整 Task 0 证据链与 Task 1/2 提交）
 - 生产运行目录：`/srv/huabang-ai-center`（只读预检；发布阶段另行记录）
 - 规格：`docs/plans/douyin-color-analysis-direct-launch-plan-v3.1.md`
 - 状态：进行中
@@ -15,8 +15,8 @@
 ## 后续任务
 
 - Task 1：PASSED（提交 `3d73805`、`21ea490`；模型、复合外键、迁移、统一审计写入服务与 PostgreSQL 持久任务基础已在隔离分支完成并经独立审查。）
-- Task 2：PASSED。生产 schema 版本副本 `e951b2d0a6c4` 经 Douyin migration 与显式 merge 到 `3a2d7e951b2c`；聚焦回归 `45 passed, 1 warning`。真实 PostgreSQL/ASGI 验收和最终独立复审均已通过，无未解决 Critical、High、Medium 或 Low 问题；可进入 Task 3，未部署且阶段 A 未开启。
-- Task 3：未开始
+- Task 2：PASSED（2026-07-31 重新验证）。旧四个标记为 `3a2d7e951b2c` 的临时库被复核为 `douyin` 表数 0，已失效且不再用作证据。新的仅结构克隆库 `huabang_ai_douyin_task2_test_20260731e` 从生产 `e951b2d0a6c4` 开始，经修复后的专用 runner 真实升级至 `3a2d7e951b2c`，核对为 19 张 Douyin 表、24 个外键；真实 PostgreSQL/ASGI 验收 `1 passed, 1 warning`。runner 的工作树文件可读性、配置路径与临时目录清理均以失败测试后修复；本模块聚焦回归当前为 53 passed、Alembic 单一 head `3a2d7e951b2c`。未部署且阶段 A 未开启。
+- Task 3：进行中。隔离工作树已新增油猴采集器、字段白名单、全局调度器、可恢复本地队列、分片协议及安装说明；Node 聚焦测试 `12 passed, 0 failed`，脚本语法检查通过，包含两个 worker 同时竞争同一全局启动窗口、认证失败停止和目录响应创作者 ID 的仅内存账号核验。采集器 v3.1.12 已在真实登录 Chrome 中安装并启用（旧 3.1.0 已禁用）；页面上下文通过 `unsafeWindow` 观察请求，页面内存观察计数在切到“流量分析”后由 0 变为 1，证明已收到实际曲线请求。清空先前的临时标签后，在作品页挂载事件探针，切至由本任务创建的空白页并返回，记录到 `hidden` 与 `visible`（各两次，浏览器事件与脚本绑定路径均可达）；临时空白页随后关闭。该证据验证了真实后台/返回前台事件，但当前没有配置上传令牌，不能验证后台期间的上传暂停及恢复。`collector-config` 已补齐并经后端聚焦回归验证 5 MiB 解压上限、最大 50 条分片、100 批/500 MiB 本地队列、1000ms 全局启动间隔、最多 2 个在途、schema/script 兼容字段；服务端采集开关现在由 `DOUYIN_COLOR_COLLECTION_ENABLED` 控制且默认关闭，只有后续 A→D 阶段显式设置为 true 才允许脚本采集。当前重放基线：Node `12 passed`、后端 `51 passed`、Alembic 单一 head `3a2d7e951b2c`。2026-07-31 对正式 API origin 的匿名只读 `GET /collector-config` 返回 HTTP 404，故接收 API 尚未部署到该环境；没有接收端时不能做真实上传、401/403、缺片或容量恢复验收。未配置上传令牌、未对生产 API 上传或开启阶段 A。仍缺系统休眠、断网、401/403、账号切换、Chrome 重启、缺片恢复与 80% 容量保护验收，以及独立采集可靠性审查批准和单独提交。
 - Task 4：未开始
 - Task 5：未开始
 - Task 6：未开始

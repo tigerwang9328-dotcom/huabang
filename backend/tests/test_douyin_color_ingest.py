@@ -270,3 +270,46 @@ def test_v1_router_registers_the_douyin_collector_router():
     from app.api.v1.router import api_router
 
     assert any(route.path == "/api/v1/douyin-color-analytics/collector-config" for route in api_router.routes)
+
+
+def test_collector_config_exposes_the_frozen_v31_capacity_and_version_contract(monkeypatch):
+    from types import SimpleNamespace
+    from app.api.v1 import douyin_color_analytics
+
+    monkeypatch.setattr(
+        douyin_color_analytics,
+        "settings",
+        SimpleNamespace(DOUYIN_COLOR_COLLECTION_ENABLED=True),
+        raising=False,
+    )
+    payload = douyin_color_analytics.collector_config_payload(account_key="account-a")
+
+    assert payload == {
+        "account_key": "account-a",
+        "schema_version": 1,
+        "supported_schema_versions": [1],
+        "minimum_script_version": "3.1.0",
+        "recommended_script_version": "3.1.0",
+        "collection_enabled": True,
+        "max_part_records": 50,
+        "max_part_uncompressed_bytes": 5 * 1024 * 1024,
+        "max_local_batches": 100,
+        "max_local_bytes": 500 * 1024 * 1024,
+        "global_start_interval_ms": 1000,
+        "max_in_flight_requests": 2,
+        "batch_expiry_hours": 24,
+    }
+
+
+def test_collector_config_defaults_to_disabled_until_the_stage_gate_is_enabled(monkeypatch):
+    from types import SimpleNamespace
+    from app.api.v1 import douyin_color_analytics
+
+    monkeypatch.setattr(
+        douyin_color_analytics,
+        "settings",
+        SimpleNamespace(DOUYIN_COLOR_COLLECTION_ENABLED=False),
+        raising=False,
+    )
+
+    assert douyin_color_analytics.collector_config_payload(account_key="account-a")["collection_enabled"] is False
