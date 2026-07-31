@@ -4,7 +4,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 _MACHINE_IDENTIFIER = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -141,3 +141,94 @@ class CollectorEventRequest(BaseModel):
     business_status_code: int | None = None
     retry_count: int | None = Field(default=None, ge=0, le=5)
     message: str | None = Field(default=None, max_length=500)
+class GarmentStyleCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: int = Field(gt=0)
+    style_code: str = Field(min_length=1, max_length=64)
+    style_name: str = Field(min_length=1, max_length=255)
+    main_image: str | None = Field(default=None, max_length=512)
+    status: str = Field(default="active", pattern="^(active|inactive)$")
+
+
+class GarmentStyleUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style_code: str | None = Field(default=None, min_length=1, max_length=64)
+    style_name: str | None = Field(default=None, min_length=1, max_length=255)
+    main_image: str | None = Field(default=None, max_length=512)
+    status: str | None = Field(default=None, pattern="^(active|inactive)$")
+
+
+class GarmentColorCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: int = Field(gt=0)
+    color_code: str = Field(min_length=1, max_length=64)
+    color_name: str = Field(min_length=1, max_length=128)
+    color_image: str | None = Field(default=None, max_length=512)
+    status: str = Field(default="active", pattern="^(active|inactive)$")
+
+
+class GarmentColorUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    color_code: str | None = Field(default=None, min_length=1, max_length=64)
+    color_name: str | None = Field(default=None, min_length=1, max_length=128)
+    color_image: str | None = Field(default=None, max_length=512)
+    status: str | None = Field(default=None, pattern="^(active|inactive)$")
+
+
+class GarmentSkuCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: int = Field(gt=0)
+    color_id: int = Field(gt=0)
+    sku_code: str = Field(min_length=1, max_length=128)
+    size_name: str | None = Field(default=None, max_length=64)
+    status: str = Field(default="active", pattern="^(active|inactive)$")
+
+
+class GarmentSkuUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    color_id: int | None = Field(default=None, gt=0)
+    sku_code: str | None = Field(default=None, min_length=1, max_length=128)
+    size_name: str | None = Field(default=None, max_length=64)
+    status: str | None = Field(default=None, pattern="^(active|inactive)$")
+
+
+class VideoClipCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: int = Field(gt=0)
+    video_id: int = Field(gt=0)
+    input_start_ms: int = Field(ge=0)
+    input_end_ms: int = Field(gt=0)
+    curve_resolution_ms: int = Field(gt=0)
+    focus_status: FocusStatus
+    style_id: int | None = Field(default=None, gt=0)
+    color_id: int | None = Field(default=None, gt=0)
+    focus_note: str | None = Field(default=None, max_length=1000)
+    overlap_reason: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_single_primary_garment(self):
+        if self.input_end_ms <= self.input_start_ms:
+            raise ValueError("clip_bounds_invalid")
+        if self.focus_status is FocusStatus.clear_primary:
+            if self.style_id is None or self.color_id is None:
+                raise ValueError("clear_primary_requires_style_and_color")
+        elif self.style_id is not None or self.color_id is not None:
+            raise ValueError("non_primary_forbids_style_and_color")
+        return self
+
+
+class VideoClipUpdateRequest(VideoClipCreateRequest):
+    expected_version: int = Field(ge=1)
+
+
+class AnnotationActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)

@@ -499,7 +499,7 @@ async def get_collection_batch(
 async def list_video_analysis_snapshots(
     video_id_string: str,
     account_id: int,
-    _: SysUser = Depends(require_permission("douyin.report.view")),
+    _: SysUser = Depends(require_permission("douyin.annotation.edit")),
     db: AsyncSession = Depends(get_db),
 ):
     video = (await db.execute(select(Video).where(
@@ -648,3 +648,6 @@ async def create_expected_schedule(
                     "timezone": schedule.timezone, "enabled": schedule.enabled}, request=request,
     )
     return ApiResponse.ok({"id": schedule.id, "account_id": schedule.account_id})
+
+from app.api.v1.douyin_color_annotation_routes import annotation_router
+router.include_router(annotation_router)
