@@ -103,6 +103,31 @@ def require_permission(permission_code: str):
     return check_permission
 
 
+def require_any_permission(*permission_codes: str):
+    """创建权限校验依赖（满足任一权限即可）"""
+    async def check_permission(
+        current_user: SysUser = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> SysUser:
+        if current_user.is_admin:
+            return current_user
+        result = await db.execute(
+            select(SysPermission.id)
+            .join(SysRolePermission, SysRolePermission.permission_id == SysPermission.id)
+            .join(SysRole, SysRole.id == SysRolePermission.role_id)
+            .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+            .where(
+                SysUserRole.user_id == current_user.id,
+                SysPermission.code.in_(permission_codes),
+                SysRole.status == 1,
+            )
+        )
+        if not result.first():
+            raise PermissionDeniedException(f"无权限: {', '.join(permission_codes)}")
+        return current_user
+    return check_permission
+
+
 def require_roles(*role_codes: str):
     """要求拥有指定角色之一"""
     async def check_role(

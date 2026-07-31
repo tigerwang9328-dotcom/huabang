@@ -285,6 +285,8 @@ class VideoCatalogSnapshot(DouyinColorModel):
 class GarmentStyle(DouyinColorModel):
     __tablename__ = "garment_styles"
     __table_args__ = (
+        CheckConstraint("status IN ('active','disabled')", name="ck_douyin_style_status"),
+        CheckConstraint("garment_position IN ('outer','top','bottom','none')", name="ck_douyin_style_garment_position"),
         UniqueConstraint("account_id", "id", name="uq_douyin_style_account_id"),
         UniqueConstraint("account_id", "style_code", name="uq_douyin_style_code"),
         ForeignKeyConstraint(["account_id"], ["douyin.douyin_creator_accounts.id"], name="fk_douyin_style_account", ondelete="RESTRICT"),
@@ -296,6 +298,7 @@ class GarmentStyle(DouyinColorModel):
     style_name = Column(String(255), nullable=False)
     main_image = Column(String(512))
     status = Column(String(16), nullable=False, default="active")
+    garment_position = Column(String(16), nullable=False, default="none")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -344,7 +347,7 @@ class VideoClip(DouyinColorModel):
         CheckConstraint("input_start_ms >= 0 AND input_end_ms > input_start_ms", name="ck_douyin_clip_input_bounds"),
         CheckConstraint("curve_resolution_ms > 0", name="ck_douyin_clip_resolution"),
         CheckConstraint("version >= 1", name="ck_douyin_clip_version"),
-        CheckConstraint("(focus_status = 'clear_primary' AND style_id IS NOT NULL AND color_id IS NOT NULL) OR (focus_status IN ('multi_focus','unclear') AND style_id IS NULL AND color_id IS NULL)", name="ck_douyin_clip_focus_assignment"),
+        CheckConstraint("(focus_status = 'clear_primary' AND jsonb_array_length(outfit_parts_json) >= 2) OR (focus_status IN ('multi_focus','unclear') AND jsonb_array_length(outfit_parts_json) = 0)", name="ck_douyin_clip_outfit_composition"),
         CheckConstraint("focus_status IN ('clear_primary','multi_focus','unclear')", name="ck_douyin_clip_focus_status"),
         CheckConstraint("annotation_status IN ('draft','submitted','approved','rejected','deleted')", name="ck_douyin_clip_annotation_status"),
         UniqueConstraint("account_id", "id", name="uq_douyin_clip_account_id"),
@@ -363,6 +366,7 @@ class VideoClip(DouyinColorModel):
     input_end_ms = Column(BigInteger, nullable=False)
     curve_resolution_ms = Column(Integer, nullable=False)
     focus_status = Column(String(32), nullable=False)
+    outfit_parts_json = Column(JSON, nullable=False, default=list)
     focus_note = Column(Text)
     annotation_status = Column(String(16), nullable=False, default="draft")
     overlap_reason = Column(Text)
@@ -427,6 +431,8 @@ class VideoColorMetric(DouyinColorModel):
     annotation_set_hash = Column(String(64), nullable=False)
     metric_input_hash = Column(String(64), nullable=False)
     metric_version = Column(String(32), nullable=False)
+    garment_position = Column(String(16), nullable=False, default="none")
+    sku_code = Column(String(64))
     average_retention = Column(Numeric(12, 8))
     retention_drop = Column(Numeric(12, 8))
     average_platform_bounce_curve_value = Column(Numeric(12, 8))
@@ -524,3 +530,97 @@ class ColorPerformanceSnapshot(DouyinColorModel):
 
 Index("uq_color_report_current", ColorPerformanceSnapshot.account_id, ColorPerformanceSnapshot.style_id, ColorPerformanceSnapshot.color_id, ColorPerformanceSnapshot.as_of_date, ColorPerformanceSnapshot.observation_window, ColorPerformanceSnapshot.position_segment, ColorPerformanceSnapshot.metric_version, unique=True, postgresql_where=text("is_current = TRUE"))
 Index("uq_color_report_revision", ColorPerformanceSnapshot.account_id, ColorPerformanceSnapshot.style_id, ColorPerformanceSnapshot.color_id, ColorPerformanceSnapshot.as_of_date, ColorPerformanceSnapshot.observation_window, ColorPerformanceSnapshot.position_segment, ColorPerformanceSnapshot.metric_version, ColorPerformanceSnapshot.report_revision, unique=True)
+
+class OutfitCombination(DouyinColorModel):
+    """v4.0: one video's qualifying garment combination for outfit ranking."""
+
+    __tablename__ = "outfit_combinations"
+    __table_args__ = (
+        CheckConstraint("observation_window IN ('t2','t7','t30','ad_hoc')", name="ck_douyin_outfit_observation_window"),
+        CheckConstraint("participant_count >= 2", name="ck_douyin_outfit_participant_count"),
+        UniqueConstraint("account_id", "id", name="uq_douyin_outfit_account_id"),
+        UniqueConstraint("account_id", "video_id", "observation_window", "combination_key", name="uq_douyin_outfit_combination"),
+        ForeignKeyConstraint(["account_id", "video_id"], ["douyin.videos.account_id", "douyin.videos.id"], name="fk_douyin_outfit_account_video", ondelete="CASCADE"),
+        ForeignKeyConstraint(["account_id", "retention_snapshot_id"], ["douyin.video_analysis_snapshots.account_id", "douyin.video_analysis_snapshots.id"], name="fk_douyin_outfit_retention_snapshot", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["account_id", "bounce_snapshot_id"], ["douyin.video_analysis_snapshots.account_id", "douyin.video_analysis_snapshots.id"], name="fk_douyin_outfit_bounce_snapshot", ondelete="RESTRICT"),
+        {"schema": "douyin"},
+    )
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    account_id = Column(BigInteger, nullable=False)
+    video_id = Column(BigInteger, nullable=False)
+    observation_window = Column(String(16), nullable=False)
+    combination_key = Column(String(512), nullable=False)
+    participant_count = Column(Integer, nullable=False)
+    annotation_set_hash = Column(String(64), nullable=False)
+    retention_snapshot_id = Column(BigInteger, nullable=False)
+    bounce_snapshot_id = Column(BigInteger)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OutfitColorMetric(DouyinColorModel):
+    """v4.0: aggregated metrics for an outfit combination (>=2 garments)."""
+
+    __tablename__ = "outfit_color_metrics"
+    __table_args__ = (
+        CheckConstraint("observation_window IN ('t2','t7','t30','ad_hoc')", name="ck_douyin_outfit_metric_observation_window"),
+        CheckConstraint("retention_calculation_status IN ('pending','computed','insufficient_data','stale','failed')", name="ck_douyin_outfit_metric_retention_status"),
+        CheckConstraint("bounce_calculation_status IN ('pending','computed','insufficient_data','stale','failed')", name="ck_douyin_outfit_metric_bounce_status"),
+        UniqueConstraint("account_id", "id", name="uq_douyin_outfit_metric_account_id"),
+        UniqueConstraint("account_id", "combination_key", "observation_window", "metric_version", "metric_input_hash", name="uq_douyin_outfit_color_metric"),
+        ForeignKeyConstraint(["account_id"], ["douyin.douyin_creator_accounts.id"], name="fk_douyin_outfit_metric_account", ondelete="CASCADE"),
+        {"schema": "douyin"},
+    )
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    account_id = Column(BigInteger, nullable=False)
+    combination_key = Column(String(512), nullable=False)
+    observation_window = Column(String(16), nullable=False)
+    metric_version = Column(String(32), nullable=False)
+    metric_input_hash = Column(String(64), nullable=False)
+    average_retention = Column(Numeric(12, 8))
+    retention_drop = Column(Numeric(12, 8))
+    average_platform_bounce_curve_value = Column(Numeric(12, 8))
+    max_platform_bounce_curve_value = Column(Numeric(12, 8))
+    participant_count = Column(Integer, nullable=False)
+    total_clip_duration_ms = Column(BigInteger, nullable=False)
+    video_duration_ms = Column(BigInteger, nullable=False)
+    dominant_position_segment = Column(String(16))
+    retention_calculation_status = Column(String(32), nullable=False, default="pending")
+    bounce_calculation_status = Column(String(32), nullable=False, default="pending")
+    calculated_at = Column(DateTime(timezone=True))
+
+
+
+class ReleaseStageConfiguration(DouyinColorModel):
+    """Per-account A/B/C/D release stage switch for v3.1 staged rollout.
+
+    Each account gets its own row so the four-phase rollout (A: collectors +
+    base storage, B: annotation + metrics, C: reports + ranking, D: full
+    release including ``bounce_report_enabled``) can proceed independently.
+    Stage transitions only move forward; the ``bounce_report_enabled`` flag is
+    gated by ``bounce_semantics_status`` via ``ck_release_stage_bounce_gating``.
+    """
+
+    __tablename__ = "release_stage_configurations"
+    __table_args__ = (
+        CheckConstraint(
+            "current_stage IN ('A','B','C','D')",
+            name="ck_release_stage_current",
+        ),
+        CheckConstraint(
+            "bounce_report_enabled = false OR bounce_semantics_status IN ('verified_lower_is_better','verified_higher_is_better')",
+            name="ck_release_stage_bounce_gating",
+        ),
+        {"schema": "douyin"},
+    )
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    account_id = Column(BigInteger, nullable=False)
+    current_stage = Column(String(1), nullable=False, default="A")
+    bounce_report_enabled = Column(Boolean, nullable=False, default=False)
+    bounce_semantics_status = Column(String(32), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

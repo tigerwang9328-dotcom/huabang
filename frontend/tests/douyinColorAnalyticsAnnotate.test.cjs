@@ -40,22 +40,25 @@ test("annotation API keeps ids as strings and exposes video, clip, style, and re
   }
 });
 
-test("annotation editor supports one primary garment or an explicit non-ranking focus outcome", () => {
+test("annotation editor supports full outfit annotation or an explicit non-ranking focus outcome", () => {
   const editor = read("src/views/douyinColorAnalytics/Annotate.vue");
 
   for (const token of [
     "clear_primary",
     "multi_focus",
     "unclear",
-    "selectedStyleId",
-    "selectedColorId",
-    "clearNonPrimaryGarment",
+    "outfitParts",
+    "clearNonPrimaryOutfit",
     "focus_status === \"clear_primary\"",
     "focus_status !== \"clear_primary\"",
+    "GarmentPosition",
+    "outfit_parts_json",
   ]) {
     assert.ok(editor.includes(token), `missing focus safeguard: ${token}`);
   }
-  assert.ok(!editor.includes("multiple"), "the primary garment selector must not allow multi-select");
+  assert.ok(editor.includes("至少 2 件"), "clear_primary must require at least 2 garments");
+  assert.ok(editor.includes("addPart"), "editor must allow adding outfit parts");
+  assert.ok(editor.includes("removePart"), "editor must allow removing outfit parts");
 });
 
 test("annotation editor exposes safe preview, whole-second clip maintenance, validation errors, and audit-facing state", () => {
