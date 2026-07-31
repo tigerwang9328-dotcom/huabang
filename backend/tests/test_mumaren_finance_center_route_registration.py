@@ -40,6 +40,19 @@ def test_api_root_registers_independent_ar_ap_and_tax_routes():
     assert "/api/v1/finance-center/mumaren/tax/alerts" in paths
 
 
+def test_api_root_registers_ar_ap_and_tax_write_endpoints():
+    """AR/AP 与税务的独立写入端点必须注册,且不自动过账凭证。"""
+    from app.api.v1.router import api_router
+
+    paths = {route.path for route in api_router.routes}
+    assert "/api/v1/finance-center/mumaren/ar-ap/orders" in paths
+    assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}/review" in paths
+    assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}/settle" in paths
+    assert "/api/v1/finance-center/mumaren/tax/records" in paths
+    assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/review" in paths
+    assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/pay" in paths
+
+
 def test_domain_read_routes_apply_a_bounded_response_limit():
     from app.api.v1 import mumaren_finance_center_domains
 
