@@ -205,3 +205,26 @@ def test_annotation_clip_validation_locks_the_parent_video_before_overlap_query(
 
     assert "select(Video).where(Video.account_id == account_id, Video.id == payload.video_id).with_for_update()" in source
     assert "_scoped_record(db, DouyinCreatorAccount" not in source
+
+@pytest.mark.asyncio
+async def test_snapshot_account_scope_is_derived_from_the_only_active_account():
+    from app.services.douyin_color_annotation_service import (
+        AnnotationPermissionError,
+        resolve_single_active_account,
+    )
+
+    class ScalarResult:
+        def all(self):
+            return [type("Account", (), {"id": 11})()]
+
+    class Result:
+        def scalars(self):
+            return ScalarResult()
+
+    class Db:
+        async def execute(self, _query):
+            return Result()
+
+    assert (await resolve_single_active_account(Db(), account_hint=11)).id == 11
+    with pytest.raises(AnnotationPermissionError, match="account_scope_mismatch"):
+        await resolve_single_active_account(Db(), account_hint=12)

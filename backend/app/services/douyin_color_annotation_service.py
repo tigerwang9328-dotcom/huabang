@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 
+from sqlalchemy import select
+
+from app.models.douyin_color_analytics import DouyinCreatorAccount
+
+
 _FOCUS_STATUSES = {"clear_primary", "multi_focus", "unclear"}
 _WORKFLOW_TRANSITIONS = {
     "draft": {"submitted", "deleted"},
@@ -95,3 +100,20 @@ def assert_account_scope(*, record_account_id: int, requested_account_id: int) -
 
     if record_account_id != requested_account_id:
         raise AnnotationValidationError("account_scope_mismatch")
+
+class AnnotationPermissionError(AnnotationValidationError):
+    """The caller supplied an account hint outside the first-release scope."""
+
+
+async def resolve_single_active_account(db, *, account_hint: int | None = None) -> DouyinCreatorAccount:
+    """Resolve the one active account without letting a request choose another account."""
+
+    accounts = (await db.execute(select(DouyinCreatorAccount).where(
+        DouyinCreatorAccount.status == "active",
+    ))).scalars().all()
+    if len(accounts) != 1:
+        raise AnnotationConflictError("active_account_not_configured")
+    account = accounts[0]
+    if account_hint is not None and account_hint != account.id:
+        raise AnnotationPermissionError("account_scope_mismatch")
+    return account

@@ -59,6 +59,11 @@ from app.services.douyin_color_security_service import (
     sanitize_douyin_text,
     read_bounded_body,
 )
+from app.services.douyin_color_annotation_service import (
+    AnnotationConflictError,
+    AnnotationPermissionError,
+    resolve_single_active_account,
+)
 from app.services.operation_audit_service import write_operation_audit
 
 
@@ -502,8 +507,14 @@ async def list_video_analysis_snapshots(
     _: SysUser = Depends(require_permission("douyin.annotation.edit")),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        account = await resolve_single_active_account(db, account_hint=account_id)
+    except AnnotationPermissionError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from None
+    except AnnotationConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from None
     video = (await db.execute(select(Video).where(
-        Video.account_id == account_id, Video.video_id_string == video_id_string,
+        Video.account_id == account.id, Video.video_id_string == video_id_string,
     ))).scalar_one_or_none()
     if video is None:
         raise HTTPException(status_code=404, detail="video_not_found")
