@@ -270,3 +270,46 @@ bounce_report_enabled 开关有语义门禁
 
 ### 回滚点
 git revert 80a0d2b 即可回滚阶段 4 全部改动
+
+
+## 2026-07-31 阶段 5：浏览器自动测试闭环 — 部分受阻
+
+### 目标
+使用 browser_use 进行前端 UI 端到端测试。
+
+### 测试环境
+- 服务器启动 vite preview（127.0.0.1:8011）服务前端构建产物
+- 本地通过 SSH 隧道（-L 8011:127.0.0.1:8011）访问
+- browser_use 访问 http://localhost:8011/
+
+### 测试结果
+- 首页加载：PASS（标题"华邦AI中台"，Element Plus 正常渲染，61 个引用，16 个可交互元素）
+- 脱敏验证：PASS（首页无 token/cookie/密码显示）
+- 标注页（/douyin-color-analytics/videos）：FAIL（SPA 路由未渲染，0 元素）
+- 报告页（/douyin-color-analytics/report）：FAIL（SPA 路由未渲染，0 元素）
+- 管理页（/douyin-color-analytics/admin）：FAIL（SPA 路由未渲染，0 元素）
+
+### 阻塞原因
+1. vite preview 环境下子页面 SPA 路由未正确渲染（可能需要后端 API 支持）
+2. 前端路由守卫检测到未登录，但重定向逻辑在无后端环境下不工作
+3. 完整的浏览器端到端测试需要：后端 API 运行 + 用户登录认证 + 数据库数据
+
+### 审查结论
+- UI 框架（Element Plus）正常加载和渲染
+- 首页布局和样式正常
+- 子页面需要完整的前后端环境才能测试
+- 前端代码已通过类型检查（0 错误）、构建（14.67s）、契约测试（227 pass）
+
+### 生产版本
+隔离工作树分支：task1/douyin-color-v31-rebased
+未部署到生产
+
+### 开关状态
+未变更（A/B/C/D 阶段开关 + bounce_report_enabled 仍默认关闭）
+
+### 风险
+1. 浏览器端到端测试受阻，需部署到生产环境后补充
+2. 子页面路由问题可能是 vite preview 限制，生产 nginx 配置有 try_files 应能正常工作
+
+### 回滚点
+无需回滚（浏览器测试未修改代码）
