@@ -150,3 +150,14 @@ from app.models.finance_v2_operations import (
     FinanceV2VoucherNumberCounter,
     FinanceV2VoucherNumberReservation,
 )
+from app.models.mumaren_finance_center import (
+    FinanceCenterMumarenAccount,
+    FinanceCenterMumarenAuditLog,
+    FinanceCenterMumarenBook,
+    FinanceCenterMumarenFiscalPeriod,
+    FinanceCenterMumarenHistoryImportBatch,
+    FinanceCenterMumarenHistoryVoucher,
+    FinanceCenterMumarenHistoryVoucherLine,
+    FinanceCenterMumarenVoucher,
+    FinanceCenterMumarenVoucherLine,
+)
