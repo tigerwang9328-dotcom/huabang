@@ -232,3 +232,41 @@ bounce_report_enabled 默认关闭，需 verified_*_is_better 才能开启
 
 ### 回滚点
 git revert b21a06a 即可回滚阶段 3 全部改动
+
+
+## 2026-07-31 阶段 4 完成：前端 v4.0 适配
+
+### 目标
+完成前端 v4.0 适配：标注页改为整套穿搭、报告页 3 Tab、健康页/权限/令牌/开关 UI。
+
+### 提交 SHA
+80a0d2b feat(douyin): v4.0 frontend outfit annotation, report tabs and admin UI
+
+### 测试命令和输出摘要
+- 类型检查：npx vue-tsc --noEmit -> 0 错误
+- 构建：npm run build -> built in 14.67s
+- 前端契约测试：node --test tests/*.test.cjs -> 227 pass, 0 fail
+- 后端回归：210 passed（无回归）
+
+### 审查结论
+- Annotate.vue：动态 N 件衣物表单（garment_position + style_id + sku_code），>=2 件才能 clear_primary
+- Report.vue：3 Tab（整套穿搭/上衣/裤子），样本门槛提示，SKU 颜色参考，CSV/XLSX 导出
+- Admin.vue：健康状态 + 6 角色权限 + 令牌轮换 + A/B/C/D 阶段开关（bounce 门禁）
+- API 文件：outfit_parts_json 类型 + report/admin API 函数
+- 路由：/report 和 /admin 新增
+
+### 生产版本
+隔离工作树分支：task1/douyin-color-v31-rebased
+未部署到生产
+
+### 开关状态
+A/B/C/D 阶段开关 UI 已实现（Admin.vue）
+bounce_report_enabled 开关有语义门禁
+
+### 风险
+1. 前端尚未部署到生产 nginx，仅在隔离工作树构建验证
+2. 浏览器端到端测试需要后端 API + 前端开发服务器同时运行
+3. 两个 sub-agent 并行修改 douyinColorAnalytics.ts 导致瞬时冲突，已修复
+
+### 回滚点
+git revert 80a0d2b 即可回滚阶段 4 全部改动
