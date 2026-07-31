@@ -146,3 +146,45 @@ Task 5 范围扩大：
 - 需调整：video_clips 模型（加 outfit_parts_json）、compute_video_color_metric、compute_outfit_metric
 - 保留：garment_position、outfit 表、curve_service、outfit_service 组合键函数
 - Task 6 导出测试暂停，先完成 v4.0 模型调整
+
+
+## 2026-07-31 阶段 2 完成：导出 + 报告快照 + 重算 worker
+
+### 目标
+完成 v3.1 Task 6 的三个子模块：安全导出、报告快照、PostgreSQL 持久重算 worker。
+
+### 提交 SHA
+8921c0b feat(douyin): Task 6 export, report snapshot and recalc worker
+
+### 测试命令和输出摘要
+cd /home/xiaohu/worktrees/huabang-douyin-color-v31-rebased/backend
+set -a && source /srv/huabang-ai-center/backend/.env && set +a
+PYTHONPATH=. /srv/huabang-ai-center/backend/.venv/bin/python -m pytest tests/test_douyin_color_*.py -q
+结果：178 passed, 1 warning in 4.32s
+- test_douyin_color_export.py: 9 passed（CSV/XLSX 公式注入转义 + 元数据）
+- test_douyin_color_report_snapshot.py: 8 passed（revision 递增 + is_current 切换）
+- test_douyin_color_worker.py: 16 passed（enqueue/claim/complete/fail/recover）
+- 原有 145 测试无回归
+
+### 审查结论
+- 导出服务：escape_csv_cell/escape_xlsx_cell 对 = + - @ 前缀加单引号转义；render_csv_row 含逗号单元格双引号包裹；build_export_metadata 含 Asia/Shanghai 时区和关联性免责声明
+- 报告快照：generate_report_snapshot 纯函数，revision = max(existing)+1，旧快照 is_current=False，新快照 is_current=True，不修改入参
+- 重算 worker：enqueue_job（deduplication_key 去重）、claim_job（FOR UPDATE SKIP LOCKED 模拟，queued + retryable_failed backoff 到期均可领取）、complete_job、fail_job（backoff min(60, 2^attempt)，max_attempts=5）、recover_expired_leases
+- 全部纯函数设计，不直接操作数据库，由调用方用 SQLAlchemy session 包装
+
+### 生产版本
+隔离工作树分支：task1/douyin-color-v31-rebased
+Alembic head：f4b5e6c7d901（v4.0 outfit-parts）
+未部署到生产
+
+### 开关状态
+A/B/C/D 阶段开关尚未实现（Task 14）
+bounce_report_enabled 默认关闭（语义状态未验证）
+
+### 风险
+1. 隔离工作树基于 2a42657，落后于生产 05c4657（finance head merge），合并前需处理
+2. worker 为纯函数模拟，实际数据库 FOR UPDATE SKIP LOCKED 需在 API 层用 SQLAlchemy session 包装
+3. 报告快照的 ColorPerformanceSnapshot 模型字段名为 report_revision（非 revision）
+
+### 回滚点
+git revert 8921c0b 即可回滚阶段 2 全部改动
