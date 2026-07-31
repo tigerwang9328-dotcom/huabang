@@ -188,3 +188,47 @@ bounce_report_enabled 默认关闭（语义状态未验证）
 
 ### 回滚点
 git revert 8921c0b 即可回滚阶段 2 全部改动
+
+
+## 2026-07-31 阶段 3 完成：健康页 + 权限 + 令牌轮换 + 发布开关
+
+### 目标
+完成 v3.1 Task 7 的四个子模块：健康页 API、6 个权限角色验证、令牌轮换、A/B/C/D 发布阶段开关。
+
+### 提交 SHA
+b21a06a feat(douyin): Task 7 health, permissions, token rotation and release stages
+
+### 测试命令和输出摘要
+cd /home/xiaohu/worktrees/huabang-douyin-color-v31-rebased/backend
+set -a && source /srv/huabang-ai-center/backend/.env && set +a
+PYTHONPATH=. /srv/huabang-ai-center/backend/.venv/bin/python -m pytest tests/test_douyin_color_*.py -q
+结果：210 passed, 1 warning in 4.49s
+- test_douyin_color_health.py: 4 passed（健康页 API）
+- test_douyin_color_permissions.py: 11 passed（6 个权限角色映射）
+- test_douyin_color_token_rotation.py: 6 passed（令牌轮换）
+- test_douyin_color_release_stages.py: 11 passed（A/B/C/D 阶段开关）
+- 原有 178 测试无回归
+
+### 审查结论
+- 健康页：GET /health 返回 collector_status、queue_capacity（CalculationJob queued 计数）、feature_flags
+- 权限：6 角色（admin/auditor/operator/annotator/analyst/viewer），新增 require_any_permission 依赖
+- 令牌轮换：POST /accounts/{id}/upload-tokens/rotate 吊销旧令牌 + 签发新令牌 + 审计日志
+- 阶段开关：纯函数 can_advance_stage/advance_stage/can_enable_bounce_report/enable_bounce_report
+- 迁移 b1c2d3e4f5a6：release_stage_configurations 表 + CHECK 约束（bounce 语义门禁）
+
+### 生产版本
+隔离工作树分支：task1/douyin-color-v31-rebased
+Alembic head：b1c2d3e4f5a6（release_stage_configurations）
+未部署到生产
+
+### 开关状态
+A/B/C/D 阶段开关已实现（纯函数 + 模型 + 迁移）
+bounce_report_enabled 默认关闭，需 verified_*_is_better 才能开启
+
+### 风险
+1. 备份恢复临时独立库验证尚未完成（后续阶段补充）
+2. 阶段开关为纯函数，API 路由尚未绑定（前端 UI 阶段实现）
+3. 两个 sub-agent 并行操作同一 worktree 导致 deps.py 瞬时冲突，已修复
+
+### 回滚点
+git revert b21a06a 即可回滚阶段 3 全部改动
