@@ -282,6 +282,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
         key: "sales-online",
         children: [
           { path: "/app/marketing/investment", label: "投流优化" },
+          { path: "/app/douyin-color-analytics/videos", label: "抖音颜色标注" },
           { path: "/app/report", label: "经营日报", permission: "dashboard:overview:view" },
           { label: "线上总览", disabled: true, badge: "规划中" },
           { label: "平台销售", disabled: true, badge: "规划中" },
