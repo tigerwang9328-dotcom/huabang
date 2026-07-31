@@ -94,3 +94,26 @@ test('应收应付与税务页面只读取牧马人独立端点，且不提供�
   assert.match(tax, /listTaxRecords/)
   assert.doesNotMatch(`${arAp}\n${tax}`, /\.post\(|\.put\(|\.delete\(/)
 })
+
+test('税务 API 必须接收并传递 book_id，后端按账簿隔离查询', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  // getTaxAlerts 与 listTaxRecords 必须接收 book_id 并作为 query 参数传递
+  assert.match(api, /getTaxAlerts:\s*\(params:\s*\{\s*book_id:\s*number[\s\S]*?\}\s*\)\s*=>/)
+  assert.match(api, /listTaxRecords:\s*\(params:\s*\{\s*book_id:\s*number[\s\S]*?\}\s*\)\s*=>/)
+})
+
+test('税务页面必须先选择独立账簿，无账簿时不请求后端并提示', () => {
+  const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+
+  // 必须有账簿选择器
+  assert.match(tax, /listBooks/)
+  assert.match(tax, /bookId/)
+  // 无账簿时必须显示提示，且不调用税务接口
+  assert.match(tax, /请选择账簿|请选择独立账簿/)
+  // 调用税务接口时必须传 book_id
+  assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)
+  assert.match(tax, /listTaxRecords\(\s*\{\s*book_id:\s*bookId/)
+  // 不允许在未选账簿时 onMounted 直接调用税务接口
+  assert.doesNotMatch(tax, /onMounted\(load\)/)
+})
