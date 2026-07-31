@@ -26,7 +26,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _UPGRADE_DDL = r"""
-SET ROLE huabang_app_role;
 
 ALTER TABLE douyin.video_clips
     ADD COLUMN IF NOT EXISTS outfit_parts_json JSONB NOT NULL DEFAULT '[]';
@@ -43,7 +42,6 @@ ALTER TABLE douyin.video_color_metrics
 """
 
 _DOWNGRADE_DDL = r"""
-SET ROLE huabang_app_role;
 
 ALTER TABLE douyin.video_color_metrics
     DROP COLUMN IF EXISTS sku_code;
@@ -61,14 +59,8 @@ ALTER TABLE douyin.video_clips
 
 
 def upgrade() -> None:
-    try:
-        op.execute(_UPGRADE_DDL)
-    finally:
-        op.execute("RESET ROLE")
+    op.execute(_UPGRADE_DDL)
 
 
 def downgrade() -> None:
-    try:
-        op.execute(_DOWNGRADE_DDL)
-    finally:
-        op.execute("RESET ROLE")
+    op.execute(_DOWNGRADE_DDL)

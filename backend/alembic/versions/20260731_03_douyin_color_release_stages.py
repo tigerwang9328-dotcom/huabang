@@ -35,7 +35,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _UPGRADE_DDL = r"""
-SET ROLE huabang_app_role;
 
 CREATE TABLE IF NOT EXISTS douyin.release_stage_configurations (
     id BIGSERIAL PRIMARY KEY,
@@ -57,21 +56,14 @@ COMMENT ON TABLE douyin.release_stage_configurations IS
 """
 
 _DOWNGRADE_DDL = r"""
-SET ROLE huabang_app_role;
 
 DROP TABLE IF EXISTS douyin.release_stage_configurations;
 """
 
 
 def upgrade() -> None:
-    try:
-        op.execute(_UPGRADE_DDL)
-    finally:
-        op.execute("RESET ROLE")
+    op.execute(_UPGRADE_DDL)
 
 
 def downgrade() -> None:
-    try:
-        op.execute(_DOWNGRADE_DDL)
-    finally:
-        op.execute("RESET ROLE")
+    op.execute(_DOWNGRADE_DDL)

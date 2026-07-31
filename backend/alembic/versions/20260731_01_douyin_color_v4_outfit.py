@@ -23,7 +23,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _UPGRADE_DDL = r"""
-SET ROLE huabang_app_role;
 
 ALTER TABLE douyin.garment_styles
     ADD COLUMN IF NOT EXISTS garment_position VARCHAR(16) NOT NULL DEFAULT 'none';
@@ -89,7 +88,6 @@ CREATE TABLE IF NOT EXISTS douyin.outfit_color_metrics (
 """
 
 _DOWNGRADE_DDL = r"""
-SET ROLE huabang_app_role;
 
 DROP TABLE IF EXISTS douyin.outfit_color_metrics;
 DROP TABLE IF EXISTS douyin.outfit_combinations;
@@ -109,14 +107,8 @@ ALTER TABLE douyin.garment_styles
 
 
 def upgrade() -> None:
-    try:
-        op.execute(_UPGRADE_DDL)
-    finally:
-        op.execute("RESET ROLE")
+    op.execute(_UPGRADE_DDL)
 
 
 def downgrade() -> None:
-    try:
-        op.execute(_DOWNGRADE_DDL)
-    finally:
-        op.execute("RESET ROLE")
+    op.execute(_DOWNGRADE_DDL)
