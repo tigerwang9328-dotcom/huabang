@@ -4,21 +4,23 @@
       <div>
         <p class="panel-kicker">凭证管理</p>
         <h2>自动凭证</h2>
-        <p>业务单据按规则自动生成凭证草稿;会话内规则维护,不真正生成凭证。</p>
+        <p>业务单据按规则自动生成凭证草稿;按独立账簿隔离,数据持久化。</p>
       </div>
       <div class="heading-actions">
-        <el-button type="primary" @click="openCreate">新增规则</el-button>
+        <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" :disabled="!bookId" @click="openCreate">新增规则</el-button>
       </div>
     </div>
 
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      title="完整数据接口待后端补,本会话数据刷新后清空"
-    />
+    <div class="filters">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
+        <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
+      </el-select>
+    </div>
 
-    <el-table :data="rules" empty-text="暂无自动凭证规则" stripe>
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+
+    <el-table v-loading="loading" :data="rules" empty-text="暂无自动凭证规则" stripe>
       <el-table-column prop="rule_name" label="规则名称" min-width="160" show-overflow-tooltip />
       <el-table-column prop="business_type" label="业务类型" width="110" />
       <el-table-column prop="account_code" label="科目编码" width="130" />
@@ -51,7 +53,7 @@
             @confirm="removeRow(scope.row)"
           >
             <template #reference>
-              <el-button size="small" link type="danger">删除</el-button>
+              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -96,7 +98,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
 
@@ -120,28 +122,27 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
+import { onMounted, reactive, ref } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
+import {
+  autoVoucherRulesApi,
+  mumarenFinanceCenterApi,
+  type MumarenAutoVoucherRule,
+  type MumarenFinanceBook,
+} from "@/api/mumarenFinanceCenter";
 
-interface AutoVoucherRule {
-  id: number;
-  rule_name: string;
-  business_type: string;
-  account_code: string;
-  direction: "debit" | "credit";
-  amount_source: string;
-  fixed_amount?: number;
-  enabled: boolean;
-  created_at: string;
-}
-
-const rules = ref<AutoVoucherRule[]>([]);
-
+const books = ref<MumarenFinanceBook[]>([]);
+const { bookId, initializeBook } = useMumarenFinanceBook();
+const rules = ref<MumarenAutoVoucherRule[]>([]);
+const loading = ref(false);
+const saving = ref(false);
+const error = ref("");
+const actingId = ref<number>();
 const dialogVisible = ref(false);
 const formRef = ref<FormInstance>();
-
 const previewVisible = ref(false);
-const previewRow = ref<AutoVoucherRule | null>(null);
+const previewRow = ref<MumarenAutoVoucherRule | null>(null);
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -172,39 +173,86 @@ const resetForm = () => {
   formRef.value?.clearValidate();
 };
 
+const load = async () => {
+  if (!bookId.value) return;
+  loading.value = true;
+  error.value = "";
+  try {
+    rules.value = (await autoVoucherRulesApi.list({ book_id: bookId.value })).data.data;
+  } catch {
+    error.value = "无法加载自动凭证规则。";
+  } finally {
+    loading.value = false;
+  }
+};
+
+const onBookChange = () => {
+  rules.value = [];
+  load();
+};
+
+onMounted(async () => {
+  try {
+    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    initializeBook(books.value);
+    if (bookId.value) await load();
+  } catch {
+    error.value = "无法加载独立账簿。";
+  }
+});
+
 const openCreate = () => {
+  if (!bookId.value) {
+    ElMessage.warning("请先选择独立账簿");
+    return;
+  }
   resetForm();
   dialogVisible.value = true;
 };
 
 const submit = async () => {
-  if (!formRef.value) return;
-  await formRef.value.validate((valid) => {
+  if (!formRef.value || !bookId.value) return;
+  const bid = bookId.value;
+  await formRef.value.validate(async (valid) => {
     if (!valid) return;
-    const now = new Date();
-    const row: AutoVoucherRule = {
-      id: Date.now(),
-      rule_name: form.rule_name.trim(),
-      business_type: form.business_type,
-      account_code: form.account_code.trim(),
-      direction: form.direction,
-      amount_source: form.amount_source,
-      fixed_amount: form.amount_source === "fixed" ? form.fixed_amount : undefined,
-      enabled: form.enabled,
-      created_at: now.toLocaleString("zh-CN", { hour12: false }),
-    };
-    rules.value.push(row);
-    ElMessage.success("规则已新增");
-    dialogVisible.value = false;
+    saving.value = true;
+    try {
+      await autoVoucherRulesApi.create({
+        book_id: bid,
+        rule_name: form.rule_name.trim(),
+        business_type: form.business_type,
+        account_code: form.account_code.trim(),
+        direction: form.direction,
+        amount_source: form.amount_source,
+        fixed_amount: form.amount_source === "fixed" ? form.fixed_amount : undefined,
+        enabled: form.enabled,
+      });
+      ElMessage.success("规则已新增");
+      dialogVisible.value = false;
+      await load();
+    } catch (e: any) {
+      ElMessage.error(e?.response?.data?.detail || "保存失败");
+    } finally {
+      saving.value = false;
+    }
   });
 };
 
-const removeRow = (row: AutoVoucherRule) => {
-  rules.value = rules.value.filter((item) => item.id !== row.id);
-  ElMessage.success("规则已删除");
+const removeRow = async (row: MumarenAutoVoucherRule) => {
+  if (!bookId.value) return;
+  actingId.value = row.id;
+  try {
+    await autoVoucherRulesApi.delete(row.id, bookId.value);
+    ElMessage.success("规则已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
+  } finally {
+    actingId.value = undefined;
+  }
 };
 
-const preview = (row: AutoVoucherRule) => {
+const preview = (row: MumarenAutoVoucherRule) => {
   previewRow.value = row;
   previewVisible.value = true;
 };
@@ -214,10 +262,12 @@ const preview = (row: AutoVoucherRule) => {
 .panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }
 .heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .heading-actions { display: flex; gap: 8px; }
+.filters { display: flex; gap: 12px; }
+.filters > * { max-width: 280px; }
 .panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
 .preview-text { line-height: 1.8; color: #5d6b7e; }
 .preview-text strong { color: #176b97; }
-@media (max-width: 640px) { .heading { flex-direction: column; } }
+@media (max-width: 640px) { .filters { flex-direction: column; } .heading { flex-direction: column; } }
 </style>

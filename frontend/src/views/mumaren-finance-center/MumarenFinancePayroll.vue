@@ -4,16 +4,23 @@
       <div>
         <p class="panel-kicker">薪资管理</p>
         <h2>工资</h2>
-        <p>工资台账、社保公积金与个税核对;会话内维护,刷新清空。</p>
+        <p>工资台账、社保公积金与个税核对;按独立账簿隔离,数据持久化。</p>
       </div>
       <div class="heading-actions">
-        <el-button type="primary" @click="openDialog">录入工资</el-button>
+        <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" :disabled="!bookId" @click="openDialog">录入工资</el-button>
       </div>
     </div>
 
-    <el-alert type="warning" :closable="false" show-icon title="完整数据接口待后端补,本会话数据刷新后清空" />
+    <div class="filters">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
+        <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
+      </el-select>
+    </div>
 
-    <el-table :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+
+    <el-table v-loading="loading" :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="employee_name" label="员工" min-width="120" />
       <el-table-column prop="department" label="部门" min-width="120" />
       <el-table-column prop="period" label="期间" width="110" />
@@ -52,18 +59,19 @@
             link
             type="primary"
             size="small"
+            :loading="actingId === row.id"
             @click="pay(row)"
           >发放</el-button>
           <el-popconfirm title="确定删除该工资记录?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small">删除</el-button>
+              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="录入工资" width="520px">
+    <el-dialog v-model="dialogVisible" title="录入工资" width="520px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px">
         <el-form-item label="员工姓名">
           <el-input v-model="form.employee_name" />
@@ -92,35 +100,31 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="save">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
+import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import {
+  mumarenFinanceCenterApi,
+  payrollsApi,
+  type MumarenFinanceBook,
+  type MumarenPayroll,
+} from "@/api/mumarenFinanceCenter";
 
-interface PayrollRecord {
-  id: number;
-  employee_name: string;
-  department: string;
-  period: string;
-  base_salary: number;
-  bonus: number;
-  gross_salary: number;
-  social_insurance: number;
-  housing_fund: number;
-  income_tax: number;
-  net_salary: number;
-  status: "draft" | "paid";
-  created_at: string;
-}
-
-const records = ref<PayrollRecord[]>([]);
+const books = ref<MumarenFinanceBook[]>([]);
+const { bookId, initializeBook } = useMumarenFinanceBook();
+const records = ref<MumarenPayroll[]>([]);
+const loading = ref(false);
+const saving = ref(false);
+const error = ref("");
+const actingId = ref<number>();
 const dialogVisible = ref(false);
-let seed = 1;
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -136,7 +140,39 @@ const form = reactive({
   income_tax: 0,
 });
 
+const load = async () => {
+  if (!bookId.value) return;
+  loading.value = true;
+  error.value = "";
+  try {
+    records.value = (await payrollsApi.list({ book_id: bookId.value })).data.data;
+  } catch {
+    error.value = "无法加载工资记录。";
+  } finally {
+    loading.value = false;
+  }
+};
+
+const onBookChange = () => {
+  records.value = [];
+  load();
+};
+
+onMounted(async () => {
+  try {
+    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    initializeBook(books.value);
+    if (bookId.value) await load();
+  } catch {
+    error.value = "无法加载独立账簿。";
+  }
+});
+
 const openDialog = () => {
+  if (!bookId.value) {
+    ElMessage.warning("请先选择独立账簿");
+    return;
+  }
   form.employee_name = "";
   form.department = "";
   form.period = new Date().toISOString().slice(0, 7);
@@ -148,55 +184,69 @@ const openDialog = () => {
   dialogVisible.value = true;
 };
 
-const save = () => {
+const save = async () => {
+  if (!bookId.value) return;
   if (!form.employee_name) {
     ElMessage.warning("请填写员工姓名");
     return;
   }
-  const base = Number(form.base_salary || 0);
-  const bonus = Number(form.bonus || 0);
-  const social = Number(form.social_insurance || 0);
-  const housing = Number(form.housing_fund || 0);
-  const tax = Number(form.income_tax || 0);
-  const gross = Number((base + bonus).toFixed(2));
-  const net = Number((gross - social - housing - tax).toFixed(2));
-  records.value.push({
-    id: seed++,
-    employee_name: form.employee_name,
-    department: form.department,
-    period: form.period,
-    base_salary: base,
-    bonus,
-    gross_salary: gross,
-    social_insurance: social,
-    housing_fund: housing,
-    income_tax: tax,
-    net_salary: net,
-    status: "draft",
-    created_at: new Date().toISOString(),
-  });
-  dialogVisible.value = false;
-  ElMessage.success("工资记录已录入");
+  saving.value = true;
+  try {
+    await payrollsApi.create({
+      book_id: bookId.value,
+      employee_name: form.employee_name,
+      department: form.department,
+      period: form.period,
+      base_salary: Number(form.base_salary || 0),
+      bonus: Number(form.bonus || 0),
+      social_insurance: Number(form.social_insurance || 0),
+      housing_fund: Number(form.housing_fund || 0),
+      income_tax: Number(form.income_tax || 0),
+    });
+    ElMessage.success("工资记录已录入");
+    dialogVisible.value = false;
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "保存失败");
+  } finally {
+    saving.value = false;
+  }
 };
 
-const pay = (row: PayrollRecord) => {
-  if (row.status !== "draft") return;
-  row.status = "paid";
-  ElMessage.success("工资已发放");
+const pay = async (row: MumarenPayroll) => {
+  if (!bookId.value || row.status !== "draft") return;
+  actingId.value = row.id;
+  try {
+    await payrollsApi.pay(row.id, bookId.value);
+    ElMessage.success("工资已发放");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "发放失败");
+  } finally {
+    actingId.value = undefined;
+  }
 };
 
-const remove = (row: PayrollRecord) => {
-  const idx = records.value.findIndex((r) => r.id === row.id);
-  if (idx >= 0) records.value.splice(idx, 1);
-  ElMessage.success("工资记录已删除");
+const remove = async (row: MumarenPayroll) => {
+  if (!bookId.value) return;
+  actingId.value = row.id;
+  try {
+    await payrollsApi.delete(row.id, bookId.value);
+    ElMessage.success("工资记录已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
+  } finally {
+    actingId.value = undefined;
+  }
 };
 
-const summary = ({ columns, data }: { columns: any[]; data: PayrollRecord[] }) => {
+const summary = ({ columns, data }: { columns: any[]; data: MumarenPayroll[] }) => {
   const sums: (string | number)[] = [];
   columns.forEach((_, i) => {
     sums[i] = i === 0 ? "合计" : "";
   });
-  const fields: Record<string, keyof PayrollRecord> = {
+  const fields: Record<string, keyof MumarenPayroll> = {
     基本工资: "base_salary",
     奖金: "bonus",
     应发: "gross_salary",
@@ -219,8 +269,10 @@ const summary = ({ columns, data }: { columns: any[]; data: PayrollRecord[] }) =
 .panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }
 .heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .heading-actions { display: flex; gap: 8px; }
+.filters { display: flex; gap: 12px; }
+.filters > * { max-width: 280px; }
 .panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
-@media (max-width: 640px) { .heading { flex-direction: column; } }
+@media (max-width: 640px) { .filters { flex-direction: column; } .heading { flex-direction: column; } }
 </style>

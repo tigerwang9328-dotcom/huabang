@@ -34,6 +34,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { onMounted, ref } from "vue";
 import {
   mumarenFinanceCenterApi,
@@ -42,7 +43,7 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { bookId, initializeBook } = useMumarenFinanceBook();
 const period = ref("");
 const trialRows = ref<MumarenTrialBalanceRow[]>([]);
 const error = ref("");
@@ -80,8 +81,9 @@ const onBookChange = async () => {
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    initializeBook(books.value);
     // 自动加载第一个账簿
-    bookId.value = books.value[0]?.id;
+    initializeBook(books.value);
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";

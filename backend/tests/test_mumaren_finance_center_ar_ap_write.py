@@ -267,3 +267,65 @@ async def test_ar_ap_full_write_flow_never_creates_voucher_or_voucher_line():
     # 不应引用旧财务表
     for item in db.added:
         assert "fin_" not in str(type(item).__table__.schema if hasattr(type(item), '__table__') else "")
+
+
+@pytest.mark.asyncio
+async def test_review_endpoint_uses_the_selected_order_type_when_ids_overlap():
+    """A payable review must not inspect a same-ID receivable order first."""
+    from app.api.v1.mumaren_finance_center_domains import review_ar_ap_order_endpoint
+
+    receivable = FinanceCenterMumarenReceivableOrder(
+        id=2, book_id=1, order_no="AR-2", order_date=date(2026, 8, 1),
+        period="2026-08", counterparty_name="客户", total_amount=Decimal("100"),
+        settled_amount=Decimal("0"), settlement_status="open", workflow_status="reviewed",
+    )
+    payable = FinanceCenterMumarenPayableOrder(
+        id=2, book_id=1, order_no="AP-2", order_date=date(2026, 8, 1),
+        period="2026-08", counterparty_name="供应商", total_amount=Decimal("100"),
+        settled_amount=Decimal("0"), settlement_status="open", workflow_status="draft",
+    )
+
+    class CollisionDb(_MockDb):
+        async def get(self, model, primary_id):
+            return {
+                FinanceCenterMumarenReceivableOrder: receivable,
+                FinanceCenterMumarenPayableOrder: payable,
+            }.get(model)
+
+    result = await review_ar_ap_order_endpoint(
+        order_id=2, order_type="payable", current_user=type("User", (), {"id": 7})(), db=CollisionDb(),
+    )
+    assert result.data["order_no"] == "AP-2"
+    assert payable.workflow_status == "reviewed"
+
+
+@pytest.mark.asyncio
+async def test_settle_endpoint_uses_the_selected_order_type_when_ids_overlap():
+    """A payable settlement must not settle a same-ID receivable order."""
+    from app.api.v1.mumaren_finance_center_domains import ArApSettleInput, settle_ar_ap_order_endpoint
+
+    receivable = FinanceCenterMumarenReceivableOrder(
+        id=3, book_id=1, order_no="AR-3", order_date=date(2026, 8, 1),
+        period="2026-08", counterparty_name="客户", total_amount=Decimal("100"),
+        settled_amount=Decimal("0"), settlement_status="open", workflow_status="reviewed",
+    )
+    payable = FinanceCenterMumarenPayableOrder(
+        id=3, book_id=1, order_no="AP-3", order_date=date(2026, 8, 1),
+        period="2026-08", counterparty_name="供应商", total_amount=Decimal("100"),
+        settled_amount=Decimal("0"), settlement_status="open", workflow_status="reviewed",
+    )
+
+    class CollisionDb(_MockDb):
+        async def get(self, model, primary_id):
+            return {
+                FinanceCenterMumarenReceivableOrder: receivable,
+                FinanceCenterMumarenPayableOrder: payable,
+            }.get(model)
+
+    result = await settle_ar_ap_order_endpoint(
+        order_id=3, order_type="payable", body=ArApSettleInput(settlement_date=date(2026, 8, 1), amount=Decimal("100")),
+        current_user=type("User", (), {"id": 7})(), db=CollisionDb(),
+    )
+    assert result.data["order_no"] == "AP-3"
+    assert payable.settlement_status == "settled"
+    assert receivable.settlement_status == "open"
