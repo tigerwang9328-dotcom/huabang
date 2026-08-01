@@ -28,7 +28,7 @@
 | `finance_module/api/history_archive.py` | `backend/app/services/mumaren_finance_center/history.py` | 金蝶单向导入新历史区，记录只读标记、来源键和导入批次 |
 | `finance_module/api/*.py` 其余模块 | `backend/app/services/mumaren_finance_center/` | 逐个建立依赖与范围审计后移植；附件、自动制单、外部适配不启用 |
 | 牧马人模型/服务注入 | `backend/app/models/mumaren_finance_center.py`、`backend/app/services/mumaren_finance_center/` | 新增独立 schema 与服务，不复用旧财务 |
-| 牧马人无前端资产 | `frontend/src/views/mumaren-finance-center/`、`frontend/src/api/mumarenFinanceCenter.ts` | 使用华邦 Vue 路由、菜单、认证壳实现页面 |
+| 牧马人服务器 `frontend/src/views/finance/` | `frontend/src/views/mumaren-finance-center/`、`frontend/src/api/mumarenFinanceCenter.ts` | 仅参考正式 Vue 页面的信息架构、表格、表单和布局；不得复制其旧 API、store、路由守卫或认证逻辑。源模块快照本身未附带该前端，故不能直接加载。 |
 
 ## 源 API 分批映射
 
@@ -59,3 +59,23 @@
 - 先新增失败测试，再做最小实现。
 - 后端定向 pytest、迁移测试、前端类型检查和构建必须通过。
 - 浏览器验收必须证明新页面不请求旧财务端点。
+
+## 2026-08-01 运行与交接快照
+
+以下为只读核验的当前状态，不等同于生产发布或生产验收结论。
+
+| 项目 | 已核实状态 | 结论/限制 |
+| --- | --- | --- |
+| 本地功能分支 | `feature/huabang-full-finance-center` 的已提交基线为 `c82018b` | 该提交已存在于服务器的同名引用；当前本地工作树另有大量未提交的财务扩展改动，尚未完成范围审计、测试或提交，不能发布。 |
+| 服务器生产工作树 | `/srv/huabang-ai-center` 当前在 `release/mumaren-finance-20260731`，HEAD 为备份提交 `f24938a`，且工作树存在未提交改动 | 生产工作树不等于功能分支；不得将其工作树状态描述为已部署独立财务中心。 |
+| 生产服务 | `huabang-backend.service` 为 active，监听 `127.0.0.1:8000`，健康检查返回 HTTP 200 | 服务正常，但本次核验未执行生产财务功能验收，也未重启或部署。 |
+| 8011 监听 | `127.0.0.1:8011` 当前由 `/home/xiaohu/worktrees/huabang-douyin-color-v31-rebased/frontend` 的 `vite preview` 占用 | 这不是牧马人财务测试 API。不得关闭、复用或把它作为财务验收服务；财务临时 API 必须在端口空闲后单独启动。 |
+| 测试库与浏览器验收 | 先前报告称测试库为 `huabang_ai_finance_drill_20260729_r2`，并完成了单元/API 层验证 | 该报告需要在最终提交对应的测试工作树重新执行后才能作为当前证据。已登录浏览器端到端验收仍需独立、安全的测试账号；未完成前整体结论为测试环境 No-Go。 |
+
+### 当前交接规则
+
+1. 先冻结并审计未提交改动：区分独立财务中心的允许范围与无关文件；不得 `git add -A`。
+2. 将允许范围内改动拆成可审查提交，在新的、明确指向测试库的工作树完成迁移、定向测试和构建。
+3. 为测试库创建临时、最小权限的财务验收账号；密码只在验收进程内使用，结束后禁用，不得使用生产账号。
+4. 仅在独立临时服务和测试库上完成浏览器点击流：凭证草稿→审核→人工过账、AR/AP 审核→结算、税务审核→缴税、历史金蝶只读。
+5. 所有上述证据完成且通过单独生产发布评审后，才能讨论部署；本文件不授权生产发布、重启、迁移或写入生产库。

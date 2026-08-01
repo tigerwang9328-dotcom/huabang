@@ -23,6 +23,7 @@ from app.services.mumaren_finance_center.workflow import (
     review_voucher_by_id,
 )
 from app.services.mumaren_finance_center.reports import (
+    get_cash_flow_statement,
     get_profit_statement,
     get_trial_balance,
 )
@@ -224,5 +225,19 @@ async def get_profit_statement_report(
     """当前账已过账凭证的利润表；空账返回零值而非模拟经营数据。"""
     try:
         return ApiResponse.ok(data=await get_profit_statement(db, book_id=book_id, period=period))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get("/reports/cash-flow-statement", response_model=ApiResponse)
+async def get_cash_flow_statement_report(
+    book_id: int = Query(ge=1),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    """现金流量表：联动已过账 cash_flows 表的经营活动/投资/筹资现金流。"""
+    try:
+        return ApiResponse.ok(data=await get_cash_flow_statement(db, book_id=book_id, period=period))
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

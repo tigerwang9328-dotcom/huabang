@@ -1,3 +1,5 @@
+import type { FinanceNavigationItem } from "@/config/financeCenterModules";
+
 export const MUMAREN_FINANCE_CENTER_ROOT = "/app/finance-center/mumaren";
 
 export type MumarenFinanceCapabilityAvailability = "available" | "planned_backend";
@@ -5,149 +7,183 @@ export type MumarenFinanceCapabilityAvailability = "available" | "planned_backen
 export interface MumarenFinanceCapability {
   title: string;
   description: string;
-  sourceModule: string;
+  sourceModule?: string;
   availability: MumarenFinanceCapabilityAvailability;
   unavailableReason?: string;
 }
 
-export interface MumarenFinanceCenterNavigationItem {
-  key:
-    | "workspace"
-    | "vouchers"
-    | "ledgers"
-    | "ar-ap"
-    | "business"
-    | "tax"
-    | "operations"
-    | "reports"
-    | "history"
-    | "accounts"
-    | "closing"
-    | "cashier"
-    | "assets"
-    | "invoices"
-    | "payroll"
-    | "payments";
+// 标准财务中心导航:13 个一级条目,5 个一级带子项,共 30 个子项。
+export interface MumarenFinanceNavItem {
+  key: string;
   title: string;
   path: string;
+  routeName: string;
+  availability: MumarenFinanceCapabilityAvailability;
+  children?: MumarenFinanceNavItem[];
+  placeholder?: {
+    summary: string;
+    capabilities: Omit<MumarenFinanceCapability, "availability">[];
+  };
 }
 
-export const mumarenFinanceCenterNavigation: MumarenFinanceCenterNavigationItem[] = [
-  { key: "workspace", title: "工作台", path: MUMAREN_FINANCE_CENTER_ROOT },
-  { key: "vouchers", title: "凭证", path: `${MUMAREN_FINANCE_CENTER_ROOT}/vouchers` },
-  { key: "ledgers", title: "账簿", path: `${MUMAREN_FINANCE_CENTER_ROOT}/ledgers` },
-  { key: "accounts", title: "科目", path: `${MUMAREN_FINANCE_CENTER_ROOT}/accounts` },
-  { key: "ar-ap", title: "应收应付", path: `${MUMAREN_FINANCE_CENTER_ROOT}/ar-ap` },
-  { key: "business", title: "业务台账", path: `${MUMAREN_FINANCE_CENTER_ROOT}/business` },
-  { key: "tax", title: "税务", path: `${MUMAREN_FINANCE_CENTER_ROOT}/tax` },
-  { key: "cashier", title: "出纳", path: `${MUMAREN_FINANCE_CENTER_ROOT}/cashier` },
-  { key: "assets", title: "资产", path: `${MUMAREN_FINANCE_CENTER_ROOT}/assets` },
-  { key: "invoices", title: "发票", path: `${MUMAREN_FINANCE_CENTER_ROOT}/invoices` },
-  { key: "payroll", title: "薪资", path: `${MUMAREN_FINANCE_CENTER_ROOT}/payroll` },
-  { key: "payments", title: "付款", path: `${MUMAREN_FINANCE_CENTER_ROOT}/payments` },
-  { key: "operations", title: "经营报表", path: `${MUMAREN_FINANCE_CENTER_ROOT}/operations` },
-  { key: "reports", title: "报表", path: `${MUMAREN_FINANCE_CENTER_ROOT}/reports` },
-  { key: "closing", title: "期末结账", path: `${MUMAREN_FINANCE_CENTER_ROOT}/closing` },
-  { key: "history", title: "历史归档", path: `${MUMAREN_FINANCE_CENTER_ROOT}/history` },
+const R = MUMAREN_FINANCE_CENTER_ROOT;
+
+export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
+  { key: "compass", title: "数据罗盘", path: `${R}/compass`, routeName: "MumarenFinanceCompass", availability: "available" },
+  { key: "history", title: "历史数据存档", path: `${R}/history`, routeName: "MumarenFinanceHistory", availability: "available" },
+  {
+    key: "vouchers",
+    title: "凭证",
+    path: `${R}/vouchers`,
+    routeName: "MumarenFinanceVouchers",
+    availability: "available",
+    children: [
+      { key: "voucher-create", title: "录凭证", path: `${R}/vouchers/create`, routeName: "MumarenFinanceVoucherCreate", availability: "available" },
+      { key: "voucher-list", title: "查凭证", path: `${R}/vouchers/list`, routeName: "MumarenFinanceVoucherList", availability: "available" },
+      { key: "voucher-summary", title: "凭证汇总", path: `${R}/vouchers/summary`, routeName: "MumarenFinanceVoucherSummary", availability: "available" },
+      { key: "voucher-template", title: "凭证模板", path: `${R}/vouchers/template`, routeName: "MumarenFinanceVoucherTemplate", availability: "available" },
+      { key: "voucher-auto", title: "自动凭证", path: `${R}/vouchers/auto`, routeName: "MumarenFinanceVoucherAuto", availability: "available" },
+    ],
+  },
+  {
+    key: "ledgers",
+    title: "账簿",
+    path: `${R}/ledgers`,
+    routeName: "MumarenFinanceLedgers",
+    availability: "available",
+    children: [
+      { key: "general-ledger", title: "总账", path: `${R}/ledgers/general`, routeName: "MumarenFinanceGeneralLedger", availability: "available" },
+      { key: "trial-balance", title: "科目余额表", path: `${R}/ledgers/trial-balance`, routeName: "MumarenFinanceTrialBalance", availability: "available" },
+      { key: "ledger-detail", title: "明细账", path: `${R}/ledgers/detail`, routeName: "MumarenFinanceLedgerDetail", availability: "available" },
+    ],
+  },
+  {
+    key: "reports",
+    title: "报表",
+    path: `${R}/reports`,
+    routeName: "MumarenFinanceReports",
+    availability: "available",
+    children: [
+      { key: "balance-sheet", title: "资产负债表", path: `${R}/reports/balance-sheet`, routeName: "MumarenFinanceBalanceSheet", availability: "available" },
+      { key: "profit-statement", title: "利润表", path: `${R}/reports/profit-statement`, routeName: "MumarenFinanceProfitStatement", availability: "available" },
+      { key: "cash-flow-statement", title: "现金流量表", path: `${R}/reports/cash-flow-statement`, routeName: "MumarenFinanceCashFlowStatement", availability: "available" },
+      { key: "receivable-detail", title: "应收明细", path: `${R}/reports/receivable-detail`, routeName: "MumarenFinanceReceivableDetail", availability: "available" },
+      { key: "payable-detail", title: "应付明细", path: `${R}/reports/payable-detail`, routeName: "MumarenFinancePayableDetail", availability: "available" },
+      { key: "expense-detail", title: "费用明细表", path: `${R}/reports/expense-detail`, routeName: "MumarenFinanceExpenseDetail", availability: "available" },
+      { key: "tax-detail", title: "税金明细表", path: `${R}/reports/tax-detail`, routeName: "MumarenFinanceTaxDetail", availability: "available" },
+      { key: "sales-monthly", title: "销售月报表", path: `${R}/reports/sales-monthly`, routeName: "MumarenFinanceSalesMonthly", availability: "available" },
+    ],
+  },
+  { key: "ar-ap", title: "应收应付", path: `${R}/ar-ap`, routeName: "MumarenFinanceArAp", availability: "available" },
+  { key: "closing", title: "结账", path: `${R}/closing`, routeName: "MumarenFinanceClosing", availability: "available" },
+  { key: "assets", title: "资产", path: `${R}/assets`, routeName: "MumarenFinanceAssets", availability: "available" },
+  { key: "invoices", title: "发票", path: `${R}/invoices`, routeName: "MumarenFinanceInvoices", availability: "available" },
+  {
+    key: "cashier",
+    title: "出纳",
+    path: `${R}/cashier`,
+    routeName: "MumarenFinanceCashier",
+    availability: "available",
+    children: [
+      { key: "cashier-accounts", title: "账户与流水", path: `${R}/cashier/accounts`, routeName: "MumarenFinanceCashierAccounts", availability: "available" },
+      { key: "cashier-reconciliation", title: "银行余额调节表", path: `${R}/cashier/reconciliation`, routeName: "MumarenFinanceCashierReconciliation", availability: "available" },
+    ],
+  },
+  { key: "payroll", title: "工资", path: `${R}/payroll`, routeName: "MumarenFinancePayroll", availability: "available" },
+  { key: "tax", title: "税务", path: `${R}/tax`, routeName: "MumarenFinanceTax", availability: "available" },
+  {
+    key: "settings",
+    title: "设置",
+    path: `${R}/settings`,
+    routeName: "MumarenFinanceSettings",
+    availability: "available",
+    children: [
+      { key: "settings-accounts", title: "科目管理", path: `${R}/settings/accounts`, routeName: "MumarenFinanceSettingsAccounts", availability: "available" },
+      { key: "settings-books", title: "账套管理", path: `${R}/settings/books`, routeName: "MumarenFinanceSettingsBooks", availability: "available" },
+      { key: "settings-auxiliary", title: "辅助核算", path: `${R}/settings/auxiliary`, routeName: "MumarenFinanceSettingsAuxiliary", availability: "available" },
+      { key: "settings-audit-logs", title: "操作日志", path: `${R}/settings/audit-logs`, routeName: "MumarenFinanceSettingsAuditLogs", availability: "available" },
+    ],
+  },
 ];
 
-export const mumarenFinanceCapabilityGroups = {
-  arAp: {
-    title: "应收应付",
-    summary: "以牧马人应收、应付与账龄分析领域模型为基线；当前不调用旧华邦财务接口。",
-    capabilities: [
-      { title: "应收单据", description: "客户应收、回款与未收余额。", sourceModule: "finance_module/api/ar_ap.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-      { title: "应付单据", description: "供应商应付、付款与未付余额。", sourceModule: "finance_module/api/ar_ap.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-      { title: "账龄分析", description: "按 30/60/90/120 天区间查看往来余额。", sourceModule: "finance_module/api/ar_ap.py", availability: "planned_backend", unavailableReason: "等待独立 AR/AP 查询接口。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  business: {
-    title: "业务台账",
-    summary: "牧马人业务台账覆盖出纳、资产、发票、工资和费用；华邦适配必须使用新模块独立表。",
-    capabilities: [
-      { title: "出纳与银行对账", description: "现金账户、银行流水与对账差异。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-      { title: "固定资产", description: "资产卡片、折旧与处置台账。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-      { title: "发票与费用", description: "发票登记、费用明细与凭证关联。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-      { title: "工资台账", description: "工资、社保、公积金、个税与实发核对。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  tax: {
-    title: "税务",
-    summary: "牧马人税务领域包含税种、申报期、计税金额、税额与缴纳状态；首版不自动生成凭证。",
-    capabilities: [
-      { title: "税务记录", description: "税种、所属期间、计税金额与税额登记。", sourceModule: "finance_module/api/tax.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-      { title: "申报与缴纳", description: "申报状态、缴税记录与人工凭证关联。", sourceModule: "finance_module/api/tax.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  operations: {
-    title: "经营报表",
-    summary: "牧马人经营分析、日报、广告费、销售月报、店铺组和退货统计保留为独立能力清单。",
-    capabilities: [
-      { title: "数据罗盘", description: "经营指标与财务分析钻取。", sourceModule: "finance_module/api/compass.py", availability: "planned_backend", unavailableReason: "等待华邦数据来源与独立接口核实。" },
-      { title: "日报与广告费", description: "财务日报、日广告费与统一日导入。", sourceModule: "finance_module/api/daily_report.py", availability: "planned_backend", unavailableReason: "百胜、钉钉正式适配不在首版范围。" },
-      { title: "销售与店铺报告", description: "销售月报、店铺组报告与退货统计。", sourceModule: "finance_module/api/sales_monthly_report.py", availability: "planned_backend", unavailableReason: "等待独立业务数据接口适配。" },
-      { title: "扩展报表", description: "牧马人扩展财务报表与经营汇总。", sourceModule: "finance_module/api/reports_extra.py", availability: "planned_backend", unavailableReason: "后端适配待完成，当前不可录入。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  cashier: {
-    title: "出纳",
-    summary: "牧马人出纳领域覆盖资金账户、银行流水与日记账；华邦适配必须使用新模块独立表，不读取旧财务表。",
-    capabilities: [
-      { title: "资金账户", description: "银行/支付宝/微信/现金账户与期初余额。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "出纳独立后端适配待完成，当前不可新增账户。" },
-      { title: "日记账与流水", description: "收支明细、对方、类别与备注登记。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "出纳独立后端适配待完成，当前不可录入流水。" },
-      { title: "银行对账", description: "银行流水与账面余额的对账差异核销。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "对账独立接口待接入，当前不可对账。" },
-      { title: "收支汇总", description: "今日/本月流入流出与净流入汇总。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "汇总独立接口待接入，当前不可查询。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  assets: {
-    title: "固定资产",
-    summary: "牧马人固定资产领域覆盖资产卡片、折旧与处置；华邦适配必须使用新模块独立表。",
-    capabilities: [
-      { title: "资产卡片", description: "资产编码、名称、分类、原值与购入日期。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "资产独立后端适配待完成，当前不可新增资产。" },
-      { title: "折旧与净值", description: "累计折旧、净值与折旧年限维护。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "折旧独立接口待接入，当前不可计提折旧。" },
-      { title: "资产处置", description: "资产报废、出售与处置台账。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "处置独立接口待接入，当前不可处置。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  invoices: {
-    title: "发票",
-    summary: "牧马人发票领域覆盖进项/销项发票登记与认证；华邦适配必须使用新模块独立表。",
-    capabilities: [
-      { title: "发票登记", description: "发票号码、方向、对方单位、金额与税额。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "发票独立后端适配待完成，当前不可录入发票。" },
-      { title: "进项认证", description: "进项发票认证状态与税额抵扣。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "认证独立接口待接入，当前不可认证。" },
-      { title: "发票台账", description: "按期间、方向汇总进销项发票与税额。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "台账独立接口待接入，当前不可查询。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  payroll: {
-    title: "薪资",
-    summary: "牧马人薪资领域覆盖工资、社保、公积金、个税与实发核对；华邦适配必须使用新模块独立表。",
-    capabilities: [
-      { title: "工资台账", description: "员工、部门、基本工资、奖金与应发合计。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "薪资独立后端适配待完成，当前不可录入工资。" },
-      { title: "社保公积金与个税", description: "社保、公积金、个税扣缴与实发核对。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "扣缴独立接口待接入，当前不可录入扣款。" },
-      { title: "薪资发放", description: "按期间发放状态与实发汇总。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "发放独立接口待接入，当前不可发放。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  payments: {
-    title: "付款",
-    summary: "牧马人付款领域覆盖付款申请、审批与执行；华邦适配必须使用新模块独立表，不读取旧财务表。",
-    capabilities: [
-      { title: "付款申请", description: "付款单录入、往来单位与付款金额。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "付款独立后端适配待完成，当前不可录入付款单。" },
-      { title: "付款审批", description: "付款单审批流程与状态流转。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "审批独立接口待接入，当前不可审批。" },
-      { title: "付款执行", description: "付款执行确认与银行流水关联。", sourceModule: "finance_module/api/business.py", availability: "planned_backend", unavailableReason: "执行独立接口待接入，当前不可执行。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-  closing: {
-    title: "期末结账",
-    summary: "期末结账独立后端适配尚未完成；在期间结账接口、预检规则与独立权限校验就绪前，本页不提供任何结账/反结账操作。",
-    capabilities: [
-      { title: "期间结账预检", description: "结账前对凭证完整性、借贷平衡、未审核单据进行预检。", sourceModule: "finance_module/api/closing.py", availability: "planned_backend", unavailableReason: "等待独立结账预检接口接入，当前不可操作。" },
-      { title: "期末结账", description: "按会计期间执行期末结账，结账后该期间凭证不可再修改。", sourceModule: "finance_module/api/closing.py", availability: "planned_backend", unavailableReason: "等待独立结账接口接入，当前不可结账。" },
-      { title: "结账状态查询", description: "查询各账簿各期间的结账状态与结账人。", sourceModule: "finance_module/api/closing.py", availability: "planned_backend", unavailableReason: "等待独立结账状态查询接口接入，当前不可查询。" },
-    ] satisfies MumarenFinanceCapability[],
-  },
-} as const;
+// 扁平化所有 navItem(含子项),用于查找
+export const flattenMumarenFinanceNavigation = (): MumarenFinanceNavItem[] => {
+  const result: MumarenFinanceNavItem[] = [];
+  const walk = (items: MumarenFinanceNavItem[]) => {
+    for (const it of items) {
+      result.push(it);
+      if (it.children?.length) walk(it.children);
+    }
+  };
+  walk(mumarenFinanceNavigation);
+  return result;
+};
 
-export const mumarenFinanceCenterMenuItem = {
-  path: MUMAREN_FINANCE_CENTER_ROOT,
+// 主侧边栏"财务中心"菜单项:可展开,children 为 13 个一级条目(其中有子项的再展开)。
+export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
   label: "财务中心",
+  key: "mumaren-finance-center",
   permission: "mumaren_finance_center:access",
+  children: [
+    { path: `${R}/compass`, label: "数据罗盘" },
+    { path: `${R}/history`, label: "历史数据存档" },
+    {
+      label: "凭证",
+      key: "mumaren-vouchers",
+      children: [
+        { path: `${R}/vouchers/create`, label: "录凭证" },
+        { path: `${R}/vouchers/list`, label: "查凭证" },
+        { path: `${R}/vouchers/summary`, label: "凭证汇总" },
+        { path: `${R}/vouchers/template`, label: "凭证模板" },
+        { path: `${R}/vouchers/auto`, label: "自动凭证" },
+      ],
+    },
+    {
+      label: "账簿",
+      key: "mumaren-ledgers",
+      children: [
+        { path: `${R}/ledgers/general`, label: "总账" },
+        { path: `${R}/ledgers/trial-balance`, label: "科目余额表" },
+        { path: `${R}/ledgers/detail`, label: "明细账" },
+      ],
+    },
+    {
+      label: "报表",
+      key: "mumaren-reports",
+      children: [
+        { path: `${R}/reports/balance-sheet`, label: "资产负债表" },
+        { path: `${R}/reports/profit-statement`, label: "利润表" },
+        { path: `${R}/reports/cash-flow-statement`, label: "现金流量表" },
+        { path: `${R}/reports/receivable-detail`, label: "应收明细" },
+        { path: `${R}/reports/payable-detail`, label: "应付明细" },
+        { path: `${R}/reports/expense-detail`, label: "费用明细表" },
+        { path: `${R}/reports/tax-detail`, label: "税金明细表" },
+        { path: `${R}/reports/sales-monthly`, label: "销售月报表" },
+      ],
+    },
+    { path: `${R}/ar-ap`, label: "应收应付" },
+    { path: `${R}/closing`, label: "结账" },
+    { path: `${R}/assets`, label: "资产" },
+    { path: `${R}/invoices`, label: "发票" },
+    {
+      label: "出纳",
+      key: "mumaren-cashier",
+      children: [
+        { path: `${R}/cashier/accounts`, label: "账户与流水" },
+        { path: `${R}/cashier/reconciliation`, label: "银行余额调节表" },
+      ],
+    },
+    { path: `${R}/payroll`, label: "工资" },
+    { path: `${R}/tax`, label: "税务" },
+    {
+      label: "设置",
+      key: "mumaren-settings",
+      children: [
+        { path: `${R}/settings/accounts`, label: "科目管理" },
+        { path: `${R}/settings/books`, label: "账套管理" },
+        { path: `${R}/settings/auxiliary`, label: "辅助核算" },
+        { path: `${R}/settings/audit-logs`, label: "操作日志" },
+      ],
+    },
+  ],
 };

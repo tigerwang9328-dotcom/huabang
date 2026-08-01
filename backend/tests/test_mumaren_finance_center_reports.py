@@ -58,6 +58,11 @@ def test_trial_balance_uses_only_posted_current_voucher_lines_and_keeps_zero_acc
         {"account_id": 3, "account_code": "6601", "account_name": "销售费用", "direction": "debit", "debit_amount": Decimal("30"), "credit_amount": Decimal("0"), "closing_debit": Decimal("30"), "closing_credit": Decimal("0")},
         {"account_id": 4, "account_code": "9999", "account_name": "尚未发生", "direction": "debit", "debit_amount": Decimal("0"), "credit_amount": Decimal("0"), "closing_debit": Decimal("0"), "closing_credit": Decimal("0")},
     ]
+    # Task 16: 平衡校验字段
+    assert report["assets_total"] == Decimal("90")
+    assert report["liabilities_total"] == Decimal("0")
+    assert report["equity_total"] == Decimal("0")
+    assert report["balance_check"]["is_balanced"] is False  # 资产 90 ≠ 负债+权益 0
 
 
 def test_empty_posted_ledger_returns_zero_trial_balance_and_profit_statement():
@@ -66,12 +71,14 @@ def test_empty_posted_ledger_returns_zero_trial_balance_and_profit_statement():
     trial_balance = build_trial_balance(accounts, [])
     profit_statement = build_profit_statement(accounts, [])
 
-    assert trial_balance == {
-        "rows": [{"account_id": 1, "account_code": "6001", "account_name": "主营业务收入", "direction": "credit", "debit_amount": Decimal("0"), "credit_amount": Decimal("0"), "closing_debit": Decimal("0"), "closing_credit": Decimal("0")}],
-        "total_debit": Decimal("0"),
-        "total_credit": Decimal("0"),
-        "is_balanced": True,
-    }
+    assert trial_balance["rows"] == [{"account_id": 1, "account_code": "6001", "account_name": "主营业务收入", "direction": "credit", "debit_amount": Decimal("0"), "credit_amount": Decimal("0"), "closing_debit": Decimal("0"), "closing_credit": Decimal("0")}]
+    assert trial_balance["total_debit"] == Decimal("0")
+    assert trial_balance["total_credit"] == Decimal("0")
+    assert trial_balance["is_balanced"] is True
+    assert trial_balance["assets_total"] == Decimal("0")
+    assert trial_balance["liabilities_total"] == Decimal("0")
+    assert trial_balance["equity_total"] == Decimal("0")
+    assert trial_balance["balance_check"]["is_balanced"] is True
     assert profit_statement == {
         "income_rows": [{"account_id": 1, "account_code": "6001", "account_name": "主营业务收入", "amount": Decimal("0")}],
         "expense_rows": [],

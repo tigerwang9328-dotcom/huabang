@@ -35,7 +35,7 @@ test("finance center navigation uses the platform Finance V2 read permission", (
     "the rendered sidebar must use the central finance navigation policy",
   );
   assert.ok(
-    layout.includes("items: financeProfitNavigation,"),
+    layout.includes("...financeProfitNavigation"),
     "the rendered sidebar must not duplicate the finance center permission with the legacy profit permission",
   );
 });

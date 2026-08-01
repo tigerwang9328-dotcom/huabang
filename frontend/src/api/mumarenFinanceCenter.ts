@@ -206,3 +206,427 @@ export const mumarenFinanceCenterApi = {
   reviewTaxRecord: (recordId: number) => request.post<ApiResponse<MumarenTaxRecord>>(requestPath(`/tax/records/${recordId}/review`)),
   payTaxRecord: (recordId: number, payload: TaxPayPayload) => request.post<ApiResponse<MumarenTaxRecord>>(requestPath(`/tax/records/${recordId}/pay`), payload),
 };
+
+// ─────────────────────────────────────────────────────────────
+// Task 18 扩展:12 组 CRUD + 状态转换 API(仅 /finance-center/mumaren/*)
+// 所有写入均落库持久化,前端不再维护会话内数组。
+// ─────────────────────────────────────────────────────────────
+
+// ── 固定资产 ──
+export interface MumarenFixedAsset {
+  id: number;
+  book_id: number;
+  asset_code: string;
+  asset_name: string;
+  category: string;
+  original_value: number;
+  purchase_date: string;
+  useful_life: number;
+  accumulated_depreciation: number;
+  net_value: number;
+  status: "in_use" | "disposed";
+  created_at: string;
+}
+export interface FixedAssetInput {
+  book_id: number;
+  asset_code: string;
+  asset_name: string;
+  category: string;
+  original_value: number;
+  purchase_date: string;
+  useful_life: number;
+}
+export interface FixedAssetUpdate {
+  asset_name?: string;
+  category?: string;
+  original_value?: number;
+  useful_life?: number;
+  status?: "in_use" | "disposed";
+}
+export const fixedAssetsApi = {
+  list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenFixedAsset[]>>(requestPath("/fixed-assets"), { params }),
+  create: (data: FixedAssetInput) => request.post<ApiResponse<MumarenFixedAsset>>(requestPath("/fixed-assets"), data),
+  update: (id: number, data: FixedAssetUpdate) => request.put<ApiResponse<MumarenFixedAsset>>(requestPath(`/fixed-assets/${id}`), data),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/fixed-assets/${id}`), { params: { book_id } }),
+  dispose: (id: number, book_id: number) => request.put<ApiResponse<MumarenFixedAsset>>(requestPath(`/fixed-assets/${id}`), { status: "disposed" }, { params: { book_id } }),
+  depreciate: (id: number, book_id: number) => request.post<ApiResponse<MumarenFixedAsset>>(requestPath(`/fixed-assets/${id}/depreciate`), null, { params: { book_id } }),
+};
+
+// ── 发票 ──
+export interface MumarenInvoice {
+  id: number;
+  book_id: number;
+  invoice_code: string;
+  invoice_no: string;
+  direction: "input" | "output";
+  counterparty: string;
+  amount: number;
+  tax_amount: number;
+  total_amount: number;
+  invoice_date: string;
+  certified: boolean;
+  status: "draft" | "verified";
+  created_at: string;
+}
+export interface InvoiceInput {
+  book_id: number;
+  invoice_code: string;
+  invoice_no: string;
+  direction: "input" | "output";
+  counterparty: string;
+  amount: number;
+  tax_amount: number;
+  invoice_date: string;
+}
+export interface InvoiceUpdate {
+  counterparty?: string;
+  amount?: number;
+  tax_amount?: number;
+  invoice_date?: string;
+}
+export const invoicesApi = {
+  list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenInvoice[]>>(requestPath("/invoices"), { params }),
+  create: (data: InvoiceInput) => request.post<ApiResponse<MumarenInvoice>>(requestPath("/invoices"), data),
+  update: (id: number, data: InvoiceUpdate, book_id: number) => request.put<ApiResponse<MumarenInvoice>>(requestPath(`/invoices/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/invoices/${id}`), { params: { book_id } }),
+  verify: (id: number, book_id: number) => request.post<ApiResponse<MumarenInvoice>>(requestPath(`/invoices/${id}/verify`), null, { params: { book_id } }),
+};
+
+// ── 出纳账户 ──
+export interface MumarenCashAccount {
+  id: number;
+  book_id: number;
+  account_name: string;
+  account_type: string;
+  opening_balance: number;
+  current_balance: number;
+  created_at: string;
+}
+export interface CashAccountInput {
+  book_id: number;
+  account_name: string;
+  account_type: string;
+  opening_balance: number;
+}
+export interface CashAccountUpdate {
+  account_name?: string;
+  account_type?: string;
+}
+export const cashAccountsApi = {
+  list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenCashAccount[]>>(requestPath("/cash-accounts"), { params }),
+  create: (data: CashAccountInput) => request.post<ApiResponse<MumarenCashAccount>>(requestPath("/cash-accounts"), data),
+  update: (id: number, data: CashAccountUpdate, book_id: number) => request.put<ApiResponse<MumarenCashAccount>>(requestPath(`/cash-accounts/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/cash-accounts/${id}`), { params: { book_id } }),
+};
+
+// ── 现金流水 ──
+export interface MumarenCashFlow {
+  id: number;
+  book_id: number;
+  cash_account_id: number;
+  transaction_date: string;
+  direction: "income" | "expense";
+  amount: number;
+  counterparty: string;
+  remark: string;
+  created_at: string;
+}
+export interface CashFlowInput {
+  book_id: number;
+  cash_account_id: number;
+  transaction_date: string;
+  direction: "income" | "expense";
+  amount: number;
+  counterparty: string;
+  remark: string;
+}
+export const cashFlowsApi = {
+  list: (params: { book_id: number; cash_account_id?: number; limit?: number }) => request.get<ApiResponse<MumarenCashFlow[]>>(requestPath("/cash-flows"), { params }),
+  create: (data: CashFlowInput) => request.post<ApiResponse<MumarenCashFlow>>(requestPath("/cash-flows"), data),
+};
+
+// ── 工资 ──
+export interface MumarenPayroll {
+  id: number;
+  book_id: number;
+  employee_name: string;
+  department: string;
+  period: string;
+  base_salary: number;
+  bonus: number;
+  gross_salary: number;
+  social_insurance: number;
+  housing_fund: number;
+  income_tax: number;
+  net_salary: number;
+  status: "draft" | "paid";
+  created_at: string;
+}
+export interface PayrollInput {
+  book_id: number;
+  employee_name: string;
+  department: string;
+  period: string;
+  base_salary: number;
+  bonus: number;
+  social_insurance: number;
+  housing_fund: number;
+  income_tax: number;
+}
+export interface PayrollUpdate {
+  employee_name?: string;
+  department?: string;
+  base_salary?: number;
+  bonus?: number;
+  social_insurance?: number;
+  housing_fund?: number;
+  income_tax?: number;
+}
+export const payrollsApi = {
+  list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenPayroll[]>>(requestPath("/payrolls"), { params }),
+  create: (data: PayrollInput) => request.post<ApiResponse<MumarenPayroll>>(requestPath("/payrolls"), data),
+  update: (id: number, data: PayrollUpdate, book_id: number) => request.put<ApiResponse<MumarenPayroll>>(requestPath(`/payrolls/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/payrolls/${id}`), { params: { book_id } }),
+  pay: (id: number, book_id: number) => request.post<ApiResponse<MumarenPayroll>>(requestPath(`/payrolls/${id}/pay`), null, { params: { book_id } }),
+};
+
+// ── 期间(结账) ──
+export interface MumarenPeriod {
+  id: number;
+  book_id: number;
+  period: string;
+  status: "open" | "closing" | "closed";
+  closed_at: string | null;
+  created_at: string;
+}
+export const periodsApi = {
+  list: (params: { book_id: number }) => request.get<ApiResponse<MumarenPeriod[]>>(requestPath("/periods"), { params }),
+  close: (id: number, book_id: number) => request.post<ApiResponse<MumarenPeriod>>(requestPath(`/periods/${id}/close`), null, { params: { book_id } }),
+  reopen: (id: number, book_id: number) => request.post<ApiResponse<MumarenPeriod>>(requestPath(`/periods/${id}/reopen`), null, { params: { book_id } }),
+};
+
+// ── AR/AP 订单(补充列表查询与删除) ──
+export interface ArApOrderUpdate {
+  counterparty_name?: string;
+  total_amount?: number;
+  order_date?: string;
+  remark?: string | null;
+}
+export const arApOrdersApi = {
+  list: (params: { book_id: number; order_type: "receivable" | "payable"; limit?: number }) => request.get<ApiResponse<MumarenArApOrder[]>>(requestPath("/ar-ap/orders"), { params }),
+  update: (id: number, data: ArApOrderUpdate, book_id: number, order_type: string) => request.put<ApiResponse<MumarenArApOrder>>(requestPath(`/ar-ap/orders/${id}`), data, { params: { book_id, order_type } }),
+  delete: (id: number, book_id: number, order_type: string) => request.delete<ApiResponse<null>>(requestPath(`/ar-ap/orders/${id}`), { params: { book_id, order_type } }),
+};
+
+// ── 审计日志(只读) ──
+export interface MumarenAuditLog {
+  id: number;
+  book_id: number | null;
+  operation_time: string;
+  module: string;
+  action: string;
+  operator: string;
+  operator_id: number | null;
+  detail: string;
+}
+export const auditLogsApi = {
+  list: (params: { book_id?: number; action?: string; operator_id?: number; start_date?: string; end_date?: string; limit?: number }) => request.get<ApiResponse<MumarenAuditLog[]>>(requestPath("/audit-logs"), { params }),
+};
+
+// ── 凭证模板 ──
+export interface MumarenVoucherTemplate {
+  id: number;
+  book_id: number;
+  template_name: string;
+  voucher_type: string;
+  summary: string;
+  created_at: string;
+}
+export interface VoucherTemplateInput {
+  book_id: number;
+  template_name: string;
+  voucher_type: string;
+  summary: string;
+}
+export interface VoucherTemplateUpdate {
+  template_name?: string;
+  voucher_type?: string;
+  summary?: string;
+}
+export const voucherTemplatesApi = {
+  list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenVoucherTemplate[]>>(requestPath("/voucher-templates"), { params }),
+  create: (data: VoucherTemplateInput) => request.post<ApiResponse<MumarenVoucherTemplate>>(requestPath("/voucher-templates"), data),
+  update: (id: number, data: VoucherTemplateUpdate, book_id: number) => request.put<ApiResponse<MumarenVoucherTemplate>>(requestPath(`/voucher-templates/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/voucher-templates/${id}`), { params: { book_id } }),
+};
+
+// ── 自动凭证规则 ──
+export interface MumarenAutoVoucherRule {
+  id: number;
+  book_id: number;
+  rule_name: string;
+  business_type: string;
+  account_code: string;
+  direction: "debit" | "credit";
+  amount_source: string;
+  fixed_amount?: number;
+  enabled: boolean;
+  created_at: string;
+}
+export interface AutoVoucherRuleInput {
+  book_id: number;
+  rule_name: string;
+  business_type: string;
+  account_code: string;
+  direction: "debit" | "credit";
+  amount_source: string;
+  fixed_amount?: number;
+  enabled: boolean;
+}
+export interface AutoVoucherRuleUpdate {
+  rule_name?: string;
+  business_type?: string;
+  account_code?: string;
+  direction?: "debit" | "credit";
+  enabled?: boolean;
+}
+export const autoVoucherRulesApi = {
+  list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenAutoVoucherRule[]>>(requestPath("/auto-voucher-rules"), { params }),
+  create: (data: AutoVoucherRuleInput) => request.post<ApiResponse<MumarenAutoVoucherRule>>(requestPath("/auto-voucher-rules"), data),
+  update: (id: number, data: AutoVoucherRuleUpdate, book_id: number) => request.put<ApiResponse<MumarenAutoVoucherRule>>(requestPath(`/auto-voucher-rules/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/auto-voucher-rules/${id}`), { params: { book_id } }),
+};
+
+// ── 费用明细(草稿 → 财务审核 → 人工过账) ──
+export interface MumarenExpenseEntry {
+  id: number;
+  book_id: number;
+  period: string;
+  account_code: string;
+  account_name: string;
+  amount: number;
+  remark: string;
+  status: "draft" | "reviewed" | "posted";
+  created_at: string;
+}
+export interface ExpenseEntryInput {
+  book_id: number;
+  period: string;
+  account_code: string;
+  account_name: string;
+  amount: number;
+  remark: string;
+}
+export interface ExpenseEntryUpdate {
+  account_code?: string;
+  account_name?: string;
+  amount?: number;
+  remark?: string;
+}
+export const expenseEntriesApi = {
+  list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenExpenseEntry[]>>(requestPath("/expense-entries"), { params }),
+  create: (data: ExpenseEntryInput) => request.post<ApiResponse<MumarenExpenseEntry>>(requestPath("/expense-entries"), data),
+  update: (id: number, data: ExpenseEntryUpdate, book_id: number) => request.put<ApiResponse<MumarenExpenseEntry>>(requestPath(`/expense-entries/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/expense-entries/${id}`), { params: { book_id } }),
+  review: (id: number, book_id: number) => request.post<ApiResponse<MumarenExpenseEntry>>(requestPath(`/expense-entries/${id}/review`), null, { params: { book_id } }),
+  post: (id: number, book_id: number) => request.post<ApiResponse<MumarenExpenseEntry>>(requestPath(`/expense-entries/${id}/post`), null, { params: { book_id } }),
+};
+
+// ── 销售月报 ──
+export interface MumarenSalesMonthlyReport {
+  id: number;
+  book_id: number;
+  period: string;
+  store_name: string;
+  sales_amount: number;
+  return_amount: number;
+  net_sales: number;
+  remark: string;
+  created_at: string;
+}
+export interface SalesMonthlyReportInput {
+  book_id: number;
+  period: string;
+  store_name: string;
+  sales_amount: number;
+  return_amount: number;
+  remark: string;
+}
+export interface SalesMonthlyReportUpdate {
+  sales_amount?: number;
+  return_amount?: number;
+  remark?: string;
+}
+export const salesMonthlyReportsApi = {
+  list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenSalesMonthlyReport[]>>(requestPath("/sales-monthly-reports"), { params }),
+  create: (data: SalesMonthlyReportInput) => request.post<ApiResponse<MumarenSalesMonthlyReport>>(requestPath("/sales-monthly-reports"), data),
+  update: (id: number, data: SalesMonthlyReportUpdate, book_id: number) => request.put<ApiResponse<MumarenSalesMonthlyReport>>(requestPath(`/sales-monthly-reports/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/sales-monthly-reports/${id}`), { params: { book_id } }),
+};
+
+// ── 银行余额调节 ──
+export interface MumarenBankReconciliation {
+  id: number;
+  book_id: number;
+  account_name: string;
+  reconcile_date: string;
+  book_balance: number;
+  bank_balance: number;
+  difference: number;
+  status: "pending" | "reconciled";
+  remark: string;
+  created_at: string;
+}
+export interface BankReconciliationInput {
+  book_id: number;
+  account_name: string;
+  reconcile_date: string;
+  book_balance: number;
+  bank_balance: number;
+  remark: string;
+}
+export interface BankReconciliationUpdate {
+  book_balance?: number;
+  bank_balance?: number;
+  status?: "pending" | "reconciled";
+  remark?: string;
+}
+export const bankReconciliationsApi = {
+  list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenBankReconciliation[]>>(requestPath("/bank-reconciliations"), { params }),
+  create: (data: BankReconciliationInput) => request.post<ApiResponse<MumarenBankReconciliation>>(requestPath("/bank-reconciliations"), data),
+  update: (id: number, data: BankReconciliationUpdate, book_id: number) => request.put<ApiResponse<MumarenBankReconciliation>>(requestPath(`/bank-reconciliations/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/bank-reconciliations/${id}`), { params: { book_id } }),
+};
+
+// ── 辅助核算 ──
+export interface MumarenAuxiliaryAccounting {
+  id: number;
+  book_id: number;
+  aux_type: string;
+  code: string;
+  name: string;
+  parent_code: string | null;
+  status: "active" | "inactive";
+  remark: string;
+  created_at: string;
+}
+export interface AuxiliaryAccountingInput {
+  book_id: number;
+  aux_type: string;
+  code: string;
+  name: string;
+  parent_code?: string | null;
+  remark: string;
+}
+export interface AuxiliaryAccountingUpdate {
+  name?: string;
+  parent_code?: string | null;
+  status?: "active" | "inactive";
+  remark?: string;
+}
+export const auxiliaryAccountingsApi = {
+  list: (params: { book_id: number; aux_type?: string; limit?: number }) => request.get<ApiResponse<MumarenAuxiliaryAccounting[]>>(requestPath("/auxiliary-accountings"), { params }),
+  create: (data: AuxiliaryAccountingInput) => request.post<ApiResponse<MumarenAuxiliaryAccounting>>(requestPath("/auxiliary-accountings"), data),
+  update: (id: number, data: AuxiliaryAccountingUpdate, book_id: number) => request.put<ApiResponse<MumarenAuxiliaryAccounting>>(requestPath(`/auxiliary-accountings/${id}`), data, { params: { book_id } }),
+  delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/auxiliary-accountings/${id}`), { params: { book_id } }),
+};
