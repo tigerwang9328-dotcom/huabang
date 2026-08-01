@@ -2,238 +2,141 @@
   <section class="admin-page" v-loading="loading">
     <div class="page-head">
       <div>
-        <el-button text @click="router.push({ name: 'DouyinColorVideoList' })">← 返回视频</el-button>
-        <p class="eyebrow">DOUYIN COLOR ADMIN</p>
-        <h1>管理与健康</h1>
-        <p>采集器状态、队列容量、令牌轮换与发布阶段开关；敏感操作由服务端权限校验。</p>
+        <p class="eyebrow">销售中心 · 线上销售</p>
+        <h1>抖音视频分析</h1>
+        <p>在这里查看采集是否正常，并为油猴脚本生成一次性上传令牌。</p>
       </div>
       <el-button :loading="loading" @click="loadAll">刷新</el-button>
     </div>
 
-    <el-alert v-if="loadError" :title="loadError" type="error" show-icon :closable="false" class="banner" />
+    <el-alert v-if="loadError" :title="loadError" type="warning" show-icon :closable="false" class="banner" />
 
-    <!-- 账号信息区域 -->
-    <el-card v-if="context" class="section-card" shadow="never">
-      <template #header><h2>当前账号</h2></template>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="管理员名称">{{ context.account.display_name }}</el-descriptions-item>
-        <el-descriptions-item label="抖音昵称">
-          <span v-if="context.account.observed_account_name">{{ context.account.observed_account_name }}</span>
-          <span v-else class="muted">暂无（采集器未上报）</span>
+    <el-card class="section-card" shadow="never">
+      <template #header><h2>采集状态</h2></template>
+      <el-descriptions v-if="context" :column="2" border>
+        <el-descriptions-item label="当前账号">{{ context.account.display_name }}</el-descriptions-item>
+        <el-descriptions-item label="抖音昵称">{{ context.account.observed_account_name || "尚未上报" }}</el-descriptions-item>
+        <el-descriptions-item label="当前采集状态">
+          <el-tag :type="statusTagType(activeCollector?.current_status)" effect="plain">{{ activeCollector?.current_status || "等待油猴心跳" }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="账号标识">
-          <code>{{ context.account.account_key }}</code>
-        </el-descriptions-item>
-        <el-descriptions-item label="最近心跳">{{ formatTime(context.account.last_heartbeat_at) }}</el-descriptions-item>
+        <el-descriptions-item label="脚本最近心跳">{{ formatTime(context.account.last_heartbeat_at) }}</el-descriptions-item>
+        <el-descriptions-item label="油猴脚本版本">{{ activeCollector?.script_version || "尚未上报" }}</el-descriptions-item>
+        <el-descriptions-item label="本地待上传批次">{{ activeCollector?.queued_batch_count ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="本地待上传数据">{{ formatBytes(activeCollector?.queued_bytes ?? 0) }}</el-descriptions-item>
+        <el-descriptions-item label="服务器计算队列">{{ health?.queue_capacity.queued_jobs ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="分析服务">{{ health?.feature_flags.color_analysis_enabled ? "已启用" : "未启用" }}</el-descriptions-item>
       </el-descriptions>
+      <el-empty v-else description="尚未读取到启用的抖音账号" />
+      <p class="hint">没有心跳时：确认油猴脚本已启用、已填写当前令牌，并在抖音创作服务平台保持登录。</p>
     </el-card>
 
-    <!-- 健康页区域 -->
     <el-card class="section-card" shadow="never">
-      <template #header><h2>采集器状态与队列</h2></template>
-      <el-descriptions v-if="health" :column="2" border>
-        <el-descriptions-item label="当前状态">
-          <el-tag :type="statusTagType(health.collector_status.current_status)" effect="plain">
-            {{ health.collector_status.current_status }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="队列批次">{{ health.collector_status.queued_batch_count }}</el-descriptions-item>
-        <el-descriptions-item label="队列字节">{{ formatBytes(health.collector_status.queued_bytes) }}</el-descriptions-item>
-        <el-descriptions-item label="最近心跳">{{ formatTime(health.collector_status.last_heartbeat_at) }}</el-descriptions-item>
-        <el-descriptions-item label="计算任务排队">
-          {{ health.queue_capacity.calculation_job_queued }} / {{ health.queue_capacity.calculation_job_capacity }}
-        </el-descriptions-item>
-        <el-descriptions-item label="当前阶段">
-          <el-tag type="success">{{ health.feature_flags.current_stage }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="弹回报告">
-          <el-tag :type="health.feature_flags.bounce_report_enabled ? 'success' : 'info'" effect="plain">
-            {{ health.feature_flags.bounce_report_enabled ? '已开启' : '已关闭' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="弹回语义状态">{{ health.feature_flags.bounce_semantics_status }}</el-descriptions-item>
-      </el-descriptions>
-      <el-empty v-else description="暂无健康数据" />
-    </el-card>
-
-    <!-- 权限区域 -->
-    <el-card class="section-card" shadow="never">
-      <template #header><h2>当前权限</h2></template>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="用户角色">
-          <el-tag v-for="role in auth.roles" :key="role" class="role-tag" effect="plain">{{ role }}</el-tag>
-          <span v-if="auth.roles.length === 0" class="muted">未分配角色</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="是否管理员">
-          <el-tag :type="auth.isAdmin ? 'danger' : 'info'" effect="plain">{{ auth.isAdmin ? '是' : '否' }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="可执行操作">
-          <el-tag v-if="canManage" type="success" effect="plain">可管理（令牌轮换、阶段前进）</el-tag>
-          <el-tag v-else type="info" effect="plain">只读查看</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="数据范围">{{ auth.dataScope }}</el-descriptions-item>
-      </el-descriptions>
-      <p class="hint">权限说明：admin 可见全部功能；viewer 仅只读。角色与权限由服务端 JWT 控制，前端不做绕过。</p>
-    </el-card>
-
-    <!-- 令牌轮换区域 -->
-    <el-card class="section-card" shadow="never">
-      <template #header><h2>上传令牌</h2></template>
+      <template #header><h2>采集令牌</h2></template>
       <el-descriptions v-if="releaseStage" :column="2" border>
-        <el-descriptions-item label="当前令牌前缀">
-          <code>{{ releaseStage.active_token?.token_prefix || '—' }}</code>
-        </el-descriptions-item>
-        <el-descriptions-item label="到期时间">
-          {{ formatTime(releaseStage.active_token?.expires_at || null) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="令牌状态">
-          <el-tag v-if="releaseStage.active_token?.is_active" type="success" effect="plain">active</el-tag>
-          <el-tag v-else type="info" effect="plain">无活跃令牌</el-tag>
-        </el-descriptions-item>
+        <el-descriptions-item label="当前令牌前缀"><code>{{ releaseStage.active_token?.token_prefix || "—" }}</code></el-descriptions-item>
+        <el-descriptions-item label="到期时间">{{ formatTime(releaseStage.active_token?.expires_at) }}</el-descriptions-item>
+        <el-descriptions-item label="令牌状态"><el-tag :type="releaseStage.active_token?.is_active ? 'success' : 'info'" effect="plain">{{ releaseStage.active_token?.is_active ? "有效" : "无有效令牌" }}</el-tag></el-descriptions-item>
       </el-descriptions>
-      <div class="card-actions">
-        <el-button type="danger" :disabled="!canManage" :loading="rotating" @click="confirmRotate">轮换令牌</el-button>
-        <span v-if="!canManage" class="muted">需要管理权限</span>
+      <el-empty v-else description="令牌状态暂不可用" />
+      <div class="card-actions" v-if="canManage">
+        <el-button type="primary" :loading="rotating" :disabled="!context" @click="confirmRotate">生成新令牌</el-button>
+        <span class="muted">生成后旧令牌立即失效。</span>
+      </div>
+      <p v-else class="hint">你可以查看采集状态；生成令牌需要抖音分析管理员权限。</p>
+    </el-card>
+
+    <el-card class="section-card" shadow="never">
+      <template #header><h2>数据分析入口</h2></template>
+      <div class="entry-actions">
+        <el-button @click="router.push({ name: 'DouyinColorVideoList' })">视频列表</el-button>
+        <el-button @click="router.push({ name: 'DouyinColorStyles' })">款式颜色</el-button>
+        <el-button type="primary" @click="router.push({ name: 'DouyinColorReport' })">颜色报告</el-button>
       </div>
     </el-card>
 
-    <!-- A/B/C/D 阶段开关区域 -->
-    <el-card class="section-card" shadow="never">
-      <template #header><h2>发布阶段</h2></template>
-      <el-descriptions v-if="releaseStage" :column="1" border>
-        <el-descriptions-item label="当前阶段">
-          <el-steps :active="stageIndex" finish-status="success" class="stage-steps">
-            <el-step title="A" description="内测" />
-            <el-step title="B" description="灰度" />
-            <el-step title="C" description="扩大" />
-            <el-step title="D" description="全量" />
-          </el-steps>
-        </el-descriptions-item>
-        <el-descriptions-item label="弹回报告开关">
-          <div class="bounce-row">
-            <el-switch
-              :model-value="releaseStage.bounce_report_enabled"
-              :disabled="!canToggleBounce || !canManage"
-              :loading="togglingBounce"
-              @change="onToggleBounce"
-            />
-            <span v-if="!canToggleBounce" class="muted">弹回语义状态未达到 verified_*_is_better，暂不可开启。</span>
-          </div>
-        </el-descriptions-item>
-        <el-descriptions-item label="弹回语义状态">{{ releaseStage.bounce_semantics_status }}</el-descriptions-item>
-      </el-descriptions>
-      <div class="card-actions">
-        <el-button type="primary" :disabled="!canManage || !canAdvance" :loading="advancing" @click="confirmAdvance">
-          前进到下一阶段（{{ nextStage }}）
-        </el-button>
-        <span v-if="!canAdvance" class="muted">已是最终阶段 D</span>
-        <span v-if="!canManage" class="muted">需要管理权限</span>
-      </div>
-    </el-card>
+    <el-collapse class="advanced" v-if="releaseStage">
+      <el-collapse-item title="高级管理" name="advanced">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="发布阶段">{{ releaseStage.current_stage }}</el-descriptions-item>
+          <el-descriptions-item label="弹回报告">{{ releaseStage.bounce_report_enabled ? "已开启" : "已关闭" }}</el-descriptions-item>
+          <el-descriptions-item label="弹回语义状态">{{ releaseStage.bounce_semantics_status }}</el-descriptions-item>
+        </el-descriptions>
+      </el-collapse-item>
+    </el-collapse>
+
+    <el-dialog :model-value="Boolean(issuedToken)" title="请立即保存新的采集令牌" width="560px" :close-on-click-modal="false" :close-on-press-escape="false" @closed="clearIssuedToken">
+      <el-alert title="该令牌只会在本窗口展示一次。关闭、刷新或离开页面后无法再次查看。" type="warning" :closable="false" show-icon />
+      <el-input class="token-value" :model-value="issuedToken || ''" readonly>
+        <template #append><el-button @click="copyIssuedToken">复制</el-button></template>
+      </el-input>
+      <template #footer><el-button type="primary" @click="clearIssuedToken">我已保存</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import {
-  douyinColorAnalyticsApi,
-  douyinColorAdminApi,
-  type DouyinAnnotationContext,
-  type DouyinColorHealth,
-  type DouyinColorReleaseStageInfo,
-  type DouyinColorReleaseStage,
-} from "@/api/douyinColorAnalytics";
+import { douyinColorAnalyticsApi, douyinColorAdminApi, type DouyinAnnotationContext, type DouyinColorHealth, type DouyinColorReleaseStageInfo } from "@/api/douyinColorAnalytics";
 
 const router = useRouter();
 const auth = useAuthStore();
 const loading = ref(false);
 const rotating = ref(false);
-const advancing = ref(false);
-const togglingBounce = ref(false);
 const loadError = ref("");
-
+const issuedToken = ref<string | null>(null);
 const context = ref<DouyinAnnotationContext | null>(null);
 const health = ref<DouyinColorHealth | null>(null);
 const releaseStage = ref<DouyinColorReleaseStageInfo | null>(null);
 
-const STAGE_ORDER: DouyinColorReleaseStage[] = ["A", "B", "C", "D"];
-
-const stageIndex = computed(() => {
-  if (!releaseStage.value) return 0;
-  const idx = STAGE_ORDER.indexOf(releaseStage.value.current_stage);
-  return idx < 0 ? 0 : idx;
-});
-
-const canAdvance = computed(() => {
-  if (!releaseStage.value) return false;
-  return STAGE_ORDER.indexOf(releaseStage.value.current_stage) < STAGE_ORDER.length - 1;
-});
-
-const nextStage = computed(() => {
-  if (!releaseStage.value || !canAdvance.value) return "—";
-  const idx = STAGE_ORDER.indexOf(releaseStage.value.current_stage);
-  return STAGE_ORDER[idx + 1] || "—";
-});
-
-const canManage = computed(() => auth.isAdmin || auth.hasRole("admin") || auth.hasPermission("douyin:admin") || auth.hasPermission("douyin.color:admin"));
-
-const canToggleBounce = computed(() => {
-  if (!releaseStage.value) return false;
-  const status = releaseStage.value.bounce_semantics_status || "";
-  return status.startsWith("verified_") && status.endsWith("_is_better");
-});
+const canManage = computed(() => auth.hasPermission("douyin.admin"));
+const activeCollector = computed(() => health.value?.collector_status.find((item) => item.account_id === context.value?.account.id));
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "—";
-  try { return new Date(value).toLocaleString("zh-CN", { hour12: false }); }
-  catch { return value; }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("zh-CN", { hour12: false });
 }
 
 function formatBytes(bytes: number) {
-  if (!bytes || bytes <= 0) return "0 B";
+  if (!bytes) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
-  let idx = 0;
-  let val = bytes;
-  while (val >= 1024 && idx < units.length - 1) { val /= 1024; idx++; }
-  return `${val.toFixed(1)} ${units[idx]}`;
+  let index = 0;
+  let value = bytes;
+  while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
+  return `${value.toFixed(1)} ${units[index]}`;
 }
 
-function statusTagType(status: string) {
-  const s = (status || "").toLowerCase();
-  if (s.includes("running") || s.includes("ok") || s.includes("healthy") || s.includes("active")) return "success";
-  if (s.includes("idle") || s.includes("waiting") || s.includes("paused")) return "info";
-  if (s.includes("error") || s.includes("down") || s.includes("failed")) return "danger";
-  return "warning";
+function statusTagType(status?: string) {
+  const value = (status || "").toLowerCase();
+  if (value.includes("active") || value.includes("healthy") || value.includes("running")) return "success";
+  if (value.includes("error") || value.includes("failed") || value.includes("offline")) return "danger";
+  return "info";
 }
 
 function describeError(error: unknown) {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 401) return "登录已失效，请重新登录中台后再试。";
+  if (status === 403) return "你没有查看该抖音账号采集状态的权限，请联系管理员授权。";
+  if (status === 404) return "采集服务尚未启用，请联系管理员完成服务部署。";
   const response = (error as { response?: { data?: { detail?: string; message?: string } } })?.response?.data;
-  return response?.detail || response?.message || (error instanceof Error ? error.message : "请求失败");
-}
-
-async function loadContext() {
-  if (context.value) return;
-  context.value = (await douyinColorAnalyticsApi.getAnnotationContext()).data;
-}
-
-async function loadHealth() {
-  health.value = (await douyinColorAdminApi.getHealth()).data;
-}
-
-async function loadReleaseStage() {
-  if (!context.value) return;
-  releaseStage.value = (await douyinColorAdminApi.getReleaseStage(context.value.account.id)).data;
+  return response?.detail || response?.message || "暂时无法读取采集状态，请稍后刷新。";
 }
 
 async function loadAll() {
   loading.value = true;
   loadError.value = "";
   try {
-    await loadContext();
-    await Promise.all([loadHealth(), loadReleaseStage()]);
+    context.value = (await douyinColorAnalyticsApi.getAnnotationContext()).data;
+    const accountId = context.value.account.id;
+    const [healthResult, stageResult] = await Promise.all([
+      douyinColorAdminApi.getHealth(),
+      douyinColorAdminApi.getReleaseStage(accountId),
+    ]);
+    health.value = healthResult.data;
+    releaseStage.value = stageResult.data;
   } catch (error) {
     loadError.value = describeError(error);
   } finally {
@@ -244,19 +147,13 @@ async function loadAll() {
 async function confirmRotate() {
   if (!context.value) return;
   try {
-    await ElMessageBox.confirm(
-      "轮换将立即吊销当前活跃令牌，已使用旧令牌的采集器需要更新配置。确认继续？",
-      "确认轮换令牌",
-      { type: "warning", confirmButtonText: "确认轮换", cancelButtonText: "取消" },
-    );
-  } catch {
-    return;
-  }
+    await ElMessageBox.confirm("生成新令牌会立即使旧令牌失效。油猴脚本需要改为使用新令牌，确认继续？", "确认生成新令牌", { type: "warning", confirmButtonText: "确认生成", cancelButtonText: "取消" });
+  } catch { return; }
   rotating.value = true;
   try {
     const res = await douyinColorAdminApi.rotateToken(context.value.account.id);
-    await loadReleaseStage();
-    ElMessage.success(`令牌已轮换，新令牌前缀：${res.data.token_prefix}`);
+    issuedToken.value = res.data.upload_token;
+    releaseStage.value = (await douyinColorAdminApi.getReleaseStage(context.value.account.id)).data;
   } catch (error) {
     ElMessage.error(describeError(error));
   } finally {
@@ -264,45 +161,20 @@ async function confirmRotate() {
   }
 }
 
-async function confirmAdvance() {
-  if (!context.value || !canAdvance.value) return;
-  const target = nextStage.value;
+async function copyIssuedToken() {
+  if (!issuedToken.value) return;
   try {
-    await ElMessageBox.confirm(
-      `确认将发布阶段从 ${releaseStage.value?.current_stage} 前进到 ${target}？此操作不可回退。`,
-      `确认前进到阶段 ${target}`,
-      { type: "warning", confirmButtonText: `前进到 ${target}`, cancelButtonText: "取消" },
-    );
+    await navigator.clipboard.writeText(issuedToken.value);
+    ElMessage.success("已复制，请粘贴到油猴脚本配置中。");
   } catch {
-    return;
-  }
-  advancing.value = true;
-  try {
-    await douyinColorAdminApi.advanceStage(context.value.account.id, target);
-    await loadAll();
-    ElMessage.success(`已前进到阶段 ${target}`);
-  } catch (error) {
-    ElMessage.error(describeError(error));
-  } finally {
-    advancing.value = false;
+    ElMessage.error("复制失败，请手动复制令牌。");
   }
 }
 
-async function onToggleBounce(val: string | number | boolean) {
-  if (!context.value) return;
-  const enabled = Boolean(val);
-  togglingBounce.value = true;
-  try {
-    await douyinColorAdminApi.toggleBounceReport(context.value.account.id, enabled);
-    await loadReleaseStage();
-    ElMessage.success(enabled ? "弹回报告已开启" : "弹回报告已关闭");
-  } catch (error) {
-    ElMessage.error(describeError(error));
-  } finally {
-    togglingBounce.value = false;
-  }
-}
+function clearIssuedToken() { issuedToken.value = null; }
 
+onBeforeRouteLeave(clearIssuedToken);
+onBeforeUnmount(clearIssuedToken);
 onMounted(loadAll);
 </script>
 
@@ -312,15 +184,12 @@ onMounted(loadAll);
 .page-head h1 { margin: 5px 0; color: #172033; }
 .page-head p { margin: 0; color: #667085; }
 .eyebrow { font-size: 11px; font-weight: 800; letter-spacing: .09em; color: #5266a6 !important; }
-.banner { margin-bottom: 16px; }
-.section-card { margin-bottom: 16px; }
+.banner, .section-card { margin-bottom: 16px; }
 .section-card h2 { margin: 0; font-size: 16px; color: #172033; }
-.role-tag { margin-right: 6px; }
-.card-actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
-.bounce-row { display: flex; align-items: center; gap: 12px; }
-.stage-steps { padding: 8px 0; }
-.hint { margin: 8px 0 0; color: #667085; font-size: 12px; }
-.muted { color: #c0c4cc; font-size: 12px; }
+.card-actions, .entry-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.hint, .muted { color: #667085; font-size: 12px; }
+.advanced { margin-bottom: 16px; }
+.token-value { margin-top: 16px; }
 code { background: #f5f7fa; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
 @media(max-width: 640px) { .admin-page { padding: 16px; } .page-head { flex-direction: column; } }
 </style>

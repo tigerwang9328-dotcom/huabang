@@ -12,11 +12,11 @@ test("annotation routes are available to internal signed-in users without a new 
   const router = read("src/router/index.ts");
   const layout = read("src/layouts/MainLayout.vue");
 
-  assert.ok(router.includes('path: "douyin-color-analytics/videos"'));
-  assert.ok(router.includes('path: "douyin-color-analytics/videos/:videoId/annotate"'));
-  assert.ok(router.includes('path: "douyin-color-analytics/styles"'));
+  assert.ok(router.includes('path: "online-sales/douyin-analysis/videos"'));
+  assert.ok(router.includes('path: "online-sales/douyin-analysis/videos/:videoId/annotate"'));
+  assert.ok(router.includes('path: "online-sales/douyin-analysis/styles"'));
   assert.ok(!router.includes('permission: "douyin.annotation.edit"'));
-  assert.ok(layout.includes("/app/douyin-color-analytics/videos"));
+  assert.ok(layout.includes("/app/online-sales/douyin-analysis"));
 });
 
 test("annotation API keeps ids as strings and exposes video, clip, style, and review calls", () => {

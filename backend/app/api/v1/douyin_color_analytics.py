@@ -26,6 +26,7 @@ from app.models.douyin_color_analytics import (
     CollectorInstance,
     DouyinCreatorAccount,
     DouyinUploadToken,
+    ReleaseStageConfiguration,
     Video,
     VideoAnalysisSnapshot,
 )
@@ -694,17 +695,27 @@ async def create_expected_schedule(
 @router.get("/health", response_model=ApiResponse)
 async def get_health(
     request: Request,
-    current_user: SysUser = Depends(require_any_permission("douyin.admin", "douyin.operator")),
+    current_user: SysUser = Depends(require_any_permission("douyin.admin", "douyin.operator", "douyin.viewer")),
     db: AsyncSession = Depends(get_db),
 ):
     """Return collector status, queue capacity, and feature flags for operators."""
-    collectors = (await db.execute(select(CollectorInstance))).scalars().all()
+    collectors = (await db.execute(
+        select(CollectorInstance)
+        .join(DouyinCreatorAccount, DouyinCreatorAccount.id == CollectorInstance.account_id)
+        .where(DouyinCreatorAccount.status == "active")
+    )).scalars().all()
     collector_status = [
         {
             "account_id": c.account_id,
             "current_status": c.current_status,
             "queued_batch_count": c.queued_batch_count,
             "queued_bytes": c.queued_bytes,
+            "script_version": getattr(c, "script_version", None),
+            "last_heartbeat_at": (
+                c.last_heartbeat_at.isoformat()
+                if getattr(c, "last_heartbeat_at", None)
+                else None
+            ),
         }
         for c in collectors
     ]
@@ -716,6 +727,43 @@ async def get_health(
         "queue_capacity": {"queued_jobs": queued_count},
         "feature_flags": {"color_analysis_enabled": True, "annotation_review_enabled": True},
     })
+
+
+async def _active_account_for_dashboard(db: AsyncSession, account_id: int) -> DouyinCreatorAccount:
+    account = (await db.execute(select(DouyinCreatorAccount).where(
+        DouyinCreatorAccount.id == account_id,
+        DouyinCreatorAccount.status == "active",
+    ))).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail="active_account_not_found")
+    return account
+
+
+async def _release_stage_payload(db: AsyncSession, account_id: int) -> dict[str, object]:
+    configuration = (await db.execute(select(ReleaseStageConfiguration).where(
+        ReleaseStageConfiguration.account_id == account_id,
+    ))).scalar_one_or_none()
+    token = (await db.execute(select(DouyinUploadToken).where(
+        DouyinUploadToken.account_id == account_id,
+        DouyinUploadToken.status == "active",
+    ).order_by(DouyinUploadToken.created_at.desc()).limit(1))).scalar_one_or_none()
+    token_is_active = bool(token and (token.expires_at is None or token.expires_at > datetime.now(timezone.utc)))
+    return {
+        "current_stage": configuration.current_stage if configuration else "A",
+        "bounce_report_enabled": configuration.bounce_report_enabled if configuration else False,
+        "bounce_semantics_status": configuration.bounce_semantics_status if configuration else "pending",
+        "active_token": ({"token_prefix": token.token_prefix, "expires_at": token.expires_at, "is_active": token_is_active} if token else None),
+    }
+
+
+@router.get("/accounts/{account_id}/release-stage", response_model=ApiResponse)
+async def get_release_stage(
+    account_id: int,
+    _: SysUser = Depends(require_any_permission("douyin.admin", "douyin.operator", "douyin.viewer")),
+    db: AsyncSession = Depends(get_db),
+):
+    await _active_account_for_dashboard(db, account_id)
+    return ApiResponse.ok(await _release_stage_payload(db, account_id))
 
 
 

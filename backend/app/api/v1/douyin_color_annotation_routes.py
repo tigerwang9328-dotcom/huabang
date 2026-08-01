@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import require_permission
+from app.api.v1.deps import require_any_permission, require_permission
 from app.core.database import get_db
 from app.models.douyin_color_analytics import (
     CollectorInstance,
@@ -159,7 +159,7 @@ async def _validate_clip_payload(
 
 
 @annotation_router.get("/annotation-context", response_model=ApiResponse)
-async def annotation_context(_: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
+async def annotation_context(_: SysUser = Depends(require_any_permission("douyin.annotation.edit", "douyin.admin", "douyin.operator", "douyin.viewer")), db: AsyncSession = Depends(get_db)):
     account = await _annotation_account(db)
     latest_instance = (await db.execute(
         select(CollectorInstance)
