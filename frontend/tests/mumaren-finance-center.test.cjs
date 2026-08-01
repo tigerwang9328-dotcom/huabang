@@ -273,6 +273,7 @@ test('财务中心各账簿页面共享并持久化所选账簿', () => {
 
   assert.match(bookStore, /localStorage/)
   assert.match(sharedBook, /useMumarenFinanceBookStore/)
+  assert.match(bookStore, /mumaren-finance-center:selected-book-id/)
   assert.match(sharedBook, /initializeBook/)
 
   for (const view of [
