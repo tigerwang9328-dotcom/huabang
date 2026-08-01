@@ -508,8 +508,8 @@ export interface MumarenArApSummary {
   open_count: number;
 }
 export const arApOrdersApi = {
-  list: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled"; limit?: number }) => request.get<ApiResponse<MumarenArApOrder[]>>(requestPath("/ar-ap/orders"), { params }),
-  summary: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled" }) => request.get<ApiResponse<MumarenArApSummary>>(requestPath("/ar-ap/orders/summary"), { params }),
+  list: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled"; counterparty_name?: string; limit?: number }) => request.get<ApiResponse<MumarenArApOrder[]>>(requestPath("/ar-ap/orders"), { params }),
+  summary: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled"; counterparty_name?: string }) => request.get<ApiResponse<MumarenArApSummary>>(requestPath("/ar-ap/orders/summary"), { params }),
   // 后端 ArApOrderUpdate 的 book_id 是请求体字段；查询参数仅用于路由过滤，不能替代它。
   update: (id: number, data: ArApOrderUpdate, book_id: number, order_type: "receivable" | "payable") => request.put<ApiResponse<MumarenArApOrder>>(requestPath(`/ar-ap/orders/${id}`), { ...data, book_id }, { params: { order_type } }),
   detail: (id: number, book_id: number, order_type: "receivable" | "payable") => request.get<ApiResponse<MumarenArApOrder>>(requestPath(`/ar-ap/orders/${id}`), { params: { book_id, order_type } }),

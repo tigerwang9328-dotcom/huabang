@@ -21,6 +21,7 @@
         <el-radio-button label="payable">应付</el-radio-button>
       </el-radio-group>
       <el-date-picker v-model="periodFilter" type="month" value-format="YYYY-MM" placeholder="筛选期间" clearable />
+      <el-input v-model="counterpartyFilter" :placeholder="`筛选${counterpartyLabel}`" clearable maxlength="128" />
       <el-select v-model="settlementFilter" placeholder="结算状态" clearable>
         <el-option label="草稿" value="draft" />
         <el-option label="待结算" value="open" />
@@ -152,6 +153,7 @@ const error = ref("");
 const loading = ref(false);
 const actingId = ref<number>();
 const periodFilter = ref("");
+const counterpartyFilter = ref("");
 const settlementFilter = ref<"draft" | "open" | "partial" | "settled" | "">("");
 const showDetail = ref(false);
 const detailOrder = ref<MumarenArApOrder>();
@@ -196,7 +198,7 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const params = { book_id: requestedBookId, order_type: requestedOrderType, period: periodFilter.value || undefined, status: settlementFilter.value || undefined };
+    const params = { book_id: requestedBookId, order_type: requestedOrderType, period: periodFilter.value || undefined, status: settlementFilter.value || undefined, counterparty_name: counterpartyFilter.value || undefined };
     const [listResponse, summaryResponse] = await Promise.all([arApOrdersApi.list({ ...params, limit: 500 }), arApOrdersApi.summary(params)]);
     if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedOrderType !== orderType.value) return;
     orders.value = listResponse.data.data;
@@ -210,7 +212,7 @@ const load = async () => {
 
 watch(bookId, async () => { orders.value = []; summary.value = undefined; showCreate.value = false; showSettle.value = false; await load(); });
 watch(orderType, load);
-watch([periodFilter, settlementFilter], load);
+watch([periodFilter, counterpartyFilter, settlementFilter], load);
 watch(() => props.fixedOrderType, (value) => { if (value) orderType.value = value; });
 onMounted(async () => { try { await loadBooks(); await load(); } catch { error.value = "无法加载独立账簿。"; } });
 

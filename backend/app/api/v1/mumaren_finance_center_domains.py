@@ -1386,10 +1386,19 @@ _AR_AP_MODELS = {
 }
 
 
-def _ar_ap_filter_conditions(model, *, book_id: int, period: str | None, status: str | None):
+def _ar_ap_filter_conditions(
+    model,
+    *,
+    book_id: int,
+    period: str | None,
+    status: str | None,
+    counterparty_name: str | None = None,
+):
     conditions = [model.book_id == book_id]
     if period:
         conditions.append(model.period == period)
+    if counterparty_name and counterparty_name.strip():
+        conditions.append(model.counterparty_name.ilike(f"%{counterparty_name.strip()}%"))
     if status == "draft":
         conditions.append(model.workflow_status == "draft")
     elif status == "open":
@@ -1405,13 +1414,16 @@ async def list_ar_ap_orders(
     order_type: str = Query(default="receivable", pattern=r"^(receivable|payable)$"),
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     status: str | None = Query(default=None, pattern=r"^(draft|open|partial|settled)$"),
+    counterparty_name: str | None = Query(default=None, max_length=128),
     limit: int = Query(default=100, ge=1, le=500),
     _: SysUser = Depends(require_mumaren_finance_access),
     db: AsyncSession = Depends(get_db),
 ):
     """列出租收应付单据,支持 book_id 与 order_type 过滤,默认 limit 100,最大 500。"""
     model = _AR_AP_MODELS[order_type]
-    conditions = _ar_ap_filter_conditions(model, book_id=book_id, period=period, status=status)
+    conditions = _ar_ap_filter_conditions(
+        model, book_id=book_id, period=period, status=status, counterparty_name=counterparty_name,
+    )
     rows = list((await db.execute(select(model).where(*conditions).order_by(model.order_date.desc(), model.id.desc()).limit(limit))).scalars())
     line_model = _AR_AP_LINE_MODELS[order_type]
     order_ids = [row.id for row in rows]
@@ -1429,12 +1441,15 @@ async def summarize_ar_ap_orders(
     order_type: str = Query(default="receivable", pattern=r"^(receivable|payable)$"),
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     status: str | None = Query(default=None, pattern=r"^(draft|open|partial|settled)$"),
+    counterparty_name: str | None = Query(default=None, max_length=128),
     _: SysUser = Depends(require_mumaren_finance_access),
     db: AsyncSession = Depends(get_db),
 ):
     """汇总整个账簿的 AR/AP，不受列表明细上限影响。"""
     model = _AR_AP_MODELS[order_type]
-    conditions = _ar_ap_filter_conditions(model, book_id=book_id, period=period, status=status)
+    conditions = _ar_ap_filter_conditions(
+        model, book_id=book_id, period=period, status=status, counterparty_name=counterparty_name,
+    )
     row = (await db.execute(select(
         func.count(model.id),
         func.coalesce(func.sum(model.total_amount), 0),
