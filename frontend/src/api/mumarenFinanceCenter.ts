@@ -166,7 +166,20 @@ export interface MumarenArApAging {
   counterparties: Array<{
     counterparty_name: string;
     total_balance: number;
-    [bucket: string]: string | number | undefined;
+    [bucket: string]: string | number | undefined | Array<{
+      order_no: string;
+      order_date: string;
+      days: number;
+      bucket: string;
+      balance: number;
+    }>;
+    orders?: Array<{
+      order_no: string;
+      order_date: string;
+      days: number;
+      bucket: string;
+      balance: number;
+    }>;
   }>;
 }
 
@@ -200,7 +213,7 @@ export const mumarenFinanceCenterApi = {
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
-  getArApAging: (params: { book_id: number; order_type: "receivable" | "payable" }) => request.get<ApiResponse<MumarenArApAging>>(requestPath("/ar-ap/aging"), { params }),
+  getArApAging: (params: { book_id: number; order_type: "receivable" | "payable"; as_of?: string }) => request.get<ApiResponse<MumarenArApAging>>(requestPath("/ar-ap/aging"), { params }),
   getTaxAlerts: (params: { book_id: number; today?: string }) => request.get<ApiResponse<{ alerts: MumarenTaxAlert[]; record_count: number }>>(requestPath("/tax/alerts"), { params }),
   listTaxRecords: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenTaxRecord[]>>(requestPath("/tax/records"), { params }),
 
@@ -448,8 +461,16 @@ export interface ArApOrderUpdate {
   order_date?: string;
   remark?: string | null;
 }
+export interface MumarenArApSummary {
+  total_count: number;
+  total_amount: number;
+  settled_amount: number;
+  outstanding_amount: number;
+  open_count: number;
+}
 export const arApOrdersApi = {
-  list: (params: { book_id: number; order_type: "receivable" | "payable"; limit?: number }) => request.get<ApiResponse<MumarenArApOrder[]>>(requestPath("/ar-ap/orders"), { params }),
+  list: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled"; limit?: number }) => request.get<ApiResponse<MumarenArApOrder[]>>(requestPath("/ar-ap/orders"), { params }),
+  summary: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled" }) => request.get<ApiResponse<MumarenArApSummary>>(requestPath("/ar-ap/orders/summary"), { params }),
   update: (id: number, data: ArApOrderUpdate, book_id: number, order_type: string) => request.put<ApiResponse<MumarenArApOrder>>(requestPath(`/ar-ap/orders/${id}`), data, { params: { book_id, order_type } }),
   delete: (id: number, book_id: number, order_type: string) => request.delete<ApiResponse<null>>(requestPath(`/ar-ap/orders/${id}`), { params: { book_id, order_type } }),
 };

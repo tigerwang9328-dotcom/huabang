@@ -165,6 +165,30 @@ test('应收应付审核把当前单据类型传给后端', () => {
   assert.match(page, /settleArApOrder\(settleTarget\.value\.id,\s*orderType\.value,/)
 })
 
+test('应收应付台账展示汇总、筛选和与单据类型一致的回款付款文案', () => {
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  for (const label of ['应收总额', '应付总额', '已回款', '已付款', '未结余额', '未结清单数']) {
+    assert.match(ledger, new RegExp(label), `台账缺少汇总指标：${label}`)
+  }
+  assert.match(ledger, /结算状态/)
+  assert.match(ledger, /筛选期间/)
+  assert.match(ledger, /登记回款/)
+  assert.match(ledger, /登记付款/)
+  assert.match(ledger, /arApOrdersApi\.summary\(/)
+  assert.match(api, /summary: \(params:/)
+})
+
+test('账龄分析展示往来单位各账龄段和单据明细', () => {
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+
+  for (const label of ['0-30天', '31-60天', '61-90天', '91-120天', '120天以上', '单据明细']) {
+    assert.match(aging, new RegExp(label), `账龄分析缺少：${label}`)
+  }
+  assert.match(aging, /watch\(bookId/)
+})
+
 test('应收应付拆分为应收单台账、应付单台账和账龄分析入口', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
