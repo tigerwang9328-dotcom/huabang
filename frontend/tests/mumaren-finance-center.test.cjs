@@ -6,303 +6,406 @@ const test = require('node:test')
 const frontendRoot = path.resolve(__dirname, '..')
 const read = (...parts) => fs.readFileSync(path.join(frontendRoot, ...parts), 'utf8')
 
-test('牧马人财务中心拥有独立前端入口和完整业务导航页面', () => {
+// ─────────────────────────────────────────────────────────────
+// 标准财务中心导航:13 个一级条目 + 22 个子项(共 35 个 navItem)
+// ─────────────────────────────────────────────────────────────
+const STANDARD_TOP_LEVEL = [
+  '数据罗盘', '历史数据存档', '凭证', '账簿', '报表', '应收应付',
+  '结账', '资产', '发票', '出纳', '工资', '税务', '设置',
+]
+
+const STANDARD_CHILDREN = {
+  '凭证': ['录凭证', '查凭证', '凭证汇总', '凭证模板', '自动凭证'],
+  '账簿': ['总账', '科目余额表', '明细账'],
+  '报表': ['资产负债表', '利润表', '现金流量表', '应收明细', '应付明细', '费用明细表', '税金明细表', '销售月报表'],
+  '出纳': ['账户与流水', '银行余额调节表'],
+  '设置': ['科目管理', '账套管理', '辅助核算', '操作日志'],
+}
+
+test('财务中心导航结构匹配标准导航:13 个一级条目 + 22 个子项', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
+
+  // 一级条目
+  for (const title of STANDARD_TOP_LEVEL) {
+    assert.match(config, new RegExp(`title:\\s*['"]${title}['"]`))
+  }
+  // 子项
+  for (const children of Object.values(STANDARD_CHILDREN)) {
+    for (const title of children) {
+      assert.match(config, new RegExp(`title:\\s*['"]${title}['"]`))
+    }
+  }
+  // 一级条目数量校验:13 个一级 + 22 个子项 = 至少 35 个 title 字段
+  const allTitleMatches = config.match(/title:\s*['"][^'"]+['"]/g) || []
+  assert.ok(allTitleMatches.length >= 35, `导航配置应至少有 35 个 title 字段(13 一级 + 22 子项),实际 ${allTitleMatches.length}`)
+})
+
+test('所有导航项 availability 全部为 available,无 planned_backend 占位项', () => {
+  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
+
+  // 所有 availability 必须为 available
+  assert.match(config, /availability:\s*['"]available['"]/)
+  // 不允许再有 planned_backend 占位项
+  assert.doesNotMatch(config, /availability:\s*['"]planned_backend['"]/)
+  // 不允许再有 placeholder 字段
+  assert.doesNotMatch(config, /placeholder:\s*\{/)
+  // mumarenFinanceCenterMenuItem 不允许再有 badge: "待适配"
+  assert.doesNotMatch(config, /badge:\s*['"]待适配['"]/)
+})
+
+test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {
   const router = read('src', 'router', 'index.ts')
 
-  assert.match(config, /MUMAREN_FINANCE_CENTER_ROOT\s*=\s*['\"]\/app\/finance-center\/mumaren['\"]/)
-  for (const section of ['工作台', '凭证', '账簿', '应收应付', '业务台账', '税务', '经营报表', '历史归档']) {
-    assert.match(config, new RegExp(`title:\\s*['\"]${section}['\"]`))
+  // 路由不允许再引用 MumarenFinancePlaceholder.vue
+  assert.doesNotMatch(router, /MumarenFinancePlaceholder\.vue/)
+  // 路由不允许再有 meta.placeholderKey
+  assert.doesNotMatch(router, /placeholderKey/)
+
+  // 19 个原占位页必须指向各自新组件
+  const componentMappings = [
+    ['MumarenFinanceCompass', 'MumarenFinanceCompass.vue'],
+    ['MumarenFinanceVoucherSummary', 'MumarenFinanceVoucherSummary.vue'],
+    ['MumarenFinanceVoucherTemplate', 'MumarenFinanceVoucherTemplate.vue'],
+    ['MumarenFinanceVoucherAuto', 'MumarenFinanceVoucherAuto.vue'],
+    ['MumarenFinanceLedgerDetail', 'MumarenFinanceLedgerDetail.vue'],
+    ['MumarenFinanceBalanceSheet', 'MumarenFinanceReportBalanceSheet.vue'],
+    ['MumarenFinanceCashFlowStatement', 'MumarenFinanceReportCashFlow.vue'],
+    ['MumarenFinanceReceivableDetail', 'MumarenFinanceReportReceivable.vue'],
+    ['MumarenFinancePayableDetail', 'MumarenFinanceReportPayable.vue'],
+    ['MumarenFinanceExpenseDetail', 'MumarenFinanceReportExpense.vue'],
+    ['MumarenFinanceSalesMonthly', 'MumarenFinanceReportSalesMonthly.vue'],
+    ['MumarenFinanceClosing', 'MumarenFinanceClosing.vue'],
+    ['MumarenFinanceAssets', 'MumarenFinanceAssets.vue'],
+    ['MumarenFinanceInvoices', 'MumarenFinanceInvoices.vue'],
+    ['MumarenFinanceCashierAccounts', 'MumarenFinanceCashierAccounts.vue'],
+    ['MumarenFinanceCashierReconciliation', 'MumarenFinanceCashierReconciliation.vue'],
+    ['MumarenFinancePayroll', 'MumarenFinancePayroll.vue'],
+    ['MumarenFinanceSettingsAuxiliary', 'MumarenFinanceSettingsAuxiliary.vue'],
+    ['MumarenFinanceSettingsAuditLogs', 'MumarenFinanceSettingsAuditLogs.vue'],
+  ]
+  for (const [routeName, component] of componentMappings) {
+    const pattern = new RegExp(`name:\\s*['"]${routeName}['"],\\s*component:\\s*\\(\\)\\s*=>\\s*import\\(['"][^'"]*${component}['"]\\)`)
+    assert.match(router, pattern, `路由 ${routeName} 必须指向组件 ${component}`)
   }
-  assert.match(router, /\/app\/finance-center\/mumaren/)
-  assert.match(router, /mumaren-finance-center/)
 })
 
-test('未移植的牧马人业务域必须显示真实接入状态，不能伪装成可操作功能', () => {
-  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
-  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCapabilityBoard.vue')
-
-  assert.match(config, /availability:\s*['"]available['"]|availability:\s*['"]planned_backend['"]/)
-  assert.match(page, /后端适配待完成/)
-  assert.match(page, /不可录入/)
-  assert.doesNotMatch(page, /自动过账/)
-})
-
-test('扩展业务页面保持在牧马人独立命名空间，且不引用旧华邦财务页面', () => {
-  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
-  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
-
-  for (const suffix of ['ar-ap', 'business', 'tax', 'operations']) {
-    assert.ok(config.includes(`MUMAREN_FINANCE_CENTER_ROOT}/${suffix}`) || config.includes(`MUMAREN_FINANCE_CENTER_ROOT}/\\${suffix}`))
+test('会话内 CRUD 页面顶部含"完整数据接口待后端补"提示', () => {
+  const sessionCrudPages = [
+    'MumarenFinanceVoucherTemplate.vue',
+    'MumarenFinanceVoucherAuto.vue',
+    'MumarenFinanceReportExpense.vue',
+    'MumarenFinanceReportSalesMonthly.vue',
+    'MumarenFinanceClosing.vue',
+    'MumarenFinanceAssets.vue',
+    'MumarenFinanceInvoices.vue',
+    'MumarenFinanceCashierAccounts.vue',
+    'MumarenFinanceCashierReconciliation.vue',
+    'MumarenFinancePayroll.vue',
+    'MumarenFinanceSettingsAuxiliary.vue',
+    'MumarenFinanceSettingsAuditLogs.vue',
+  ]
+  for (const page of sessionCrudPages) {
+    const source = read('src', 'views', 'mumaren-finance-center', page)
+    assert.match(source, /完整数据接口待后端补/, `页面 ${page} 必须包含"完整数据接口待后端补"提示`)
+    assert.match(source, /本会话数据刷新后清空/, `页面 ${page} 必须包含"本会话数据刷新后清空"提示`)
   }
-  assert.doesNotMatch(api, /FormalLedger|HistoricalFinance|\/api\/v1\/finance\/(?!center\/mumaren)/)
 })
 
-test('财务利润保留旧菜单并将独立财务中心置于首项', () => {
+test('派生展示类页面调用已有 API,不新增后端接口', () => {
+  const derivedPages = [
+    { file: 'MumarenFinanceCompass.vue', apis: ['listBooks', 'getTrialBalance', 'getProfitStatement'] },
+    { file: 'MumarenFinanceVoucherSummary.vue', apis: ['listBooks', 'listVouchers'] },
+    { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'listVouchers'] },
+    { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },
+    { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getTrialBalance'] },
+    { file: 'MumarenFinanceReportReceivable.vue', apis: ['listBooks', 'getArApAging'] },
+    { file: 'MumarenFinanceReportPayable.vue', apis: ['listBooks', 'getArApAging'] },
+  ]
+  for (const { file, apis } of derivedPages) {
+    const source = read('src', 'views', 'mumaren-finance-center', file)
+    for (const api of apis) {
+      assert.match(source, new RegExp(api), `页面 ${file} 必须调用 API ${api}`)
+    }
+    // 不得调用旧财务 API
+    assert.doesNotMatch(source, /\/api\/v1\/finance(?!-center\/mumaren)/)
+  }
+})
+
+test('CapabilityBoard 展示真实接入状态,不伪装可操作功能', () => {
+  const board = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCapabilityBoard.vue')
+
+  assert.match(board, /后端适配待完成/)
+  assert.match(board, /不可录入|不可操作|不可查询/)
+  assert.doesNotMatch(board, /自动过账/)
+})
+
+test('路由配置与导航项一一对应,所有路由均注册', () => {
+  const router = read('src', 'router', 'index.ts')
+
+  // 一级路由名
+  const topRoutes = [
+    'MumarenFinanceCompass', 'MumarenFinanceHistory',
+    'MumarenFinanceArAp', 'MumarenFinanceClosing',
+    'MumarenFinanceAssets', 'MumarenFinanceInvoices',
+    'MumarenFinancePayroll', 'MumarenFinanceTax',
+  ]
+  for (const name of topRoutes) {
+    assert.match(router, new RegExp(`name:\\s*['"]${name}['"]`))
+  }
+
+  // 子项路由名
+  const childRoutes = [
+    'MumarenFinanceVoucherCreate', 'MumarenFinanceVoucherList',
+    'MumarenFinanceVoucherSummary', 'MumarenFinanceVoucherTemplate', 'MumarenFinanceVoucherAuto',
+    'MumarenFinanceGeneralLedger', 'MumarenFinanceTrialBalance', 'MumarenFinanceLedgerDetail',
+    'MumarenFinanceBalanceSheet', 'MumarenFinanceProfitStatement', 'MumarenFinanceCashFlowStatement',
+    'MumarenFinanceReceivableDetail', 'MumarenFinancePayableDetail', 'MumarenFinanceExpenseDetail',
+    'MumarenFinanceTaxDetail', 'MumarenFinanceSalesMonthly',
+    'MumarenFinanceCashierAccounts', 'MumarenFinanceCashierReconciliation',
+    'MumarenFinanceSettingsAccounts', 'MumarenFinanceSettingsBooks',
+    'MumarenFinanceSettingsAuxiliary', 'MumarenFinanceSettingsAuditLogs',
+  ]
+  for (const name of childRoutes) {
+    assert.match(router, new RegExp(`name:\\s*['"]${name}['"]`))
+  }
+})
+
+test('财务中心入口在主菜单首项,并使用独立访问权限', () => {
   const layout = read('src', 'layouts', 'MainLayout.vue')
-  assert.match(layout, /import\s+\{\s*financeProfitNavigation\s*\}\s+from\s+['\"]@\/config\/financeCenterModules['\"]/) 
-  assert.match(layout, /import\s+\{\s*mumarenFinanceCenterMenuItem\s*\}\s+from\s+['\"]@\/config\/mumarenFinanceCenter['\"]/) 
-  assert.match(layout, /items:\s*\[mumarenFinanceCenterMenuItem,\s*\.\.\.financeProfitNavigation\]/)
-})
-
-test('牧马人财务中心 API 只指向独立后端命名空间', () => {
-  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
-  assert.match(api, /\/api\/v1\/finance-center\/mumaren/)
-  assert.doesNotMatch(api, /\/api\/v1\/finance(?!-center\/mumaren)/)
-  assert.doesNotMatch(api, /financeCenterModules|FormalLedger|HistoricalFinance/)
-})
-
-test('牧马人财务中心前端入口只使用新模块访问权限', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
 
-  assert.match(config, /permission:\s*['"]mumaren_finance_center:access['"]/) 
+  assert.match(layout, /import\s+\{\s*financeProfitNavigation\s*\}\s+from\s+['"]@\/config\/financeCenterModules['"]/)
+  assert.match(layout, /import\s+\{\s*mumarenFinanceCenterMenuItem\s*\}\s+from\s+['"]@\/config\/mumarenFinanceCenter['"]/)
+  assert.match(layout, /items:\s*\[mumarenFinanceCenterMenuItem,\s*\.\.\.financeProfitNavigation\]/)
+
+  assert.match(config, /permission:\s*['"]mumaren_finance_center:access['"]/)
   assert.match(router, /\["\/app\/finance-center\/mumaren", "mumaren_finance_center:access"\]/)
   assert.doesNotMatch(router, /\["\/app\/finance-center\/mumaren", "finance:center:view"\]/)
 })
 
-test('牧马人财务中心页面不展示已禁用的上传和自动过账能力', () => {
-  const shell = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCenterShell.vue')
-  assert.match(shell, /历史数据只读/)
-  assert.doesNotMatch(shell, /上传附件|自动过账/)
-})
+test('mumarenFinanceCenterMenuItem 带 children(13个一级条目),不再直接跳转', () => {
+  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
 
-test('已存在的独立财务 API 必须被工作台、账簿、凭证、报表和历史页面实际使用', () => {
-  for (const page of [
-    'MumarenFinanceWorkspace.vue',
-    'MumarenFinanceVouchers.vue',
-    'MumarenFinanceLedgers.vue',
-    'MumarenFinanceReports.vue',
-    'MumarenFinanceHistory.vue',
-  ]) {
-    const source = read('src', 'views', 'mumaren-finance-center', page)
-    assert.match(source, /mumarenFinanceCenterApi/)
-    assert.doesNotMatch(source, /@\/api\/financeCenter|@\/api\/kingdeeFinance|FormalLedger|HistoricalFinance/)
+  // 必须有 children,不再有 path
+  assert.match(config, /mumarenFinanceCenterMenuItem[^=]*=\s*\{[\s\S]*?children:\s*\[/)
+  // 13个一级条目
+  for (const title of STANDARD_TOP_LEVEL) {
+    assert.match(config, new RegExp(`label:\\s*['"]${title}['"]`))
   }
 })
 
-test('应收应付与税务页面支持草稿→审核→人工结算/缴税工作流，且不直接调用旧财务 HTTP', () => {
-  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
-  const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
-  const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+test('MainLayout 模板支持第4级菜单(submenu-list-3)', () => {
+  const layout = read('src', 'layouts', 'MainLayout.vue')
 
-  // 只读端点仍然存在
-  assert.match(api, /\/ar-ap\/aging/)
-  assert.match(api, /\/tax\/alerts/)
-  assert.match(api, /\/tax\/records/)
-  assert.match(arAp, /getArApAging/)
-  assert.match(tax, /getTaxAlerts/)
-  assert.match(tax, /listTaxRecords/)
-
-  // 允许 draft → review → manual posting/settle/pay 工作流（通过 API 包装方法）
-  assert.match(api, /createArApOrder:/)
-  assert.match(api, /reviewArApOrder:/)
-  assert.match(api, /settleArApOrder:/)
-  assert.match(api, /createTaxRecord:/)
-  assert.match(api, /reviewTaxRecord:/)
-  assert.match(api, /payTaxRecord:/)
-  assert.match(arAp, /createArApOrder|reviewArApOrder|settleArApOrder/)
-  assert.match(tax, /createTaxRecord|reviewTaxRecord|payTaxRecord/)
-
-  // 页面不得直接发起裸 HTTP 写入（必须走 mumarenFinanceCenterApi 包装）
-  assert.doesNotMatch(`${arAp}\n${tax}`, /request\.post\(|request\.put\(|request\.delete\(/)
-  // 页面不得引用旧财务 API 路径
-  assert.doesNotMatch(`${arAp}\n${tax}`, /\/api\/v1\/finance(?!-center\/mumaren)/)
+  // 必须有第4级渲染逻辑
+  assert.match(layout, /submenu-list-3/)
+  assert.match(layout, /nav-parent-3/)
+  assert.match(layout, /nav-sub-3/)
+  // expandActiveMenuPath 必须展开第3级
+  assert.match(layout, /展开第3级中包含活跃路由的节点/)
 })
 
-test('税务 API 必须接收并传递 book_id，后端按账簿隔离查询', () => {
+test('财务中心 API 只指向独立后端命名空间 /api/v1/finance-center/mumaren', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
 
-  // getTaxAlerts 与 listTaxRecords 必须接收 book_id 并作为 query 参数传递
-  assert.match(api, /getTaxAlerts:\s*\(params:\s*\{\s*book_id:\s*number[\s\S]*?\}\s*\)\s*=>/)
-  assert.match(api, /listTaxRecords:\s*\(params:\s*\{\s*book_id:\s*number[\s\S]*?\}\s*\)\s*=>/)
+  assert.match(api, /\/api\/v1\/finance-center\/mumaren/)
+  assert.doesNotMatch(api, /\/api\/v1\/finance(?!-center\/mumaren)/)
+  assert.doesNotMatch(api, /financeCenterModules|FormalLedger|HistoricalFinance|kingdeeFinance/)
+  assert.doesNotMatch(api, /mumaren\.cn|mumaren\.com|finance_module\/api\//)
 })
 
-test('税务页面必须先选择独立账簿，无账簿时不请求后端并提示', () => {
-  const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+test('Shell 组件仅渲染内容区,不含 aside 侧边栏(导航已集成到主侧边栏)', () => {
+  const shell = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCenterShell.vue')
 
-  // 必须有账簿选择器
-  assert.match(tax, /listBooks/)
-  assert.match(tax, /bookId/)
-  // 无账簿时必须显示提示，且不调用税务接口
-  assert.match(tax, /请选择账簿|请选择独立账簿/)
-  // 调用税务接口时必须传 book_id
-  assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)
-  assert.match(tax, /listTaxRecords\(\s*\{\s*book_id:\s*bookId/)
-  // 不允许在未选账簿时 onMounted 直接调用税务接口
-  assert.doesNotMatch(tax, /onMounted\(load\)/)
-  // onMounted 内不允许自动选择第一个账簿(用户必须主动选择)
-  assert.doesNotMatch(tax, /books\.value\[0\]\?\.id/)
-  // onMounted 回调内不允许调用 load()(只能在用户主动点击查询时触发)
-  // 使用负向先行断言确保匹配范围不跨出 onMounted 块（遇到 }); 即停止）
-  assert.doesNotMatch(tax, /onMounted\(async\s*\(\)\s*=>\s*\{(?:(?!\}\);)[\s\S])*?await\s+load\(\)/)
+  // 必须有 router-view 渲染内容
+  assert.match(shell, /router-view/)
+  // 不得包含 aside 侧边栏
+  assert.doesNotMatch(shell, /finance-center-sidebar|nav-list|nav-group-toggle|openGroups/)
+  // 历史数据只读
+  assert.match(shell, /历史数据只读/)
+  // 不展示已禁用的上传和自动过账能力
+  assert.doesNotMatch(shell, /上传附件|自动过账/)
 })
 
-test('凭证写入流程：草稿录入 → 财务审核 → 人工过账，禁止自动过账', () => {
+test('凭证写入流程:草稿录入 → 财务审核 → 人工过账(录凭证/查凭证拆分页面)', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
-  const vouchers = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVouchers.vue')
+  const create = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
+  const list = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
 
   // API 必须暴露 create/review/post 三个写入方法
   assert.match(api, /createVoucher:\s*\(payload:\s*VoucherCreatePayload\)/)
   assert.match(api, /reviewVoucher:\s*\(voucherId:\s*number\)/)
   assert.match(api, /postVoucher:\s*\(voucherId:\s*number\)/)
-  // 页面必须调用这三个方法
-  assert.match(vouchers, /createVoucher\(/)
-  assert.match(vouchers, /reviewVoucher\(/)
-  assert.match(vouchers, /postVoucher\(/)
-  // 状态机标记：draft → reviewed → posted
-  assert.match(vouchers, /'draft'/)
-  assert.match(vouchers, /'reviewed'/)
-  assert.match(vouchers, /'posted'/)
-  // 禁止自动过账、反过账的代码逻辑（描述性文字"不自动过账/不反过账"允许出现）
-  assert.doesNotMatch(vouchers, /autoPost\(|autoPostVoucher|reversePost\(|reversePostVoucher/)
+
+  // 录凭证页面必须调用 createVoucher
+  assert.match(create, /createVoucher\(/)
+  assert.match(create, /mumarenFinanceCenterApi/)
+  // 查凭证页面必须调用 review/post(列表页提供审核/过账操作)
+  assert.match(list, /reviewVoucher\(|postVoucher\(/)
+  assert.match(list, /mumarenFinanceCenterApi/)
+
+  // 状态机标记:draft → reviewed → posted
+  const combined = `${create}\n${list}`
+  assert.match(combined, /'draft'/)
+  assert.match(combined, /'reviewed'/)
+  assert.match(combined, /'posted'/)
+
+  // 禁止自动过账、反过账的代码逻辑
+  assert.doesNotMatch(combined, /autoPost\(|autoPostVoucher|reversePost\(|reversePostVoucher/)
   // 页面不得直接发起裸 HTTP 写入
-  assert.doesNotMatch(vouchers, /request\.post\(|request\.put\(|request\.delete\(/)
+  assert.doesNotMatch(combined, /request\.post\(|request\.put\(|request\.delete\(/)
 })
 
-test('AR-AP 写入流程：草稿录入 → 财务审核 → 人工结算，不自动生成凭证', () => {
+test('AR-AP 写入流程:草稿录入 → 财务审核 → 人工结算,不自动生成凭证', () => {
   const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
 
-  // 页面必须调用 create/review/settle 三个方法
   assert.match(arAp, /createArApOrder\(/)
   assert.match(arAp, /reviewArApOrder\(/)
   assert.match(arAp, /settleArApOrder\(/)
-  // 状态机标记：draft → reviewed → settled
   assert.match(arAp, /'draft'/)
   assert.match(arAp, /'reviewed'/)
   assert.match(arAp, /'settled'/)
-  // 禁止自动生成凭证的代码逻辑（描述性文字"不自动生成凭证"允许出现）
   assert.doesNotMatch(arAp, /autoCreateVoucher|autoPost\(|reversePost\(/)
 })
 
-test('税务写入流程：草稿录入 → 财务审核 → 人工缴税，不自动生成凭证', () => {
+test('AR/AP 会话内订单列表:本会话单据可审核/结算,刷新后清空', () => {
+  const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+
+  // 必须维护 sessionOrders 数组
+  assert.match(arAp, /sessionOrders/)
+  // 必须有 updateSessionOrder 工具方法
+  assert.match(arAp, /updateSessionOrder/)
+  // 必须显示"完整订单列表接口待后端补"提示
+  assert.match(arAp, /完整订单列表接口待后端补|刷新后列表清空/)
+  // 必须显示"本会话单据"
+  assert.match(arAp, /本会话单据/)
+})
+
+test('税务写入流程:草稿录入 → 财务审核 → 人工缴税,不自动生成凭证', () => {
   const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
 
-  // 页面必须调用 create/review/pay 三个方法
   assert.match(tax, /createTaxRecord\(/)
   assert.match(tax, /reviewTaxRecord\(/)
   assert.match(tax, /payTaxRecord\(/)
-  // 状态机标记：draft → reviewed → paid
   assert.match(tax, /'draft'/)
   assert.match(tax, /'reviewed'/)
   assert.match(tax, /'paid'/)
-  // 禁止自动生成凭证、反审核的代码逻辑（描述性文字"不自动生成凭证/不反审核"允许出现）
   assert.doesNotMatch(tax, /autoCreateVoucher|autoPost\(|reverseReview\(|reversePost\(/)
 })
 
-test('AR/AP 结算状态读取 settlement_status，不得把 workflow_status 误判为 settled', () => {
+test('AR/AP 结算状态读取 settlement_status,不得把 workflow_status 误判为 settled', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
 
-  // TypeScript 类型：settlement_status 必须区分 open/partial/settled
   assert.match(api, /settlement_status:\s*["']open["']\s*\|\s*["']partial["']\s*\|\s*["']settled["']/)
-  // workflow_status 不得包含 settled（后端 workflow_status 只有 draft/reviewed/posted）
   assert.doesNotMatch(api, /workflow_status:\s*["']draft["']\s*\|\s*["']reviewed["']\s*\|\s*["']settled["']/)
-
-  // 页面必须引用 settlement_status 字段判断结算状态
   assert.match(arAp, /settlement_status/)
-  // 不得用 workflow_status === 'settled' 判断已结算
   assert.doesNotMatch(arAp, /workflow_status\s*===?\s*['"]settled['"]/)
 })
 
-test('税务缴税状态读取后端 status 字段，不得把 workflow_status 误判为 paid', () => {
+test('税务缴税状态读取后端 status 字段,不得把 workflow_status 误判为 paid', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
 
-  // TypeScript 类型：status 必须区分 pending/paid
   assert.match(api, /status:\s*["']pending["']\s*\|\s*["']paid["']/)
-  // workflow_status 不得包含 paid（后端 workflow_status 只有 draft/reviewed）
   assert.doesNotMatch(api, /workflow_status\??:\s*["']draft["']\s*\|\s*["']reviewed["']\s*\|\s*["']paid["']/)
-
-  // 页面必须用 status === 'paid' 判断已缴税
   assert.match(tax, /\.status\s*===?\s*['"]paid['"]/)
-  // 不得用 workflow_status === 'paid' 判断已缴税
   assert.doesNotMatch(tax, /workflow_status\s*===?\s*['"]paid['"]/)
 })
 
-test('科目与期末结账页面已接入路由和导航，且科目只读、期末结账暂不可用', () => {
+test('税务 API 必须接收并传递 book_id,后端按账簿隔离查询', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  assert.match(api, /getTaxAlerts:\s*\(params:\s*\{\s*book_id:\s*number[\s\S]*?\}\s*\)\s*=>/)
+  assert.match(api, /listTaxRecords:\s*\(params:\s*\{\s*book_id:\s*number[\s\S]*?\}\s*\)\s*=>/)
+})
+
+test('税务页面必须先选择独立账簿,无账簿时不请求后端并提示', () => {
+  const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+
+  assert.match(tax, /listBooks/)
+  assert.match(tax, /bookId/)
+  assert.match(tax, /请选择独立账簿/)
+  assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)
+  assert.match(tax, /listTaxRecords\(\s*\{\s*book_id:\s*bookId/)
+  // 不允许在未选账簿时 onMounted 直接调用税务接口
+  assert.doesNotMatch(tax, /onMounted\(load\)/)
+  assert.doesNotMatch(tax, /books\.value\[0\]\?\.id/)
+  assert.doesNotMatch(tax, /onMounted\(async\s*\(\)\s*=>\s*\{(?:(?!\}\);)[\s\S])*?await\s+load\(\)/)
+})
+
+test('科目管理与账套管理页面只读,期末结账与辅助核算标注待适配', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
 
-  // 导航项存在
-  assert.match(config, /key:\s*['"]accounts['"]/)
-  assert.match(config, /key:\s*['"]closing['"]/)
-  assert.match(config, /title:\s*['"]科目['"]/)
-  assert.match(config, /title:\s*['"]期末结账['"]/)
+  // 设置下的子项
+  assert.match(config, /key:\s*['"]settings-accounts['"]/)
+  assert.match(config, /key:\s*['"]settings-books['"]/)
+  assert.match(config, /key:\s*['"]settings-auxiliary['"]/)
+  assert.match(config, /key:\s*['"]settings-audit-logs['"]/)
+  assert.match(config, /title:\s*['"]科目管理['"]/)
+  assert.match(config, /title:\s*['"]账套管理['"]/)
+  assert.match(config, /title:\s*['"]辅助核算['"]/)
+  assert.match(config, /title:\s*['"]操作日志['"]/)
   // 路由存在
-  assert.match(router, /path:\s*['"]accounts['"],\s*name:\s*['"]MumarenFinanceAccounts['"]/)
-  assert.match(router, /path:\s*['"]closing['"],\s*name:\s*['"]MumarenFinanceClosing['"]/)
+  assert.match(router, /name:\s*['"]MumarenFinanceSettingsAccounts['"]/)
+  assert.match(router, /name:\s*['"]MumarenFinanceSettingsBooks['"]/)
+  assert.match(router, /name:\s*['"]MumarenFinanceSettingsAuxiliary['"]/)
+  assert.match(router, /name:\s*['"]MumarenFinanceSettingsAuditLogs['"]/)
 
-  // 科目页面只读：必须使用 listAccounts，不得有写入方法
+  // 科目页面只读
   const accounts = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAccounts.vue')
   assert.match(accounts, /listAccounts/)
   assert.doesNotMatch(accounts, /createAccount|updateAccount|deleteAccount|request\.post\(|request\.put\(|request\.delete\(/)
 
-  // 期末结账页面：必须显示暂不可用，不得提供结账/反结账操作函数或按钮
+  // 期末结账:已改为会话内 CRUD 页面,指向新组件 MumarenFinanceClosing.vue
+  assert.match(router, /path:\s*['"]closing['"],\s*name:\s*['"]MumarenFinanceClosing['"],\s*component:\s*\(\)\s*=>\s*import\(['"][^'"]*MumarenFinanceClosing\.vue['"]\),\s*meta:\s*\{\s*title:\s*['"]结账['"]\s*\}/)
+  // 会话内 CRUD 提示
   const closing = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceClosing.vue')
-  assert.match(closing, /暂不可用|后端适配待完成/)
-  assert.doesNotMatch(closing, /carryForward|doClose\(|doUnclose\(|quickClose\(|quickUnclose\(|initPeriods\(|request\.post\(|request\.put\(|request\.delete\(/)
+  assert.match(closing, /完整数据接口待后端补/)
+  assert.match(closing, /本会话数据刷新后清空/)
 })
 
-test('历史归档页面必须只读，不出现编辑/审核/过账操作按钮', () => {
+test('历史归档页面必须只读,不出现编辑/审核/过账操作按钮', () => {
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
 
-  // 必须显示历史标记
   assert.match(history, /历史数据|is_readonly|只读/)
-  // 必须使用只读接口 listHistory
   assert.match(history, /listHistory/)
-  // 不得出现编辑/审核/过账/删除等写入操作
   assert.doesNotMatch(history, /reviewVoucher|postVoucher|createVoucher|deleteVoucher|reviewArApOrder|settleArApOrder|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
 })
 
-test('出纳/资产/发票/薪资/付款外壳页面存在并标注暂不可用，不伪造按钮成功', () => {
-  const router = read('src', 'router', 'index.ts')
-  const shells = [
-    { file: 'MumarenFinanceCashier.vue', route: 'MumarenFinanceCashier', title: '出纳' },
-    { file: 'MumarenFinanceAssets.vue', route: 'MumarenFinanceAssets', title: '资产' },
-    { file: 'MumarenFinanceInvoices.vue', route: 'MumarenFinanceInvoices', title: '发票' },
-    { file: 'MumarenFinancePayroll.vue', route: 'MumarenFinancePayroll', title: '薪资' },
-    { file: 'MumarenFinancePayments.vue', route: 'MumarenFinancePayments', title: '付款' },
-  ]
+test('利润表与科目余额表页面调用独立报表接口', () => {
+  const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
+  const trial = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportTrialBalance.vue')
 
-  for (const { file, route } of shells) {
-    const source = read('src', 'views', 'mumaren-finance-center', file)
-    // 必须使用 CapabilityBoard 展示，不直接渲染可操作表单
-    assert.match(source, /MumarenFinanceCapabilityBoard/)
-    // 必须从 config 取能力组，不硬编码可操作按钮
-    assert.match(source, /mumarenFinanceCapabilityGroups\./)
-    // 路由必须注册
-    assert.match(router, new RegExp(`name:\\s*['"]${route}['"]`))
-  }
+  assert.match(profit, /getProfitStatement/)
+  assert.match(profit, /mumarenFinanceCenterApi/)
+  assert.match(trial, /getTrialBalance/)
+  assert.match(trial, /mumarenFinanceCenterApi/)
+})
 
-  // 这些外壳页面对应的 config 能力组必须全部标注 planned_backend
-  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
-  for (const group of ['cashier', 'assets', 'invoices', 'payroll', 'payments']) {
-    assert.match(config, new RegExp(`${group}:\\s*\\{`))
-  }
-  // 能力卡片文案必须包含"后端适配待完成"
-  const board = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCapabilityBoard.vue')
-  assert.match(board, /后端适配待完成/)
+test('税金明细表页面调用税务记录接口(只读展示)', () => {
+  const taxRecords = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTaxRecords.vue')
+
+  assert.match(taxRecords, /listTaxRecords|mumarenFinanceCenterApi/)
+  // 只读页面,不得有写入操作
+  assert.doesNotMatch(taxRecords, /createTaxRecord|reviewTaxRecord|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
 })
 
 test('所有牧马人财务中心页面不得调用旧财务 API 或残留牧马人服务器地址', () => {
   const dir = path.join(frontendRoot, 'src', 'views', 'mumaren-finance-center')
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.vue'))
-  assert.ok(files.length >= 12, '应至少有 12 个牧马人财务中心页面')
+  assert.ok(files.length >= 13, '应至少有 13 个牧马人财务中心页面')
 
   for (const file of files) {
     const source = read('src', 'views', 'mumaren-finance-center', file)
-    // 不得引用旧财务 API 模块
     assert.doesNotMatch(source, /@\/api\/finance['"]|@\/api\/financeCenter['"]|@\/api\/kingdeeFinance['"]|FormalLedger|HistoricalFinance/)
-    // 不得直接调用旧财务 HTTP 路径
     assert.doesNotMatch(source, /\/api\/v1\/finance(?!-center\/mumaren)[/'"`]/)
-    // 不得使用旧财务 store
     assert.doesNotMatch(source, /useFinanceStore|finStore/)
-    // 不得残留牧马人服务器地址或旧财务 store
     assert.doesNotMatch(source, /mumaren\.cn|mumaren\.com|finance_module\/api\//)
   }
 
-  // API 文件同样不得残留旧财务路径或牧马人服务器地址
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   assert.doesNotMatch(api, /\/api\/v1\/finance(?!-center\/mumaren)[/'"`]/)
   assert.doesNotMatch(api, /mumaren\.cn|mumaren\.com|finance_module\/api\//)

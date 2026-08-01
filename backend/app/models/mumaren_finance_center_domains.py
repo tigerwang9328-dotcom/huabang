@@ -224,3 +224,110 @@ class FinanceCenterMumarenTaxRecord(Base):
     voucher_id: Mapped[int | None] = mapped_column(BigInteger)
     source_payload: Mapped[dict | None] = mapped_column(JSON)
     remark: Mapped[str | None] = mapped_column(Text)
+
+
+class FinanceCenterMumarenVoucherTemplate(Base):
+    __tablename__ = "finance_center_mumaren_voucher_templates"
+    __table_args__ = (
+        UniqueConstraint("book_id", "template_name", name="uq_mumaren_finance_voucher_template"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    template_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    voucher_type: Mapped[str] = mapped_column(String(16), nullable=False, default="记")
+    summary: Mapped[str | None] = mapped_column(String(500))
+    lines_json: Mapped[dict | None] = mapped_column(JSON)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenAutoVoucherRule(Base):
+    __tablename__ = "finance_center_mumaren_auto_voucher_rules"
+    __table_args__ = (
+        UniqueConstraint("book_id", "rule_name", name="uq_mumaren_finance_auto_voucher_rule"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    rule_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    trigger_event: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(BigInteger)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False, default="debit")
+    amount_formula: Mapped[str | None] = mapped_column(String(256))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenExpenseEntry(Base):
+    __tablename__ = "finance_center_mumaren_expense_entries"
+    __table_args__ = (
+        CheckConstraint("workflow_status IN ('draft', 'reviewed', 'posted')", name="ck_mumaren_finance_expense_workflow"),
+        CheckConstraint("amount >= 0", name="ck_mumaren_finance_expense_amount"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    account_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    remark: Mapped[str | None] = mapped_column(Text)
+    workflow_status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenSalesMonthlyReport(Base):
+    __tablename__ = "finance_center_mumaren_sales_monthly_reports"
+    __table_args__ = (
+        UniqueConstraint("book_id", "period", "store_code", name="uq_mumaren_finance_sales_monthly"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    store_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    store_name: Mapped[str | None] = mapped_column(String(128))
+    sales_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    remark: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenBankReconciliation(Base):
+    __tablename__ = "finance_center_mumaren_bank_reconciliations"
+    __table_args__ = (
+        UniqueConstraint("book_id", "cash_account_id", "period", name="uq_mumaren_finance_bank_reconciliation"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    cash_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    bank_balance: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    book_balance: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    adjusted_balance: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    items_json: Mapped[dict | None] = mapped_column(JSON)
+    workflow_status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenAuxiliaryAccounting(Base):
+    __tablename__ = "finance_center_mumaren_auxiliary_accountings"
+    __table_args__ = (
+        UniqueConstraint("book_id", "aux_type", "code", name="uq_mumaren_finance_auxiliary_accounting"),
+        CheckConstraint("aux_type IN ('customer', 'supplier', 'employee', 'project', 'department')", name="ck_mumaren_finance_aux_type"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    aux_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(BigInteger)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

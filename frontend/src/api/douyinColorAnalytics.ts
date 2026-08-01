@@ -28,6 +28,8 @@ export interface DouyinAnnotationContext {
     id: number;
     account_key: string;
     display_name: string;
+    observed_account_name?: string | null;
+    last_heartbeat_at?: string | null;
   };
 }
 

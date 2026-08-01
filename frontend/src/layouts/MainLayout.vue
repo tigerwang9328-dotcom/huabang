@@ -52,8 +52,46 @@
                     <transition name="submenu">
                       <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list submenu-list-2">
                         <template v-for="leaf in item.children" :key="menuKey(leaf)">
+                          <!-- 第4级:leaf 有 children,可展开 -->
+                          <div v-if="leaf.children?.length" class="nav-submenu nav-submenu-2">
+                            <button
+                              type="button"
+                              class="nav-item nav-sub nav-parent-3"
+                              :class="{ active: isAnyChildActive(leaf.children), expanded: expandedMenus.has(menuKey(leaf)) }"
+                              @click.stop="toggleMenu(menuKey(leaf))"
+                            >
+                              <span>{{ leaf.label }}</span>
+                              <em v-if="leaf.badge" class="nav-badge">{{ leaf.badge }}</em>
+                              <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+                            </button>
+                            <transition name="submenu">
+                              <div v-show="expandedMenus.has(menuKey(leaf))" class="submenu-list submenu-list-3">
+                                <template v-for="leaf2 in leaf.children" :key="menuKey(leaf2)">
+                                  <button
+                                    v-if="leaf2.disabled"
+                                    type="button"
+                                    class="nav-item nav-sub nav-sub-3 nav-disabled"
+                                    disabled
+                                  >
+                                    <span>{{ leaf2.label }}</span>
+                                    <em v-if="leaf2.badge" class="nav-badge">{{ leaf2.badge }}</em>
+                                  </button>
+                                  <router-link
+                                    v-else
+                                    :to="leaf2.path || '/app/dashboard'"
+                                    class="nav-item nav-sub nav-sub-3"
+                                    :class="{ active: isActive(leaf2.path || '') }"
+                                  >
+                                    <span>{{ leaf2.label }}</span>
+                                    <em v-if="leaf2.badge" class="nav-badge">{{ leaf2.badge }}</em>
+                                  </router-link>
+                                </template>
+                              </div>
+                            </transition>
+                          </div>
+                          <!-- 第3级叶子 -->
                           <button
-                            v-if="leaf.disabled"
+                            v-else-if="leaf.disabled"
                             type="button"
                             class="nav-item nav-sub nav-sub-2 nav-disabled"
                             disabled
@@ -283,7 +321,6 @@ const menuGroups = computed<MenuGroup[]>(() => [
         key: "sales-online",
         children: [
           { path: "/app/marketing/investment", label: "投流优化" },
-          { path: "/app/douyin-color-analytics/videos", label: "抖音颜色标注" },
           { path: "/app/report", label: "经营日报", permission: "dashboard:overview:view" },
           { label: "线上总览", disabled: true, badge: "规划中" },
           { label: "平台销售", disabled: true, badge: "规划中" },
@@ -438,6 +475,15 @@ const expandActiveMenuPath = () => {
         next.add(menuKey(item));
         changed = true;
       }
+      // 展开第3级中包含活跃路由的节点(支持4级菜单)
+      item.children.forEach((leaf) => {
+        if (!leaf.children?.length || !isAnyChildActive(leaf.children)) return;
+        const leafMenuKey = menuKey(leaf);
+        if (!next.has(leafMenuKey)) {
+          next.add(leafMenuKey);
+          changed = true;
+        }
+      });
     });
   });
   if (!changed) return;
@@ -635,7 +681,8 @@ const handleLogout = async () => {
   transition: transform 0.16s ease, color 0.16s ease;
 }
 .nav-parent.expanded .nav-arrow,
-.nav-parent-2.expanded .nav-arrow {
+.nav-parent-2.expanded .nav-arrow,
+.nav-parent-3.expanded .nav-arrow {
   transform: rotate(90deg);
   color: rgba(255, 255, 255, 0.75);
 }
@@ -645,6 +692,9 @@ const handleLogout = async () => {
 .submenu-list-2 {
   padding-left: 8px;
 }
+.submenu-list-3 {
+  padding-left: 8px;
+}
 .nav-sub {
   padding-left: 38px;
   font-size: 13px;
@@ -652,10 +702,19 @@ const handleLogout = async () => {
 .nav-parent-2 {
   padding-left: 38px;
 }
+.nav-parent-3 {
+  padding-left: 50px;
+  font-size: 12.5px;
+}
 .nav-sub-2 {
   padding-left: 50px;
   font-size: 12.5px;
   color: rgba(255, 255, 255, 0.5);
+}
+.nav-sub-3 {
+  padding-left: 62px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
 }
 .submenu-enter-active,
 .submenu-leave-active {

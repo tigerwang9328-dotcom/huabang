@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import require_permission
 from app.core.database import get_db
 from app.models.douyin_color_analytics import (
+    CollectorInstance,
     DouyinCreatorAccount,
     GarmentColor,
     GarmentSku,
@@ -160,7 +161,19 @@ async def _validate_clip_payload(
 @annotation_router.get("/annotation-context", response_model=ApiResponse)
 async def annotation_context(_: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
     account = await _annotation_account(db)
-    return ApiResponse.ok({"account": {"id": account.id, "account_key": account.account_key, "display_name": account.display_name}})
+    latest_instance = (await db.execute(
+        select(CollectorInstance)
+        .where(CollectorInstance.account_id == account.id)
+        .order_by(CollectorInstance.last_heartbeat_at.desc().nulls_last())
+        .limit(1)
+    )).scalar_one_or_none()
+    return ApiResponse.ok({"account": {
+        "id": account.id,
+        "account_key": account.account_key,
+        "display_name": account.display_name,
+        "observed_account_name": latest_instance.observed_account_name if latest_instance else None,
+        "last_heartbeat_at": latest_instance.last_heartbeat_at.isoformat() if latest_instance and latest_instance.last_heartbeat_at else None,
+    }})
 
 
 @annotation_router.get("/videos", response_model=ApiResponse)

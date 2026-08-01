@@ -1,13 +1,18 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.1.12
+// @version      3.5.0
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_listValues
 // @grant        unsafeWindow
 // @connect      hbreare.com
+// @connect      localhost
+// @connect      127.0.0.1
 // @run-at       document-start
 // ==/UserScript==
 
@@ -15,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.1.12';
+  const SCRIPT_VERSION = '3.5.0';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -29,6 +34,21 @@
   let learnedCatalogRequest = null;
   let paused = document.visibilityState !== 'visible';
   let lastWakeCheckAt = now();
+
+  // v3.5.0: 启动时从 GM 存储加载已保存的 token,实现持久化
+  const CONFIG_STORAGE_KEY = 'huabang:douyinColor:runtimeConfig';
+  async function loadSavedConfig() {
+    try {
+      const saved = GM_getValue(CONFIG_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (!parsed?.uploadToken) return;
+      const control = await loadCollectorConfig(parsed.uploadToken);
+      if (!control) { console.warn('[douyin-color] 已保存的令牌已失效,请重新配置'); GM_setValue(CONFIG_STORAGE_KEY, ''); return; }
+      runtimeConfig = { ...parsed, max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
+      console.info('[douyin-color] 已自动加载保存的令牌,采集器就绪');
+    } catch (e) { console.warn('[douyin-color] 加载保存的令牌失败:', e.message); }
+  }
   function openQueueDb() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open('huabang_douyin_color_v31', 1);
@@ -89,7 +109,19 @@
       .map((item) => ({ key: item.key, value: item.value })) : [];
   }
   function guardObservedCreator(response) {
-    const observed = response?.user_id || response?.data?.user_id || response?.data?.author?.user_id;
+    // 兼容多种字段:user_id / author_user_id / author.user_id
+    const observed = response?.user_id || response?.author_user_id || response?.data?.user_id || response?.data?.author?.user_id || response?.data?.author_user_id;
+    const observedName = response?.data?.author?.nickname || response?.data?.nickname || response?.nickname || response?.author?.nickname;
+    if (observed && runtimeConfig && !runtimeConfig.observedCreatorId) {
+      runtimeConfig.observedCreatorId = String(observed);
+      runtimeConfig.observedAccountName = observedName || runtimeConfig.observedAccountName || '';
+      // v3.5.0: 同步更新 GM 存储中的 creator_id
+      GM_setValue(CONFIG_STORAGE_KEY, JSON.stringify({ uploadToken: runtimeConfig.uploadToken, observedCreatorId: runtimeConfig.observedCreatorId, observedAccountName: runtimeConfig.observedAccountName }));
+      console.info('[douyin-color] 已自动识别创作者:', runtimeConfig.observedCreatorId, runtimeConfig.observedAccountName || '(昵称待补)');
+    } else if (observedName && runtimeConfig && !runtimeConfig.observedAccountName) {
+      runtimeConfig.observedAccountName = observedName;
+      GM_setValue(CONFIG_STORAGE_KEY, JSON.stringify({ uploadToken: runtimeConfig.uploadToken, observedCreatorId: runtimeConfig.observedCreatorId, observedAccountName: runtimeConfig.observedAccountName }));
+    }
     if (!observed || !runtimeConfig?.observedCreatorId || String(observed) === runtimeConfig.observedCreatorId) return true;
     paused = true;
     runtimeConfig = null;
@@ -116,12 +148,20 @@
     };
   }
   function catalogItemsFromResponse(response) {
-    return Array.isArray(response?.items) ? response.items.map((item) => ({
-      video_id: String(item.id), sanitized_title: typeof item.description === 'string' ? item.description.slice(0, 500) : undefined,
-      published_at_epoch_seconds: Number.isInteger(item.create_time) ? item.create_time : undefined,
-      duration_ms: Number.isInteger(item.video_info?.duration) ? item.video_info.duration : undefined,
-      item_status: item.type === 4 ? 'pending' : 'skipped_non_video',
-    })).map((item) => Object.fromEntries(Object.entries(item).filter(([, value]) => value !== undefined))) : [];
+    // 兼容新旧接口:旧 /web/api/creator/item/list 返回 items[],新 /janus/douyin/creator/pc/work_list 返回 aweme_list[]
+    const list = Array.isArray(response?.aweme_list) ? response.aweme_list : (Array.isArray(response?.items) ? response.items : []);
+    return list.map((item) => {
+      const playCount = Number(item?.statistics?.play_count ?? item?.play_count ?? 0);
+      // v3.5.0: 排除播放量小于 1000 的视频
+      if (playCount < 1000) return { video_id: String(item.aweme_id || item.id || item.item_id), item_status: 'skipped_low_play_count' };
+      return {
+        video_id: String(item.aweme_id || item.id || item.item_id),
+        sanitized_title: typeof (item.desc || item.description) === 'string' ? (item.desc || item.description).slice(0, 500) : undefined,
+        published_at_epoch_seconds: Number.isInteger(item.create_time) ? item.create_time : undefined,
+        duration_ms: Number.isInteger(item.duration) ? item.duration : (Number.isInteger(item.video_info?.duration) ? item.video_info.duration : undefined),
+        item_status: (item.type === 0 || item.type === 4) ? 'pending' : 'skipped_non_video',
+      };
+    }).map((item) => Object.fromEntries(Object.entries(item).filter(([, value]) => value !== undefined)));
   }
   function observationWindow(publishedAtEpochSeconds) {
     if (!Number.isInteger(publishedAtEpochSeconds)) return null;
@@ -159,8 +199,19 @@
   }
   async function captureCatalog(response, rawUrl) {
     if (rawUrl) learnedCatalogRequest = rawUrl;
-    const catalogCreatorId = Array.isArray(response?.items) ? response.items.find((item) => item?.user_id)?.user_id : null;
-    if (catalogCreatorId && !guardObservedCreator({ user_id: catalogCreatorId })) return;
+    // 兼容新旧接口:aweme_list[] 或 items[]
+    const list = Array.isArray(response?.aweme_list) ? response.aweme_list : (Array.isArray(response?.items) ? response.items : []);
+    const catalogCreatorId = list.find((item) => item?.author_user_id || item?.user_id)?.author_user_id || list.find((item) => item?.user_id)?.user_id || null;
+    const catalogNickname = list.find((item) => item?.author?.nickname)?.author?.nickname || list.find((item) => item?.nickname)?.nickname || null;
+    if (catalogCreatorId && runtimeConfig && !runtimeConfig.observedCreatorId) {
+      runtimeConfig.observedCreatorId = String(catalogCreatorId);
+      if (catalogNickname) runtimeConfig.observedAccountName = catalogNickname;
+      console.info('[douyin-color] 已从作品目录识别创作者:', runtimeConfig.observedCreatorId, runtimeConfig.observedAccountName || '(昵称待补)');
+    }
+    if (catalogNickname && runtimeConfig && !runtimeConfig.observedAccountName) {
+      runtimeConfig.observedAccountName = catalogNickname;
+    }
+    if (catalogCreatorId && !guardObservedCreator({ user_id: catalogCreatorId, author: { nickname: catalogNickname } })) return;
     const items = catalogItemsFromResponse(response); if (!items.length) return;
     await mutateQueue((state) => {
       state.catalogItems = state.catalogItems || [];
@@ -277,11 +328,12 @@
     const settings = await config(); if (!settings?.uploadToken) return;
     const state = await queueState(); const stableInstallationId = await ensureInstallationId();
     await scheduledRequest({ method: 'POST', url: `${API_ORIGIN}${API_PREFIX}/collector-heartbeats`, headers: { Authorization: `Bearer ${settings.uploadToken}`, 'Content-Type': 'application/json' },
-      data: JSON.stringify({ installation_id: stableInstallationId, script_version: SCRIPT_VERSION, schema_version: SCHEMA_VERSION, current_page_path: location.pathname, current_page_type: 'creator_page', document_visibility: document.visibilityState, queued_batch_count: state.batches.length, queued_bytes: bytes(state) }) });
+      data: JSON.stringify({ installation_id: stableInstallationId, script_version: SCRIPT_VERSION, schema_version: SCHEMA_VERSION, observed_creator_id: settings.observedCreatorId || undefined, observed_account_name: settings.observedAccountName || undefined, current_page_path: location.pathname, current_page_type: 'creator_page', document_visibility: document.visibilityState, queued_batch_count: state.batches.length, queued_bytes: bytes(state) }) });
     console.info('douyin-color-v31-status', status);
   }
   async function uploadPending() {
     const settings = await config(); if (!settings?.uploadToken) return;
+    if (!settings?.observedCreatorId) { console.warn('[douyin-color] 尚未识别到创作者 ID,请在创作者中心浏览作品或数据中心页面后重试'); return; }
     const stableInstallationId = await ensureInstallationId();
     const batches = await mutateQueue((state) => state.batches
       .filter((item) => !item.uploaded && (item.status === 'receiving' || item.status === 'uploading'))
@@ -296,7 +348,7 @@
       for (let index = 0; index < parts.length; index += 1) {
         if (batch.uploadedParts.includes(index + 1)) continue;
         const partRecords = parts[index];
-        const envelope = { schema_version: SCHEMA_VERSION, client_batch_id: batch.id, script_version: SCRIPT_VERSION, created_at: new Date(batch.createdAt).toISOString(), installation_id: stableInstallationId, observed_creator_id: settings.observedCreatorId, part_number: index + 1, part_count: parts.length, records: partRecords };
+        const envelope = { schema_version: SCHEMA_VERSION, client_batch_id: batch.id, script_version: SCRIPT_VERSION, created_at: new Date(batch.createdAt).toISOString(), installation_id: stableInstallationId, observed_creator_id: settings.observedCreatorId, observed_account_name: settings.observedAccountName || undefined, part_number: index + 1, part_count: parts.length, records: partRecords };
         envelope.part_hash = await sha256(canonicalJson({ client_batch_id: envelope.client_batch_id, records: partRecords }));
         batch.failedParts = batch.failedParts || [];
         if (batch.failedParts.some((part) => part.part_number === index + 1)) continue;
@@ -351,7 +403,7 @@
       try {
         const rawUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
         const url = new URL(rawUrl, location.origin);
-        if (url.pathname === '/web/api/creator/item/list') { observerState.observed += 1; void captureCatalog(await result.clone().json(), rawUrl); }
+        if (url.pathname === '/janus/douyin/creator/pc/work_list' || url.pathname === '/web/api/creator/item/list') { observerState.observed += 1; void captureCatalog(await result.clone().json(), rawUrl); }
         if (url.pathname.endsWith('/janus/douyin/creator/data/realtime/analysis/data_center')) {
           observerState.observed += 1;
           learnedCurveRequest = rawUrl;
@@ -367,7 +419,7 @@
       this.addEventListener('load', () => {
         try {
           const url = new URL(this.__huabangDouyinColorRawUrl, location.origin);
-          if (url.pathname === '/web/api/creator/item/list') { observerState.observed += 1; void captureCatalog(JSON.parse(this.responseText), this.__huabangDouyinColorRawUrl); }
+          if (url.pathname === '/janus/douyin/creator/pc/work_list' || url.pathname === '/web/api/creator/item/list') { observerState.observed += 1; void captureCatalog(JSON.parse(this.responseText), this.__huabangDouyinColorRawUrl); }
           if (url.pathname.endsWith('/janus/douyin/creator/data/realtime/analysis/data_center')) {
             observerState.observed += 1;
             learnedCurveRequest = this.__huabangDouyinColorRawUrl;
@@ -381,13 +433,19 @@
   }
   function registerMenus() {
     GM_registerMenuCommand('配置本机采集令牌', async () => {
-      const uploadToken = prompt('粘贴后台签发的短期采集令牌（仅保存在当前页面内存，刷新后需重新输入）', '');
-      const observedCreatorId = prompt('粘贴当前账号的创作者 ID（仅用于请求时核验，不进入队列）', '');
-      if (!uploadToken || !observedCreatorId) return;
-      runtimeConfig = { uploadToken, observedCreatorId, max_part_uncompressed_bytes: 1024 * 1024, max_part_records: 50, max_local_batches: DEFAULT_MAX_LOCAL_BATCHES, max_local_bytes: DEFAULT_MAX_QUEUE_BYTES };
+      const uploadToken = prompt('粘贴后台签发的采集令牌（将持久保存,刷新页面无需重新输入）', '');
+      if (!uploadToken) return;
+      runtimeConfig = { uploadToken, observedCreatorId: runtimeConfig?.observedCreatorId || '', observedAccountName: runtimeConfig?.observedAccountName || '', max_part_uncompressed_bytes: 1024 * 1024, max_part_records: 50, max_local_batches: DEFAULT_MAX_LOCAL_BATCHES, max_local_bytes: DEFAULT_MAX_QUEUE_BYTES };
       const control = await loadCollectorConfig(uploadToken);
-      if (!control) { runtimeConfig = null; paused = true; console.warn('douyin-color-v31-status', 'config_incompatible'); return; }
-      runtimeConfig = { uploadToken, observedCreatorId, max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
+      if (!control) { runtimeConfig = null; paused = true; console.warn('douyin-color-v31-status', 'config_incompatible'); alert('令牌验证失败,请检查令牌是否正确或已过期'); return; }
+      runtimeConfig = { uploadToken, observedCreatorId: runtimeConfig?.observedCreatorId || '', observedAccountName: runtimeConfig?.observedAccountName || '', max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
+      // v3.5.0: 持久化到 GM 存储,刷新页面后自动加载
+      GM_setValue(CONFIG_STORAGE_KEY, JSON.stringify({ uploadToken, observedCreatorId: runtimeConfig.observedCreatorId, observedAccountName: runtimeConfig.observedAccountName }));
+      if (!runtimeConfig.observedCreatorId) {
+        console.warn('[douyin-color] 创作者 ID 将在您浏览作品或数据中心时自动识别,无需手动输入');
+      }
+      console.info('[douyin-color] 令牌已保存,采集器就绪');
+      alert('令牌已保存成功！采集器已就绪。\n刷新页面或重启浏览器后无需重新配置。\n创作者 ID 将在浏览作品时自动识别。');
     });
         GM_registerMenuCommand('立即上传已采集批次', () => void uploadPending());
         GM_registerMenuCommand('按目录补采留存与平台跳出曲线', () => void collectCatalogCurves());
@@ -398,7 +456,7 @@
       await mutateQueue((state) => { state.batches = state.batches.filter((item) => item.uploaded); });
     });
   }
-  observePageRequests(); registerMenus();
+  observePageRequests(); registerMenus(); void loadSavedConfig();
   document.addEventListener('visibilitychange', () => { paused = document.visibilityState !== 'visible'; if (!paused) void uploadPending(); });
   window.addEventListener('pagehide', () => { paused = true; });
   window.addEventListener('online', () => void uploadPending());

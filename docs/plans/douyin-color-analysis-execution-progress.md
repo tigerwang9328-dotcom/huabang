@@ -313,3 +313,60 @@ git revert 80a0d2b 即可回滚阶段 4 全部改动
 
 ### 回滚点
 无需回滚（浏览器测试未修改代码）
+## 生产部署记录 (2026-07-31 12:32 UTC)
+
+### 部署前回滚点
+- Git commit: 05c4657 (release/mumaren-finance-20260731)
+- Alembic head: 1556f0a1b263 (finance mergepoint)
+- 数据库备份: /home/xiaohu/backups/huabang_ai_pre_v4_deploy_full_20260731_122240.sql (871MB)
+- 服务状态: active (running)
+
+### 部署后状态
+- Git commit: 4c08f3e (release/mumaren-finance-20260731)
+  - 25ba4e9 merge: integrate douyin color v4.0 into release branch
+  - 4c08f3e fix(alembic): remove SET ROLE huabang_app_role from v4.0 migrations
+- Alembic head: 217152ee1a62 (mergepoint, merge v4.0 + finance heads)
+- 迁移链: 8a3f6b2c1d90 -> f4b5e6c7d901 -> b1c2d3e4f5a6 -> 217152ee1a62
+- 服务状态: active (running) since 2026-07-31 12:32:15 UTC
+
+### Schema 验证
+- douyin schema: 22 张表 (owner: huabang)
+- video_clips.outfit_parts_json: JSONB ✓
+- video_color_metrics.sku_code: VARCHAR ✓
+- outfit_combinations: 表存在 ✓
+- outfit_color_metrics: 表存在 ✓
+- release_stage_configurations: 表存在 (7 列, 0 行,默认值由应用代码控制) ✓
+
+### 健康检查
+- /health (8000): 200 ✓
+- /health (nginx 80): 200 ✓
+- /api/v1/douyin-color-analytics/health: 401 (需认证,路由已加载) ✓
+- 标注页 /app/douyin-color-analytics/annotate: 200 ✓
+- 报告页 /app/douyin-color-analytics/report: 200 ✓
+- 健康页 /app/douyin-color-analytics/health: 200 ✓
+
+### 回滚步骤
+1. 关闭阶段开关 (如已配置账号): UPDATE douyin.release_stage_configurations SET current_stage='A'
+2. 恢复数据库: sudo -u postgres psql -d huabang_ai < /home/xiaohu/backups/huabang_ai_pre_v4_deploy_full_20260731_122240.sql
+3. 回退代码: cd /srv/huabang-ai-center && git checkout 05c4657
+4. 重启服务: sudo systemctl restart huabang-backend.service
+5. 验证: curl http://127.0.0.1:8000/health
+
+### 部署中的问题与修复
+1. **pg_dump 权限问题**: app 用户无权 dump fin_current schema,改为 --exclude-schema 排除受限 schema
+2. **SET ROLE huabang_app_role**: 测试环境角色不存在于生产,移除 SET ROLE/RESET ROLE 语句 (commit 4c08f3e)
+3. **表所有者权限**: douyin 表所有者为 postgres,app 用户无 ALTER 权限,通过 sudo -u postgres 更改所有者为 huabang
+
+### 阶段开关默认值
+- A 阶段 (采集): on (应用代码默认)
+- B 阶段 (标注): on (应用代码默认)
+- C 阶段 (计算): off (应用代码默认)
+- D 阶段 (报告): off (应用代码默认)
+- bounce_report_enabled: off (三视频语义验收前不开启)
+
+### 未完成事项 (需后续跟进)
+1. 配置 Douyin 创作者账号 (release_stage_configurations 当前 0 行)
+2. 油猴采集器真实上传闭环验证
+3. Phase A 浏览器端到端闭环验证 (需用户登录认证)
+4. 生产 D 阶段 3 日连续观察 (需配置账号后启动)
+5. 推送到 GitHub origin (服务器 GitHub SSH 端口 22 超时,需通过其他方式推送)

@@ -7,7 +7,7 @@
         <p>每个片段只标注一件主要分析衣物；多件重点或无法判断会保留质量记录，但不进入颜色排名。</p>
       </div>
       <div class="head-actions">
-        <el-tag v-if="context" type="info" effect="plain">账号：{{ context.account.display_name }}</el-tag>
+        <el-tag v-if="context" type="info" effect="plain">账号：{{ context.account.display_name }}<span v-if="context.account.observed_account_name">（{{ context.account.observed_account_name }}）</span></el-tag>
         <el-button @click="openStyles">款号与颜色</el-button>
         <el-button type="primary" :loading="loading" @click="load">刷新视频</el-button>
       </div>

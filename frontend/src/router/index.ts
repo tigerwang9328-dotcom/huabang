@@ -31,11 +31,6 @@ const routes = [
       { path: "", redirect: "/app/dashboard" },
       { path: "dashboard", name: "Dashboard", component: () => import("@/views/dashboard/Index.vue"), meta: { title: "经营总览" } },
       { path: "marketing/investment", name: "InvestmentOptimization", component: () => import("@/views/marketing/InvestmentOptimization.vue"), meta: { title: "投流优化" } },
-      { path: "douyin-color-analytics/videos", name: "DouyinColorVideoList", component: () => import("@/views/douyinColorAnalytics/VideoList.vue"), meta: { title: "抖音颜色标注" } },
-      { path: "douyin-color-analytics/videos/:videoId/annotate", name: "DouyinColorAnnotation", component: () => import("@/views/douyinColorAnalytics/Annotate.vue"), meta: { title: "视频片段标注" } },
-      { path: "douyin-color-analytics/styles", name: "DouyinColorStyles", component: () => import("@/views/douyinColorAnalytics/Styles.vue"), meta: { title: "款号与颜色" } },
-      { path: "douyin-color-analytics/report", name: "DouyinColorReport", component: () => import("@/views/douyinColorAnalytics/Report.vue"), meta: { title: "颜色留存报告" } },
-      { path: "douyin-color-analytics/admin", name: "DouyinColorAdmin", component: () => import("@/views/douyinColorAnalytics/Admin.vue"), meta: { title: "管理与健康" } },
       { path: "report", name: "BusinessReport", component: () => import("@/views/report/Index.vue"), meta: { title: "经营日报" } },
       { path: "boss", name: "Boss", component: () => import("@/views/boss/Index.vue"), meta: { title: "经营日报" } },
       { path: "ai-diagnosis", name: "AiDiagnosis", redirect: "/app/ai-diagnosis/overview", meta: { title: "AI经营诊断" } },
@@ -69,22 +64,55 @@ const routes = [
         component: () => import("@/views/mumaren-finance-center/MumarenFinanceCenterShell.vue"),
         meta: { title: "财务中心" },
         children: [
-          { path: "", name: "MumarenFinanceCenter", component: () => import("@/views/mumaren-finance-center/MumarenFinanceWorkspace.vue"), meta: { title: "财务中心" } },
-          { path: "vouchers", name: "MumarenFinanceVouchers", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVouchers.vue"), meta: { title: "凭证" } },
-          { path: "ledgers", name: "MumarenFinanceLedgers", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgers.vue"), meta: { title: "账簿" } },
-          { path: "accounts", name: "MumarenFinanceAccounts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceAccounts.vue"), meta: { title: "科目" } },
+          { path: "", redirect: "/app/finance-center/mumaren/history" },
+          // 数据罗盘
+          { path: "compass", name: "MumarenFinanceCompass", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCompass.vue"), meta: { title: "数据罗盘" } },
+          // 历史数据存档
+          { path: "history", name: "MumarenFinanceHistory", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistory.vue"), meta: { title: "历史数据存档" } },
+          // 凭证(5 子项)
+          { path: "vouchers", redirect: "/app/finance-center/mumaren/vouchers/list" },
+          { path: "vouchers/create", name: "MumarenFinanceVoucherCreate", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherCreate.vue"), meta: { title: "录凭证" } },
+          { path: "vouchers/list", name: "MumarenFinanceVoucherList", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherList.vue"), meta: { title: "查凭证" } },
+          { path: "vouchers/summary", name: "MumarenFinanceVoucherSummary", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherSummary.vue"), meta: { title: "凭证汇总" } },
+          { path: "vouchers/template", name: "MumarenFinanceVoucherTemplate", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherTemplate.vue"), meta: { title: "凭证模板" } },
+          { path: "vouchers/auto", name: "MumarenFinanceVoucherAuto", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherAuto.vue"), meta: { title: "自动凭证" } },
+          // 账簿(3 子项)
+          { path: "ledgers", redirect: "/app/finance-center/mumaren/ledgers/general" },
+          { path: "ledgers/general", name: "MumarenFinanceGeneralLedger", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgers.vue"), meta: { title: "总账" } },
+          { path: "ledgers/trial-balance", name: "MumarenFinanceTrialBalance", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue"), meta: { title: "科目余额表" } },
+          { path: "ledgers/detail", name: "MumarenFinanceLedgerDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue"), meta: { title: "明细账" } },
+          // 报表(8 子项)
+          { path: "reports", redirect: "/app/finance-center/mumaren/reports/profit-statement" },
+          { path: "reports/balance-sheet", name: "MumarenFinanceBalanceSheet", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportBalanceSheet.vue"), meta: { title: "资产负债表" } },
+          { path: "reports/profit-statement", name: "MumarenFinanceProfitStatement", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportProfit.vue"), meta: { title: "利润表" } },
+          { path: "reports/cash-flow-statement", name: "MumarenFinanceCashFlowStatement", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportCashFlow.vue"), meta: { title: "现金流量表" } },
+          { path: "reports/receivable-detail", name: "MumarenFinanceReceivableDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportReceivable.vue"), meta: { title: "应收明细" } },
+          { path: "reports/payable-detail", name: "MumarenFinancePayableDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportPayable.vue"), meta: { title: "应付明细" } },
+          { path: "reports/expense-detail", name: "MumarenFinanceExpenseDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportExpense.vue"), meta: { title: "费用明细表" } },
+          { path: "reports/tax-detail", name: "MumarenFinanceTaxDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceTaxRecords.vue"), meta: { title: "税金明细表" } },
+          { path: "reports/sales-monthly", name: "MumarenFinanceSalesMonthly", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportSalesMonthly.vue"), meta: { title: "销售月报表" } },
+          // 应收应付
           { path: "ar-ap", name: "MumarenFinanceArAp", component: () => import("@/views/mumaren-finance-center/MumarenFinanceArAp.vue"), meta: { title: "应收应付" } },
-          { path: "business", name: "MumarenFinanceBusiness", component: () => import("@/views/mumaren-finance-center/MumarenFinanceBusiness.vue"), meta: { title: "业务台账" } },
-          { path: "tax", name: "MumarenFinanceTax", component: () => import("@/views/mumaren-finance-center/MumarenFinanceTax.vue"), meta: { title: "税务" } },
-          { path: "cashier", name: "MumarenFinanceCashier", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCashier.vue"), meta: { title: "出纳" } },
+          // 结账
+          { path: "closing", name: "MumarenFinanceClosing", component: () => import("@/views/mumaren-finance-center/MumarenFinanceClosing.vue"), meta: { title: "结账" } },
+          // 资产
           { path: "assets", name: "MumarenFinanceAssets", component: () => import("@/views/mumaren-finance-center/MumarenFinanceAssets.vue"), meta: { title: "资产" } },
+          // 发票
           { path: "invoices", name: "MumarenFinanceInvoices", component: () => import("@/views/mumaren-finance-center/MumarenFinanceInvoices.vue"), meta: { title: "发票" } },
-          { path: "payroll", name: "MumarenFinancePayroll", component: () => import("@/views/mumaren-finance-center/MumarenFinancePayroll.vue"), meta: { title: "薪资" } },
-          { path: "payments", name: "MumarenFinancePayments", component: () => import("@/views/mumaren-finance-center/MumarenFinancePayments.vue"), meta: { title: "付款" } },
-          { path: "operations", name: "MumarenFinanceOperations", component: () => import("@/views/mumaren-finance-center/MumarenFinanceOperations.vue"), meta: { title: "经营报表" } },
-          { path: "reports", name: "MumarenFinanceReports", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReports.vue"), meta: { title: "报表" } },
-          { path: "closing", name: "MumarenFinanceClosing", component: () => import("@/views/mumaren-finance-center/MumarenFinanceClosing.vue"), meta: { title: "期末结账" } },
-          { path: "history", name: "MumarenFinanceHistory", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistory.vue"), meta: { title: "历史归档" } },
+          // 出纳(2 子项)
+          { path: "cashier", redirect: "/app/finance-center/mumaren/cashier/accounts" },
+          { path: "cashier/accounts", name: "MumarenFinanceCashierAccounts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCashierAccounts.vue"), meta: { title: "账户与流水" } },
+          { path: "cashier/reconciliation", name: "MumarenFinanceCashierReconciliation", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCashierReconciliation.vue"), meta: { title: "银行余额调节表" } },
+          // 工资
+          { path: "payroll", name: "MumarenFinancePayroll", component: () => import("@/views/mumaren-finance-center/MumarenFinancePayroll.vue"), meta: { title: "工资" } },
+          // 税务
+          { path: "tax", name: "MumarenFinanceTax", component: () => import("@/views/mumaren-finance-center/MumarenFinanceTax.vue"), meta: { title: "税务" } },
+          // 设置(4 子项)
+          { path: "settings", redirect: "/app/finance-center/mumaren/settings/accounts" },
+          { path: "settings/accounts", name: "MumarenFinanceSettingsAccounts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceAccounts.vue"), meta: { title: "科目管理" } },
+          { path: "settings/books", name: "MumarenFinanceSettingsBooks", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgers.vue"), meta: { title: "账套管理" } },
+          { path: "settings/auxiliary", name: "MumarenFinanceSettingsAuxiliary", component: () => import("@/views/mumaren-finance-center/MumarenFinanceSettingsAuxiliary.vue"), meta: { title: "辅助核算" } },
+          { path: "settings/audit-logs", name: "MumarenFinanceSettingsAuditLogs", component: () => import("@/views/mumaren-finance-center/MumarenFinanceSettingsAuditLogs.vue"), meta: { title: "操作日志" } },
         ],
       },
       { path: "finance-center", redirect: "/app/finance-center/core-workspace" },

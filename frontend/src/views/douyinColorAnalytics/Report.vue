@@ -53,6 +53,21 @@
       class="banner"
     />
 
+    <el-card v-if="context" class="section-card" shadow="never">
+      <template #header><h2>当前账号</h2></template>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="管理员名称">{{ context.account.display_name }}</el-descriptions-item>
+        <el-descriptions-item label="抖音昵称">
+          <span v-if="context.account.observed_account_name">{{ context.account.observed_account_name }}</span>
+          <span v-else class="muted">暂无（采集器未上报）</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="账号标识">
+          <code>{{ context.account.account_key }}</code>
+        </el-descriptions-item>
+        <el-descriptions-item label="最近心跳">{{ formatTime(context.account.last_heartbeat_at) }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
       <el-tab-pane label="整套穿搭" name="outfit" />
       <el-tab-pane label="上衣（outer+top）" name="top" />
@@ -133,6 +148,12 @@ const currentRows = computed(() => {
 const formatPercent = (value: number) => {
   const pct = value <= 1 ? value * 100 : value;
   return `${pct.toFixed(1)}%`;
+};
+
+const formatTime = (value: string | null | undefined) => {
+  if (!value) return "—";
+  try { return new Date(value).toLocaleString("zh-CN", { hour12: false }); }
+  catch { return value; }
 };
 
 const colorToCss = (code: string | null, name: string | null): string => {

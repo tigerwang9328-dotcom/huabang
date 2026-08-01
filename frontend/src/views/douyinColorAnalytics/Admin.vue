@@ -12,6 +12,22 @@
 
     <el-alert v-if="loadError" :title="loadError" type="error" show-icon :closable="false" class="banner" />
 
+    <!-- 账号信息区域 -->
+    <el-card v-if="context" class="section-card" shadow="never">
+      <template #header><h2>当前账号</h2></template>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="管理员名称">{{ context.account.display_name }}</el-descriptions-item>
+        <el-descriptions-item label="抖音昵称">
+          <span v-if="context.account.observed_account_name">{{ context.account.observed_account_name }}</span>
+          <span v-else class="muted">暂无（采集器未上报）</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="账号标识">
+          <code>{{ context.account.account_key }}</code>
+        </el-descriptions-item>
+        <el-descriptions-item label="最近心跳">{{ formatTime(context.account.last_heartbeat_at) }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <!-- 健康页区域 -->
     <el-card class="section-card" shadow="never">
       <template #header><h2>采集器状态与队列</h2></template>
@@ -170,7 +186,7 @@ const canToggleBounce = computed(() => {
   return status.startsWith("verified_") && status.endsWith("_is_better");
 });
 
-function formatTime(value: string | null) {
+function formatTime(value: string | null | undefined) {
   if (!value) return "—";
   try { return new Date(value).toLocaleString("zh-CN", { hour12: false }); }
   catch { return value; }

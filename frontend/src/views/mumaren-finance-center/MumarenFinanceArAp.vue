@@ -22,29 +22,40 @@
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
-    <!-- 刚创建的草稿单据(可在此审核/结算,闭环演示) -->
-    <el-card v-if="createdOrder" class="created-card" shadow="never">
+    <!-- 本会话单据列表(可在此审核/结算,闭环演示;刷新后清空) -->
+    <el-card v-if="sessionOrders.length" class="created-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>刚创建的草稿单据（可审核 / 结算）</span>
-          <el-button link type="info" @click="createdOrder = undefined">关闭</el-button>
+          <span>本会话单据（可审核 / 结算）</span>
+          <el-button link type="info" @click="sessionOrders = []">清空</el-button>
         </div>
       </template>
-      <el-descriptions :column="3" border size="small">
-        <el-descriptions-item label="单号">{{ createdOrder.order_no }}</el-descriptions-item>
-        <el-descriptions-item label="往来单位">{{ createdOrder.counterparty_name }}</el-descriptions-item>
-        <el-descriptions-item label="金额">{{ money(createdOrder.total_amount) }}</el-descriptions-item>
-        <el-descriptions-item label="已结算">{{ money(createdOrder.settled_amount) }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ createdOrder.order_type === "receivable" ? "应收" : "应付" }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="statusTagType(createdOrder)" size="small">{{ statusLabel(createdOrder) }}</el-tag>
-        </el-descriptions-item>
-      </el-descriptions>
-      <div class="card-actions">
-        <el-button v-if="createdOrder.workflow_status === 'draft'" size="small" type="primary" :loading="actingOnCreated" @click="reviewCreated">财务审核</el-button>
-        <el-button v-if="createdOrder.workflow_status === 'reviewed' && createdOrder.settlement_status !== 'settled'" size="small" type="success" :loading="actingOnCreated" @click="openSettleCreated">人工结算</el-button>
-        <span v-if="createdOrder.settlement_status === 'settled'" class="done-text">已结算</span>
-      </div>
+      <p class="session-note">完整订单列表接口待后端补,刷新后列表清空;账龄查询不依赖此列表。</p>
+      <el-table :data="sessionOrders" stripe size="small">
+        <el-table-column prop="order_no" label="单号" min-width="140" />
+        <el-table-column prop="counterparty_name" label="往来单位" min-width="160" show-overflow-tooltip />
+        <el-table-column label="类型" width="80">
+          <template #default="scope">{{ scope.row.order_type === "receivable" ? "应收" : "应付" }}</template>
+        </el-table-column>
+        <el-table-column label="金额" width="120" align="right">
+          <template #default="scope">{{ money(scope.row.total_amount) }}</template>
+        </el-table-column>
+        <el-table-column label="已结算" width="120" align="right">
+          <template #default="scope">{{ money(scope.row.settled_amount) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="scope">
+            <el-tag :type="statusTagType(scope.row)" size="small">{{ statusLabel(scope.row) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="170">
+          <template #default="scope">
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="reviewSession(scope.row)">审核</el-button>
+            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :loading="actingId === scope.row.id" @click="openSettleSession(scope.row)">人工结算</el-button>
+            <span v-if="scope.row.settlement_status === 'settled'" class="done-text">已结算</span>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <template v-if="aging">
@@ -63,7 +74,7 @@
           <template #default="scope">{{ money(scope.row.total_balance) }}</template>
         </el-table-column>
       </el-table>
-      <p class="gap-note">注：账龄按往来单位聚合展示。历史单据的逐单审核/结算需要 AR/AP 订单列表接口（暂未接入），仅上方“刚创建的草稿单据”可在此闭环操作。</p>
+      <p class="gap-note">注:账龄按往来单位聚合展示。历史单据的逐单审核/结算需要 AR/AP 订单列表接口(待后端补),仅上方"本会话单据"可在此闭环操作。</p>
     </template>
     <el-empty v-else-if="!error" description="请选择独立账簿后查询账龄" />
 
@@ -133,10 +144,10 @@ const books = ref<MumarenFinanceBook[]>([]);
 const bookId = ref<number>();
 const orderType = ref<"receivable" | "payable">("receivable");
 const aging = ref<MumarenArApAging>();
-const createdOrder = ref<MumarenArApOrder>(); // 刚创建的草稿单据(可审核/结算)
+const sessionOrders = ref<MumarenArApOrder[]>([]); // 本会话创建/审核/结算过的单据(刷新清空)
 const error = ref("");
 const loading = ref(false);
-const actingOnCreated = ref(false);
+const actingId = ref<number>(); // 当前正在审核/结算的单据 id
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -170,7 +181,7 @@ const load = async () => {
 
 const onBookChange = () => {
   aging.value = undefined;
-  createdOrder.value = undefined;
+  sessionOrders.value = [];
 };
 
 onMounted(async () => {
@@ -223,8 +234,8 @@ const save = async () => {
       total_amount: form.total_amount,
       remark: form.remark || null,
     });
-    createdOrder.value = res.data.data;
-    ElMessage.success("AR/AP 草稿已创建");
+    sessionOrders.value.unshift(res.data.data);
+    ElMessage.success("AR/AP 草稿已创建,已加入本会话单据列表");
     showCreate.value = false;
     await load();
   } catch (e: any) {
@@ -234,19 +245,24 @@ const save = async () => {
   }
 };
 
-// ── 刚创建单据的审核(状态机:draft → reviewed,禁止反向) ──
-const reviewCreated = async () => {
-  if (!createdOrder.value) return;
-  actingOnCreated.value = true;
+// 本会话单据的本地更新工具
+const updateSessionOrder = (updated: MumarenArApOrder) => {
+  const idx = sessionOrders.value.findIndex((o) => o.id === updated.id);
+  if (idx >= 0) sessionOrders.value.splice(idx, 1, updated);
+};
+
+// ── 本会话单据审核(状态机:draft → reviewed,禁止反向) ──
+const reviewSession = async (row: MumarenArApOrder) => {
+  actingId.value = row.id;
   try {
-    const res = await mumarenFinanceCenterApi.reviewArApOrder(createdOrder.value.id);
-    createdOrder.value = res.data.data;
+    const res = await mumarenFinanceCenterApi.reviewArApOrder(row.id);
+    updateSessionOrder(res.data.data);
     ElMessage.success("AR/AP 单据已审核");
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "审核失败");
   } finally {
-    actingOnCreated.value = false;
+    actingId.value = undefined;
   }
 };
 
@@ -264,10 +280,9 @@ const canSettle = computed(
     settleForm.amount <= Number(settleTarget.value.total_amount) - Number(settleTarget.value.settled_amount) + 0.001,
 );
 
-const openSettleCreated = () => {
-  if (!createdOrder.value) return;
-  settleTarget.value = createdOrder.value;
-  settleForm.amount = Number(createdOrder.value.total_amount) - Number(createdOrder.value.settled_amount);
+const openSettleSession = (row: MumarenArApOrder) => {
+  settleTarget.value = row;
+  settleForm.amount = Number(row.total_amount) - Number(row.settled_amount);
   settleForm.settlement_date = new Date().toISOString().slice(0, 10);
   settleForm.remark = "";
   showSettle.value = true;
@@ -282,7 +297,7 @@ const confirmSettle = async () => {
       amount: settleForm.amount,
       remark: settleForm.remark || null,
     });
-    createdOrder.value = res.data.data;
+    updateSessionOrder(res.data.data);
     ElMessage.success("AR/AP 单据已结算");
     showSettle.value = false;
     await load();

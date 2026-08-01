@@ -5,7 +5,7 @@
         <el-button text @click="router.push({ name: 'DouyinColorVideoList' })">← 返回视频</el-button>
         <p class="eyebrow">ANNOTATION WORKSPACE</p>
         <h1>{{ video?.title || "视频片段标注" }}</h1>
-        <p>{{ video?.video_id_string }} · 账号：{{ context?.account.display_name || "加载中" }}</p>
+        <p>{{ video?.video_id_string }} · 账号：{{ context?.account.display_name || "加载中" }}<span v-if="context?.account.observed_account_name">（{{ context.account.observed_account_name }}）</span></p>
       </div>
       <div class="head-actions">
         <el-button @click="startNew">新增片段</el-button>
