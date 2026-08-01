@@ -180,6 +180,34 @@ test('应收应付台账展示汇总、筛选和与单据类型一致的回款�
   assert.match(api, /summary: \(params:/)
 })
 
+test('应收应付草稿可编辑，并把账簿标识放入后端要求的请求体', () => {
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  assert.match(ledger, /编辑/)
+  assert.match(ledger, /openEdit\(scope\.row\)/)
+  assert.match(ledger, /arApOrdersApi\.update\(editingId\.value/)
+  assert.match(api, /\{\s*\.\.\.data,\s*book_id\s*}/)
+})
+
+test('应收应付与账龄分析不会让旧账簿请求覆盖当前选择', () => {
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+
+  assert.match(ledger, /loadRequestVersion/)
+  assert.match(ledger, /requestedBookId\s*!==\s*bookId\.value/)
+  assert.match(aging, /loadRequestVersion/)
+  assert.match(aging, /requestedBookId\s*!==\s*bookId\.value/)
+})
+
+test('清空账簿会结束应收应付与账龄页面在途请求的加载状态', () => {
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+
+  assert.match(ledger, /if \(!requestedBookId\) \{ orders\.value = \[\]; summary\.value = undefined; loading\.value = false;/)
+  assert.match(aging, /if \(!requestedBookId\) \{ aging\.value = undefined; loading\.value = false;/)
+})
+
 test('账龄分析展示往来单位各账龄段和单据明细', () => {
   const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
 

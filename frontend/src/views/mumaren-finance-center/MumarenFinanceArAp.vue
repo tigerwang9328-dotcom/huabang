@@ -64,6 +64,7 @@
         <el-table-column label="操作" width="250" @click.stop>
           <template #default="scope">
             <el-button size="small" link @click.stop="openDetail(scope.row)">详情</el-button>
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" @click.stop="openEdit(scope.row)">编辑</el-button>
             <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="reviewOrder(scope.row)">审核</el-button>
             <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="openSettle(scope.row)">{{ settlementAction }}</el-button>
             <el-popconfirm v-if="scope.row.workflow_status === 'draft' && !isReadonly" title="确定删除该订单？" @confirm="removeOrder(scope.row)">
@@ -76,15 +77,15 @@
 
     <el-alert v-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿只读：可查询台账，不能录入、审核、回款、付款或删除。" />
 
-    <el-dialog v-model="showCreate" :title="`录入${typeText}草稿`" width="500px" destroy-on-close :close-on-click-modal="false">
+    <el-dialog v-model="showCreate" :title="editingId ? `编辑${typeText}草稿` : `录入${typeText}草稿`" width="500px" destroy-on-close :close-on-click-modal="false">
       <el-form :model="form" label-width="90px">
-        <el-form-item label="单号" required><el-input v-model="form.order_no" :placeholder="orderType === 'receivable' ? '如 AR-2026-08-001' : '如 AP-2026-08-001'" /></el-form-item>
+        <el-form-item label="单号" required><el-input v-model="form.order_no" :disabled="!!editingId" :placeholder="orderType === 'receivable' ? '如 AR-2026-08-001' : '如 AP-2026-08-001'" /></el-form-item>
         <el-form-item label="单据日期" required><el-date-picker v-model="form.order_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
         <el-form-item :label="counterpartyLabel" required><el-input v-model="form.counterparty_name" maxlength="128" :placeholder="counterpartyLabel" /></el-form-item>
         <el-form-item :label="amountLabel" required><el-input-number v-model="form.total_amount" :min="0.01" :precision="2" :controls="false" style="width:100%" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" maxlength="500" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="showCreate = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">保存草稿</el-button></template>
+      <template #footer><el-button @click="showCreate = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">{{ editingId ? '保存修改' : '保存草稿' }}</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="showSettle" :title="settlementAction" width="420px" destroy-on-close :close-on-click-modal="false">
@@ -131,6 +132,7 @@ const periodFilter = ref("");
 const settlementFilter = ref<"draft" | "open" | "partial" | "settled" | "">("");
 const showDetail = ref(false);
 const detailOrder = ref<MumarenArApOrder>();
+let loadRequestVersion = 0;
 
 const isReceivable = computed(() => orderType.value === "receivable");
 const typeText = computed(() => isReceivable.value ? "应收" : "应付");
@@ -164,20 +166,26 @@ const statusLabel = (row: MumarenArApOrder) => {
 const statusTagType = (row: MumarenArApOrder): "" | "warning" | "success" => row.workflow_status === "draft" ? "" : row.settlement_status === "settled" ? "success" : "warning";
 
 const load = async () => {
-  if (!bookId.value) { orders.value = []; summary.value = undefined; return; }
+  const requestedBookId = bookId.value;
+  const requestedOrderType = orderType.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) { orders.value = []; summary.value = undefined; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
-    const params = { book_id: bookId.value, order_type: orderType.value, period: periodFilter.value || undefined, status: settlementFilter.value || undefined };
+    const params = { book_id: requestedBookId, order_type: requestedOrderType, period: periodFilter.value || undefined, status: settlementFilter.value || undefined };
     const [listResponse, summaryResponse] = await Promise.all([arApOrdersApi.list({ ...params, limit: 500 }), arApOrdersApi.summary(params)]);
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedOrderType !== orderType.value) return;
     orders.value = listResponse.data.data;
     summary.value = summaryResponse.data.data;
+  } catch {
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && requestedOrderType === orderType.value) error.value = "无法加载独立应收应付数据。";
+  } finally {
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
-  catch { error.value = "无法加载独立应收应付数据。"; }
-  finally { loading.value = false; }
 };
 
-watch(bookId, async () => { orders.value = []; await load(); });
+watch(bookId, async () => { orders.value = []; summary.value = undefined; showCreate.value = false; showSettle.value = false; await load(); });
 watch(orderType, load);
 watch([periodFilter, settlementFilter], load);
 watch(() => props.fixedOrderType, (value) => { if (value) orderType.value = value; });
@@ -185,20 +193,34 @@ onMounted(async () => { try { await loadBooks(); await load(); } catch { error.v
 
 const showCreate = ref(false);
 const saving = ref(false);
+const editingId = ref<number>();
 const form = reactive({ order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "" });
 const canCreate = computed(() => !!bookId.value && !!form.order_no && !!form.order_date && !!form.counterparty_name && form.total_amount > 0);
 const openCreate = () => {
   if (isReadonly.value) { ElMessage.warning("金蝶迁移账簿只读，不能录入应收应付单据"); return; }
   if (!bookId.value) { ElMessage.warning("请先选择独立账簿"); return; }
   Object.assign(form, { order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "" });
+  editingId.value = undefined;
+  showCreate.value = true;
+};
+const openEdit = (row: MumarenArApOrder) => {
+  if (isReadonly.value || row.workflow_status !== "draft") return;
+  editingId.value = row.id;
+  Object.assign(form, { order_no: row.order_no, order_date: row.order_date, counterparty_name: row.counterparty_name, total_amount: Number(row.total_amount), remark: "" });
   showCreate.value = true;
 };
 const save = async () => {
   if (!bookId.value || isReadonly.value || !canCreate.value) return;
   saving.value = true;
   try {
-    await mumarenFinanceCenterApi.createArApOrder({ book_id: bookId.value, order_type: orderType.value, order_no: form.order_no, order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null });
-    ElMessage.success(`${typeText.value}草稿已创建`); showCreate.value = false; await load();
+    if (editingId.value) {
+      await arApOrdersApi.update(editingId.value, { order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null }, bookId.value, orderType.value);
+      ElMessage.success(`${typeText.value}草稿已更新`);
+    } else {
+      await mumarenFinanceCenterApi.createArApOrder({ book_id: bookId.value, order_type: orderType.value, order_no: form.order_no, order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null });
+      ElMessage.success(`${typeText.value}草稿已创建`);
+    }
+    showCreate.value = false; await load();
   } catch (e: any) { ElMessage.error(e?.response?.data?.detail || "保存失败"); }
   finally { saving.value = false; }
 };

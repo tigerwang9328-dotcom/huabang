@@ -40,14 +40,24 @@ const asOf = ref("");
 const aging = ref<MumarenArApAging>();
 const loading = ref(false);
 const error = ref("");
+let loadRequestVersion = 0;
 const money = (value: number) => new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 const orderRows = computed(() => (aging.value?.counterparties || []).flatMap((counterparty) => (counterparty.orders || []).map((order) => ({ ...order, counterparty_name: counterparty.counterparty_name }))));
 const load = async () => {
-  if (!bookId.value) { aging.value = undefined; return; }
+  const requestedBookId = bookId.value;
+  const requestedOrderType = orderType.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) { aging.value = undefined; loading.value = false; error.value = ""; return; }
   loading.value = true; error.value = "";
-  try { aging.value = (await mumarenFinanceCenterApi.getArApAging({ book_id: bookId.value, order_type: orderType.value, as_of: asOf.value || undefined })).data.data; }
-  catch { error.value = "无法加载独立账龄分析。"; }
-  finally { loading.value = false; }
+  try {
+    const response = await mumarenFinanceCenterApi.getArApAging({ book_id: requestedBookId, order_type: requestedOrderType, as_of: asOf.value || undefined });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedOrderType !== orderType.value) return;
+    aging.value = response.data.data;
+  } catch {
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && requestedOrderType === orderType.value) error.value = "无法加载独立账龄分析。";
+  } finally {
+    if (requestVersion === loadRequestVersion) loading.value = false;
+  }
 };
 watch(bookId, load); watch(orderType, load); watch(asOf, load);
 onMounted(async () => { try { await loadBooks(); await load(); } catch { error.value = "无法加载独立账簿。"; } });
