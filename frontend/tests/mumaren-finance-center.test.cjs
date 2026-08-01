@@ -417,7 +417,7 @@ test('税务 API 必须接收并传递 book_id,后端按账簿隔离查询', () 
 test('税务页面必须先选择独立账簿,无账簿时不请求后端并提示', () => {
   const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
 
-  assert.match(tax, /bookStore\.loadBooks/)
+  assert.match(tax, /useMumarenFinanceBook/)
   assert.match(tax, /bookId/)
   assert.match(tax, /请选择独立账簿/)
   assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)

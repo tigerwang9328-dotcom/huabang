@@ -179,8 +179,7 @@ const save = async () => {
       aux_type: auxTypeValue(form.aux_type),
       code: form.code,
       name: form.name,
-      parent_code: form.parent_code || null,
-      remark: form.remark,
+      parent_id: items.value.find((item) => item.code === form.parent_code)?.id ?? null,
     });
     ElMessage.success("核算项已新增");
     dialogVisible.value = false;
@@ -199,7 +198,7 @@ const toggle = async (row: MumarenAuxiliaryAccounting) => {
     await auxiliaryAccountingsApi.update(row.id, {
       is_active: !row.is_active,
     }, bookId.value);
-    ElMessage.success(row.status === "active" ? "已停用" : "已启用");
+    ElMessage.success(row.is_active ? "已停用" : "已启用");
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "操作失败");
