@@ -210,7 +210,7 @@ test('拆分后的应收应付页面从共享账簿仓库加载并随路由账�
   const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
   const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
 
-  assert.match(sharedBook, /return \{ books, bookId, isReadonly, loadBooks, initializeBook \}/)
+  assert.match(sharedBook, /return \{ books, bookId, isReadonly, error, loadBooks, initializeBook \}/)
   assert.match(ledger, /await loadBooks\(\)/)
   assert.match(ledger, /watch\(\(\) => props\.fixedOrderType/)
   assert.match(aging, /await loadBooks\(\)/)
@@ -239,6 +239,23 @@ test('所有账簿页面使用共享账簿，历史账簿写入页有界面只�
   }
 })
 
+test('数据罗盘以共享账簿为唯一来源，并在账簿切换后重新加载指标', () => {
+  const compass = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCompass.vue')
+  const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
+
+  assert.match(compass, /const \{ books, bookId, loadBooks, error: bookError \} = useMumarenFinanceBook\(\)/)
+  assert.match(compass, /await loadBooks\(\);\s*booksLoaded\.value = true;\s*await load\(\)/)
+  assert.match(compass, /watch\(bookId,\s*\(\)\s*=>\s*\{\s*if \(booksLoaded\.value\) void load\(\);/)
+  assert.match(compass, /const requestVersion = ref\(0\)/)
+  assert.match(compass, /const requestedBookId = bookId\.value;\s*const version = \+\+requestVersion\.value;/)
+  assert.match(compass, /if \(!requestedBookId\) \{\s*loading\.value = false;/)
+  assert.match(compass, /if \(version !== requestVersion\.value \|\| requestedBookId !== bookId\.value\) return;/)
+  assert.match(compass, /v-if="error \|\| bookError"/)
+  assert.doesNotMatch(compass, /const books = ref<MumarenFinanceBook\[\]>\(\[\]\)/)
+  assert.match(sharedBook, /const \{ books, bookId, isReadonly, error \} = storeToRefs\(store\)/)
+  assert.match(sharedBook, /return \{ books, bookId, isReadonly, error, loadBooks, initializeBook \}/)
+})
+
 test('付款台账在独立财务中心可访问，并遵循草稿审核人工支付和历史账簿只读规则', () => {
   const navigation = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
@@ -254,7 +271,7 @@ test('付款台账在独立财务中心可访问，并遵循草稿审核人工�
 
 test('派生展示类页面调用已有 API,不新增后端接口', () => {
   const derivedPages = [
-    { file: 'MumarenFinanceCompass.vue', apis: ['listBooks', 'getTrialBalance', 'getProfitStatement'] },
+    { file: 'MumarenFinanceCompass.vue', apis: ['loadBooks', 'getTrialBalance', 'getProfitStatement'] },
     { file: 'MumarenFinanceVoucherSummary.vue', apis: ['listBooks', 'listVouchers'] },
     { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'listVouchers'] },
     { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },

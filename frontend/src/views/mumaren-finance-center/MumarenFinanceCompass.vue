@@ -12,12 +12,12 @@
     </div>
 
     <div class="filters">
-      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="load">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable>
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
     </div>
 
-    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="error || bookError" type="error" :title="error || bookError" :closable="false" show-icon />
 
     <el-empty v-else-if="!bookId" description="请先选择独立账簿" />
 
@@ -49,20 +49,20 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   mumarenFinanceCenterApi,
-  type MumarenFinanceBook,
   type MumarenProfitStatement,
   type MumarenTrialBalanceRow,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, loadBooks, error: bookError } = useMumarenFinanceBook();
 const profit = ref<Partial<MumarenProfitStatement>>({});
 const trialRows = ref<MumarenTrialBalanceRow[]>([]);
 const error = ref("");
 const loading = ref(false);
+const booksLoaded = ref(false);
+const requestVersion = ref(0);
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -91,7 +91,11 @@ const balanceSummary = computed(() => {
 });
 
 const load = async () => {
-  if (!bookId.value) {
+  const requestedBookId = bookId.value;
+  const version = ++requestVersion.value;
+  if (!requestedBookId) {
+    loading.value = false;
+    error.value = "";
     trialRows.value = [];
     profit.value = {};
     return;
@@ -100,25 +104,29 @@ const load = async () => {
   error.value = "";
   try {
     const [trialResult, profitResult] = await Promise.all([
-      mumarenFinanceCenterApi.getTrialBalance({ book_id: bookId.value }),
-      mumarenFinanceCenterApi.getProfitStatement({ book_id: bookId.value }),
+      mumarenFinanceCenterApi.getTrialBalance({ book_id: requestedBookId }),
+      mumarenFinanceCenterApi.getProfitStatement({ book_id: requestedBookId }),
     ]);
+    if (version !== requestVersion.value || requestedBookId !== bookId.value) return;
     trialRows.value = trialResult.data.data.rows || [];
     profit.value = profitResult.data.data;
   } catch {
-    error.value = "无法加载独立当前账数据罗盘。";
+    if (version === requestVersion.value && requestedBookId === bookId.value) {
+      error.value = "无法加载独立当前账数据罗盘。";
+    }
   } finally {
-    loading.value = false;
+    if (version === requestVersion.value) loading.value = false;
   }
 };
 
 onMounted(async () => {
-  try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
-  } catch {
-    error.value = "无法加载独立账簿。";
-  }
+  await loadBooks();
+  booksLoaded.value = true;
+  await load();
+});
+
+watch(bookId, () => {
+  if (booksLoaded.value) void load();
 });
 </script>
 
