@@ -22,7 +22,8 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
     <template v-else>
-      <el-form :model="form" label-width="84px">
+      <el-alert v-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿只读，不能录入或修改凭证。" />
+      <el-form :model="form" label-width="84px" :disabled="isReadonly">
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12" :md="6">
             <el-form-item label="凭证字">
@@ -51,7 +52,7 @@
       </el-form>
 
       <div class="dialog-toolbar">
-        <el-button type="primary" plain @click="addLine">添加分录</el-button>
+        <el-button type="primary" plain :disabled="isReadonly" @click="addLine">添加分录</el-button>
         <div class="totals">
           <span>借方 <b>{{ money(totalDebit) }}</b></span>
           <span>贷方 <b>{{ money(totalCredit) }}</b></span>
@@ -60,37 +61,37 @@
         </div>
       </div>
 
-      <el-table :data="form.lines" border size="small" row-key="key" :max-height="360">
+      <el-table :data="form.lines" border size="small" row-key="key" :max-height="360" :class="{ 'is-readonly': isReadonly }">
         <el-table-column type="index" label="#" width="42" />
         <el-table-column label="会计科目" min-width="240">
           <template #default="{ row }">
-            <el-select v-model="row.account_id" filterable clearable size="small" placeholder="选择科目" style="width:100%">
+            <el-select v-model="row.account_id" :disabled="isReadonly" filterable clearable size="small" placeholder="选择科目" style="width:100%">
               <el-option v-for="a in accounts" :key="a.id" :label="`${a.account_code} ${a.account_name}`" :value="a.id" />
             </el-select>
           </template>
         </el-table-column>
         <el-table-column label="摘要" min-width="160">
-          <template #default="{ row }"><el-input v-model="row.summary" size="small" placeholder="行摘要" /></template>
+          <template #default="{ row }"><el-input v-model="row.summary" :disabled="isReadonly" size="small" placeholder="行摘要" /></template>
         </el-table-column>
         <el-table-column label="借方金额" width="130" align="right">
           <template #default="{ row }">
-            <el-input-number v-model="row.debit_amount" :min="0" :precision="2" :controls="false" size="small" style="width:108px" @focus="row.credit_amount = 0" />
+            <el-input-number v-model="row.debit_amount" :disabled="isReadonly" :min="0" :precision="2" :controls="false" size="small" style="width:108px" @focus="row.credit_amount = 0" />
           </template>
         </el-table-column>
         <el-table-column label="贷方金额" width="130" align="right">
           <template #default="{ row }">
-            <el-input-number v-model="row.credit_amount" :min="0" :precision="2" :controls="false" size="small" style="width:108px" @focus="row.debit_amount = 0" />
+            <el-input-number v-model="row.credit_amount" :disabled="isReadonly" :min="0" :precision="2" :controls="false" size="small" style="width:108px" @focus="row.debit_amount = 0" />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="70" align="center">
           <template #default="{ $index }">
-            <el-button link type="danger" size="small" :disabled="form.lines.length <= 1" @click="removeLine($index)">删除</el-button>
+            <el-button link type="danger" size="small" :disabled="isReadonly || form.lines.length <= 1" @click="removeLine($index)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <div class="form-actions">
-        <el-button type="primary" :loading="saving" :disabled="!canSave" @click="save">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" :disabled="isReadonly || !canSave" @click="save">保存草稿</el-button>
       </div>
 
       <el-alert v-if="created" type="success" :closable="false" show-icon title="凭证草稿已创建">
@@ -108,16 +109,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceAccount,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenFinanceAccount[]>([]);
 const error = ref("");
 const saving = ref(false);
@@ -142,11 +145,14 @@ const onBookChange = async () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    await bookStore.loadBooks();
+    await onBookChange();
   } catch {
     error.value = "无法加载独立账簿。";
   }
 });
+
+watch(bookId, () => void onBookChange());
 
 // ── 录入表单 ──
 let lineSeed = 1;
@@ -168,13 +174,17 @@ const balanceDiff = computed(() => totalDebit.value - totalCredit.value);
 const balanced = computed(() => Math.abs(balanceDiff.value) < 0.005 && totalDebit.value > 0);
 const canSave = computed(() => balanced.value && validLines.value.length >= 2 && !!form.voucher_no && !!form.voucher_date);
 
-const addLine = () => form.lines.push(newLine());
+const addLine = () => {
+  if (isReadonly.value) return;
+  form.lines.push(newLine());
+};
 const removeLine = (index: number) => {
+  if (isReadonly.value) return;
   if (form.lines.length > 1) form.lines.splice(index, 1);
 };
 
 const save = async () => {
-  if (!bookId.value || !canSave.value) return;
+  if (isReadonly.value || !bookId.value || !canSave.value) return;
   // 同一行不能同时填借贷
   if (validLines.value.find((l) => Number(l.debit_amount) > 0 && Number(l.credit_amount) > 0)) {
     ElMessage.error("同一分录行不能同时填写借方和贷方金额");

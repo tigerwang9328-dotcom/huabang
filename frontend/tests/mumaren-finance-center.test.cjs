@@ -382,7 +382,7 @@ test('税务 API 必须接收并传递 book_id,后端按账簿隔离查询', () 
 test('税务页面必须先选择独立账簿,无账簿时不请求后端并提示', () => {
   const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
 
-  assert.match(tax, /listBooks/)
+  assert.match(tax, /bookStore\.loadBooks/)
   assert.match(tax, /bookId/)
   assert.match(tax, /请选择独立账簿/)
   assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)
@@ -432,6 +432,15 @@ test('历史归档页面必须只读,不出现编辑/审核/过账操作按钮',
   assert.match(history, /历史数据|is_readonly|只读/)
   assert.match(history, /listHistory/)
   assert.doesNotMatch(history, /reviewVoucher|postVoucher|createVoucher|deleteVoucher|reviewArApOrder|settleArApOrder|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
+})
+
+test('录凭证页会随共享账簿加载科目,并将金蝶历史账簿整表单设为只读', () => {
+  const voucherCreate = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
+
+  assert.match(voucherCreate, /await bookStore\.loadBooks\(\);\s*await onBookChange\(\)/)
+  assert.match(voucherCreate, /watch\(bookId,\s*\(\)\s*=>\s*void onBookChange\(\)\)/)
+  assert.match(voucherCreate, /<el-form :model="form" label-width="84px" :disabled="isReadonly">/)
+  assert.match(voucherCreate, /<el-table[^>]*:class="\{ 'is-readonly': isReadonly \}"/)
 })
 
 test('利润表与科目余额表页面调用独立报表接口', () => {

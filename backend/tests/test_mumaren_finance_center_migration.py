@@ -80,3 +80,13 @@ def test_mumaren_finance_center_migration_records_its_own_permission_seeds_for_s
     assert "finance_center_mumaren_permission_seed_grants" in migration
     assert "RETURNING id" in migration
     assert "code LIKE 'mumaren_finance_center:%'" not in migration
+
+
+def test_mumaren_finance_crud_migration_extends_the_current_finance_center_head():
+    matches = list(VERSIONS.glob("*_persist_mumaren_finance_crud.py"))
+    assert len(matches) == 1
+    migration = matches[0].read_text(encoding="utf-8")
+
+    assert "Revises: a19c7e3d5b41" in migration
+    assert 'down_revision: Union[str, None] = "a19c7e3d5b41"' in migration
+    assert "217152ee1a62" not in migration

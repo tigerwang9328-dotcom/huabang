@@ -15,6 +15,10 @@ export interface MumarenFinanceBook {
   book_name: string;
   company_name: string | null;
   status: string;
+  /** 金蝶迁移账簿为只读；普通账簿继续走草稿、审核、人工过账。 */
+  is_readonly: boolean;
+  source_system: string | null;
+  source_database: string | null;
 }
 
 export interface MumarenFinanceAccount {
