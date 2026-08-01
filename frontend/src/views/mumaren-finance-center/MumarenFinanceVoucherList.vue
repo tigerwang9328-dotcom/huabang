@@ -8,6 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :disabled="!vouchers.length" @click="exportVouchers">导出当前列表</el-button>
         <router-link to="/app/finance-center/mumaren/vouchers/create">
           <el-button type="primary" :disabled="isReadonly">录入新凭证</el-button>
         </router-link>
@@ -83,6 +84,32 @@ const load = async () => {
 
 const onBookChange = async () => {
   await load();
+};
+
+const exportVouchers = () => {
+  const quote = (value: unknown) => {
+    let text = String(value ?? "");
+    if (/^[=+@-]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const rows = [
+    ["凭证号", "日期", "摘要", "状态", "借方", "贷方"],
+    ...vouchers.value.map((row) => [
+      row.voucher_no,
+      row.voucher_date,
+      row.summary,
+      statusLabel(row.status),
+      money(row.total_debit),
+      money(row.total_credit),
+    ]),
+  ];
+  const blob = new Blob([`\uFEFF${rows.map((row) => row.map(quote).join(",")).join("\r\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `独立财务凭证-${bookId.value || "全部"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 onMounted(async () => {

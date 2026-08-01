@@ -640,6 +640,22 @@ test('科目管理与账套管理页面只读,期末结账与辅助核算已持�
   assert.match(closing, /periodsApi/, '结账页面必须调用 periodsApi')
 })
 
+test('录凭证补齐牧马人辅助录入按钮，导出不改变人工审核过账边界', () => {
+  const create = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
+  const list = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+
+  assert.match(create, /复制上一行/)
+  assert.match(create, /收款分录/)
+  assert.match(create, /付款分录/)
+  assert.match(create, /自动找平/)
+  assert.match(create, /copyLastLine|addReceiptPair|addPaymentPair|balanceLastLine/)
+  assert.match(list, /导出当前列表/)
+  assert.match(list, /exportVouchers/)
+  assert.match(list, /[=+@-]/)
+  assert.match(list, /text = `'/)
+  assert.doesNotMatch(`${create}\n${list}`, /unreviewVoucher|unpostVoucher|reversePostVoucher/)
+})
+
 test('共享账簿切换会重建当前页面，避免旧账簿异步响应覆盖新账簿', () => {
   const layout = read('src', 'layouts', 'MainLayout.vue')
   assert.match(layout, /useMumarenFinanceBookStore/)

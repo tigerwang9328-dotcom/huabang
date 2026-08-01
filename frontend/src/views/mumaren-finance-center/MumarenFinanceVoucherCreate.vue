@@ -53,6 +53,10 @@
 
       <div class="dialog-toolbar">
         <el-button type="primary" plain :disabled="isReadonly" @click="addLine">添加分录</el-button>
+        <el-button :disabled="isReadonly || !form.lines.length" @click="copyLastLine">复制上一行</el-button>
+        <el-button :disabled="isReadonly" @click="addReceiptPair">收款分录</el-button>
+        <el-button :disabled="isReadonly" @click="addPaymentPair">付款分录</el-button>
+        <el-button :disabled="isReadonly || !form.lines.length" @click="balanceLastLine">自动找平</el-button>
         <div class="totals">
           <span>借方 <b>{{ money(totalDebit) }}</b></span>
           <span>贷方 <b>{{ money(totalCredit) }}</b></span>
@@ -234,6 +238,46 @@ const addLine = () => {
 const removeLine = (index: number) => {
   if (isReadonly.value) return;
   if (form.lines.length > 1) form.lines.splice(index, 1);
+};
+
+const copyLastLine = () => {
+  if (isReadonly.value || !form.lines.length) return;
+  const line = form.lines[form.lines.length - 1];
+  form.lines.push({
+    key: `line-${lineSeed++}`,
+    account_id: line.account_id,
+    summary: line.summary,
+    debit_amount: Number(line.debit_amount || 0),
+    credit_amount: Number(line.credit_amount || 0),
+  });
+};
+
+const addVoucherPair = (voucherType: "收" | "付", summary: string) => {
+  if (isReadonly.value) return;
+  form.voucher_type = voucherType;
+  if (!form.summary) form.summary = summary;
+  form.lines.push(
+    { ...newLine(), summary },
+    { ...newLine(), summary },
+  );
+};
+
+const addReceiptPair = () => addVoucherPair("收", "收款分录");
+const addPaymentPair = () => addVoucherPair("付", "付款分录");
+
+const balanceLastLine = () => {
+  if (isReadonly.value || !form.lines.length) return;
+  const line = form.lines[form.lines.length - 1];
+  const debitBeforeLast = form.lines.slice(0, -1).reduce((sum, item) => sum + Number(item.debit_amount || 0), 0);
+  const creditBeforeLast = form.lines.slice(0, -1).reduce((sum, item) => sum + Number(item.credit_amount || 0), 0);
+  const difference = debitBeforeLast - creditBeforeLast;
+  if (Math.abs(difference) < 0.005) {
+    ElMessage.info("前面的分录已经平衡，无需找平。");
+    return;
+  }
+  line.debit_amount = difference < 0 ? Math.abs(difference) : 0;
+  line.credit_amount = difference > 0 ? difference : 0;
+  if (!line.summary) line.summary = "自动找平";
 };
 
 const save = async () => {
