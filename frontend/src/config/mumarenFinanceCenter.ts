@@ -147,6 +147,7 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
         { path: `${R}/vouchers/list`, label: "查凭证" },
         { path: `${R}/vouchers/summary`, label: "凭证汇总" },
         { path: `${R}/vouchers/template`, label: "凭证模板" },
+        { path: `${R}/vouchers/auto`, label: "自动凭证" },
       ],
     },
     {

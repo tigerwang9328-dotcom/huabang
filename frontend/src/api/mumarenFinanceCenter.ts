@@ -539,36 +539,62 @@ export interface MumarenAutoVoucherRule {
   id: number;
   book_id: number;
   rule_name: string;
-  business_type: string;
-  account_code: string;
-  direction: "debit" | "credit";
-  amount_source: string;
-  fixed_amount?: number;
-  enabled: boolean;
+  trigger_event: string;
+  debit_account_id: number | null;
+  credit_account_id: number | null;
+  default_amount: number | null;
+  summary: string | null;
+  voucher_type: string;
+  is_active: boolean;
   created_at: string;
 }
 export interface AutoVoucherRuleInput {
   book_id: number;
   rule_name: string;
-  business_type: string;
-  account_code: string;
-  direction: "debit" | "credit";
-  amount_source: string;
-  fixed_amount?: number;
-  enabled: boolean;
+  trigger_event: string;
+  debit_account_id: number;
+  credit_account_id: number;
+  default_amount?: number;
+  summary?: string;
+  voucher_type: string;
+  is_active: boolean;
 }
 export interface AutoVoucherRuleUpdate {
+  book_id: number;
   rule_name?: string;
-  business_type?: string;
-  account_code?: string;
-  direction?: "debit" | "credit";
-  enabled?: boolean;
+  trigger_event?: string;
+  debit_account_id?: number;
+  credit_account_id?: number;
+  default_amount?: number;
+  summary?: string;
+  voucher_type?: string;
+  is_active?: boolean;
+}
+export interface AutoVoucherDraftRequest {
+  book_id: number;
+  voucher_no: string;
+  voucher_date: string;
+  source_key: string;
+  amount?: number;
+  summary?: string;
+}
+export interface AutoVoucherDraftPreview {
+  status: "draft";
+  source_key: string;
+  summary: string;
+  voucher_type: string;
+  amount: number;
+  voucher_no: string;
+  voucher_date: string;
+  lines: VoucherTemplateLine[];
 }
 export const autoVoucherRulesApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenAutoVoucherRule[]>>(requestPath("/auto-voucher-rules"), { params }),
   create: (data: AutoVoucherRuleInput) => request.post<ApiResponse<MumarenAutoVoucherRule>>(requestPath("/auto-voucher-rules"), data),
-  update: (id: number, data: AutoVoucherRuleUpdate, book_id: number) => request.put<ApiResponse<MumarenAutoVoucherRule>>(requestPath(`/auto-voucher-rules/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: AutoVoucherRuleUpdate) => request.put<ApiResponse<MumarenAutoVoucherRule>>(requestPath(`/auto-voucher-rules/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/auto-voucher-rules/${id}`), { params: { book_id } }),
+  previewAutoVoucherDraft: (ruleId: number, data: AutoVoucherDraftRequest) => request.post<ApiResponse<AutoVoucherDraftPreview>>(requestPath(`/auto-voucher-rules/${ruleId}/preview`), data),
+  generateAutoVoucherDraft: (ruleId: number, data: AutoVoucherDraftRequest) => request.post<ApiResponse<{ voucher_id: number; voucher_no: string; status: "draft" | "reviewed" | "posted"; reused: boolean }>>(requestPath(`/auto-voucher-rules/${ruleId}/generate-draft`), data),
 };
 
 // ── 费用明细(草稿 → 财务审核 → 人工过账) ──

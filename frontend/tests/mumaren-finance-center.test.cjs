@@ -381,13 +381,27 @@ test('mumarenFinanceCenterMenuItem 带 children(13个一级条目),不再直接�
   }
 })
 
-test('已接通的凭证模板显示在主侧边栏，未接通的自动凭证仍不显示', () => {
+test('已接通的凭证模板和自动凭证均显示在主侧边栏', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const menuStart = config.indexOf('export const mumarenFinanceCenterMenuItem')
   const menuConfig = config.slice(menuStart)
 
   assert.match(menuConfig, /path:\s*`\$\{R\}\/vouchers\/template`/)
-  assert.doesNotMatch(menuConfig, /path:\s*`\$\{R\}\/vouchers\/auto`/)
+  assert.match(menuConfig, /path:\s*`\$\{R\}\/vouchers\/auto`/)
+})
+
+test('自动凭证必须预览并生成草稿，不得自动过账', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherAuto.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  assert.match(page, /生成凭证草稿/)
+  assert.match(page, /previewAutoVoucherDraft/)
+  assert.match(page, /generateAutoVoucherDraft/)
+  assert.match(page, /debit_account_id/)
+  assert.match(page, /credit_account_id/)
+  assert.match(api, /\/auto-voucher-rules\/\$\{ruleId\}\/preview/)
+  assert.match(api, /\/auto-voucher-rules\/\$\{ruleId\}\/generate-draft/)
+  assert.doesNotMatch(page, /autoPost\(|自动过账/)
 })
 
 test('凭证模板保存平衡分录并可套用为未保存的凭证草稿', () => {

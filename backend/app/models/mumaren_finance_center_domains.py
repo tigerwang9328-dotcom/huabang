@@ -255,7 +255,33 @@ class FinanceCenterMumarenAutoVoucherRule(Base):
     account_id: Mapped[int | None] = mapped_column(BigInteger)
     direction: Mapped[str] = mapped_column(String(8), nullable=False, default="debit")
     amount_formula: Mapped[str | None] = mapped_column(String(256))
+    debit_account_id: Mapped[int | None] = mapped_column(BigInteger)
+    credit_account_id: Mapped[int | None] = mapped_column(BigInteger)
+    default_amount: Mapped[object | None] = mapped_column(Numeric(18, 2))
+    summary: Mapped[str | None] = mapped_column(String(500))
+    voucher_type: Mapped[str] = mapped_column(String(16), nullable=False, default="记")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenAutoVoucherRun(Base):
+    """每个来源业务标识只允许生成一次草稿，保证重试幂等。"""
+    __tablename__ = "finance_center_mumaren_auto_voucher_runs"
+    __table_args__ = (
+        UniqueConstraint("book_id", "rule_id", "source_key", name="uq_mumaren_auto_voucher_run_source"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey(f"{MUMAREN_FINANCE_DOMAIN_SCHEMA}.finance_center_mumaren_auto_voucher_rules.id"), nullable=False
+    )
+    voucher_id: Mapped[int] = mapped_column(
+        ForeignKey(f"{MUMAREN_FINANCE_DOMAIN_SCHEMA}.finance_center_mumaren_vouchers.id"), nullable=False
+    )
+    source_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False)
     created_by: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

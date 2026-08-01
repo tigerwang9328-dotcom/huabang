@@ -9,6 +9,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.mumaren_finance_center import (
@@ -20,15 +21,22 @@ from app.models.mumaren_finance_center import FinanceCenterMumarenAuditLog
 from app.models.mumaren_finance_center import (
     FinanceCenterMumarenAccount,
     FinanceCenterMumarenBook,
+    FinanceCenterMumarenVoucher,
 )
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenAuxiliaryAccounting,
     FinanceCenterMumarenAutoVoucherRule,
+    FinanceCenterMumarenAutoVoucherRun,
     FinanceCenterMumarenBankReconciliation,
     FinanceCenterMumarenExpenseEntry,
     FinanceCenterMumarenSalesMonthlyReport,
     FinanceCenterMumarenVoucherTemplate,
 )
+from app.services.mumaren_finance_center.auto_voucher import (
+    AutoVoucherRuleConfigurationError,
+    build_auto_voucher_draft,
+)
+from app.services.mumaren_finance_center.workflow import create_voucher
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 
@@ -236,18 +244,23 @@ class AutoVoucherRuleInput(BaseModel):
     book_id: int = Field(ge=1)
     rule_name: str = Field(min_length=1, max_length=128)
     trigger_event: str = Field(min_length=1, max_length=64)
-    account_id: int | None = Field(default=None, ge=1)
-    direction: str = Field(default="debit", pattern=r"^(debit|credit)$")
-    amount_formula: str | None = Field(default=None, max_length=256)
+    debit_account_id: int = Field(ge=1)
+    credit_account_id: int = Field(ge=1)
+    default_amount: Decimal | None = Field(default=None, gt=0)
+    summary: str | None = Field(default=None, max_length=500)
+    voucher_type: str = Field(default="记", min_length=1, max_length=16)
+    is_active: bool = True
 
 
 class AutoVoucherRuleUpdate(BaseModel):
     book_id: int = Field(ge=1)
     rule_name: str | None = None
     trigger_event: str | None = None
-    account_id: int | None = Field(default=None, ge=1)
-    direction: str | None = Field(default=None, pattern=r"^(debit|credit)$")
-    amount_formula: str | None = None
+    debit_account_id: int | None = Field(default=None, ge=1)
+    credit_account_id: int | None = Field(default=None, ge=1)
+    default_amount: Decimal | None = Field(default=None, gt=0)
+    summary: str | None = Field(default=None, max_length=500)
+    voucher_type: str | None = Field(default=None, min_length=1, max_length=16)
     is_active: bool | None = None
 
 
@@ -257,9 +270,11 @@ def _auto_voucher_rule_data(rule: FinanceCenterMumarenAutoVoucherRule) -> dict:
         "book_id": rule.book_id,
         "rule_name": rule.rule_name,
         "trigger_event": rule.trigger_event,
-        "account_id": rule.account_id,
-        "direction": rule.direction,
-        "amount_formula": rule.amount_formula,
+        "debit_account_id": rule.debit_account_id,
+        "credit_account_id": rule.credit_account_id,
+        "default_amount": rule.default_amount,
+        "summary": rule.summary,
+        "voucher_type": rule.voucher_type,
         "is_active": rule.is_active,
         "created_by": rule.created_by,
         "created_at": rule.created_at,
@@ -289,15 +304,19 @@ async def create_auto_voucher_rule(
     current_user: SysUser = Depends(require_mumaren_voucher_write),
     db: AsyncSession = Depends(get_db),
 ):
-    """创建自动凭证规则;仅持久化规则配置,不真正生成凭证。"""
+    """创建自动凭证规则；生成时只形成草稿，绝不自动过账。"""
+    await _require_writable_book(db, body.book_id)
+    await _validate_auto_voucher_accounts(db, body.book_id, body.debit_account_id, body.credit_account_id)
     rule = FinanceCenterMumarenAutoVoucherRule(
         book_id=body.book_id,
         rule_name=body.rule_name,
         trigger_event=body.trigger_event,
-        account_id=body.account_id,
-        direction=body.direction,
-        amount_formula=body.amount_formula,
-        is_active=True,
+        debit_account_id=body.debit_account_id,
+        credit_account_id=body.credit_account_id,
+        default_amount=body.default_amount,
+        summary=body.summary,
+        voucher_type=body.voucher_type,
+        is_active=body.is_active,
         created_by=_actor_id(current_user),
     )
     db.add(rule)
@@ -323,7 +342,11 @@ async def update_auto_voucher_rule(
         raise HTTPException(status_code=404, detail=f"自动凭证规则 {rule_id} 不存在")
     if rule.book_id != body.book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿修改")
-    for field in ("rule_name", "trigger_event", "account_id", "direction", "amount_formula", "is_active"):
+    await _require_writable_book(db, body.book_id)
+    debit_account_id = body.debit_account_id if body.debit_account_id is not None else rule.debit_account_id
+    credit_account_id = body.credit_account_id if body.credit_account_id is not None else rule.credit_account_id
+    await _validate_auto_voucher_accounts(db, body.book_id, debit_account_id, credit_account_id)
+    for field in ("rule_name", "trigger_event", "debit_account_id", "credit_account_id", "default_amount", "summary", "voucher_type", "is_active"):
         value = getattr(body, field)
         if value is not None:
             setattr(rule, field, value)
@@ -349,6 +372,7 @@ async def delete_auto_voucher_rule(
         raise HTTPException(status_code=404, detail=f"自动凭证规则 {rule_id} 不存在")
     if rule.book_id != book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿删除")
+    await _require_writable_book(db, book_id)
     rule_name = rule.rule_name
     await db.delete(rule)
     await _add_audit_log(
@@ -357,6 +381,105 @@ async def delete_auto_voucher_rule(
         detail=f"删除自动凭证规则 {rule_name}",
     )
     return ApiResponse.ok(message="自动凭证规则已删除")
+
+
+async def _validate_auto_voucher_accounts(db: AsyncSession, book_id: int, debit_account_id: int | None, credit_account_id: int | None) -> None:
+    if not debit_account_id or not credit_account_id:
+        raise HTTPException(status_code=400, detail="规则必须配置借方和贷方会计科目")
+    if debit_account_id == credit_account_id:
+        raise HTTPException(status_code=400, detail="借方和贷方会计科目不能相同")
+    for label, account_id in (("借方", debit_account_id), ("贷方", credit_account_id)):
+        account = (await db.execute(select(FinanceCenterMumarenAccount).where(
+            FinanceCenterMumarenAccount.id == account_id,
+            FinanceCenterMumarenAccount.book_id == book_id,
+            FinanceCenterMumarenAccount.is_active.is_(True),
+        ))).scalar_one_or_none()
+        if account is None:
+            raise HTTPException(status_code=400, detail=f"{label}会计科目不存在、不属于账簿或已停用")
+
+
+class AutoVoucherDraftRequest(BaseModel):
+    book_id: int = Field(ge=1)
+    voucher_no: str = Field(min_length=1, max_length=64)
+    voucher_date: date
+    source_key: str = Field(min_length=1, max_length=128)
+    amount: Decimal | None = Field(default=None, gt=0)
+    summary: str | None = Field(default=None, max_length=500)
+
+
+async def _load_auto_rule(db: AsyncSession, rule_id: int, body: AutoVoucherDraftRequest) -> FinanceCenterMumarenAutoVoucherRule:
+    rule = await db.get(FinanceCenterMumarenAutoVoucherRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="自动凭证规则不存在")
+    if rule.book_id != body.book_id:
+        raise HTTPException(status_code=400, detail="账簿不一致，禁止跨账簿生成")
+    await _require_writable_book(db, body.book_id)
+    if not rule.is_active:
+        raise HTTPException(status_code=409, detail="规则已停用，不能生成草稿")
+    await _validate_auto_voucher_accounts(db, body.book_id, rule.debit_account_id, rule.credit_account_id)
+    return rule
+
+
+@router.post("/auto-voucher-rules/{rule_id}/preview", response_model=ApiResponse)
+async def preview_auto_voucher_draft(rule_id: int, body: AutoVoucherDraftRequest, _: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db)):
+    """预览平衡草稿，不写入数据库，也不审核或过账。"""
+    rule = await _load_auto_rule(db, rule_id, body)
+    try:
+        draft = build_auto_voucher_draft(rule.__dict__, amount=body.amount, source_key=body.source_key)
+    except AutoVoucherRuleConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if body.summary:
+        draft["summary"] = body.summary
+        for line in draft["lines"]:
+            line["summary"] = body.summary
+    return ApiResponse.ok(data={**draft, "voucher_no": body.voucher_no, "voucher_date": body.voucher_date})
+
+
+@router.post("/auto-voucher-rules/{rule_id}/generate-draft", response_model=ApiResponse)
+async def generate_auto_voucher_draft(rule_id: int, body: AutoVoucherDraftRequest, current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db)):
+    """按规则幂等生成当前账草稿；审核和过账必须另行人工操作。"""
+    rule = await _load_auto_rule(db, rule_id, body)
+    existing = (await db.execute(select(FinanceCenterMumarenAutoVoucherRun).where(
+        FinanceCenterMumarenAutoVoucherRun.book_id == body.book_id,
+        FinanceCenterMumarenAutoVoucherRun.rule_id == rule_id,
+        FinanceCenterMumarenAutoVoucherRun.source_key == body.source_key.strip(),
+    ))).scalar_one_or_none()
+    if existing is not None:
+        voucher = await db.get(FinanceCenterMumarenVoucher, existing.voucher_id)
+        if voucher is None:
+            raise HTTPException(status_code=409, detail="自动凭证幂等记录缺少关联凭证，请联系管理员核查")
+        return ApiResponse.ok(data={"voucher_id": existing.voucher_id, "voucher_no": voucher.voucher_no, "status": voucher.status, "reused": True}, message="来源业务已生成过凭证")
+    try:
+        async with db.begin_nested():
+            draft = build_auto_voucher_draft(rule.__dict__, amount=body.amount, source_key=body.source_key)
+            if body.summary:
+                draft["summary"] = body.summary
+                for line in draft["lines"]:
+                    line["summary"] = body.summary
+            voucher = await create_voucher(db, book_id=body.book_id, voucher_no=body.voucher_no, voucher_date=body.voucher_date,
+                lines=draft["lines"], operator_id=_actor_id(current_user), summary=draft["summary"], voucher_type=draft["voucher_type"])
+            voucher.source_system = "mumaren_auto_rule"
+            voucher.source_database = "finance_center_mumaren"
+            voucher.source_key = str(draft["source_key"])
+            voucher.source_payload = {"rule_id": rule.id, "rule_name": rule.rule_name, "trigger_event": rule.trigger_event, "source_key": body.source_key.strip()}
+            db.add(FinanceCenterMumarenAutoVoucherRun(book_id=body.book_id, rule_id=rule_id, voucher_id=voucher.id, source_key=body.source_key.strip(), amount=draft["amount"], created_by=_actor_id(current_user)))
+            await db.flush()
+    except (AutoVoucherRuleConfigurationError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        existing = (await db.execute(select(FinanceCenterMumarenAutoVoucherRun).where(
+            FinanceCenterMumarenAutoVoucherRun.book_id == body.book_id,
+            FinanceCenterMumarenAutoVoucherRun.rule_id == rule_id,
+            FinanceCenterMumarenAutoVoucherRun.source_key == body.source_key.strip(),
+        ))).scalar_one_or_none()
+        if existing is None:
+            raise HTTPException(status_code=409, detail="凭证号或自动凭证来源标识冲突") from exc
+        voucher = await db.get(FinanceCenterMumarenVoucher, existing.voucher_id)
+        if voucher is None:
+            raise HTTPException(status_code=409, detail="自动凭证幂等记录缺少关联凭证，请联系管理员核查") from exc
+        return ApiResponse.ok(data={"voucher_id": voucher.id, "voucher_no": voucher.voucher_no, "status": voucher.status, "reused": True}, message="来源业务已生成过凭证")
+    await _add_audit_log(db, book_id=body.book_id, action="generate_auto_voucher_draft", operator_id=_actor_id(current_user), detail=f"规则 {rule.rule_name} 来源 {body.source_key.strip()}")
+    return ApiResponse.ok(data={"voucher_id": voucher.id, "voucher_no": voucher.voucher_no, "status": voucher.status, "reused": False}, message="平衡草稿已生成，请到凭证列表审核后人工过账")
 
 
 # ===========================================================================
