@@ -249,25 +249,25 @@ export const douyinColorReportApi = {
 export type DouyinColorReleaseStage = "A" | "B" | "C" | "D";
 
 export interface DouyinColorCollectorStatus {
+  account_id: number;
   current_status: string;
   queued_batch_count: number;
   queued_bytes: number;
+  script_version: string | null;
   last_heartbeat_at: string | null;
 }
 
 export interface DouyinColorQueueCapacity {
-  calculation_job_queued: number;
-  calculation_job_capacity: number;
+  queued_jobs: number;
 }
 
 export interface DouyinColorFeatureFlags {
-  current_stage: DouyinColorReleaseStage;
-  bounce_report_enabled: boolean;
-  bounce_semantics_status: string;
+  color_analysis_enabled: boolean;
+  annotation_review_enabled: boolean;
 }
 
 export interface DouyinColorHealth {
-  collector_status: DouyinColorCollectorStatus;
+  collector_status: DouyinColorCollectorStatus[];
   queue_capacity: DouyinColorQueueCapacity;
   feature_flags: DouyinColorFeatureFlags;
 }
@@ -280,8 +280,8 @@ export interface DouyinColorActiveToken {
 
 export interface DouyinColorTokenRotateResult {
   upload_token: string;
-  token_prefix: string;
   expires_at: string;
+  revoked_count: number;
 }
 
 export interface DouyinColorReleaseStageInfo {
