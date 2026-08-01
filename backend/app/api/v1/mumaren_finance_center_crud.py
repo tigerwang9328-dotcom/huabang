@@ -684,6 +684,7 @@ class SalesMonthlyReportInput(BaseModel):
     store_code: str = Field(min_length=1, max_length=32)
     store_name: str | None = Field(default=None, max_length=128)
     sales_amount: Decimal = Field(ge=0)
+    return_amount: Decimal = Field(default=Decimal("0"), ge=0)
     remark: str | None = None
 
 
@@ -693,6 +694,7 @@ class SalesMonthlyReportUpdate(BaseModel):
     store_code: str | None = None
     store_name: str | None = None
     sales_amount: Decimal | None = Field(default=None, ge=0)
+    return_amount: Decimal | None = Field(default=None, ge=0)
     remark: str | None = None
 
 
@@ -704,6 +706,8 @@ def _sales_monthly_report_data(report: FinanceCenterMumarenSalesMonthlyReport) -
         "store_code": report.store_code,
         "store_name": report.store_name,
         "sales_amount": report.sales_amount,
+        "return_amount": report.return_amount,
+        "net_sales": Decimal(report.sales_amount) - Decimal(report.return_amount),
         "remark": report.remark,
         "created_by": report.created_by,
         "created_at": report.created_at,
@@ -739,12 +743,14 @@ async def create_sales_monthly_report(
     db: AsyncSession = Depends(get_db),
 ):
     """创建销售月报;不自动审核、不自动过账。"""
+    await _require_writable_book(db, body.book_id)
     report = FinanceCenterMumarenSalesMonthlyReport(
         book_id=body.book_id,
         period=body.period,
         store_code=body.store_code,
         store_name=body.store_name,
         sales_amount=body.sales_amount,
+        return_amount=body.return_amount,
         remark=body.remark,
         created_by=_actor_id(current_user),
     )
@@ -771,7 +777,8 @@ async def update_sales_monthly_report(
         raise HTTPException(status_code=404, detail=f"销售月报 {report_id} 不存在")
     if report.book_id != body.book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿修改")
-    for field in ("period", "store_code", "store_name", "sales_amount", "remark"):
+    await _require_writable_book(db, body.book_id)
+    for field in ("period", "store_code", "store_name", "sales_amount", "return_amount", "remark"):
         value = getattr(body, field)
         if value is not None:
             setattr(report, field, value)
@@ -797,6 +804,7 @@ async def delete_sales_monthly_report(
         raise HTTPException(status_code=404, detail=f"销售月报 {report_id} 不存在")
     if report.book_id != book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿删除")
+    await _require_writable_book(db, book_id)
     desc = f"{report.period} {report.store_code}"
     await db.delete(report)
     await _add_audit_log(

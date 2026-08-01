@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +33,10 @@ from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenFixedAsset,
     FinanceCenterMumarenInvoice,
     FinanceCenterMumarenPayableOrder,
+    FinanceCenterMumarenPayableOrderLine,
     FinanceCenterMumarenPayroll,
     FinanceCenterMumarenReceivableOrder,
+    FinanceCenterMumarenReceivableOrderLine,
     FinanceCenterMumarenTaxRecord,
     FinanceCenterMumarenTaxType,
 )
@@ -67,6 +69,17 @@ def _actor_id(user: SysUser) -> int:
     return int(user.id)
 
 
+class ArApOrderLineInput(BaseModel):
+    item_name: str = Field(min_length=1, max_length=255)
+    spec: str | None = Field(default=None, max_length=255)
+    quantity: Decimal = Field(default=Decimal("1"), gt=0)
+    unit_price: Decimal = Field(default=Decimal("0"), ge=0)
+    amount: Decimal = Field(ge=0)
+    tax_rate: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    remark: str | None = Field(default=None, max_length=500)
+
+
 class ArApOrderInput(BaseModel):
     book_id: int = Field(ge=1)
     order_type: str = Field(pattern=r"^(receivable|payable)$")
@@ -76,6 +89,13 @@ class ArApOrderInput(BaseModel):
     counterparty_name: str = Field(min_length=1, max_length=128)
     total_amount: Decimal = Field(ge=0)
     remark: str | None = Field(default=None, max_length=500)
+    lines: list[ArApOrderLineInput] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_detail_total(self):
+        if self.lines and sum((line.amount for line in self.lines), Decimal("0")) != self.total_amount:
+            raise ValueError("明细金额合计必须等于单据总金额")
+        return self
 
 
 class ArApSettleInput(BaseModel):
@@ -99,7 +119,7 @@ class TaxPayInput(BaseModel):
     remark: str | None = Field(default=None, max_length=500)
 
 
-def _order_data(order) -> dict:
+def _order_data(order, *, has_details: bool = False) -> dict:
     return {
         "id": order.id,
         "book_id": order.book_id,
@@ -112,7 +132,48 @@ def _order_data(order) -> dict:
         "settled_amount": order.settled_amount,
         "settlement_status": order.settlement_status,
         "workflow_status": order.workflow_status,
+        "has_details": has_details,
     }
+
+
+_AR_AP_LINE_MODELS = {
+    "receivable": FinanceCenterMumarenReceivableOrderLine,
+    "payable": FinanceCenterMumarenPayableOrderLine,
+}
+
+
+def _ar_ap_line_data(line) -> dict:
+    return {
+        "id": line.id, "line_no": line.line_no, "item_name": line.item_name,
+        "spec": line.spec, "quantity": line.quantity, "unit_price": line.unit_price,
+        "amount": line.amount, "tax_rate": line.tax_rate, "tax_amount": line.tax_amount,
+        "remark": line.remark,
+    }
+
+
+def _ar_ap_settlement_data(settlement) -> dict:
+    return {
+        "id": settlement.id, "settlement_date": settlement.settlement_date,
+        "amount": settlement.amount, "remark": settlement.remark,
+        "created_by": settlement.created_by, "created_at": settlement.created_at,
+    }
+
+
+async def _ar_ap_order_detail_data(db: AsyncSession, order, order_type: Literal["receivable", "payable"]) -> dict:
+    line_model = _AR_AP_LINE_MODELS[order_type]
+    lines = list((await db.execute(
+        select(line_model).where(line_model.order_id == order.id).order_by(line_model.line_no, line_model.id)
+    )).scalars())
+    settlements = list((await db.execute(
+        select(FinanceCenterMumarenArApSettlement)
+        .where(
+            FinanceCenterMumarenArApSettlement.book_id == order.book_id,
+            FinanceCenterMumarenArApSettlement.settlement_type == order_type,
+            FinanceCenterMumarenArApSettlement.order_id == order.id,
+        )
+        .order_by(FinanceCenterMumarenArApSettlement.settlement_date.desc(), FinanceCenterMumarenArApSettlement.id.desc())
+    )).scalars())
+    return {**_order_data(order), "lines": [_ar_ap_line_data(line) for line in lines], "settlements": [_ar_ap_settlement_data(row) for row in settlements]}
 
 
 def _tax_record_data(record, *, tax_code=None, tax_name=None) -> dict:
@@ -268,6 +329,7 @@ async def create_ar_ap_order_endpoint(
             total_amount=body.total_amount,
             operator_id=_actor_id(current_user),
             remark=body.remark,
+            lines=[line.model_dump() for line in body.lines],
         )
     except CrossBookViolationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -279,7 +341,7 @@ async def create_ar_ap_order_endpoint(
         detail=f"创建{body.order_type}单据 {body.order_no}",
     )
     await db.flush()
-    return ApiResponse.ok(data=_order_data(order), message="AR/AP 草稿已创建")
+    return ApiResponse.ok(data=await _ar_ap_order_detail_data(db, order, body.order_type), message="AR/AP 草稿已创建")
 
 
 @router.post("/ar-ap/orders/{order_id}/review", response_model=ApiResponse)
@@ -1351,7 +1413,14 @@ async def list_ar_ap_orders(
     model = _AR_AP_MODELS[order_type]
     conditions = _ar_ap_filter_conditions(model, book_id=book_id, period=period, status=status)
     rows = list((await db.execute(select(model).where(*conditions).order_by(model.order_date.desc(), model.id.desc()).limit(limit))).scalars())
-    return ApiResponse.ok(data=[_order_data(row) for row in rows])
+    line_model = _AR_AP_LINE_MODELS[order_type]
+    order_ids = [row.id for row in rows]
+    detail_order_ids = set()
+    if order_ids:
+        detail_order_ids = set((await db.execute(
+            select(line_model.order_id).where(line_model.order_id.in_(order_ids))
+        )).scalars())
+    return ApiResponse.ok(data=[_order_data(row, has_details=row.id in detail_order_ids) for row in rows])
 
 
 @router.get("/ar-ap/orders/summary", response_model=ApiResponse)
@@ -1380,6 +1449,24 @@ async def summarize_ar_ap_orders(
         "outstanding_amount": total_amount - settled_amount,
         "open_count": int(row[3]),
     })
+
+
+@router.get("/ar-ap/orders/{order_id}", response_model=ApiResponse)
+async def get_ar_ap_order_detail(
+    order_id: int,
+    book_id: int = Query(ge=1),
+    order_type: Literal["receivable", "payable"] = Query(),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询一张独立 AR/AP 单据及其明细行、人工结算流水。"""
+    model = _AR_AP_MODELS[order_type]
+    order = await db.get(model, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail=f"{order_type} 单据 {order_id} 不存在")
+    if order.book_id != book_id:
+        raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿查询")
+    return ApiResponse.ok(data=await _ar_ap_order_detail_data(db, order, order_type))
 
 
 @router.put("/ar-ap/orders/{order_id}", response_model=ApiResponse)

@@ -48,6 +48,9 @@ def test_api_root_registers_ar_ap_and_tax_write_endpoints():
     assert "/api/v1/finance-center/mumaren/ar-ap/orders" in paths
     assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}/review" in paths
     assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}/settle" in paths
+    assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}" in paths
+    detail_routes = [route for route in api_router.routes if route.path == "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}"]
+    assert any("GET" in route.methods for route in detail_routes)
     assert "/api/v1/finance-center/mumaren/tax/records" in paths
     assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/review" in paths
     assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/pay" in paths

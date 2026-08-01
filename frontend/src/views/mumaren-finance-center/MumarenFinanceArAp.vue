@@ -64,7 +64,7 @@
         <el-table-column label="操作" width="250" @click.stop>
           <template #default="scope">
             <el-button size="small" link @click.stop="openDetail(scope.row)">详情</el-button>
-            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" @click.stop="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="scope.row.workflow_status === 'draft' && !scope.row.has_details" size="small" link type="primary" :disabled="isReadonly" @click.stop="openEdit(scope.row)">编辑</el-button>
             <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="reviewOrder(scope.row)">审核</el-button>
             <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="openSettle(scope.row)">{{ settlementAction }}</el-button>
             <el-popconfirm v-if="scope.row.workflow_status === 'draft' && !isReadonly" title="确定删除该订单？" @confirm="removeOrder(scope.row)">
@@ -82,7 +82,21 @@
         <el-form-item label="单号" required><el-input v-model="form.order_no" :disabled="!!editingId" :placeholder="orderType === 'receivable' ? '如 AR-2026-08-001' : '如 AP-2026-08-001'" /></el-form-item>
         <el-form-item label="单据日期" required><el-date-picker v-model="form.order_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
         <el-form-item :label="counterpartyLabel" required><el-input v-model="form.counterparty_name" maxlength="128" :placeholder="counterpartyLabel" /></el-form-item>
-        <el-form-item :label="amountLabel" required><el-input-number v-model="form.total_amount" :min="0.01" :precision="2" :controls="false" style="width:100%" /></el-form-item>
+        <el-form-item :label="amountLabel" required><el-input-number v-model="form.total_amount" :min="0.01" :precision="2" :controls="false" :disabled="form.lines.length > 0" style="width:100%" /></el-form-item>
+        <el-form-item v-if="!editingId" label="单据明细">
+          <div class="line-editor">
+            <el-button size="small" @click="addLine">添加明细</el-button>
+            <el-table v-if="form.lines.length" :data="form.lines" size="small" border>
+              <el-table-column label="项目" min-width="130"><template #default="scope"><el-input v-model="scope.row.item_name" maxlength="255" /></template></el-table-column>
+              <el-table-column label="规格" min-width="100"><template #default="scope"><el-input v-model="scope.row.spec" maxlength="255" /></template></el-table-column>
+              <el-table-column label="数量" width="105"><template #default="scope"><el-input-number v-model="scope.row.quantity" :min="0.0001" :precision="4" :controls="false" @change="syncLineAmount(scope.row)" /></template></el-table-column>
+              <el-table-column label="单价" width="115"><template #default="scope"><el-input-number v-model="scope.row.unit_price" :min="0" :precision="4" :controls="false" @change="syncLineAmount(scope.row)" /></template></el-table-column>
+              <el-table-column label="金额" width="115" align="right"><template #default="scope">{{ money(scope.row.amount) }}</template></el-table-column>
+              <el-table-column label="操作" width="65"><template #default="scope"><el-button link type="danger" @click="removeLine(scope.$index)">删除</el-button></template></el-table-column>
+            </el-table>
+            <span v-if="form.lines.length" class="muted">明细合计：{{ money(lineTotal) }}，已作为{{ amountLabel }}保存。</span>
+          </div>
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" maxlength="500" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="showCreate = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">{{ editingId ? '保存修改' : '保存草稿' }}</el-button></template>
@@ -110,6 +124,15 @@
         <el-descriptions-item label="未结余额">{{ money(balanceOf(detailOrder)) }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ statusLabel(detailOrder) }}</el-descriptions-item>
       </el-descriptions>
+      <el-divider content-position="left">单据明细</el-divider>
+      <el-table :data="detailOrder?.lines || []" size="small" empty-text="该单据未录入明细行">
+        <el-table-column prop="line_no" label="#" width="55" /><el-table-column prop="item_name" label="项目" min-width="150" /><el-table-column prop="spec" label="规格" min-width="100" />
+        <el-table-column prop="quantity" label="数量" width="90" align="right" /><el-table-column prop="unit_price" label="单价" width="100" align="right" /><el-table-column label="金额" width="110" align="right"><template #default="scope">{{ money(scope.row.amount) }}</template></el-table-column>
+      </el-table>
+      <el-divider content-position="left">{{ isReceivable ? '回款' : '付款' }}流水</el-divider>
+      <el-table :data="detailOrder?.settlements || []" size="small" empty-text="暂无人工结算流水">
+        <el-table-column prop="settlement_date" label="日期" width="120" /><el-table-column label="金额" width="120" align="right"><template #default="scope">{{ money(scope.row.amount) }}</template></el-table-column><el-table-column prop="remark" label="备注" min-width="160" />
+      </el-table>
     </el-drawer>
   </section>
 </template>
@@ -118,7 +141,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { arApOrdersApi, mumarenFinanceCenterApi, type MumarenArApOrder, type MumarenArApSummary } from "@/api/mumarenFinanceCenter";
+import { arApOrdersApi, mumarenFinanceCenterApi, type ArApOrderLineInput, type MumarenArApOrder, type MumarenArApSummary } from "@/api/mumarenFinanceCenter";
 
 const props = defineProps<{ fixedOrderType?: "receivable" | "payable" }>();
 const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
@@ -194,19 +217,20 @@ onMounted(async () => { try { await loadBooks(); await load(); } catch { error.v
 const showCreate = ref(false);
 const saving = ref(false);
 const editingId = ref<number>();
-const form = reactive({ order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "" });
-const canCreate = computed(() => !!bookId.value && !!form.order_no && !!form.order_date && !!form.counterparty_name && form.total_amount > 0);
+const form = reactive({ order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "", lines: [] as ArApOrderLineInput[] });
+const lineTotal = computed(() => form.lines.reduce((total, line) => total + Number(line.amount || 0), 0));
+const canCreate = computed(() => !!bookId.value && !!form.order_no && !!form.order_date && !!form.counterparty_name && form.total_amount > 0 && (!form.lines.length || form.lines.every((line) => !!line.item_name.trim() && line.quantity > 0 && line.amount >= 0)));
 const openCreate = () => {
   if (isReadonly.value) { ElMessage.warning("金蝶迁移账簿只读，不能录入应收应付单据"); return; }
   if (!bookId.value) { ElMessage.warning("请先选择独立账簿"); return; }
-  Object.assign(form, { order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "" });
+  Object.assign(form, { order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "", lines: [] });
   editingId.value = undefined;
   showCreate.value = true;
 };
 const openEdit = (row: MumarenArApOrder) => {
   if (isReadonly.value || row.workflow_status !== "draft") return;
   editingId.value = row.id;
-  Object.assign(form, { order_no: row.order_no, order_date: row.order_date, counterparty_name: row.counterparty_name, total_amount: Number(row.total_amount), remark: "" });
+  Object.assign(form, { order_no: row.order_no, order_date: row.order_date, counterparty_name: row.counterparty_name, total_amount: Number(row.total_amount), remark: "", lines: [] });
   showCreate.value = true;
 };
 const save = async () => {
@@ -217,7 +241,7 @@ const save = async () => {
       await arApOrdersApi.update(editingId.value, { order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null }, bookId.value, orderType.value);
       ElMessage.success(`${typeText.value}草稿已更新`);
     } else {
-      await mumarenFinanceCenterApi.createArApOrder({ book_id: bookId.value, order_type: orderType.value, order_no: form.order_no, order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null });
+      await mumarenFinanceCenterApi.createArApOrder({ book_id: bookId.value, order_type: orderType.value, order_no: form.order_no, order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null, lines: form.lines });
       ElMessage.success(`${typeText.value}草稿已创建`);
     }
     showCreate.value = false; await load();
@@ -238,7 +262,16 @@ const removeOrder = async (row: MumarenArApOrder) => {
   catch (e: any) { ElMessage.error(e?.response?.data?.detail || "删除失败"); }
   finally { actingId.value = undefined; }
 };
-const openDetail = (row: MumarenArApOrder) => { detailOrder.value = row; showDetail.value = true; };
+const addLine = () => { form.lines.push({ item_name: "", spec: "", quantity: 1, unit_price: 0, amount: 0, tax_rate: 0, tax_amount: 0, remark: "" }); };
+const removeLine = (index: number) => { form.lines.splice(index, 1); if (!form.lines.length) form.total_amount = 0; else form.total_amount = lineTotal.value; };
+const syncLineAmount = (line: ArApOrderLineInput) => { line.amount = Number((Number(line.quantity || 0) * Number(line.unit_price || 0)).toFixed(2)); form.total_amount = lineTotal.value; };
+const openDetail = async (row: MumarenArApOrder) => {
+  if (!bookId.value) return;
+  showDetail.value = true;
+  detailOrder.value = row;
+  try { detailOrder.value = (await arApOrdersApi.detail(row.id, bookId.value, orderType.value)).data.data; }
+  catch (e: any) { ElMessage.error(e?.response?.data?.detail || "无法加载单据详情"); }
+};
 
 const showSettle = ref(false);
 const settling = ref(false);
@@ -266,6 +299,6 @@ const confirmSettle = async () => {
 .heading { justify-content: space-between; align-items: flex-start; }
 .filters { flex-wrap: wrap; }
 .metric-grid { margin: 0 -6px; }.metric-card { text-align: center; }.metric-label, .muted { color: #718096; font-size: 13px; }.metric-card strong { display: block; margin-top: 6px; font-size: 20px; }.metric-primary { color: #176b97; }.metric-success { color: #2f855a; }.metric-danger, .balance { color: #c53030; }.metric-warning { color: #b7791f; }
-.card-header { justify-content: space-between; color: #176b97; font-weight: 600; }.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }h2 { margin: 8px 0; }p { color: #5d6b7e; }
+.card-header { justify-content: space-between; color: #176b97; font-weight: 600; }.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }h2 { margin: 8px 0; }p { color: #5d6b7e; }.line-editor { width: 100%; display: grid; gap: 8px; }
 @media (max-width: 640px) { .heading, .filters { align-items: stretch; flex-direction: column; } .heading-actions { width: 100%; } }
 </style>

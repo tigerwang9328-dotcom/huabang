@@ -317,6 +317,7 @@ class FinanceCenterMumarenSalesMonthlyReport(Base):
     store_code: Mapped[str] = mapped_column(String(32), nullable=False)
     store_name: Mapped[str | None] = mapped_column(String(128))
     sales_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    return_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     remark: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -18,7 +18,9 @@ from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenArApSettlement,
     FinanceCenterMumarenCounterparty,
     FinanceCenterMumarenPayableOrder,
+    FinanceCenterMumarenPayableOrderLine,
     FinanceCenterMumarenReceivableOrder,
+    FinanceCenterMumarenReceivableOrderLine,
 )
 
 
@@ -37,6 +39,11 @@ class CrossBookViolationError(ValueError):
 _ORDER_MODELS = {
     "receivable": FinanceCenterMumarenReceivableOrder,
     "payable": FinanceCenterMumarenPayableOrder,
+}
+
+_ORDER_LINE_MODELS = {
+    "receivable": FinanceCenterMumarenReceivableOrderLine,
+    "payable": FinanceCenterMumarenPayableOrderLine,
 }
 
 
@@ -130,13 +137,17 @@ async def create_ar_ap_order(
     operator_id: int,
     counterparty_id: int | None = None,
     remark: str | None = None,
+    lines: Iterable[Mapping[str, Any]] | None = None,
 ) -> FinanceCenterMumarenReceivableOrder | FinanceCenterMumarenPayableOrder:
     """创建 AR/AP 草稿单据;强制同账簿校验,且不产生任何凭证分录。"""
     if order_type not in _ORDER_MODELS:
         raise ValueError(f"未知的往来单据类型: {order_type}")
     amount = _amount(total_amount)
+    line_rows = list(lines or ())
     if amount < ZERO:
         raise ValueError("单据金额不能为负数")
+    if line_rows and sum((_amount(line.get("amount")) for line in line_rows), ZERO) != amount:
+        raise ValueError("明细金额合计必须等于单据总金额")
     if counterparty_id is not None:
         await _load_counterparty(db, counterparty_id=counterparty_id, book_id=book_id)
 
@@ -157,6 +168,20 @@ async def create_ar_ap_order(
     )
     db.add(order)
     await db.flush()
+    line_model = _ORDER_LINE_MODELS[order_type]
+    for line_no, line in enumerate(line_rows, start=1):
+        db.add(line_model(
+            order_id=order.id,
+            line_no=line_no,
+            item_name=str(line["item_name"]),
+            spec=line.get("spec"),
+            quantity=_amount(line.get("quantity") or 1),
+            unit_price=_amount(line.get("unit_price")),
+            amount=_amount(line.get("amount")),
+            tax_rate=_amount(line.get("tax_rate")),
+            tax_amount=_amount(line.get("tax_amount")),
+            remark=line.get("remark"),
+        ))
     return order
 
 

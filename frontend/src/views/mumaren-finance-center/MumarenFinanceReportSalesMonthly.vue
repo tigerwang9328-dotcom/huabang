@@ -19,10 +19,11 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能录入或删除销售月报。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能录入、编辑或删除销售月报。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="records" empty-text="暂无销售月报" stripe show-summary :summary-method="getSummaries">
       <el-table-column prop="period" label="月份" width="120" />
+      <el-table-column prop="store_code" label="门店编码" width="120" />
       <el-table-column prop="store_name" label="门店名称" min-width="180" show-overflow-tooltip />
       <el-table-column label="销售额" width="160" align="right">
         <template #default="scope">¥{{ money(scope.row.sales_amount) }}</template>
@@ -34,8 +35,9 @@
         <template #default="scope">¥{{ money(scope.row.net_sales) }}</template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-      <el-table-column label="操作" width="120">
+      <el-table-column label="操作" width="170">
         <template #default="scope">
+          <el-button size="small" link type="primary" :disabled="isReadonly" @click="openEdit(scope.row)">编辑</el-button>
           <el-popconfirm
             title="确定删除该记录吗?"
             confirm-button-text="删除"
@@ -50,10 +52,13 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="录入月报" width="520px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑月报' : '录入月报'" width="520px" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
         <el-form-item label="月份" prop="period">
-          <el-date-picker v-model="form.period" type="month" value-format="YYYY-MM" placeholder="请选择月份" style="width: 100%" />
+          <el-date-picker v-model="form.period" type="month" value-format="YYYY-MM" :disabled="!!editingId" placeholder="请选择月份" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="门店编码" prop="store_code">
+          <el-input v-model="form.store_code" :disabled="!!editingId" placeholder="如 285101" maxlength="32" />
         </el-form-item>
         <el-form-item label="门店名称" prop="store_name">
           <el-input v-model="form.store_name" placeholder="请输入门店名称" maxlength="50" />
@@ -91,6 +96,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+const editingId = ref<number>();
 
 const dialogVisible = ref(false);
 const formRef = ref<FormInstance>();
@@ -100,6 +106,7 @@ const money = (value: number) =>
 
 const defaultForm = () => ({
   period: "",
+  store_code: "",
   store_name: "",
   sales_amount: 0,
   return_amount: 0,
@@ -110,6 +117,7 @@ const form = reactive(defaultForm());
 
 const formRules: FormRules = {
   period: [{ required: true, message: "请选择月份", trigger: "change" }],
+  store_code: [{ required: true, message: "请输入门店编码", trigger: "blur" }],
   store_name: [{ required: true, message: "请输入门店名称", trigger: "blur" }],
   sales_amount: [{ required: true, message: "请输入销售额", trigger: "blur" }],
   return_amount: [{ required: true, message: "请输入退货额", trigger: "blur" }],
@@ -154,6 +162,22 @@ const openCreate = () => {
     return;
   }
   resetForm();
+  editingId.value = undefined;
+  dialogVisible.value = true;
+};
+
+const openEdit = (row: MumarenSalesMonthlyReport) => {
+  if (isReadonly.value) return;
+  editingId.value = row.id;
+  Object.assign(form, {
+    period: row.period,
+    store_code: row.store_code,
+    store_name: row.store_name || "",
+    sales_amount: Number(row.sales_amount || 0),
+    return_amount: Number(row.return_amount || 0),
+    remark: row.remark || "",
+  });
+  formRef.value?.clearValidate();
   dialogVisible.value = true;
 };
 
@@ -165,15 +189,27 @@ const submit = async () => {
     if (!valid) return;
     saving.value = true;
     try {
-      await salesMonthlyReportsApi.create({
-        book_id: bid,
-        period: form.period,
-        store_name: form.store_name.trim(),
-        sales_amount: form.sales_amount,
-        return_amount: form.return_amount,
-        remark: form.remark.trim(),
-      });
-      ElMessage.success("月报已录入");
+      if (editingId.value) {
+        await salesMonthlyReportsApi.update(editingId.value, {
+          book_id: bid,
+          store_name: form.store_name.trim(),
+          sales_amount: form.sales_amount,
+          return_amount: form.return_amount,
+          remark: form.remark.trim() || null,
+        });
+        ElMessage.success("月报已更新");
+      } else {
+        await salesMonthlyReportsApi.create({
+          book_id: bid,
+          period: form.period,
+          store_code: form.store_code.trim(),
+          store_name: form.store_name.trim(),
+          sales_amount: form.sales_amount,
+          return_amount: form.return_amount,
+          remark: form.remark.trim(),
+        });
+        ElMessage.success("月报已录入");
+      }
       dialogVisible.value = false;
       await load();
     } catch (e: any) {

@@ -54,6 +54,26 @@ export interface VoucherCreatePayload {
   lines: VoucherLineInput[];
 }
 
+export interface ArApOrderLineInput {
+  item_name: string;
+  spec?: string | null;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  tax_rate?: number;
+  tax_amount?: number;
+  remark?: string | null;
+}
+
+export interface MumarenArApSettlement {
+  id: number;
+  settlement_date: string;
+  amount: number;
+  remark: string | null;
+  created_by: number | null;
+  created_at: string | null;
+}
+
 // AR/AP 草稿创建载荷(对应后端 ArApOrderInput)
 export interface ArApOrderCreatePayload {
   book_id: number;
@@ -64,6 +84,7 @@ export interface ArApOrderCreatePayload {
   counterparty_name: string;
   total_amount: number;
   remark?: string | null;
+  lines?: ArApOrderLineInput[];
 }
 
 // AR/AP 人工结算载荷(对应后端 ArApSettleInput)
@@ -87,6 +108,9 @@ export interface MumarenArApOrder {
   settled_amount: number;
   settlement_status: "open" | "partial" | "settled";
   workflow_status: "draft" | "reviewed" | "posted";
+  has_details?: boolean;
+  lines?: ArApOrderLineInput[];
+  settlements?: MumarenArApSettlement[];
 }
 
 // 税务草稿创建载荷(对应后端 TaxRecordInput)
@@ -473,6 +497,7 @@ export const arApOrdersApi = {
   summary: (params: { book_id: number; order_type: "receivable" | "payable"; period?: string; status?: "draft" | "open" | "partial" | "settled" }) => request.get<ApiResponse<MumarenArApSummary>>(requestPath("/ar-ap/orders/summary"), { params }),
   // 后端 ArApOrderUpdate 的 book_id 是请求体字段；查询参数仅用于路由过滤，不能替代它。
   update: (id: number, data: ArApOrderUpdate, book_id: number, order_type: "receivable" | "payable") => request.put<ApiResponse<MumarenArApOrder>>(requestPath(`/ar-ap/orders/${id}`), { ...data, book_id }, { params: { order_type } }),
+  detail: (id: number, book_id: number, order_type: "receivable" | "payable") => request.get<ApiResponse<MumarenArApOrder>>(requestPath(`/ar-ap/orders/${id}`), { params: { book_id, order_type } }),
   delete: (id: number, book_id: number, order_type: string) => request.delete<ApiResponse<null>>(requestPath(`/ar-ap/orders/${id}`), { params: { book_id, order_type } }),
 };
 
@@ -637,30 +662,36 @@ export interface MumarenSalesMonthlyReport {
   id: number;
   book_id: number;
   period: string;
-  store_name: string;
+  store_code: string;
+  store_name: string | null;
   sales_amount: number;
   return_amount: number;
   net_sales: number;
-  remark: string;
-  created_at: string;
+  remark: string | null;
+  created_at: string | null;
 }
 export interface SalesMonthlyReportInput {
   book_id: number;
   period: string;
+  store_code: string;
   store_name: string;
   sales_amount: number;
   return_amount: number;
   remark: string;
 }
 export interface SalesMonthlyReportUpdate {
+  book_id: number;
+  period?: string;
+  store_code?: string;
+  store_name?: string;
   sales_amount?: number;
   return_amount?: number;
-  remark?: string;
+  remark?: string | null;
 }
 export const salesMonthlyReportsApi = {
   list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenSalesMonthlyReport[]>>(requestPath("/sales-monthly-reports"), { params }),
   create: (data: SalesMonthlyReportInput) => request.post<ApiResponse<MumarenSalesMonthlyReport>>(requestPath("/sales-monthly-reports"), data),
-  update: (id: number, data: SalesMonthlyReportUpdate, book_id: number) => request.put<ApiResponse<MumarenSalesMonthlyReport>>(requestPath(`/sales-monthly-reports/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: SalesMonthlyReportUpdate) => request.put<ApiResponse<MumarenSalesMonthlyReport>>(requestPath(`/sales-monthly-reports/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/sales-monthly-reports/${id}`), { params: { book_id } }),
 };
 

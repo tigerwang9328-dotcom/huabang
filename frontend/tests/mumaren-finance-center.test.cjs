@@ -404,6 +404,19 @@ test('自动凭证必须预览并生成草稿，不得自动过账', () => {
   assert.doesNotMatch(page, /autoPost\(|自动过账/)
 })
 
+test('销售月报支持对未锁定记录编辑，不强迫删除后重建', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportSalesMonthly.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  assert.match(page, /编辑/)
+  assert.match(page, /openEdit/)
+  assert.match(page, /salesMonthlyReportsApi\.update/)
+  assert.match(page, /store_code/)
+  assert.match(page, /return_amount/)
+  assert.match(api, /export interface SalesMonthlyReportUpdate\s*\{\s*book_id: number;/)
+  assert.match(api, /update:\s*\(id: number, data: SalesMonthlyReportUpdate\) => request\.put/)
+  assert.match(api, /return_amount\?: number/)
+})
+
 test('凭证模板保存平衡分录并可套用为未保存的凭证草稿', () => {
   const template = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherTemplate.vue')
   const create = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
@@ -682,6 +695,19 @@ test('税金明细表页面调用税务记录接口(只读展示)', () => {
   assert.match(taxRecords, /listTaxRecords|mumarenFinanceCenterApi/)
   // 只读页面,不得有写入操作
   assert.doesNotMatch(taxRecords, /createTaxRecord|reviewTaxRecord|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
+})
+
+test('应收应付台账支持单据明细行和逐笔回款付款流水查询', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  assert.match(page, /添加明细/)
+  assert.match(page, /form\.lines/)
+  assert.match(page, /settlements/)
+  assert.match(page, /arApOrdersApi\.detail/)
+  assert.match(api, /export interface ArApOrderLineInput/)
+  assert.match(api, /lines\?: ArApOrderLineInput\[\]/)
+  assert.match(api, /detail: \(id: number, book_id: number, order_type: "receivable" \| "payable"\)/)
 })
 
 test('所有牧马人财务中心页面不得调用旧财务 API 或残留牧马人服务器地址', () => {
