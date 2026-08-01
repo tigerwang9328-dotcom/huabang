@@ -4,30 +4,39 @@
       <div>
         <p class="panel-kicker">财务报表</p>
         <h2>费用明细表</h2>
-        <p>按期间、科目展示费用发生明细;支持会话内补充登记。</p>
+        <p>按期间、科目展示费用发生明细;按独立账簿隔离,数据持久化。</p>
       </div>
       <div class="heading-actions">
-        <el-button type="primary" @click="openCreate">登记费用</el-button>
+        <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" :disabled="!bookId" @click="openCreate">登记费用</el-button>
       </div>
     </div>
 
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      title="完整数据接口待后端补,本会话数据刷新后清空"
-    />
+    <div class="filters">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
+        <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
+      </el-select>
+    </div>
 
-    <el-table :data="records" empty-text="暂无费用明细" stripe show-summary :summary-method="getSummaries">
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+
+    <el-table v-loading="loading" :data="records" empty-text="暂无费用明细" stripe show-summary :summary-method="getSummaries">
       <el-table-column prop="period" label="期间" width="120" />
       <el-table-column prop="account_code" label="科目编码" width="140" />
       <el-table-column prop="account_name" label="科目名称" min-width="180" show-overflow-tooltip />
       <el-table-column label="金额" width="160" align="right">
         <template #default="scope">¥{{ money(scope.row.amount) }}</template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-      <el-table-column label="操作" width="120">
+      <el-table-column label="状态" width="100">
         <template #default="scope">
+          <el-tag :type="statusTagType(scope.row.status)" size="small">{{ statusLabel(scope.row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
+      <el-table-column label="操作" width="220">
+        <template #default="scope">
+          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="reviewRow(scope.row)">审核</el-button>
+          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :loading="actingId === scope.row.id" @click="postRow(scope.row)">过账</el-button>
           <el-popconfirm
             title="确定删除该记录吗?"
             confirm-button-text="删除"
@@ -35,7 +44,7 @@
             @confirm="removeRow(scope.row)"
           >
             <template #reference>
-              <el-button size="small" link type="danger">删除</el-button>
+              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -62,33 +71,47 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
+import {
+  expenseEntriesApi,
+  mumarenFinanceCenterApi,
+  type MumarenExpenseEntry,
+  type MumarenFinanceBook,
+} from "@/api/mumarenFinanceCenter";
 
-interface ExpenseRecord {
-  id: number;
-  period: string;
-  account_code: string;
-  account_name: string;
-  amount: number;
-  remark: string;
-  created_at: string;
-}
-
-const records = ref<ExpenseRecord[]>([]);
+const books = ref<MumarenFinanceBook[]>([]);
+const bookId = ref<number>();
+const records = ref<MumarenExpenseEntry[]>([]);
+const loading = ref(false);
+const saving = ref(false);
+const error = ref("");
+const actingId = ref<number>();
 
 const dialogVisible = ref(false);
 const formRef = ref<FormInstance>();
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
+
+const statusLabel = (status: string) => {
+  if (status === "draft") return "草稿";
+  if (status === "reviewed") return "已审核";
+  if (status === "posted") return "已过账";
+  return status;
+};
+const statusTagType = (status: string): "" | "warning" | "success" => {
+  if (status === "draft") return "";
+  if (status === "reviewed") return "warning";
+  return "success";
+};
 
 const defaultForm = () => ({
   period: "",
@@ -112,37 +135,112 @@ const resetForm = () => {
   formRef.value?.clearValidate();
 };
 
+const load = async () => {
+  if (!bookId.value) return;
+  loading.value = true;
+  error.value = "";
+  try {
+    records.value = (await expenseEntriesApi.list({ book_id: bookId.value })).data.data;
+  } catch {
+    error.value = "无法加载费用明细。";
+  } finally {
+    loading.value = false;
+  }
+};
+
+const onBookChange = () => {
+  records.value = [];
+  load();
+};
+
+onMounted(async () => {
+  try {
+    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    bookId.value = books.value[0]?.id;
+    if (bookId.value) await load();
+  } catch {
+    error.value = "无法加载独立账簿。";
+  }
+});
+
 const openCreate = () => {
+  if (!bookId.value) {
+    ElMessage.warning("请先选择独立账簿");
+    return;
+  }
   resetForm();
   dialogVisible.value = true;
 };
 
 const submit = async () => {
-  if (!formRef.value) return;
-  await formRef.value.validate((valid) => {
+  if (!formRef.value || !bookId.value) return;
+  const bid = bookId.value;
+  await formRef.value.validate(async (valid) => {
     if (!valid) return;
-    const now = new Date();
-    const row: ExpenseRecord = {
-      id: Date.now(),
-      period: form.period,
-      account_code: form.account_code.trim(),
-      account_name: form.account_name.trim(),
-      amount: form.amount,
-      remark: form.remark.trim(),
-      created_at: now.toLocaleString("zh-CN", { hour12: false }),
-    };
-    records.value.push(row);
-    ElMessage.success("费用已登记");
-    dialogVisible.value = false;
+    saving.value = true;
+    try {
+      await expenseEntriesApi.create({
+        book_id: bid,
+        period: form.period,
+        account_code: form.account_code.trim(),
+        account_name: form.account_name.trim(),
+        amount: form.amount,
+        remark: form.remark.trim(),
+      });
+      ElMessage.success("费用已登记");
+      dialogVisible.value = false;
+      await load();
+    } catch (e: any) {
+      ElMessage.error(e?.response?.data?.detail || "保存失败");
+    } finally {
+      saving.value = false;
+    }
   });
 };
 
-const removeRow = (row: ExpenseRecord) => {
-  records.value = records.value.filter((item) => item.id !== row.id);
-  ElMessage.success("记录已删除");
+const reviewRow = async (row: MumarenExpenseEntry) => {
+  if (!bookId.value) return;
+  actingId.value = row.id;
+  try {
+    await expenseEntriesApi.review(row.id, bookId.value);
+    ElMessage.success("已审核");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "审核失败");
+  } finally {
+    actingId.value = undefined;
+  }
 };
 
-const getSummaries = (param: { columns: any[]; data: ExpenseRecord[] }) => {
+const postRow = async (row: MumarenExpenseEntry) => {
+  if (!bookId.value) return;
+  actingId.value = row.id;
+  try {
+    await expenseEntriesApi.post(row.id, bookId.value);
+    ElMessage.success("已过账");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "过账失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+const removeRow = async (row: MumarenExpenseEntry) => {
+  if (!bookId.value) return;
+  actingId.value = row.id;
+  try {
+    await expenseEntriesApi.delete(row.id, bookId.value);
+    ElMessage.success("记录已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+const getSummaries = (param: { columns: any[]; data: MumarenExpenseEntry[] }) => {
   const { columns, data } = param;
   const sums: string[] = [];
   columns.forEach((column, index) => {
@@ -165,8 +263,10 @@ const getSummaries = (param: { columns: any[]; data: ExpenseRecord[] }) => {
 .panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }
 .heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .heading-actions { display: flex; gap: 8px; }
+.filters { display: flex; gap: 12px; }
+.filters > * { max-width: 280px; }
 .panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
-@media (max-width: 640px) { .heading { flex-direction: column; } }
+@media (max-width: 640px) { .filters { flex-direction: column; } .heading { flex-direction: column; } }
 </style>

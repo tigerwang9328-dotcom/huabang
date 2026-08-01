@@ -4,21 +4,23 @@
       <div>
         <p class="panel-kicker">财务报表</p>
         <h2>销售月报表</h2>
-        <p>按期间、门店展示销售汇总月报;会话内维护,刷新清空。</p>
+        <p>按期间、门店展示销售汇总月报;按独立账簿隔离,数据持久化。</p>
       </div>
       <div class="heading-actions">
-        <el-button type="primary" @click="openCreate">录入月报</el-button>
+        <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" :disabled="!bookId" @click="openCreate">录入月报</el-button>
       </div>
     </div>
 
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      title="完整数据接口待后端补,本会话数据刷新后清空"
-    />
+    <div class="filters">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
+        <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
+      </el-select>
+    </div>
 
-    <el-table :data="records" empty-text="暂无销售月报" stripe show-summary :summary-method="getSummaries">
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+
+    <el-table v-loading="loading" :data="records" empty-text="暂无销售月报" stripe show-summary :summary-method="getSummaries">
       <el-table-column prop="period" label="月份" width="120" />
       <el-table-column prop="store_name" label="门店名称" min-width="180" show-overflow-tooltip />
       <el-table-column label="销售额" width="160" align="right">
@@ -40,7 +42,7 @@
             @confirm="removeRow(scope.row)"
           >
             <template #reference>
-              <el-button size="small" link type="danger">删除</el-button>
+              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -67,28 +69,29 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">保存</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
+import {
+  salesMonthlyReportsApi,
+  mumarenFinanceCenterApi,
+  type MumarenSalesMonthlyReport,
+  type MumarenFinanceBook,
+} from "@/api/mumarenFinanceCenter";
 
-interface SalesMonthlyRecord {
-  id: number;
-  period: string;
-  store_name: string;
-  sales_amount: number;
-  return_amount: number;
-  net_sales: number;
-  remark: string;
-  created_at: string;
-}
-
-const records = ref<SalesMonthlyRecord[]>([]);
+const books = ref<MumarenFinanceBook[]>([]);
+const bookId = ref<number>();
+const records = ref<MumarenSalesMonthlyReport[]>([]);
+const loading = ref(false);
+const saving = ref(false);
+const error = ref("");
+const actingId = ref<number>();
 
 const dialogVisible = ref(false);
 const formRef = ref<FormInstance>();
@@ -118,38 +121,84 @@ const resetForm = () => {
   formRef.value?.clearValidate();
 };
 
+const load = async () => {
+  if (!bookId.value) return;
+  loading.value = true;
+  error.value = "";
+  try {
+    records.value = (await salesMonthlyReportsApi.list({ book_id: bookId.value })).data.data;
+  } catch {
+    error.value = "无法加载销售月报。";
+  } finally {
+    loading.value = false;
+  }
+};
+
+const onBookChange = () => {
+  records.value = [];
+  load();
+};
+
+onMounted(async () => {
+  try {
+    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    bookId.value = books.value[0]?.id;
+    if (bookId.value) await load();
+  } catch {
+    error.value = "无法加载独立账簿。";
+  }
+});
+
 const openCreate = () => {
+  if (!bookId.value) {
+    ElMessage.warning("请先选择独立账簿");
+    return;
+  }
   resetForm();
   dialogVisible.value = true;
 };
 
 const submit = async () => {
-  if (!formRef.value) return;
-  await formRef.value.validate((valid) => {
+  if (!formRef.value || !bookId.value) return;
+  const bid = bookId.value;
+  await formRef.value.validate(async (valid) => {
     if (!valid) return;
-    const now = new Date();
-    const row: SalesMonthlyRecord = {
-      id: Date.now(),
-      period: form.period,
-      store_name: form.store_name.trim(),
-      sales_amount: form.sales_amount,
-      return_amount: form.return_amount,
-      net_sales: (form.sales_amount || 0) - (form.return_amount || 0),
-      remark: form.remark.trim(),
-      created_at: now.toLocaleString("zh-CN", { hour12: false }),
-    };
-    records.value.push(row);
-    ElMessage.success("月报已录入");
-    dialogVisible.value = false;
+    saving.value = true;
+    try {
+      await salesMonthlyReportsApi.create({
+        book_id: bid,
+        period: form.period,
+        store_name: form.store_name.trim(),
+        sales_amount: form.sales_amount,
+        return_amount: form.return_amount,
+        remark: form.remark.trim(),
+      });
+      ElMessage.success("月报已录入");
+      dialogVisible.value = false;
+      await load();
+    } catch (e: any) {
+      ElMessage.error(e?.response?.data?.detail || "保存失败");
+    } finally {
+      saving.value = false;
+    }
   });
 };
 
-const removeRow = (row: SalesMonthlyRecord) => {
-  records.value = records.value.filter((item) => item.id !== row.id);
-  ElMessage.success("记录已删除");
+const removeRow = async (row: MumarenSalesMonthlyReport) => {
+  if (!bookId.value) return;
+  actingId.value = row.id;
+  try {
+    await salesMonthlyReportsApi.delete(row.id, bookId.value);
+    ElMessage.success("记录已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
+  } finally {
+    actingId.value = undefined;
+  }
 };
 
-const getSummaries = (param: { columns: any[]; data: SalesMonthlyRecord[] }) => {
+const getSummaries = (param: { columns: any[]; data: MumarenSalesMonthlyReport[] }) => {
   const { columns, data } = param;
   const sums: string[] = [];
   columns.forEach((column, index) => {
@@ -157,7 +206,7 @@ const getSummaries = (param: { columns: any[]; data: SalesMonthlyRecord[] }) => 
       sums[index] = "合计";
       return;
     }
-    const property = column.property as keyof SalesMonthlyRecord;
+    const property = column.property as keyof MumarenSalesMonthlyReport;
     if (property === "sales_amount" || property === "return_amount" || property === "net_sales") {
       const total = data.reduce((sum, item) => sum + (item[property] as number || 0), 0);
       sums[index] = "¥" + money(total);
@@ -173,8 +222,10 @@ const getSummaries = (param: { columns: any[]; data: SalesMonthlyRecord[] }) => 
 .panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }
 .heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .heading-actions { display: flex; gap: 8px; }
+.filters { display: flex; gap: 12px; }
+.filters > * { max-width: 280px; }
 .panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
-@media (max-width: 640px) { .heading { flex-direction: column; } }
+@media (max-width: 640px) { .filters { flex-direction: column; } .heading { flex-direction: column; } }
 </style>

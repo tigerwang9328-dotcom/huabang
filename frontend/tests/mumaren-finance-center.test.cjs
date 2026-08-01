@@ -89,8 +89,8 @@ test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', (
   }
 })
 
-test('会话内 CRUD 页面顶部含"完整数据接口待后端补"提示', () => {
-  const sessionCrudPages = [
+test('12 个 CRUD 页面不再显示"会话内数据刷新清空"黄色横幅,改为调用真实 API', () => {
+  const crudPages = [
     'MumarenFinanceVoucherTemplate.vue',
     'MumarenFinanceVoucherAuto.vue',
     'MumarenFinanceReportExpense.vue',
@@ -104,11 +104,65 @@ test('会话内 CRUD 页面顶部含"完整数据接口待后端补"提示', () 
     'MumarenFinanceSettingsAuxiliary.vue',
     'MumarenFinanceSettingsAuditLogs.vue',
   ]
-  for (const page of sessionCrudPages) {
+  for (const page of crudPages) {
     const source = read('src', 'views', 'mumaren-finance-center', page)
-    assert.match(source, /完整数据接口待后端补/, `页面 ${page} 必须包含"完整数据接口待后端补"提示`)
-    assert.match(source, /本会话数据刷新后清空/, `页面 ${page} 必须包含"本会话数据刷新后清空"提示`)
+    // 不得再包含黄色横幅提示
+    assert.doesNotMatch(source, /完整数据接口待后端补/, `页面 ${page} 不得包含"完整数据接口待后端补"横幅`)
+    assert.doesNotMatch(source, /本会话数据刷新后清空/, `页面 ${page} 不得包含"本会话数据刷新后清空"横幅`)
+    // 不得再使用 el-alert type="warning" 作为数据提示横幅
+    assert.doesNotMatch(source, /el-alert\s+type="warning"\s+[^>]*title="完整数据接口待后端补"/)
   }
+})
+
+test('12 个 CRUD 页面调用正确的 API 方法进行数据持久化', () => {
+  const pageApiMap = [
+    { file: 'MumarenFinanceAssets.vue', api: 'fixedAssetsApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceInvoices.vue', api: 'invoicesApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceCashierAccounts.vue', api: 'cashAccountsApi', methods: ['list', 'create'] },
+    { file: 'MumarenFinanceCashierReconciliation.vue', api: 'bankReconciliationsApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinancePayroll.vue', api: 'payrollsApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceClosing.vue', api: 'periodsApi', methods: ['list', 'close', 'reopen'] },
+    { file: 'MumarenFinanceSettingsAuditLogs.vue', api: 'auditLogsApi', methods: ['list'] },
+    { file: 'MumarenFinanceVoucherTemplate.vue', api: 'voucherTemplatesApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceVoucherAuto.vue', api: 'autoVoucherRulesApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceReportExpense.vue', api: 'expenseEntriesApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceReportSalesMonthly.vue', api: 'salesMonthlyReportsApi', methods: ['list', 'create', 'delete'] },
+    { file: 'MumarenFinanceSettingsAuxiliary.vue', api: 'auxiliaryAccountingsApi', methods: ['list', 'create', 'delete'] },
+  ]
+  for (const { file, api, methods } of pageApiMap) {
+    const source = read('src', 'views', 'mumaren-finance-center', file)
+    // 必须导入对应的 API 客户端
+    assert.match(source, new RegExp(api), `页面 ${file} 必须导入 ${api}`)
+    // 必须调用指定的方法
+    for (const method of methods) {
+      assert.match(source, new RegExp(`${api}\\.${method}\\(`), `页面 ${file} 必须调用 ${api}.${method}()`)
+    }
+    // 不得直接使用 request.post/put/delete 裸 HTTP 调用
+    assert.doesNotMatch(source, /request\.post\(|request\.put\(|request\.delete\(/, `页面 ${file} 不得直接使用裸 HTTP 写入`)
+  }
+})
+
+test('固定资产处置将账簿 ID 与目标状态一并放入请求体', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  assert.match(
+    api,
+    /dispose:\s*\(id:\s*number,\s*book_id:\s*number\)\s*=>\s*request\.put[^\n]*\{\s*book_id,\s*status:\s*"disposed"\s*\}/,
+  )
+})
+
+test('新增固定资产使用后端的分类字段和按月折旧年限', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAssets.vue')
+  assert.match(page, /asset_category:\s*form\.category/)
+  assert.match(page, /useful_life_months:\s*Number\(form\.useful_life\s*\|\|\s*0\)\s*\*\s*12/)
+})
+
+test('应收应付审核把当前单据类型传给后端', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  assert.match(api, /reviewArApOrder:\s*\(orderId:\s*number,\s*orderType:\s*"receivable"\s*\|\s*"payable"\)/)
+  assert.match(page, /reviewArApOrder\(row\.id,\s*orderType\.value\)/)
+  assert.match(api, /settleArApOrder:\s*\(orderId:\s*number,\s*orderType:\s*"receivable"\s*\|\s*"payable",\s*payload/)
+  assert.match(page, /settleArApOrder\(settleTarget\.value\.id,\s*orderType\.value,/)
 })
 
 test('派生展示类页面调用已有 API,不新增后端接口', () => {
@@ -269,17 +323,21 @@ test('AR-AP 写入流程:草稿录入 → 财务审核 → 人工结算,不自�
   assert.doesNotMatch(arAp, /autoCreateVoucher|autoPost\(|reversePost\(/)
 })
 
-test('AR/AP 会话内订单列表:本会话单据可审核/结算,刷新后清空', () => {
+test('AR/AP 订单列表从后端持久化加载,不再使用 sessionOrders 会话数组', () => {
   const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
 
-  // 必须维护 sessionOrders 数组
-  assert.match(arAp, /sessionOrders/)
-  // 必须有 updateSessionOrder 工具方法
-  assert.match(arAp, /updateSessionOrder/)
-  // 必须显示"完整订单列表接口待后端补"提示
-  assert.match(arAp, /完整订单列表接口待后端补|刷新后列表清空/)
-  // 必须显示"本会话单据"
-  assert.match(arAp, /本会话单据/)
+  // 不得再使用 sessionOrders 会话数组
+  assert.doesNotMatch(arAp, /sessionOrders/, 'AR/AP 页面不得再使用 sessionOrders 会话数组')
+  // 不得再有 updateSessionOrder 工具方法
+  assert.doesNotMatch(arAp, /updateSessionOrder/, 'AR/AP 页面不得再有 updateSessionOrder')
+  // 不得再显示"完整订单列表接口待后端补"提示
+  assert.doesNotMatch(arAp, /完整订单列表接口待后端补|刷新后列表清空/, 'AR/AP 页面不得再有会话清空提示')
+  // 不得再显示"本会话单据"
+  assert.doesNotMatch(arAp, /本会话单据/, 'AR/AP 页面不得再有"本会话单据"字样')
+  // 必须调用 arApOrdersApi.list 从后端加载订单
+  assert.match(arAp, /arApOrdersApi\.list\(/, 'AR/AP 页面必须调用 arApOrdersApi.list() 加载订单')
+  // 必须调用 arApOrdersApi.delete 支持删除
+  assert.match(arAp, /arApOrdersApi\.delete\(/, 'AR/AP 页面必须调用 arApOrdersApi.delete() 删除订单')
 })
 
 test('税务写入流程:草稿录入 → 财务审核 → 人工缴税,不自动生成凭证', () => {
@@ -335,7 +393,7 @@ test('税务页面必须先选择独立账簿,无账簿时不请求后端并提�
   assert.doesNotMatch(tax, /onMounted\(async\s*\(\)\s*=>\s*\{(?:(?!\}\);)[\s\S])*?await\s+load\(\)/)
 })
 
-test('科目管理与账套管理页面只读,期末结账与辅助核算标注待适配', () => {
+test('科目管理与账套管理页面只读,期末结账与辅助核算已持久化', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
 
@@ -359,12 +417,13 @@ test('科目管理与账套管理页面只读,期末结账与辅助核算标注�
   assert.match(accounts, /listAccounts/)
   assert.doesNotMatch(accounts, /createAccount|updateAccount|deleteAccount|request\.post\(|request\.put\(|request\.delete\(/)
 
-  // 期末结账:已改为会话内 CRUD 页面,指向新组件 MumarenFinanceClosing.vue
+  // 期末结账:已改为持久化 CRUD 页面,指向新组件 MumarenFinanceClosing.vue
   assert.match(router, /path:\s*['"]closing['"],\s*name:\s*['"]MumarenFinanceClosing['"],\s*component:\s*\(\)\s*=>\s*import\(['"][^'"]*MumarenFinanceClosing\.vue['"]\),\s*meta:\s*\{\s*title:\s*['"]结账['"]\s*\}/)
-  // 会话内 CRUD 提示
+  // 期末结账页面不再有会话内 CRUD 提示,改为调用 periodsApi
   const closing = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceClosing.vue')
-  assert.match(closing, /完整数据接口待后端补/)
-  assert.match(closing, /本会话数据刷新后清空/)
+  assert.doesNotMatch(closing, /完整数据接口待后端补/, '结账页面不得再有黄色横幅')
+  assert.doesNotMatch(closing, /本会话数据刷新后清空/, '结账页面不得再有会话清空提示')
+  assert.match(closing, /periodsApi/, '结账页面必须调用 periodsApi')
 })
 
 test('历史归档页面必须只读,不出现编辑/审核/过账操作按钮', () => {

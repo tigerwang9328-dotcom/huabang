@@ -1,6 +1,6 @@
 """API总路由注册"""
 from fastapi import APIRouter
-from app.api.v1 import auth, dashboard, sync, task, finance, kingdee_finance, finance_center, finance_v2, mumaren_finance_center, mumaren_finance_center_domains, ai, ai_assistant, ai_diagnosis, dingtalk, system, etl, rules, report, acceptance, audit, baison, dingtalk_finance, hr, store, product, inventory, member, mobile, life_data, life_data_analysis, investment_decision, douyin_color_analytics
+from app.api.v1 import auth, dashboard, sync, task, finance, kingdee_finance, finance_center, finance_v2, mumaren_finance_center, mumaren_finance_center_domains, mumaren_finance_center_crud, ai, ai_assistant, ai_diagnosis, dingtalk, system, etl, rules, report, acceptance, audit, baison, dingtalk_finance, hr, store, product, inventory, member, mobile, life_data, life_data_analysis, investment_decision, douyin_color_analytics
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -14,6 +14,7 @@ api_router.include_router(finance_center.router)
 api_router.include_router(finance_v2.router)
 api_router.include_router(mumaren_finance_center.router)
 api_router.include_router(mumaren_finance_center_domains.router)
+api_router.include_router(mumaren_finance_center_crud.router)
 api_router.include_router(ai.router)
 api_router.include_router(ai_assistant.router)
 api_router.include_router(ai_diagnosis.router)
