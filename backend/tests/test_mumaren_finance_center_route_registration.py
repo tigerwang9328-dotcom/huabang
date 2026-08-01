@@ -38,6 +38,7 @@ def test_api_root_registers_independent_ar_ap_and_tax_routes():
     paths = {route.path for route in api_router.routes}
     assert "/api/v1/finance-center/mumaren/ar-ap/aging" in paths
     assert "/api/v1/finance-center/mumaren/tax/alerts" in paths
+    assert "/api/v1/finance-center/mumaren/reports/cash-flow-statement" in paths
 
 
 def test_api_root_registers_ar_ap_and_tax_write_endpoints():
@@ -48,9 +49,36 @@ def test_api_root_registers_ar_ap_and_tax_write_endpoints():
     assert "/api/v1/finance-center/mumaren/ar-ap/orders" in paths
     assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}/review" in paths
     assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}/settle" in paths
+    assert "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}" in paths
+    detail_routes = [route for route in api_router.routes if route.path == "/api/v1/finance-center/mumaren/ar-ap/orders/{order_id}"]
+    assert any("GET" in route.methods for route in detail_routes)
     assert "/api/v1/finance-center/mumaren/tax/records" in paths
     assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/review" in paths
     assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/pay" in paths
+
+
+def test_period_close_workbench_registers_initialization_and_readonly_precheck_routes():
+    from app.api.v1 import mumaren_finance_center_domains
+
+    paths = {route.path for route in mumaren_finance_center_domains.router.routes}
+    source = open(mumaren_finance_center_domains.__file__, encoding="utf-8").read()
+    assert "/finance-center/mumaren/periods/initialize" in paths
+    assert "/finance-center/mumaren/periods/pre-check" in paths
+    assert "_period_close_precheck" in source
+    assert "_require_writable_operating_book" in source
+
+
+def test_books_can_create_a_new_writable_ledger_and_only_drafts_can_be_deleted():
+    from app.api.v1 import mumaren_finance_center
+
+    paths = {route.path for route in mumaren_finance_center.router.routes}
+    source = open(mumaren_finance_center.__file__, encoding="utf-8").read()
+    assert '@router.post("/books"' in source
+    assert '@router.delete("/vouchers/{voucher_id}"' in source
+    assert 'voucher.status != "draft"' in source
+    assert 'voucher.is_readonly' in source
+    assert "/finance-center/mumaren/books" in paths
+    assert "/finance-center/mumaren/vouchers/{voucher_id}" in paths
 
 
 def test_domain_read_routes_apply_a_bounded_response_limit():

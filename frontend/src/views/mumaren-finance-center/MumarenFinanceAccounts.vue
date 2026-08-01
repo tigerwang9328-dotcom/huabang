@@ -55,6 +55,7 @@ const load = async () => {
 onMounted(async () => {
   try {
     await bookStore.loadBooks();
+    await load();
   } catch {
     error.value = "无法加载独立账簿。";
   }

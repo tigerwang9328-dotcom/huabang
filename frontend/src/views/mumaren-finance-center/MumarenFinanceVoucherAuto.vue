@@ -1,272 +1,38 @@
 <template>
   <section class="panel">
-    <div class="heading">
-      <div>
-        <p class="panel-kicker">凭证管理</p>
-        <h2>自动凭证</h2>
-        <p>业务单据按规则自动生成凭证草稿;按独立账簿隔离,数据持久化。</p>
-      </div>
-      <div class="heading-actions">
-        <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openCreate">新增规则</el-button>
-      </div>
-    </div>
-
-    <div class="filters">
-      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
-        <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
-      </el-select>
-    </div>
-
+    <div class="heading"><div><p class="panel-kicker">凭证管理</p><h2>自动凭证</h2><p>规则仅生成平衡草稿；财务人员审核后，仍须人工过账。</p></div><div class="heading-actions"><el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button><el-button type="primary" :disabled="!bookId || isReadonly" @click="openEditor()">新增规则</el-button></div></div>
+    <el-select v-model="bookId" placeholder="选择独立账簿" clearable class="book-select"><el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" /></el-select>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能维护规则或生成草稿。" :closable="false" show-icon />
     <el-table v-loading="loading" :data="rules" empty-text="暂无自动凭证规则" stripe>
-      <el-table-column prop="rule_name" label="规则名称" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="business_type" label="业务类型" width="110" />
-      <el-table-column prop="account_code" label="科目编码" width="130" />
-      <el-table-column label="方向" width="80">
-        <template #default="scope">
-          <el-tag :type="scope.row.direction === 'debit' ? 'primary' : 'warning'" size="small">
-            {{ scope.row.direction === "debit" ? "借" : "贷" }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="金额来源" width="160">
-        <template #default="scope">
-          {{ scope.row.amount_source === "fixed" ? `固定 ¥${money(scope.row.fixed_amount || 0)}` : "业务单据金额" }}
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="scope">
-          <el-tag :type="scope.row.enabled ? 'success' : 'info'" size="small">
-            {{ scope.row.enabled ? "启用" : "停用" }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="160">
-        <template #default="scope">
-          <el-button size="small" link type="primary" @click="preview(scope.row)">预览</el-button>
-          <el-popconfirm
-            title="确定删除该规则吗?"
-            confirm-button-text="删除"
-            cancel-button-text="取消"
-            @confirm="removeRow(scope.row)"
-          >
-            <template #reference>
-              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
-            </template>
-          </el-popconfirm>
-        </template>
-      </el-table-column>
+      <el-table-column prop="rule_name" label="规则名称" min-width="150" /><el-table-column prop="trigger_event" label="触发场景" min-width="130" />
+      <el-table-column label="借方科目" min-width="150"><template #default="{ row }">{{ accountLabel(row.debit_account_id) }}</template></el-table-column>
+      <el-table-column label="贷方科目" min-width="150"><template #default="{ row }">{{ accountLabel(row.credit_account_id) }}</template></el-table-column>
+      <el-table-column label="默认金额" width="120"><template #default="{ row }">{{ row.default_amount ? `¥${money(row.default_amount)}` : "执行时填写" }}</template></el-table-column>
+      <el-table-column label="状态" width="90"><template #default="{ row }"><el-tag :type="row.is_active ? 'success' : 'info'" size="small">{{ row.is_active ? "启用" : "停用" }}</el-tag></template></el-table-column>
+      <el-table-column label="操作" width="240"><template #default="{ row }"><el-button link type="primary" :disabled="isReadonly || !row.is_active" @click="openRun(row)">生成凭证草稿</el-button><el-button link :disabled="isReadonly" @click="openEditor(row)">编辑</el-button><el-popconfirm title="确定删除该规则吗?" @confirm="removeRow(row)"><template #reference><el-button link type="danger" :disabled="isReadonly">删除</el-button></template></el-popconfirm></template></el-table-column>
     </el-table>
-
-    <el-dialog v-model="dialogVisible" title="新增规则" width="560px" :close-on-click-modal="false">
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px">
-        <el-form-item label="规则名称" prop="rule_name">
-          <el-input v-model="form.rule_name" placeholder="请输入规则名称" maxlength="50" show-word-limit />
-        </el-form-item>
-        <el-form-item label="业务类型" prop="business_type">
-          <el-select v-model="form.business_type" placeholder="请选择业务类型" style="width: 100%">
-            <el-option label="销售" value="销售" />
-            <el-option label="采购" value="采购" />
-            <el-option label="收款" value="收款" />
-            <el-option label="付款" value="付款" />
-            <el-option label="费用" value="费用" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="科目编码" prop="account_code">
-          <el-input v-model="form.account_code" placeholder="请输入科目编码" maxlength="30" />
-        </el-form-item>
-        <el-form-item label="方向" prop="direction">
-          <el-radio-group v-model="form.direction">
-            <el-radio value="debit">借</el-radio>
-            <el-radio value="credit">贷</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="金额来源" prop="amount_source">
-          <el-select v-model="form.amount_source" placeholder="请选择金额来源" style="width: 100%">
-            <el-option label="固定" value="fixed" />
-            <el-option label="业务单据金额" value="business" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="form.amount_source === 'fixed'" label="固定金额" prop="fixed_amount">
-          <el-input-number v-model="form.fixed_amount" :min="0" :precision="2" :step="100" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="启用" prop="enabled">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="previewVisible" title="规则预览" width="480px">
-      <p v-if="previewRow" class="preview-text">
-        预览:此规则将生成一条
-        <strong>{{ previewRow.direction === "debit" ? "借" : "贷" }}</strong>
-        方向的凭证分录,科目
-        <strong>{{ previewRow.account_code }}</strong>,金额
-        <strong>{{
-          previewRow.amount_source === "fixed"
-            ? "¥" + money(previewRow.fixed_amount || 0)
-            : "业务单据金额"
-        }}</strong>。
-      </p>
-      <template #footer>
-        <el-button type="primary" @click="previewVisible = false">知道了</el-button>
-      </template>
-    </el-dialog>
+    <el-dialog v-model="editorVisible" :title="editingRule ? '编辑规则' : '新增规则'" width="600px"><el-form ref="formRef" :model="form" :rules="formRules" label-width="100px"><el-form-item label="规则名称" prop="rule_name"><el-input v-model="form.rule_name" /></el-form-item><el-form-item label="触发场景" prop="trigger_event"><el-select v-model="form.trigger_event" style="width:100%"><el-option label="月度销售" value="sales_monthly"/><el-option label="月度薪酬" value="payroll_monthly"/><el-option label="折旧摊销" value="depreciation_monthly"/><el-option label="人工调整" value="manual_adjustment"/></el-select></el-form-item><el-form-item label="借方科目" prop="debit_account_id"><el-select v-model="form.debit_account_id" filterable style="width:100%"><el-option v-for="item in accounts" :key="item.id" :label="`${item.account_code} ${item.account_name}`" :value="item.id"/></el-select></el-form-item><el-form-item label="贷方科目" prop="credit_account_id"><el-select v-model="form.credit_account_id" filterable style="width:100%"><el-option v-for="item in accounts" :key="item.id" :label="`${item.account_code} ${item.account_name}`" :value="item.id"/></el-select></el-form-item><el-form-item label="默认金额"><el-input-number v-model="form.default_amount" :min="0.01" :precision="2" style="width:100%"/></el-form-item><el-form-item label="摘要"><el-input v-model="form.summary"/></el-form-item><el-form-item label="凭证字"><el-input v-model="form.voucher_type" maxlength="16"/></el-form-item><el-form-item label="启用"><el-switch v-model="form.is_active"/></el-form-item></el-form><template #footer><el-button @click="editorVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRule">保存</el-button></template></el-dialog>
+    <el-dialog v-model="runVisible" title="生成凭证草稿" width="600px"><el-alert type="info" :closable="false" title="此操作只会创建草稿，不会审核或过账。相同来源标识重复提交将返回已生成的草稿。"/><el-form ref="runFormRef" :model="runForm" :rules="runRules" label-width="100px" class="run-form"><el-form-item label="凭证号" prop="voucher_no"><el-input v-model="runForm.voucher_no"/></el-form-item><el-form-item label="凭证日期" prop="voucher_date"><el-date-picker v-model="runForm.voucher_date" value-format="YYYY-MM-DD" type="date" style="width:100%"/></el-form-item><el-form-item label="来源标识" prop="source_key"><el-input v-model="runForm.source_key" placeholder="例如 2026-08-销售汇总"/></el-form-item><el-form-item label="金额"><el-input-number v-model="runForm.amount" :min="0.01" :precision="2" style="width:100%"/></el-form-item><el-form-item label="摘要"><el-input v-model="runForm.summary" placeholder="留空使用规则摘要"/></el-form-item></el-form><div v-if="preview" class="preview"><strong>预览：借贷平衡 ¥{{ money(preview.amount) }}</strong><div v-for="line in preview.lines" :key="line.account_id">{{ accountLabel(line.account_id) }}：借 {{ money(line.debit_amount) }} / 贷 {{ money(line.credit_amount) }}</div></div><template #footer><el-button :loading="previewing" @click="previewDraft">预览</el-button><el-button type="primary" :loading="generating" @click="generateDraft">生成凭证草稿</el-button></template></el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
-import {
-  autoVoucherRulesApi,
-  mumarenFinanceCenterApi,
-  type MumarenAutoVoucherRule,
-  type MumarenFinanceBook,
-} from "@/api/mumarenFinanceCenter";
-
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
-const rules = ref<MumarenAutoVoucherRule[]>([]);
-const loading = ref(false);
-const saving = ref(false);
-const error = ref("");
-const actingId = ref<number>();
-const dialogVisible = ref(false);
-const formRef = ref<FormInstance>();
-const previewVisible = ref(false);
-const previewRow = ref<MumarenAutoVoucherRule | null>(null);
-
-const money = (value: number) =>
-  new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
-
-const defaultForm = () => ({
-  rule_name: "",
-  business_type: "销售",
-  account_code: "",
-  direction: "debit" as "debit" | "credit",
-  amount_source: "fixed",
-  fixed_amount: 0,
-  enabled: true,
-});
-
-const form = reactive(defaultForm());
-
-const formRules: FormRules = {
-  rule_name: [{ required: true, message: "请输入规则名称", trigger: "blur" }],
-  business_type: [{ required: true, message: "请选择业务类型", trigger: "change" }],
-  account_code: [{ required: true, message: "请输入科目编码", trigger: "blur" }],
-  direction: [{ required: true, message: "请选择方向", trigger: "change" }],
-  amount_source: [{ required: true, message: "请选择金额来源", trigger: "change" }],
-  fixed_amount: [{ required: true, message: "请输入固定金额", trigger: "blur" }],
-};
-
-const resetForm = () => {
-  Object.assign(form, defaultForm());
-  formRef.value?.clearValidate();
-};
-
-const load = async () => {
-  if (!bookId.value) return;
-  loading.value = true;
-  error.value = "";
-  try {
-    rules.value = (await autoVoucherRulesApi.list({ book_id: bookId.value })).data.data;
-  } catch {
-    error.value = "无法加载自动凭证规则。";
-  } finally {
-    loading.value = false;
-  }
-};
-
-const onBookChange = () => {
-  rules.value = [];
-  load();
-};
-
-onMounted(async () => {
-  try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
-    if (bookId.value) await load();
-  } catch {
-    error.value = "无法加载独立账簿。";
-  }
-});
-
-const openCreate = () => {
-  if (!bookId.value) {
-    ElMessage.warning("请先选择独立账簿");
-    return;
-  }
-  resetForm();
-  dialogVisible.value = true;
-};
-
-const submit = async () => {
-  if (!formRef.value || !bookId.value) return;
-  const bid = bookId.value;
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return;
-    saving.value = true;
-    try {
-      await autoVoucherRulesApi.create({
-        book_id: bid,
-        rule_name: form.rule_name.trim(),
-        business_type: form.business_type,
-        account_code: form.account_code.trim(),
-        direction: form.direction,
-        amount_source: form.amount_source,
-        fixed_amount: form.amount_source === "fixed" ? form.fixed_amount : undefined,
-        enabled: form.enabled,
-      });
-      ElMessage.success("规则已新增");
-      dialogVisible.value = false;
-      await load();
-    } catch (e: any) {
-      ElMessage.error(e?.response?.data?.detail || "保存失败");
-    } finally {
-      saving.value = false;
-    }
-  });
-};
-
-const removeRow = async (row: MumarenAutoVoucherRule) => {
-  if (!bookId.value) return;
-  actingId.value = row.id;
-  try {
-    await autoVoucherRulesApi.delete(row.id, bookId.value);
-    ElMessage.success("规则已删除");
-    await load();
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || "删除失败");
-  } finally {
-    actingId.value = undefined;
-  }
-};
-
-const preview = (row: MumarenAutoVoucherRule) => {
-  previewRow.value = row;
-  previewVisible.value = true;
-};
+import { autoVoucherRulesApi, mumarenFinanceCenterApi, type AutoVoucherDraftPreview, type MumarenAutoVoucherRule } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook(); const rules=ref<MumarenAutoVoucherRule[]>([]); const accounts=ref<any[]>([]); const loading=ref(false); const saving=ref(false); const generating=ref(false); const previewing=ref(false); const error=ref(""); const editorVisible=ref(false); const runVisible=ref(false); const editingRule=ref<MumarenAutoVoucherRule|null>(null); const runRule=ref<MumarenAutoVoucherRule|null>(null); const preview=ref<AutoVoucherDraftPreview|null>(null); const formRef=ref<FormInstance>(); const runFormRef=ref<FormInstance>(); let version=0;
+const form=reactive<any>({rule_name:"",trigger_event:"sales_monthly",debit_account_id:null,credit_account_id:null,default_amount:undefined,summary:"",voucher_type:"记",is_active:true}); const runForm=reactive<any>({voucher_no:"",voucher_date:new Date().toISOString().slice(0,10),source_key:"",amount:undefined,summary:""});
+const formRules:FormRules={rule_name:[{required:true,message:"请输入规则名称",trigger:"blur"}],trigger_event:[{required:true,message:"请选择触发场景",trigger:"change"}],debit_account_id:[{required:true,message:"请选择借方科目",trigger:"change"}],credit_account_id:[{required:true,message:"请选择贷方科目",trigger:"change"}]}; const runRules:FormRules={voucher_no:[{required:true,message:"请输入凭证号",trigger:"blur"}],voucher_date:[{required:true,message:"请选择日期",trigger:"change"}],source_key:[{required:true,message:"请输入来源标识",trigger:"blur"}]};
+const money=(value:number)=>new Intl.NumberFormat("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2}).format(value||0); const accountMap=computed(()=>new Map(accounts.value.map(a=>[a.id,`${a.account_code} ${a.account_name}`]))); const accountLabel=(id:number|null)=>id?accountMap.value.get(id)||`科目 #${id}`:"未配置";
+async function load(){const requested=bookId.value; const id=++version; rules.value=[];accounts.value=[]; if(!requested){loading.value=false;return;} loading.value=true;error.value="";try{const [ruleResult,accountResult]=await Promise.all([autoVoucherRulesApi.list({book_id:requested}),mumarenFinanceCenterApi.listAccounts(requested)]);if(id===version&&bookId.value===requested){rules.value=ruleResult.data.data;accounts.value=accountResult.data.data;}}catch{if(id===version)error.value="无法加载自动凭证规则或会计科目。";}finally{if(id===version)loading.value=false;}}
+watch(bookId,()=>{editorVisible.value=false;runVisible.value=false;load();}); onMounted(async()=>{try{await loadBooks();await load();}catch{error.value="无法加载独立账簿。";}});
+function openEditor(row?:MumarenAutoVoucherRule){if(!bookId.value||isReadonly.value)return;editingRule.value=row||null;Object.assign(form,row?{...row}:{rule_name:"",trigger_event:"sales_monthly",debit_account_id:null,credit_account_id:null,default_amount:undefined,summary:"",voucher_type:"记",is_active:true});editorVisible.value=true;}
+async function submitRule(){if(!bookId.value||isReadonly.value||!formRef.value)return;await formRef.value.validate(async valid=>{if(!valid)return;if(form.debit_account_id===form.credit_account_id){ElMessage.error("借方和贷方科目不能相同");return;}saving.value=true;try{const data={...form,book_id:bookId.value,rule_name:form.rule_name.trim(),summary:form.summary?.trim()||undefined};if(editingRule.value)await autoVoucherRulesApi.update(editingRule.value.id,data);else await autoVoucherRulesApi.create(data);ElMessage.success("规则已保存");editorVisible.value=false;await load();}catch(e:any){ElMessage.error(e?.response?.data?.detail||"保存失败");}finally{saving.value=false;}})}
+function openRun(row:MumarenAutoVoucherRule){runRule.value=row;preview.value=null;Object.assign(runForm,{voucher_no:"",voucher_date:new Date().toISOString().slice(0,10),source_key:"",amount:row.default_amount||undefined,summary:row.summary||""});runVisible.value=true;} function requestBody(){return {...runForm,book_id:bookId.value!,summary:runForm.summary?.trim()||undefined};}
+async function previewDraft(){if(!runRule.value||!runFormRef.value)return;await runFormRef.value.validate(async valid=>{if(!valid)return;previewing.value=true;try{preview.value=(await autoVoucherRulesApi.previewAutoVoucherDraft(runRule.value!.id,requestBody())).data.data;}catch(e:any){ElMessage.error(e?.response?.data?.detail||"预览失败");}finally{previewing.value=false;}})}
+async function generateDraft(){if(!runRule.value||!runFormRef.value||isReadonly.value)return;await runFormRef.value.validate(async valid=>{if(!valid)return;generating.value=true;try{const result=(await autoVoucherRulesApi.generateAutoVoucherDraft(runRule.value!.id,requestBody())).data.data;ElMessage.success(result.reused?"已返回此前生成的草稿":"草稿已生成，请到凭证列表审核");runVisible.value=false;}catch(e:any){ElMessage.error(e?.response?.data?.detail||"生成草稿失败");}finally{generating.value=false;}})}
+async function removeRow(row:MumarenAutoVoucherRule){if(!bookId.value||isReadonly.value)return;try{await autoVoucherRulesApi.delete(row.id,bookId.value);ElMessage.success("规则已删除");await load();}catch(e:any){ElMessage.error(e?.response?.data?.detail||"删除失败");}}
 </script>
-
-<style scoped>
-.panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }
-.heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.heading-actions { display: flex; gap: 8px; }
-.filters { display: flex; gap: 12px; }
-.filters > * { max-width: 280px; }
-.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
-h2 { margin: 8px 0; }
-p { color: #5d6b7e; }
-.preview-text { line-height: 1.8; color: #5d6b7e; }
-.preview-text strong { color: #176b97; }
-@media (max-width: 640px) { .filters { flex-direction: column; } .heading { flex-direction: column; } }
-</style>
+<style scoped>.panel{padding:30px;border:1px solid #e1e7ef;border-radius:14px;background:#fff;display:grid;gap:16px}.heading{display:flex;justify-content:space-between;gap:16px}.heading-actions{display:flex;gap:8px}.panel-kicker{margin:0;color:#176b97;font-size:12px;font-weight:700}h2{margin:8px 0}.book-select{max-width:300px}.run-form{margin-top:16px}.preview{padding:12px;background:#f5f8fc;line-height:1.9;color:#425466}@media(max-width:640px){.heading{flex-direction:column}}</style>

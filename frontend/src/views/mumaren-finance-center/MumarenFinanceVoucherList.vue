@@ -8,8 +8,9 @@
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :disabled="!vouchers.length" @click="exportVouchers">导出当前列表</el-button>
         <router-link to="/app/finance-center/mumaren/vouchers/create">
-          <el-button type="primary">录入新凭证</el-button>
+          <el-button type="primary" :disabled="isReadonly">录入新凭证</el-button>
         </router-link>
       </div>
     </div>
@@ -37,10 +38,13 @@
       <el-table-column label="贷方" width="140" align="right">
         <template #default="scope">{{ money(scope.row.total_credit) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="160">
+      <el-table-column label="操作" width="220">
         <template #default="scope">
-          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
-          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :loading="actingId === scope.row.id" @click="post(scope.row)">人工过账</el-button>
+          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+          <el-popconfirm v-if="scope.row.status === 'draft' && !isReadonly" title="确定删除该草稿凭证？此操作不可恢复。" @confirm="remove(scope.row)">
+            <template #reference><el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button></template>
+          </el-popconfirm>
+          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="post(scope.row)">人工过账</el-button>
           <span v-if="scope.row.status === 'posted'" class="done-text">已过账</span>
         </template>
       </el-table-column>
@@ -54,12 +58,10 @@ import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
-  type MumarenFinanceBook,
   type MumarenFinanceVoucher,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const vouchers = ref<MumarenFinanceVoucher[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -87,10 +89,35 @@ const onBookChange = async () => {
   await load();
 };
 
+const exportVouchers = () => {
+  const quote = (value: unknown) => {
+    let text = String(value ?? "");
+    if (/^[=+@-]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const rows = [
+    ["凭证号", "日期", "摘要", "状态", "借方", "贷方"],
+    ...vouchers.value.map((row) => [
+      row.voucher_no,
+      row.voucher_date,
+      row.summary,
+      statusLabel(row.status),
+      money(row.total_debit),
+      money(row.total_credit),
+    ]),
+  ];
+  const blob = new Blob([`\uFEFF${rows.map((row) => row.map(quote).join(",")).join("\r\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `独立财务凭证-${bookId.value || "全部"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -99,6 +126,7 @@ onMounted(async () => {
 
 // ── 审核与人工过账(状态机:draft → reviewed → posted,禁止反向) ──
 const review = async (row: MumarenFinanceVoucher) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.reviewVoucher(row.id);
@@ -111,7 +139,22 @@ const review = async (row: MumarenFinanceVoucher) => {
   }
 };
 
+const remove = async (row: MumarenFinanceVoucher) => {
+  if (isReadonly.value || row.status !== "draft") return;
+  actingId.value = row.id;
+  try {
+    await mumarenFinanceCenterApi.deleteVoucher(row.id);
+    ElMessage.success("草稿凭证已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
 const post = async (row: MumarenFinanceVoucher) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.postVoucher(row.id);

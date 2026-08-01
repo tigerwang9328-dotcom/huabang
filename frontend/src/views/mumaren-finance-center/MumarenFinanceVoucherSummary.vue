@@ -32,6 +32,27 @@
       show-summary
       :summary-method="summaryMethod"
     >
+      <el-table-column type="expand" width="52">
+        <template #default="{ row }">
+          <div class="voucher-details">
+            <p>该月份、该凭证字下的全部凭证</p>
+            <el-table :data="row.vouchers" size="small" stripe>
+              <el-table-column prop="voucher_no" label="凭证号" min-width="130" />
+              <el-table-column prop="voucher_date" label="日期" width="120" />
+              <el-table-column prop="summary" label="摘要" min-width="220" show-overflow-tooltip />
+              <el-table-column label="状态" width="100">
+                <template #default="detail">{{ statusLabel(detail.row.status) }}</template>
+              </el-table-column>
+              <el-table-column label="借方" width="140" align="right">
+                <template #default="detail">{{ money(detail.row.total_debit) }}</template>
+              </el-table-column>
+              <el-table-column label="贷方" width="140" align="right">
+                <template #default="detail">{{ money(detail.row.total_credit) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="month" label="月份" width="120" />
       <el-table-column prop="voucher_type" label="凭证字" width="120" />
       <el-table-column prop="count" label="凭证数" width="100" align="center" />
@@ -61,8 +82,11 @@ const monthFilter = ref("");
 const error = ref("");
 const loading = ref(false);
 
-const money = (value?: number) =>
-  new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
+const money = (value?: number | string) =>
+  new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
+
+const statusLabel = (status: MumarenFinanceVoucher["status"]) =>
+  ({ draft: "草稿", reviewed: "已审核", posted: "已过账" }[status]);
 
 // 凭证字:voucher_no 第一个分隔符前的部分,如 "记" 或 "转";无分隔符时取前导非数字字符。
 const extractVoucherType = (voucherNo: string): string => {
@@ -79,6 +103,7 @@ interface SummaryRow {
   count: number;
   total_debit: number;
   total_credit: number;
+  vouchers: MumarenFinanceVoucher[];
 }
 
 const summaryRows = computed<SummaryRow[]>(() => {
@@ -88,12 +113,13 @@ const summaryRows = computed<SummaryRow[]>(() => {
     const voucherType = extractVoucherType(v.voucher_no || "");
     const key = `${month}|${voucherType}`;
     if (!map.has(key)) {
-      map.set(key, { month, voucher_type: voucherType, count: 0, total_debit: 0, total_credit: 0 });
+      map.set(key, { month, voucher_type: voucherType, count: 0, total_debit: 0, total_credit: 0, vouchers: [] });
     }
     const row = map.get(key)!;
     row.count += 1;
-    row.total_debit += v.total_debit || 0;
-    row.total_credit += v.total_credit || 0;
+    row.total_debit += Number(v.total_debit) || 0;
+    row.total_credit += Number(v.total_credit) || 0;
+    row.vouchers.push(v);
   }
   return Array.from(map.values())
     .filter((r) => !monthFilter.value || r.month === monthFilter.value)
@@ -112,10 +138,11 @@ const monthOptions = computed(() => {
 
 const summaryMethod = ({ columns }: { columns: Array<Record<string, unknown>> }) => {
   return columns.map((_, index) => {
-    if (index === 0) return "合计";
-    if (index === 2) return String(summaryRows.value.reduce((s, r) => s + r.count, 0));
-    if (index === 3) return money(summaryRows.value.reduce((s, r) => s + r.total_debit, 0));
-    if (index === 4) return money(summaryRows.value.reduce((s, r) => s + r.total_credit, 0));
+    const label = String(columns[index].label || "");
+    if (label === "月份") return "合计";
+    if (label === "凭证数") return String(summaryRows.value.reduce((s, r) => s + r.count, 0));
+    if (label === "借方合计") return money(summaryRows.value.reduce((s, r) => s + r.total_debit, 0));
+    if (label === "贷方合计") return money(summaryRows.value.reduce((s, r) => s + r.total_credit, 0));
     return "";
   });
 };
@@ -155,5 +182,7 @@ onMounted(async () => {
 .panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
+.voucher-details { padding: 8px 24px 16px; }
+.voucher-details p { margin: 0 0 8px; font-size: 13px; }
 @media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } }
 </style>

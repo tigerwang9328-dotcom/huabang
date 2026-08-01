@@ -2,7 +2,6 @@
   <section class="finance-center-shell">
     <header class="finance-center-header">
       <div>
-        <p class="eyebrow">牧马人财务模块</p>
         <h1>财务中心</h1>
         <p class="subtitle">凭证按"草稿 → 审核 → 人工过账"流转;历史数据只读。</p>
       </div>

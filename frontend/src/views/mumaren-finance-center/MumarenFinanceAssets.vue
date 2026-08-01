@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openCreate">新增资产</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">新增资产</el-button>
       </div>
     </div>
 
@@ -19,6 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，仅可查询资产卡片与折旧记录。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="assets" empty-text="暂无资产卡片" stripe show-summary :summary-method="summary">
       <el-table-column prop="asset_code" label="编码" width="140" />
@@ -41,15 +42,15 @@
       </el-table-column>
       <el-table-column label="操作" width="220">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" :disabled="row.status === 'disposed'" :loading="actingId === row.id" @click="depreciate(row)">折旧</el-button>
+          <el-button link type="primary" size="small" :disabled="isReadonly || row.status === 'disposed'" :loading="actingId === row.id" @click="depreciate(row)">折旧</el-button>
           <el-popconfirm title="确认处置该资产?" @confirm="dispose(row)">
             <template #reference>
-              <el-button link type="warning" size="small" :disabled="row.status === 'disposed'" :loading="actingId === row.id">处置</el-button>
+              <el-button link type="warning" size="small" :disabled="isReadonly || row.status === 'disposed'" :loading="actingId === row.id">处置</el-button>
             </template>
           </el-popconfirm>
           <el-popconfirm title="确定删除该资产?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -96,13 +97,11 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   fixedAssetsApi,
-  mumarenFinanceCenterApi,
-  type MumarenFinanceBook,
   type MumarenFixedAsset,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const assets = ref<MumarenFixedAsset[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -142,8 +141,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -151,6 +149,10 @@ onMounted(async () => {
 });
 
 const openCreate = () => {
+  if (isReadonly.value) {
+    ElMessage.warning("金蝶迁移账簿只读，不能新增资产");
+    return;
+  }
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -165,6 +167,7 @@ const openCreate = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!form.asset_code || !form.asset_name) {
     ElMessage.warning("请填写资产编码与名称");
@@ -193,6 +196,7 @@ const save = async () => {
 };
 
 const depreciate = async (row: MumarenFixedAsset) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -207,6 +211,7 @@ const depreciate = async (row: MumarenFixedAsset) => {
 };
 
 const dispose = async (row: MumarenFixedAsset) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -221,6 +226,7 @@ const dispose = async (row: MumarenFixedAsset) => {
 };
 
 const remove = async (row: MumarenFixedAsset) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

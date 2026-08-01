@@ -7,6 +7,7 @@
         <p>独立当前账凭证草稿录入;借贷平衡后保存为草稿。</p>
       </div>
       <div class="heading-actions">
+        <el-button :disabled="!bookId" @click="reloadAll">刷新</el-button>
         <router-link to="/app/finance-center/mumaren/vouchers/list">
           <el-button>查看凭证列表</el-button>
         </router-link>
@@ -53,6 +54,10 @@
 
       <div class="dialog-toolbar">
         <el-button type="primary" plain :disabled="isReadonly" @click="addLine">添加分录</el-button>
+        <el-button :disabled="isReadonly || !form.lines.length" @click="copyLastLine">复制上一行</el-button>
+        <el-button :disabled="isReadonly" @click="addReceiptPair">收款分录</el-button>
+        <el-button :disabled="isReadonly" @click="addPaymentPair">付款分录</el-button>
+        <el-button :disabled="isReadonly || !form.lines.length" @click="balanceLastLine">自动找平</el-button>
         <div class="totals">
           <span>借方 <b>{{ money(totalDebit) }}</b></span>
           <span>贷方 <b>{{ money(totalCredit) }}</b></span>
@@ -110,22 +115,26 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
+  voucherTemplatesApi,
   type MumarenFinanceAccount,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
 import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
 const bookStore = useMumarenFinanceBookStore();
+const route = useRoute();
 const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenFinanceAccount[]>([]);
 const accountRequestVersion = ref(0);
 const error = ref("");
 const saving = ref(false);
 const created = ref(false);
+let templateApplyVersion = 0;
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -149,10 +158,16 @@ const onBookChange = async () => {
   }
 };
 
+const reloadAll = async () => {
+  error.value = "";
+  await bookStore.loadBooks();
+  await onBookChange();
+  await applyTemplateFromRoute();
+};
+
 onMounted(async () => {
   try {
-    await bookStore.loadBooks();
-    await onBookChange();
+    await reloadAll();
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -171,6 +186,48 @@ const form = reactive({
   lines: [newLine(), newLine()],
 });
 
+const applyTemplateFromRoute = async () => {
+  const templateId = Number(route.query.template_id);
+  const requestedBookId = bookId.value;
+  const requestedTemplateId = String(route.query.template_id || "");
+  const version = ++templateApplyVersion;
+  if (!templateId || !requestedBookId || isReadonly.value) return;
+  try {
+    const template = (await voucherTemplatesApi.list({ book_id: requestedBookId, limit: 500 })).data.data
+      .find((item) => item.id === templateId);
+    if (version !== templateApplyVersion || requestedBookId !== bookId.value || requestedTemplateId !== String(route.query.template_id || "")) return;
+    if (!template?.lines_json?.lines.length) {
+      resetTemplateDraft();
+      error.value = "所选模板不存在、与当前账簿不一致，或尚未配置分录。";
+      return;
+    }
+    form.voucher_type = template.voucher_type;
+    form.summary = template.summary || "";
+    form.lines = template.lines_json.lines.map((line) => ({
+      key: `line-${lineSeed++}`,
+      account_id: line.account_id,
+      summary: line.summary || "",
+      debit_amount: Number(line.debit_amount),
+      credit_amount: Number(line.credit_amount),
+    }));
+    ElMessage.success(`已套用模板“${template.template_name}”，请填写凭证号后保存草稿。`);
+  } catch {
+    if (version === templateApplyVersion && requestedBookId === bookId.value && requestedTemplateId === String(route.query.template_id || "")) {
+      resetTemplateDraft();
+      error.value = "无法读取所选凭证模板。";
+    }
+  }
+};
+
+const resetTemplateDraft = () => {
+  form.voucher_type = "记";
+  form.summary = "";
+  form.lines = [newLine(), newLine()];
+};
+
+watch(() => route.query.template_id, () => { resetTemplateDraft(); void applyTemplateFromRoute(); });
+watch(bookId, () => { if (route.query.template_id) resetTemplateDraft(); void applyTemplateFromRoute(); });
+
 const validLines = computed(() =>
   form.lines.filter((l) => l.account_id && (Number(l.debit_amount) > 0 || Number(l.credit_amount) > 0)),
 );
@@ -187,6 +244,46 @@ const addLine = () => {
 const removeLine = (index: number) => {
   if (isReadonly.value) return;
   if (form.lines.length > 1) form.lines.splice(index, 1);
+};
+
+const copyLastLine = () => {
+  if (isReadonly.value || !form.lines.length) return;
+  const line = form.lines[form.lines.length - 1];
+  form.lines.push({
+    key: `line-${lineSeed++}`,
+    account_id: line.account_id,
+    summary: line.summary,
+    debit_amount: Number(line.debit_amount || 0),
+    credit_amount: Number(line.credit_amount || 0),
+  });
+};
+
+const addVoucherPair = (voucherType: "收" | "付", summary: string) => {
+  if (isReadonly.value) return;
+  form.voucher_type = voucherType;
+  if (!form.summary) form.summary = summary;
+  form.lines.push(
+    { ...newLine(), summary },
+    { ...newLine(), summary },
+  );
+};
+
+const addReceiptPair = () => addVoucherPair("收", "收款分录");
+const addPaymentPair = () => addVoucherPair("付", "付款分录");
+
+const balanceLastLine = () => {
+  if (isReadonly.value || !form.lines.length) return;
+  const line = form.lines[form.lines.length - 1];
+  const debitBeforeLast = form.lines.slice(0, -1).reduce((sum, item) => sum + Number(item.debit_amount || 0), 0);
+  const creditBeforeLast = form.lines.slice(0, -1).reduce((sum, item) => sum + Number(item.credit_amount || 0), 0);
+  const difference = debitBeforeLast - creditBeforeLast;
+  if (Math.abs(difference) < 0.005) {
+    ElMessage.info("前面的分录已经平衡，无需找平。");
+    return;
+  }
+  line.debit_amount = difference < 0 ? Math.abs(difference) : 0;
+  line.credit_amount = difference > 0 ? difference : 0;
+  if (!line.summary) line.summary = "自动找平";
 };
 
 const save = async () => {

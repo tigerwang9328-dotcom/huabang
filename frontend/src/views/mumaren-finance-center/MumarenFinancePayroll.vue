@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openDialog">录入工资</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openDialog">录入工资</el-button>
       </div>
     </div>
 
@@ -19,6 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能录入或发放工资。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="employee_name" label="员工" min-width="120" />
@@ -59,12 +60,13 @@
             link
             type="primary"
             size="small"
+            :disabled="isReadonly"
             :loading="actingId === row.id"
             @click="pay(row)"
           >发放</el-button>
           <el-popconfirm title="确定删除该工资记录?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -110,14 +112,12 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
-  mumarenFinanceCenterApi,
   payrollsApi,
-  type MumarenFinanceBook,
   type MumarenPayroll,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const records = ref<MumarenPayroll[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -159,8 +159,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -168,6 +167,7 @@ onMounted(async () => {
 });
 
 const openDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -184,6 +184,7 @@ const openDialog = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!form.employee_name) {
     ElMessage.warning("请填写员工姓名");
@@ -213,6 +214,7 @@ const save = async () => {
 };
 
 const pay = async (row: MumarenPayroll) => {
+  if (isReadonly.value) return;
   if (!bookId.value || row.status !== "draft") return;
   actingId.value = row.id;
   try {
@@ -227,6 +229,7 @@ const pay = async (row: MumarenPayroll) => {
 };
 
 const remove = async (row: MumarenPayroll) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

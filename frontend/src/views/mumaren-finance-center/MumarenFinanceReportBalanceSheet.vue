@@ -8,6 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
+        <el-button :disabled="!bookId" @click="printReport">打印</el-button>
       </div>
     </div>
 
@@ -94,6 +95,7 @@ const loading = ref(false);
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
+const printReport = () => window.print();
 
 // 科目分类:优先用 account_type(包含关键字),缺失时回退到科目编码首位(中国会计准则 1资产/2负债/4权益)。
 const classify = (row: TrialRowWithType): "asset" | "liability" | "equity" | "other" => {

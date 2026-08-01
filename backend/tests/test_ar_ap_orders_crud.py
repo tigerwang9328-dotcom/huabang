@@ -3,12 +3,13 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 
 from mumaren_crud_helpers import _FakeUser, _MockDb, _MockResult
 
 from app.api.v1.mumaren_finance_center_domains import (
     ArApOrderUpdate,
+    _ar_ap_filter_conditions,
     delete_ar_ap_order,
     list_ar_ap_orders,
     update_ar_ap_order,
@@ -33,6 +34,17 @@ def _payable(*, oid=1, book_id=1, status="draft"):
         period="2026-07", counterparty_name="供应商乙", total_amount=Decimal("500.00"),
         settled_amount=Decimal("0"), settlement_status="open", workflow_status=status,
     )
+
+
+def test_ar_ap_filters_ignore_unresolved_fastapi_optional_query_defaults():
+    conditions = _ar_ap_filter_conditions(
+        FinanceCenterMumarenReceivableOrder,
+        book_id=1,
+        period=Query(default=None),
+        status=Query(default=None),
+        counterparty_name=Query(default=None),
+    )
+    assert len(conditions) == 1
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ export interface MumarenFinanceCapability {
   unavailableReason?: string;
 }
 
-// 标准财务中心导航:13 个一级条目,5 个一级带子项,共 30 个子项。
+// 标准财务中心导航:13 个一级条目,5 个一级带子项,共 32 个子项。
 export interface MumarenFinanceNavItem {
   key: string;
   title: string;
@@ -74,10 +74,22 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
       { key: "sales-monthly", title: "销售月报表", path: `${R}/reports/sales-monthly`, routeName: "MumarenFinanceSalesMonthly", availability: "available" },
     ],
   },
-  { key: "ar-ap", title: "应收应付", path: `${R}/ar-ap`, routeName: "MumarenFinanceArAp", availability: "available" },
+  {
+    key: "ar-ap",
+    title: "应收应付",
+    path: `${R}/ar-ap`,
+    routeName: "MumarenFinanceArAp",
+    availability: "available",
+    children: [
+      { key: "ar-ap-receivable", title: "应收单台账", path: `${R}/ar-ap/receivable`, routeName: "MumarenFinanceReceivableLedger", availability: "available" },
+      { key: "ar-ap-payable", title: "应付单台账", path: `${R}/ar-ap/payable`, routeName: "MumarenFinancePayableLedger", availability: "available" },
+      { key: "ar-ap-aging", title: "账龄分析", path: `${R}/ar-ap/aging`, routeName: "MumarenFinanceArApAging", availability: "available" },
+    ],
+  },
   { key: "closing", title: "结账", path: `${R}/closing`, routeName: "MumarenFinanceClosing", availability: "available" },
   { key: "assets", title: "资产", path: `${R}/assets`, routeName: "MumarenFinanceAssets", availability: "available" },
   { key: "invoices", title: "发票", path: `${R}/invoices`, routeName: "MumarenFinanceInvoices", availability: "available" },
+  { key: "payments", title: "付款", path: `${R}/payments`, routeName: "MumarenFinancePayments", availability: "available" },
   {
     key: "cashier",
     title: "出纳",
@@ -102,6 +114,8 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
       { key: "settings-books", title: "账套管理", path: `${R}/settings/books`, routeName: "MumarenFinanceSettingsBooks", availability: "available" },
       { key: "settings-auxiliary", title: "辅助核算", path: `${R}/settings/auxiliary`, routeName: "MumarenFinanceSettingsAuxiliary", availability: "available" },
       { key: "settings-audit-logs", title: "操作日志", path: `${R}/settings/audit-logs`, routeName: "MumarenFinanceSettingsAuditLogs", availability: "available" },
+      { key: "settings-daily-parameters", title: "每日经营参数", path: `${R}/settings/daily-parameters`, routeName: "MumarenFinanceDailyParameters", availability: "available" },
+      { key: "settings-daily-ad-costs", title: "每日广告费", path: `${R}/settings/daily-ad-costs`, routeName: "MumarenFinanceDailyAdCosts", availability: "available" },
     ],
   },
 ];
@@ -134,6 +148,8 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
         { path: `${R}/vouchers/create`, label: "录凭证" },
         { path: `${R}/vouchers/list`, label: "查凭证" },
         { path: `${R}/vouchers/summary`, label: "凭证汇总" },
+        { path: `${R}/vouchers/template`, label: "凭证模板" },
+        { path: `${R}/vouchers/auto`, label: "自动凭证" },
       ],
     },
     {
@@ -159,10 +175,19 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
         { path: `${R}/reports/sales-monthly`, label: "销售月报表" },
       ],
     },
-    { path: `${R}/ar-ap`, label: "应收应付" },
+    {
+      label: "应收应付",
+      key: "mumaren-ar-ap",
+      children: [
+        { path: `${R}/ar-ap/receivable`, label: "应收单台账" },
+        { path: `${R}/ar-ap/payable`, label: "应付单台账" },
+        { path: `${R}/ar-ap/aging`, label: "账龄分析" },
+      ],
+    },
     { path: `${R}/closing`, label: "结账" },
     { path: `${R}/assets`, label: "资产" },
     { path: `${R}/invoices`, label: "发票" },
+    { path: `${R}/payments`, label: "付款" },
     {
       label: "出纳",
       key: "mumaren-cashier",
@@ -181,6 +206,8 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
         { path: `${R}/settings/books`, label: "账套管理" },
         { path: `${R}/settings/auxiliary`, label: "辅助核算" },
         { path: `${R}/settings/audit-logs`, label: "操作日志" },
+        { path: `${R}/settings/daily-parameters`, label: "每日经营参数" },
+        { path: `${R}/settings/daily-ad-costs`, label: "每日广告费" },
       ],
     },
   ],
