@@ -192,6 +192,29 @@ test('拆分后的应收应付页面从共享账簿仓库加载并随路由账�
   assert.match(aging, /await loadBooks\(\)/)
 })
 
+test('所有账簿页面使用共享账簿，历史账簿写入页有界面只读守卫', () => {
+  const financeViews = [
+    'MumarenFinanceAssets', 'MumarenFinanceCashierAccounts', 'MumarenFinanceCashierReconciliation',
+    'MumarenFinanceClosing', 'MumarenFinanceCompass', 'MumarenFinanceInvoices',
+    'MumarenFinanceLedgerDetail', 'MumarenFinancePayroll', 'MumarenFinanceReportBalanceSheet',
+    'MumarenFinanceReportCashFlow', 'MumarenFinanceReportExpense', 'MumarenFinanceReportPayable',
+    'MumarenFinanceReportProfit', 'MumarenFinanceReportReceivable', 'MumarenFinanceReportSalesMonthly',
+    'MumarenFinanceReportTrialBalance', 'MumarenFinanceSettingsAuditLogs', 'MumarenFinanceSettingsAuxiliary',
+    'MumarenFinanceTax', 'MumarenFinanceTaxRecords', 'MumarenFinanceVoucherAuto',
+    'MumarenFinanceVoucherList', 'MumarenFinanceVoucherSummary', 'MumarenFinanceVoucherTemplate',
+  ]
+  for (const view of financeViews) {
+    assert.match(read('src', 'views', 'mumaren-finance-center', `${view}.vue`), /useMumarenFinanceBook|useMumarenFinanceBookStore/, view)
+  }
+  for (const view of [
+    'MumarenFinanceAssets', 'MumarenFinanceCashierAccounts', 'MumarenFinanceCashierReconciliation',
+    'MumarenFinanceInvoices', 'MumarenFinancePayroll', 'MumarenFinanceSettingsAuxiliary',
+    'MumarenFinanceTax', 'MumarenFinanceVoucherAuto', 'MumarenFinanceVoucherList', 'MumarenFinanceVoucherTemplate',
+  ]) {
+    assert.match(read('src', 'views', 'mumaren-finance-center', `${view}.vue`), /isReadonly/, `${view} must guard historical books`)
+  }
+})
+
 test('派生展示类页面调用已有 API,不新增后端接口', () => {
   const derivedPages = [
     { file: 'MumarenFinanceCompass.vue', apis: ['listBooks', 'getTrialBalance', 'getProfitStatement'] },

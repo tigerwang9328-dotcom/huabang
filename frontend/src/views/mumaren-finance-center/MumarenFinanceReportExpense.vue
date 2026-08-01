@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openCreate">登记费用</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">登记费用</el-button>
       </div>
     </div>
 
@@ -19,6 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能登记、审核或过账费用。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="records" empty-text="暂无费用明细" stripe show-summary :summary-method="getSummaries">
       <el-table-column prop="period" label="期间" width="120" />
@@ -35,8 +36,8 @@
       <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
       <el-table-column label="操作" width="220">
         <template #default="scope">
-          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="reviewRow(scope.row)">审核</el-button>
-          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :loading="actingId === scope.row.id" @click="postRow(scope.row)">过账</el-button>
+          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="reviewRow(scope.row)">审核</el-button>
+          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="postRow(scope.row)">过账</el-button>
           <el-popconfirm
             title="确定删除该记录吗?"
             confirm-button-text="删除"
@@ -44,7 +45,7 @@
             @confirm="removeRow(scope.row)"
           >
             <template #reference>
-              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
+              <el-button size="small" link type="danger" :disabled="isReadonly" :loading="actingId === scope.row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -82,13 +83,11 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import {
   expenseEntriesApi,
-  mumarenFinanceCenterApi,
   type MumarenExpenseEntry,
-  type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const records = ref<MumarenExpenseEntry[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -155,8 +154,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -164,6 +162,7 @@ onMounted(async () => {
 });
 
 const openCreate = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -173,6 +172,7 @@ const openCreate = () => {
 };
 
 const submit = async () => {
+  if (isReadonly.value) return;
   if (!formRef.value || !bookId.value) return;
   const bid = bookId.value;
   await formRef.value.validate(async (valid) => {
@@ -199,6 +199,7 @@ const submit = async () => {
 };
 
 const reviewRow = async (row: MumarenExpenseEntry) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -213,6 +214,7 @@ const reviewRow = async (row: MumarenExpenseEntry) => {
 };
 
 const postRow = async (row: MumarenExpenseEntry) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -227,6 +229,7 @@ const postRow = async (row: MumarenExpenseEntry) => {
 };
 
 const removeRow = async (row: MumarenExpenseEntry) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

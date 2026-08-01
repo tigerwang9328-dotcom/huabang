@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openCreate">录入月报</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">录入月报</el-button>
       </div>
     </div>
 
@@ -19,6 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能录入或删除销售月报。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="records" empty-text="暂无销售月报" stripe show-summary :summary-method="getSummaries">
       <el-table-column prop="period" label="月份" width="120" />
@@ -42,7 +43,7 @@
             @confirm="removeRow(scope.row)"
           >
             <template #reference>
-              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
+              <el-button size="small" link type="danger" :disabled="isReadonly" :loading="actingId === scope.row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -80,13 +81,11 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import {
   salesMonthlyReportsApi,
-  mumarenFinanceCenterApi,
   type MumarenSalesMonthlyReport,
-  type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const records = ref<MumarenSalesMonthlyReport[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -141,8 +140,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -150,6 +148,7 @@ onMounted(async () => {
 });
 
 const openCreate = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -159,6 +158,7 @@ const openCreate = () => {
 };
 
 const submit = async () => {
+  if (isReadonly.value) return;
   if (!formRef.value || !bookId.value) return;
   const bid = bookId.value;
   await formRef.value.validate(async (valid) => {
@@ -185,6 +185,7 @@ const submit = async () => {
 };
 
 const removeRow = async (row: MumarenSalesMonthlyReport) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

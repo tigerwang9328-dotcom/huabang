@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openDialog">新增核算项</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openDialog">新增核算项</el-button>
       </div>
     </div>
 
@@ -25,6 +25,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能维护辅助核算项。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="items" empty-text="暂无核算项" stripe>
       <el-table-column prop="aux_type" label="维度" width="120" />
@@ -45,12 +46,12 @@
       </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
-          <el-button link :type="row.status === 'active' ? 'warning' : 'success'" size="small" :loading="actingId === row.id" @click="toggle(row)">
+          <el-button link :type="row.status === 'active' ? 'warning' : 'success'" size="small" :disabled="isReadonly" :loading="actingId === row.id" @click="toggle(row)">
             {{ row.status === "active" ? "停用" : "启用" }}
           </el-button>
           <el-popconfirm title="确定删除该核算项?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -94,13 +95,10 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   auxiliaryAccountingsApi,
-  mumarenFinanceCenterApi,
   type MumarenAuxiliaryAccounting,
-  type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const items = ref<MumarenAuxiliaryAccounting[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -141,8 +139,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -163,6 +160,7 @@ const openDialog = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!form.code) {
     ElMessage.warning("请填写编码");
@@ -192,6 +190,7 @@ const save = async () => {
 };
 
 const toggle = async (row: MumarenAuxiliaryAccounting) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -208,6 +207,7 @@ const toggle = async (row: MumarenAuxiliaryAccounting) => {
 };
 
 const remove = async (row: MumarenAuxiliaryAccounting) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

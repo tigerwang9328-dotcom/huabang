@@ -8,8 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button :disabled="!bookId" @click="openAccountDialog">新增账户</el-button>
-        <el-button type="primary" :disabled="!bookId || accounts.length === 0" @click="openTxnDialog">录入流水</el-button>
+        <el-button :disabled="!bookId || isReadonly" @click="openAccountDialog">新增账户</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly || accounts.length === 0" @click="openTxnDialog">录入流水</el-button>
       </div>
     </div>
 
@@ -20,6 +20,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能维护资金账户或录入流水。" :closable="false" show-icon />
 
     <h3 class="block-title">资金账户</h3>
     <el-table v-loading="loading" :data="accounts" empty-text="暂无账户" stripe show-summary :summary-method="accountSummary">
@@ -33,7 +34,7 @@
         <template #default="{ row }">
           <el-popconfirm title="确定删除该账户?关联流水将一并删除" @confirm="removeAccount(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -120,14 +121,11 @@ import { ElMessage } from "element-plus";
 import {
   cashAccountsApi,
   cashFlowsApi,
-  mumarenFinanceCenterApi,
   type MumarenCashAccount,
   type MumarenCashFlow,
-  type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const accounts = ref<MumarenCashAccount[]>([]);
 const transactions = ref<MumarenCashFlow[]>([]);
 const loading = ref(false);
@@ -187,8 +185,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -196,6 +193,7 @@ onMounted(async () => {
 });
 
 const openAccountDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -207,6 +205,7 @@ const openAccountDialog = () => {
 };
 
 const saveAccount = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!accountForm.account_code || !accountForm.account_name) {
     ElMessage.warning("请填写账户编码和账户名称");
@@ -232,6 +231,7 @@ const saveAccount = async () => {
 };
 
 const openTxnDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -250,6 +250,7 @@ const openTxnDialog = () => {
 };
 
 const saveTxn = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!txnForm.account_id) {
     ElMessage.warning("请选择账户");
@@ -282,6 +283,7 @@ const saveTxn = async () => {
 };
 
 const removeAccount = async (row: MumarenCashAccount) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

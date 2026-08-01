@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openCreate">登记发票</el-button>
+        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">登记发票</el-button>
       </div>
     </div>
 
@@ -45,10 +45,10 @@
       </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" :disabled="!canVerify(row)" :loading="actingId === row.id" @click="verify(row)">认证</el-button>
+          <el-button link type="primary" size="small" :disabled="isReadonly || !canVerify(row)" :loading="actingId === row.id" @click="verify(row)">认证</el-button>
           <el-popconfirm title="确定删除该发票?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -96,13 +96,11 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   invoicesApi,
-  mumarenFinanceCenterApi,
   type MumarenFinanceBook,
   type MumarenInvoice,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const invoices = ref<MumarenInvoice[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -144,8 +142,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -167,6 +164,7 @@ const openCreate = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!form.invoice_no) {
     ElMessage.warning("请填写发票号码");
@@ -196,7 +194,7 @@ const save = async () => {
 const canVerify = (row: MumarenInvoice) => row.invoice_type === "input" && row.verification_status !== "verified";
 
 const verify = async (row: MumarenInvoice) => {
-  if (!bookId.value || !canVerify(row)) return;
+  if (isReadonly.value || !bookId.value || !canVerify(row)) return;
   actingId.value = row.id;
   try {
     await invoicesApi.verify(row.id, bookId.value);
@@ -210,6 +208,7 @@ const verify = async (row: MumarenInvoice) => {
 };
 
 const remove = async (row: MumarenInvoice) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
