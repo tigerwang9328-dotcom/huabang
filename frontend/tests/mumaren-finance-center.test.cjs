@@ -925,3 +925,17 @@ test('固定资产编辑按月保留后端折旧年限，不能四舍五入为�
   assert.doesNotMatch(page, /Math\.round\(Number\(row\.useful_life_months/)
   assert.doesNotMatch(page, /Number\(form\.useful_life \|\| 0\) \* 12/)
 })
+
+test('当前账簿可受控编辑并幂等补齐基础科目，金蝶迁移账簿没有维护入口', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceBooks.vue')
+
+  assert.match(api, /updateBook:/)
+  assert.match(api, /updateBook:[\s\S]*ApiResponse<Pick<MumarenFinanceBook, "id" \| "book_code" \| "book_name" \| "company_name" \| "status" \| "is_readonly">>/)
+  assert.match(api, /replenishStarterAccounts:/)
+  assert.match(page, /编辑/)
+  assert.match(page, /补齐基础科目/)
+  assert.match(page, /openEdit/)
+  assert.match(page, /replenishStarterAccounts/)
+  assert.match(page, /row\.is_readonly/)
+})

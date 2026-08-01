@@ -18,6 +18,8 @@ from app.services.mumaren_finance_center.workflow import (
     create_book as create_mumaren_book,
     create_account as create_mumaren_account,
     update_account as update_mumaren_account,
+    replenish_starter_accounts,
+    update_book as update_mumaren_book,
     create_voucher as create_mumaren_voucher,
     list_accounts,
     list_books,
@@ -76,6 +78,12 @@ class BookCreateInput(BaseModel):
     book_name: str = Field(min_length=1, max_length=128)
     company_name: str | None = Field(default=None, max_length=255)
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
+
+
+class BookUpdateInput(BaseModel):
+    book_name: str | None = Field(default=None, min_length=1, max_length=128)
+    # The client always sends this field so null explicitly clears an optional company name.
+    company_name: str | None
 
 
 class AccountCreateInput(BaseModel):
@@ -159,6 +167,40 @@ async def create_book_endpoint(
         "id": book.id, "book_code": book.book_code, "book_name": book.book_name,
         "company_name": book.company_name, "status": book.status,
     }, message="账簿已创建并完成基础数据初始化")
+
+
+@router.put("/books/{book_id}", response_model=ApiResponse)
+async def update_book_endpoint(
+    book_id: int, body: BookUpdateInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    try:
+        book = await update_mumaren_book(
+            db, book_id=book_id, book_name=body.book_name, company_name=body.company_name,
+            operator_id=_actor_id(current_user),
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data={
+        "id": book.id, "book_code": book.book_code, "book_name": book.book_name,
+        "company_name": book.company_name, "status": book.status, "is_readonly": book.is_readonly,
+    }, message="账簿已更新")
+
+
+@router.post("/books/{book_id}/starter-accounts", response_model=ApiResponse)
+async def replenish_starter_accounts_endpoint(
+    book_id: int,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    try:
+        added = await replenish_starter_accounts(db, book_id=book_id, operator_id=_actor_id(current_user))
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data={"added": added}, message=f"已补齐 {added} 个基础科目")
 
 
 @router.get("/books/{book_id}/accounts", response_model=ApiResponse)

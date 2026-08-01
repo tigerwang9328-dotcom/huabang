@@ -26,6 +26,10 @@ export interface MumarenFinanceBookCreatePayload {
   company_name?: string | null;
   status?: "active" | "inactive";
 }
+export interface MumarenFinanceBookUpdatePayload {
+  book_name?: string;
+  company_name: string | null;
+}
 
 export interface MumarenFinanceAccount {
   id: number;
@@ -286,6 +290,8 @@ export const mumarenFinanceCenterApi = {
   listVouchers: (params?: { book_id?: number }) => request.get<ApiResponse<MumarenFinanceVoucher[]>>(requestPath("/vouchers"), { params }),
   listBooks: () => request.get<ApiResponse<MumarenFinanceBook[]>>(requestPath("/books")),
   createBook: (data: MumarenFinanceBookCreatePayload) => request.post<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status">>>(requestPath("/books"), data),
+  updateBook: (bookId: number, data: MumarenFinanceBookUpdatePayload) => request.put<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status" | "is_readonly">>>(requestPath(`/books/${bookId}`), data),
+  replenishStarterAccounts: (bookId: number) => request.post<ApiResponse<{ added: number }>>(requestPath(`/books/${bookId}/starter-accounts`)),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),

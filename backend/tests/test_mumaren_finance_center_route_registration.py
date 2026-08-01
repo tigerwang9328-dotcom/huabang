@@ -81,6 +81,19 @@ def test_books_can_create_a_new_writable_ledger_and_only_drafts_can_be_deleted()
     assert "/finance-center/mumaren/vouchers/{voucher_id}" in paths
 
 
+def test_books_expose_current_book_only_metadata_update_and_idempotent_starter_account_replenish():
+    from app.api.v1 import mumaren_finance_center
+
+    paths = {route.path for route in mumaren_finance_center.router.routes}
+    source = open(mumaren_finance_center.__file__, encoding="utf-8").read()
+    assert '@router.put("/books/{book_id}"' in source
+    assert '@router.post("/books/{book_id}/starter-accounts"' in source
+    assert "update_mumaren_book" in source
+    assert "replenish_starter_accounts" in source
+    assert "/finance-center/mumaren/books/{book_id}" in paths
+    assert "/finance-center/mumaren/books/{book_id}/starter-accounts" in paths
+
+
 def test_domain_read_routes_apply_a_bounded_response_limit():
     from app.api.v1 import mumaren_finance_center_domains
 
