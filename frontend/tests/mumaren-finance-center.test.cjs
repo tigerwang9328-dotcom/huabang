@@ -812,3 +812,20 @@ test('对照牧马人快捷操作，数据罗盘只导航到受控录入流程�
   assert.match(closing, /periodsApi\.initialize/)
   assert.match(closing, /periodsApi\.precheck/)
 })
+
+test('出纳和发票页面与独立后端的实际请求字段保持一致', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const cashier = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCashierAccounts.vue')
+  const invoices = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceInvoices.vue')
+
+  assert.match(api, /account_code: string/)
+  assert.match(api, /cash_account_id: number/)
+  assert.match(api, /flow_date: string/)
+  assert.match(api, /direction: "in" \| "out"/)
+  assert.match(api, /invoice_type: "input" \| "output"/)
+  assert.match(api, /counterparty_name/)
+  assert.match(cashier, /cash_account_id/)
+  assert.match(cashier, /flow_date/)
+  assert.match(invoices, /invoice_type/)
+  assert.match(invoices, /verification_status/)
+})

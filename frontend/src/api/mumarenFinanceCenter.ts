@@ -324,30 +324,27 @@ export const fixedAssetsApi = {
 export interface MumarenInvoice {
   id: number;
   book_id: number;
-  invoice_code: string;
   invoice_no: string;
-  direction: "input" | "output";
-  counterparty: string;
+  invoice_type: "input" | "output";
+  counterparty_name: string | null;
   amount: number;
   tax_amount: number;
-  total_amount: number;
   invoice_date: string;
-  certified: boolean;
-  status: "draft" | "verified";
-  created_at: string;
+  verification_status: "draft" | "verified";
+  workflow_status: "draft" | "reviewed";
 }
 export interface InvoiceInput {
   book_id: number;
-  invoice_code: string;
   invoice_no: string;
-  direction: "input" | "output";
-  counterparty: string;
+  invoice_type: "input" | "output";
+  counterparty_name?: string | null;
   amount: number;
   tax_amount: number;
   invoice_date: string;
 }
 export interface InvoiceUpdate {
-  counterparty?: string;
+  invoice_type?: "input" | "output";
+  counterparty_name?: string | null;
   amount?: number;
   tax_amount?: number;
   invoice_date?: string;
@@ -364,21 +361,23 @@ export const invoicesApi = {
 export interface MumarenCashAccount {
   id: number;
   book_id: number;
+  account_code: string;
   account_name: string;
   account_type: string;
-  opening_balance: number;
-  current_balance: number;
-  created_at: string;
+  currency: string;
+  is_active: boolean;
 }
 export interface CashAccountInput {
   book_id: number;
+  account_code: string;
   account_name: string;
   account_type: string;
-  opening_balance: number;
+  currency: string;
 }
 export interface CashAccountUpdate {
   account_name?: string;
   account_type?: string;
+  currency?: string;
 }
 export const cashAccountsApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenCashAccount[]>>(requestPath("/cash-accounts"), { params }),
@@ -392,21 +391,21 @@ export interface MumarenCashFlow {
   id: number;
   book_id: number;
   cash_account_id: number;
-  transaction_date: string;
-  direction: "income" | "expense";
+  flow_date: string;
+  direction: "in" | "out";
   amount: number;
-  counterparty: string;
-  remark: string;
-  created_at: string;
+  category: string | null;
+  counterparty_name: string | null;
+  workflow_status: "draft" | "reviewed";
 }
 export interface CashFlowInput {
   book_id: number;
   cash_account_id: number;
-  transaction_date: string;
-  direction: "income" | "expense";
+  flow_date: string;
+  direction: "in" | "out";
   amount: number;
-  counterparty: string;
-  remark: string;
+  category?: string | null;
+  counterparty_name?: string | null;
 }
 export const cashFlowsApi = {
   list: (params: { book_id: number; cash_account_id?: number; limit?: number }) => request.get<ApiResponse<MumarenCashFlow[]>>(requestPath("/cash-flows"), { params }),
