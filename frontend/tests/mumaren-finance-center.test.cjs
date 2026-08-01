@@ -606,6 +606,18 @@ test('科目管理与账套管理页面只读,期末结账与辅助核算已持�
   assert.match(closing, /periodsApi/, '结账页面必须调用 periodsApi')
 })
 
+test('辅助核算页面使用独立后端的 parent_id 和 is_active 契约显示层级与启停状态', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceSettingsAuxiliary.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  assert.match(page, /row\.parent_id/)
+  assert.match(page, /row\.is_active/)
+  assert.doesNotMatch(page, /row\.parent_code|row\.status/)
+  assert.match(page, /is_active:\s*!row\.is_active,\s*book_id:\s*bookId\.value/)
+  assert.match(api, /export interface AuxiliaryAccountingUpdate\s*\{\s*book_id: number;/)
+  assert.match(api, /request\.put<ApiResponse<MumarenAuxiliaryAccounting>>\(requestPath\(`\/auxiliary-accountings\/\$\{id\}`\), data\)/)
+})
+
 test('历史归档页面必须只读,不出现编辑/审核/过账操作按钮', () => {
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
 

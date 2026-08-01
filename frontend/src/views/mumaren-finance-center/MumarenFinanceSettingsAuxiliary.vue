@@ -31,23 +31,20 @@
       <el-table-column prop="aux_type" label="维度" width="120" />
       <el-table-column prop="code" label="编码" width="140" />
       <el-table-column prop="name" label="名称" min-width="180" />
-      <el-table-column label="父级编码" width="140">
-        <template #default="{ row }">{{ row.parent_code || "—" }}</template>
+      <el-table-column label="父级" width="180">
+        <template #default="{ row }">{{ row.parent_id ? parentNameById.get(row.parent_id) || `#${row.parent_id}` : "—" }}</template>
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-            {{ row.status === "active" ? "启用" : "停用" }}
+          <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+            {{ row.is_active ? "启用" : "停用" }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="备注" min-width="160" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.remark || "—" }}</template>
-      </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
-          <el-button link :type="row.status === 'active' ? 'warning' : 'success'" size="small" :disabled="isReadonly" :loading="actingId === row.id" @click="toggle(row)">
-            {{ row.status === "active" ? "停用" : "启用" }}
+          <el-button link :type="row.is_active ? 'warning' : 'success'" size="small" :disabled="isReadonly" :loading="actingId === row.id" @click="toggle(row)">
+            {{ row.is_active ? "停用" : "启用" }}
           </el-button>
           <el-popconfirm title="确定删除该核算项?" @confirm="remove(row)">
             <template #reference>
@@ -74,11 +71,10 @@
         <el-form-item label="名称">
           <el-input v-model="form.name" />
         </el-form-item>
-        <el-form-item label="父级编码">
-          <el-input v-model="form.parent_code" placeholder="可选,留空表示顶级" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" />
+        <el-form-item label="父级">
+          <el-select v-model="form.parent_id" clearable style="width:100%" placeholder="可选,留空表示顶级">
+            <el-option v-for="item in parentCandidates" :key="item.id" :label="`${item.code} - ${item.name}`" :value="item.id" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -91,7 +87,7 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   auxiliaryAccountingsApi,
@@ -107,13 +103,14 @@ const actingId = ref<number>();
 const dialogVisible = ref(false);
 const filterDimension = ref("");
 const auxTypeValue = (label: string) => ({ 客户: "customer", 供应商: "supplier", 员工: "employee", 项目: "project", 部门: "department" }[label] || label);
+const parentNameById = computed(() => new Map(items.value.map((item) => [item.id, `${item.code} - ${item.name}`])));
+const parentCandidates = computed(() => items.value.filter((item) => item.aux_type === auxTypeValue(form.aux_type)));
 
 const form = reactive({
   aux_type: "客户",
   code: "",
   name: "",
-  parent_code: "",
-  remark: "",
+  parent_id: undefined as number | undefined,
 });
 
 const load = async () => {
@@ -147,6 +144,7 @@ onMounted(async () => {
 });
 
 const openDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -154,8 +152,7 @@ const openDialog = () => {
   form.aux_type = "客户";
   form.code = "";
   form.name = "";
-  form.parent_code = "";
-  form.remark = "";
+  form.parent_id = undefined;
   dialogVisible.value = true;
 };
 
@@ -177,7 +174,7 @@ const save = async () => {
       aux_type: auxTypeValue(form.aux_type),
       code: form.code,
       name: form.name,
-      parent_id: items.value.find((item) => item.code === form.parent_code)?.id ?? null,
+      parent_id: form.parent_id ?? null,
     });
     ElMessage.success("核算项已新增");
     dialogVisible.value = false;
@@ -196,7 +193,8 @@ const toggle = async (row: MumarenAuxiliaryAccounting) => {
   try {
     await auxiliaryAccountingsApi.update(row.id, {
       is_active: !row.is_active,
-    }, bookId.value);
+      book_id: bookId.value,
+    });
     ElMessage.success(row.is_active ? "已停用" : "已启用");
     await load();
   } catch (e: any) {

@@ -682,6 +682,7 @@ export interface AuxiliaryAccountingInput {
   parent_id?: number | null;
 }
 export interface AuxiliaryAccountingUpdate {
+  book_id: number;
   name?: string;
   parent_id?: number | null;
   is_active?: boolean;
@@ -689,6 +690,6 @@ export interface AuxiliaryAccountingUpdate {
 export const auxiliaryAccountingsApi = {
   list: (params: { book_id: number; aux_type?: string; limit?: number }) => request.get<ApiResponse<MumarenAuxiliaryAccounting[]>>(requestPath("/auxiliary-accountings"), { params }),
   create: (data: AuxiliaryAccountingInput) => request.post<ApiResponse<MumarenAuxiliaryAccounting>>(requestPath("/auxiliary-accountings"), data),
-  update: (id: number, data: AuxiliaryAccountingUpdate, book_id: number) => request.put<ApiResponse<MumarenAuxiliaryAccounting>>(requestPath(`/auxiliary-accountings/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: AuxiliaryAccountingUpdate) => request.put<ApiResponse<MumarenAuxiliaryAccounting>>(requestPath(`/auxiliary-accountings/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/auxiliary-accountings/${id}`), { params: { book_id } }),
 };
