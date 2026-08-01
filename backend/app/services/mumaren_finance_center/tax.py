@@ -17,6 +17,7 @@ from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenTaxRecord,
     FinanceCenterMumarenTaxType,
 )
+from app.services.mumaren_finance_center.workflow import assert_book_writable
 
 
 class InvalidTaxTransition(ValueError):
@@ -36,6 +37,60 @@ def tax_record_balance(tax_amount: Any, paid_amount: Any) -> Decimal:
     if tax < 0 or paid < 0 or paid > tax:
         raise ValueError("税务实缴金额无效")
     return tax - paid
+
+
+async def create_tax_type(
+    db: AsyncSession, *, book_id: int, tax_code: str, tax_name: str,
+    default_rate: Any, operator_id: int, tax_category: str | None = None,
+) -> FinanceCenterMumarenTaxType:
+    """Create a tax type only for a writable current book."""
+    await assert_book_writable(db, book_id=book_id)
+    code, name = tax_code.strip().upper(), tax_name.strip()
+    rate = _amount(default_rate)
+    if not code or not name:
+        raise ValueError("税种编码和名称不能为空")
+    if rate < 0 or rate > 1:
+        raise ValueError("默认税率必须在0到1之间")
+    existing = (await db.execute(select(FinanceCenterMumarenTaxType).where(
+        FinanceCenterMumarenTaxType.book_id == book_id,
+        FinanceCenterMumarenTaxType.tax_code == code,
+    ))).scalar_one_or_none()
+    if existing is not None:
+        raise ValueError("税种编码已存在")
+    row = FinanceCenterMumarenTaxType(
+        book_id=book_id, tax_code=code, tax_name=name, default_rate=rate,
+        tax_category=tax_category.strip() if tax_category else None, is_active=True,
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def update_tax_type(
+    db: AsyncSession, *, tax_type_id: int, book_id: int, tax_name: str | None,
+    default_rate: Any | None, tax_category: str | None, is_active: bool | None,
+    operator_id: int,
+) -> FinanceCenterMumarenTaxType:
+    """Update non-key tax-type fields while preserving historical immutability."""
+    await assert_book_writable(db, book_id=book_id)
+    row = await db.get(FinanceCenterMumarenTaxType, tax_type_id)
+    if row is None or row.book_id != book_id:
+        raise LookupError("税种不存在")
+    if tax_name is not None:
+        if not tax_name.strip():
+            raise ValueError("税种名称不能为空")
+        row.tax_name = tax_name.strip()
+    if default_rate is not None:
+        rate = _amount(default_rate)
+        if rate < 0 or rate > 1:
+            raise ValueError("默认税率必须在0到1之间")
+        row.default_rate = rate
+    if tax_category is not None:
+        row.tax_category = tax_category.strip() or None
+    if is_active is not None:
+        row.is_active = is_active
+    await db.flush()
+    return row
 
 
 def build_tax_alerts(records: Iterable[Mapping[str, Any]], *, today: date) -> list[dict]:

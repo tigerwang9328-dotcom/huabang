@@ -9,13 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission, require_roles
 from app.core.database import get_db
-from app.models.mumaren_finance_center import FinanceCenterMumarenAuditLog, FinanceCenterMumarenVoucher
+from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog, FinanceCenterMumarenVoucher
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.mumaren_finance_center.workflow import (
     InvalidVoucherTransition,
     UnbalancedVoucherError,
     create_book as create_mumaren_book,
+    create_account as create_mumaren_account,
+    update_account as update_mumaren_account,
     create_voucher as create_mumaren_voucher,
     list_accounts,
     list_books,
@@ -74,6 +76,23 @@ class BookCreateInput(BaseModel):
     book_name: str = Field(min_length=1, max_length=128)
     company_name: str | None = Field(default=None, max_length=255)
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
+
+
+class AccountCreateInput(BaseModel):
+    account_code: str = Field(min_length=1, max_length=64)
+    account_name: str = Field(min_length=1, max_length=128)
+    account_type: str = Field(pattern=r"^(asset|liability|equity|income|expense)$")
+    direction: str = Field(pattern=r"^(debit|credit)$")
+    level: int = Field(default=1, ge=1, le=10)
+
+
+class AccountUpdateInput(BaseModel):
+    book_id: int = Field(ge=1)
+    account_name: str | None = Field(default=None, min_length=1, max_length=128)
+    account_type: str | None = Field(default=None, pattern=r"^(asset|liability|equity|income|expense)$")
+    direction: str | None = Field(default=None, pattern=r"^(debit|credit)$")
+    level: int | None = Field(default=None, ge=1, le=10)
+    is_active: bool | None = None
 
 
 def _actor_id(user: SysUser) -> int:
@@ -153,6 +172,49 @@ async def get_accounts(
         "id": account.id, "account_code": account.account_code, "account_name": account.account_name,
         "account_type": account.account_type, "direction": account.direction, "level": account.level,
     } for account in accounts])
+
+
+def _account_data(account: FinanceCenterMumarenAccount) -> dict:
+    return {
+        "id": account.id, "book_id": account.book_id, "account_code": account.account_code,
+        "account_name": account.account_name, "account_type": account.account_type,
+        "direction": account.direction, "level": account.level, "is_active": account.is_active,
+    }
+
+
+@router.post("/books/{book_id}/accounts", response_model=ApiResponse)
+async def create_account_endpoint(
+    book_id: int, body: AccountCreateInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    try:
+        account = await create_mumaren_account(
+            db, book_id=book_id, operator_id=_actor_id(current_user), **body.model_dump(),
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data=_account_data(account), message="科目已创建")
+
+
+@router.put("/books/{book_id}/accounts/{account_id}", response_model=ApiResponse)
+async def update_account_endpoint(
+    book_id: int, account_id: int, body: AccountUpdateInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    if body.book_id != book_id:
+        raise HTTPException(status_code=400, detail="账簿标识不一致")
+    try:
+        account = await update_mumaren_account(
+            db, account_id=account_id, book_id=book_id, operator_id=_actor_id(current_user),
+            **body.model_dump(exclude={"book_id"}),
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data=_account_data(account), message="科目已更新")
 
 
 @router.get("/vouchers", response_model=ApiResponse)

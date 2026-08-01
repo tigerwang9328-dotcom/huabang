@@ -162,6 +162,86 @@ async def list_accounts(db: AsyncSession, *, book_id: int) -> list[FinanceCenter
     return list(result.scalars())
 
 
+async def assert_book_writable(db: AsyncSession, *, book_id: int) -> FinanceCenterMumarenBook:
+    """Return a current book and reject all mutation attempts against Kingdee books."""
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise LookupError("账簿不存在")
+    if book.is_readonly:
+        raise HistoricalRecordReadonlyError("历史迁移账簿只读，不能维护基础资料")
+    return book
+
+
+async def create_account(
+    db: AsyncSession, *, book_id: int, account_code: str, account_name: str,
+    account_type: str, direction: str, level: int, operator_id: int,
+) -> FinanceCenterMumarenAccount:
+    """Create one current-book account; historical books are immutable."""
+    await assert_book_writable(db, book_id=book_id)
+    normalized_code, normalized_name = account_code.strip(), account_name.strip()
+    if not normalized_code or not normalized_name:
+        raise ValueError("科目编码和名称不能为空")
+    if account_type not in {"asset", "liability", "equity", "income", "expense"}:
+        raise ValueError("科目类别无效")
+    if direction not in {"debit", "credit"}:
+        raise ValueError("余额方向无效")
+    if level < 1 or level > 10:
+        raise ValueError("科目级次必须在1到10之间")
+    existing = (await db.execute(select(FinanceCenterMumarenAccount).where(
+        FinanceCenterMumarenAccount.book_id == book_id,
+        FinanceCenterMumarenAccount.account_code == normalized_code,
+    ))).scalar_one_or_none()
+    if existing is not None:
+        raise ValueError("科目编码已存在")
+    account = FinanceCenterMumarenAccount(
+        book_id=book_id, account_code=normalized_code, account_name=normalized_name,
+        account_type=account_type, direction=direction, level=level, is_active=True,
+    )
+    db.add(account)
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=book_id, action="create_account", operator_id=operator_id, detail=normalized_code,
+    ))
+    await db.flush()
+    return account
+
+
+async def update_account(
+    db: AsyncSession, *, account_id: int, book_id: int, account_name: str | None,
+    account_type: str | None, direction: str | None, level: int | None,
+    is_active: bool | None, operator_id: int,
+) -> FinanceCenterMumarenAccount:
+    """Update controlled account attributes without changing account code or book."""
+    await assert_book_writable(db, book_id=book_id)
+    account = await db.get(FinanceCenterMumarenAccount, account_id)
+    if account is None or account.book_id != book_id:
+        raise LookupError("科目不存在")
+    if account.is_readonly:
+        raise HistoricalRecordReadonlyError("历史迁移科目只读，不能维护")
+    if account_name is not None:
+        if not account_name.strip():
+            raise ValueError("科目名称不能为空")
+        account.account_name = account_name.strip()
+    if account_type is not None:
+        if account_type not in {"asset", "liability", "equity", "income", "expense"}:
+            raise ValueError("科目类别无效")
+        account.account_type = account_type
+    if direction is not None:
+        if direction not in {"debit", "credit"}:
+            raise ValueError("余额方向无效")
+        account.direction = direction
+    if level is not None:
+        if level < 1 or level > 10:
+            raise ValueError("科目级次必须在1到10之间")
+        account.level = level
+    if is_active is not None:
+        account.is_active = is_active
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=book_id, action="update_account", operator_id=operator_id, detail=account.account_code,
+    ))
+    await db.flush()
+    return account
+
+
 async def create_voucher(
     db: AsyncSession,
     *,

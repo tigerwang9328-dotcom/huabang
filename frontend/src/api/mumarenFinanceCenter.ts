@@ -34,6 +34,24 @@ export interface MumarenFinanceAccount {
   account_type: string;
   direction: string;
   level: number;
+  is_active?: boolean;
+}
+
+export interface AccountCreatePayload {
+  account_code: string;
+  account_name: string;
+  account_type: "asset" | "liability" | "equity" | "income" | "expense";
+  direction: "debit" | "credit";
+  level: number;
+}
+
+export interface AccountUpdatePayload {
+  book_id: number;
+  account_name?: string;
+  account_type?: AccountCreatePayload["account_type"];
+  direction?: AccountCreatePayload["direction"];
+  level?: number;
+  is_active?: boolean;
 }
 
 // 凭证分录录入(对应后端 VoucherLineInput)
@@ -140,10 +158,30 @@ export interface MumarenTaxType {
   tax_code: string;
   tax_name: string;
   default_rate: number;
+  tax_category?: string | null;
+  is_active?: boolean;
+}
+
+export interface TaxTypeCreatePayload {
+  book_id: number;
+  tax_code: string;
+  tax_name: string;
+  default_rate: number;
+  tax_category?: string | null;
+}
+
+export interface TaxTypeUpdatePayload {
+  book_id: number;
+  tax_name?: string;
+  default_rate?: number;
+  tax_category?: string | null;
+  is_active?: boolean;
 }
 
 export const taxTypesApi = {
   list: (params: { book_id: number }) => request.get<ApiResponse<MumarenTaxType[]>>(requestPath("/tax-types"), { params }),
+  createTaxType: (data: TaxTypeCreatePayload) => request.post<ApiResponse<MumarenTaxType>>(requestPath("/tax-types"), data),
+  updateTaxType: (id: number, data: TaxTypeUpdatePayload) => request.put<ApiResponse<MumarenTaxType>>(requestPath(`/tax-types/${id}`), data),
 };
 
 export interface MumarenFinanceVoucher {
@@ -258,6 +296,8 @@ export const mumarenFinanceCenterApi = {
 
   // ── 科目查询(只读,按账簿隔离) ──
   listAccounts: (bookId: number) => request.get<ApiResponse<MumarenFinanceAccount[]>>(requestPath(`/books/${bookId}/accounts`)),
+  createAccount: (bookId: number, data: AccountCreatePayload) => request.post<ApiResponse<MumarenFinanceAccount>>(requestPath(`/books/${bookId}/accounts`), data),
+  updateAccount: (bookId: number, accountId: number, data: AccountUpdatePayload) => request.put<ApiResponse<MumarenFinanceAccount>>(requestPath(`/books/${bookId}/accounts/${accountId}`), data),
 
   // ── 凭证写入:草稿 → 财务审核 → 人工过账(禁止自动过账) ──
   createVoucher: (payload: VoucherCreatePayload) => request.post<ApiResponse<MumarenFinanceVoucher>>(requestPath("/vouchers"), payload),
