@@ -64,6 +64,8 @@ from app.services.mumaren_finance_center.tax import (
     pay_tax_record,
     review_tax_record,
     tax_record_balance,
+    create_tax_type,
+    update_tax_type,
 )
 
 
@@ -575,6 +577,22 @@ class TaxPayInput(BaseModel):
     remark: str | None = Field(default=None, max_length=500)
 
 
+class TaxTypeCreateInput(BaseModel):
+    book_id: int = Field(ge=1)
+    tax_code: str = Field(min_length=1, max_length=64)
+    tax_name: str = Field(min_length=1, max_length=128)
+    default_rate: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    tax_category: str | None = Field(default=None, max_length=64)
+
+
+class TaxTypeUpdateInput(BaseModel):
+    book_id: int = Field(ge=1)
+    tax_name: str | None = Field(default=None, min_length=1, max_length=128)
+    default_rate: Decimal | None = Field(default=None, ge=0, le=1)
+    tax_category: str | None = Field(default=None, max_length=64)
+    is_active: bool | None = None
+
+
 def _order_data(order, *, has_details: bool = False) -> dict:
     return {
         "id": order.id,
@@ -687,6 +705,14 @@ async def get_ar_ap_aging(
     return ApiResponse.ok(data={"order_type": order_type, **result})
 
 
+def _tax_type_data(row: FinanceCenterMumarenTaxType) -> dict:
+    return {
+        "id": row.id, "book_id": row.book_id, "tax_code": row.tax_code,
+        "tax_name": row.tax_name, "tax_category": row.tax_category,
+        "default_rate": float(row.default_rate), "is_active": row.is_active,
+    }
+
+
 @router.get("/tax-types", response_model=ApiResponse)
 async def list_tax_types(
     book_id: int = Query(ge=1),
@@ -702,12 +728,42 @@ async def list_tax_types(
         )
         .order_by(FinanceCenterMumarenTaxType.tax_code, FinanceCenterMumarenTaxType.id)
     )).scalars().all())
+    # Preserve the existing picker contract; management endpoints return the richer row.
     return ApiResponse.ok(data=[{
-        "id": row.id,
-        "tax_code": row.tax_code,
-        "tax_name": row.tax_name,
+        "id": row.id, "tax_code": row.tax_code, "tax_name": row.tax_name,
         "default_rate": float(row.default_rate),
     } for row in rows])
+
+
+@router.post("/tax-types", response_model=ApiResponse)
+async def create_tax_type_endpoint(
+    body: TaxTypeCreateInput, current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        row = await create_tax_type(db, operator_id=_actor_id(current_user), **body.model_dump())
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data=_tax_type_data(row), message="税种已创建")
+
+
+@router.put("/tax-types/{tax_type_id}", response_model=ApiResponse)
+async def update_tax_type_endpoint(
+    tax_type_id: int, body: TaxTypeUpdateInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    try:
+        row = await update_tax_type(
+            db, tax_type_id=tax_type_id, operator_id=_actor_id(current_user),
+            **body.model_dump(),
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data=_tax_type_data(row), message="税种已更新")
 
 
 @router.get("/tax/alerts", response_model=ApiResponse)

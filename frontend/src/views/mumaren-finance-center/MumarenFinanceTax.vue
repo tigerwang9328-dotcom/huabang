@@ -9,6 +9,7 @@
       <div class="heading-actions">
         <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
         <el-button :disabled="isReadonly || !bookId" @click="openCreate">录入草稿</el-button>
+        <el-button :disabled="isReadonly || !bookId" @click="openTaxTypes">管理税种</el-button>
       </div>
     </div>
     <div class="filters">
@@ -83,6 +84,15 @@
         <el-button @click="showCreate = false">取消</el-button>
         <el-button type="primary" :loading="saving" :disabled="isReadonly || !canCreate" @click="save">保存草稿</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="showTaxTypes" title="管理税种" width="620px" :close-on-click-modal="false">
+      <div class="heading-actions"><el-button type="primary" @click="openTaxTypeCreate">新增税种</el-button></div>
+      <el-table :data="taxTypes" size="small"><el-table-column prop="tax_code" label="编码" /><el-table-column prop="tax_name" label="名称" /><el-table-column label="默认税率"><template #default="scope">{{ Number(scope.row.default_rate || 0) * 100 }}%</template></el-table-column><el-table-column label="操作" width="110"><template #default="scope"><el-button link type="primary" @click="openTaxTypeEdit(scope.row)">编辑</el-button></template></el-table-column></el-table>
+      <el-dialog v-model="showTaxTypeEditor" :title="editingTaxType ? '编辑税种' : '新增税种'" width="430px" append-to-body>
+        <el-form :model="taxTypeForm" label-width="90px"><el-form-item label="税种编码" required><el-input v-model="taxTypeForm.tax_code" :disabled="!!editingTaxType" /></el-form-item><el-form-item label="税种名称" required><el-input v-model="taxTypeForm.tax_name" /></el-form-item><el-form-item label="默认税率"><el-input-number v-model="taxTypeForm.default_rate" :min="0" :max="1" :step="0.01" :precision="4" /></el-form-item><el-form-item label="类别"><el-input v-model="taxTypeForm.tax_category" /></el-form-item></el-form>
+        <template #footer><el-button @click="showTaxTypeEditor=false">取消</el-button><el-button type="primary" :loading="savingTaxType" @click="saveTaxType">保存</el-button></template>
+      </el-dialog>
     </el-dialog>
 
     <!-- 人工缴税对话框 -->
@@ -212,6 +222,11 @@ const review = async (row: MumarenTaxRecord) => {
 
 // ── 录入草稿对话框 ──
 const showCreate = ref(false);
+const showTaxTypes = ref(false);
+const showTaxTypeEditor = ref(false);
+const savingTaxType = ref(false);
+const editingTaxType = ref<MumarenTaxType>();
+const taxTypeForm = reactive({ tax_code: "", tax_name: "", default_rate: 0, tax_category: "" });
 const saving = ref(false);
 const form = reactive({
   tax_type_id: undefined as number | undefined,
@@ -240,6 +255,35 @@ const openCreate = async () => {
   form.due_date = "";
   form.remark = "";
   showCreate.value = true;
+};
+
+const loadTaxTypes = async () => {
+  if (!bookId.value) return;
+  taxTypes.value = (await taxTypesApi.list({ book_id: bookId.value })).data.data;
+};
+const openTaxTypes = async () => {
+  if (isReadonly.value || !bookId.value) return;
+  try { await loadTaxTypes(); showTaxTypes.value = true; }
+  catch (e: any) { ElMessage.error(e?.response?.data?.detail || "无法加载税种"); }
+};
+const openTaxTypeCreate = () => {
+  editingTaxType.value = undefined;
+  Object.assign(taxTypeForm, { tax_code: "", tax_name: "", default_rate: 0, tax_category: "" });
+  showTaxTypeEditor.value = true;
+};
+const openTaxTypeEdit = (row: MumarenTaxType) => {
+  editingTaxType.value = row;
+  Object.assign(taxTypeForm, { tax_code: row.tax_code, tax_name: row.tax_name, default_rate: Number(row.default_rate), tax_category: row.tax_category || "" });
+  showTaxTypeEditor.value = true;
+};
+const saveTaxType = async () => {
+  if (!bookId.value || !taxTypeForm.tax_code.trim() || !taxTypeForm.tax_name.trim()) return;
+  savingTaxType.value = true;
+  try {
+    if (editingTaxType.value) await taxTypesApi.updateTaxType(editingTaxType.value.id, { book_id: bookId.value, tax_name: taxTypeForm.tax_name, default_rate: taxTypeForm.default_rate, tax_category: taxTypeForm.tax_category || null });
+    else await taxTypesApi.createTaxType({ book_id: bookId.value, ...taxTypeForm, tax_category: taxTypeForm.tax_category || null });
+    ElMessage.success(editingTaxType.value ? "税种已更新" : "税种已创建"); showTaxTypeEditor.value = false; await loadTaxTypes();
+  } catch (e: any) { ElMessage.error(e?.response?.data?.detail || "保存失败"); } finally { savingTaxType.value = false; }
 };
 
 const save = async () => {

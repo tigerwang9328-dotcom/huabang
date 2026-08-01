@@ -607,7 +607,7 @@ test('税务页面必须先选择独立账簿,无账簿时不请求后端并提�
   assert.doesNotMatch(tax, /onMounted\(async\s*\(\)\s*=>\s*\{(?:(?!\}\);)[\s\S])*?await\s+load\(\)/)
 })
 
-test('科目管理与账套管理页面只读,期末结账与辅助核算已持久化', () => {
+test('科目管理与账套管理按账簿隔离,期末结账与辅助核算已持久化', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
 
@@ -626,10 +626,12 @@ test('科目管理与账套管理页面只读,期末结账与辅助核算已持�
   assert.match(router, /name:\s*['"]MumarenFinanceSettingsAuxiliary['"]/)
   assert.match(router, /name:\s*['"]MumarenFinanceSettingsAuditLogs['"]/)
 
-  // 科目页面只读
+  // 科目页面只能通过独立 API 写当前账；历史账簿由 isReadonly 禁用入口。
   const accounts = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAccounts.vue')
   assert.match(accounts, /listAccounts/)
-  assert.doesNotMatch(accounts, /createAccount|updateAccount|deleteAccount|request\.post\(|request\.put\(|request\.delete\(/)
+  assert.match(accounts, /createAccount|updateAccount/)
+  assert.match(accounts, /isReadonly/)
+  assert.doesNotMatch(accounts, /request\.post\(|request\.put\(|request\.delete\(/)
 
   // 期末结账:已改为持久化 CRUD 页面,指向新组件 MumarenFinanceClosing.vue
   assert.match(router, /path:\s*['"]closing['"],\s*name:\s*['"]MumarenFinanceClosing['"],\s*component:\s*\(\)\s*=>\s*import\(['"][^'"]*MumarenFinanceClosing\.vue['"]\),\s*meta:\s*\{\s*title:\s*['"]结账['"]\s*\}/)
@@ -811,6 +813,21 @@ test('对照牧马人快捷操作，数据罗盘只导航到受控录入流程�
   assert.match(closing, /结账预检/)
   assert.match(closing, /periodsApi\.initialize/)
   assert.match(closing, /periodsApi\.precheck/)
+})
+
+test('当前账可维护科目和税种，历史金蝶账簿不暴露维护入口', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const accounts = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAccounts.vue')
+  const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+
+  assert.match(api, /createAccount:/)
+  assert.match(api, /updateAccount:/)
+  assert.match(api, /createTaxType:/)
+  assert.match(api, /updateTaxType:/)
+  assert.match(accounts, /新增科目/)
+  assert.match(accounts, /isReadonly/)
+  assert.match(tax, /管理税种/)
+  assert.match(tax, /isReadonly/)
 })
 
 test('出纳和发票页面与独立后端的实际请求字段保持一致', () => {
