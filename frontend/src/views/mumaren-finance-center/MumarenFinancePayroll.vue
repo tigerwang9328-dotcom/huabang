@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">薪资管理</p>
         <h2>工资</h2>
-        <p>工资台账、社保公积金与个税核对;按独立账簿隔离,数据持久化。</p>
+        <p>工资草稿、扣除额与实发额核对;按独立账簿隔离,数据持久化。</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -22,41 +22,30 @@
     <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能录入或发放工资。" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
+      <el-table-column prop="employee_no" label="员工编号" width="120" />
       <el-table-column prop="employee_name" label="员工" min-width="120" />
-      <el-table-column prop="department" label="部门" min-width="120" />
       <el-table-column prop="period" label="期间" width="110" />
-      <el-table-column label="基本工资" width="130" align="right">
-        <template #default="{ row }">{{ money(row.base_salary) }}</template>
-      </el-table-column>
-      <el-table-column label="奖金" width="120" align="right">
-        <template #default="{ row }">{{ money(row.bonus) }}</template>
-      </el-table-column>
       <el-table-column label="应发" width="130" align="right">
-        <template #default="{ row }">{{ money(row.gross_salary) }}</template>
+        <template #default="{ row }">{{ money(row.gross_amount) }}</template>
       </el-table-column>
-      <el-table-column label="社保" width="120" align="right">
-        <template #default="{ row }">{{ money(row.social_insurance) }}</template>
-      </el-table-column>
-      <el-table-column label="公积金" width="120" align="right">
-        <template #default="{ row }">{{ money(row.housing_fund) }}</template>
-      </el-table-column>
-      <el-table-column label="个税" width="120" align="right">
-        <template #default="{ row }">{{ money(row.income_tax) }}</template>
+      <el-table-column label="扣除" width="130" align="right">
+        <template #default="{ row }">{{ money(row.deduction_amount) }}</template>
       </el-table-column>
       <el-table-column label="实发" width="130" align="right">
-        <template #default="{ row }">{{ money(row.net_salary) }}</template>
+        <template #default="{ row }">{{ money(row.net_amount) }}</template>
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'draft' ? 'warning' : 'success'" size="small">
-            {{ row.status === "draft" ? "草稿" : "已发放" }}
+          <el-tag :type="row.workflow_status === 'draft' ? 'warning' : 'success'" size="small">
+            {{ row.workflow_status === "draft" ? "草稿" : "已发放" }}
           </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="140">
         <template #default="{ row }">
+          <el-button v-if="row.workflow_status === 'draft'" link type="primary" size="small" :disabled="isReadonly" @click="openEdit(row)">编辑</el-button>
           <el-button
-            v-if="row.status === 'draft'"
+            v-if="row.workflow_status === 'draft'"
             link
             type="primary"
             size="small"
@@ -73,31 +62,25 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="录入工资" width="520px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑工资' : '录入工资'" width="520px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px">
+        <el-form-item label="员工编号">
+          <el-input v-model="form.employee_no" :disabled="!!editingId" />
+        </el-form-item>
         <el-form-item label="员工姓名">
           <el-input v-model="form.employee_name" />
         </el-form-item>
-        <el-form-item label="部门">
-          <el-input v-model="form.department" />
-        </el-form-item>
         <el-form-item label="期间">
-          <el-date-picker v-model="form.period" type="month" value-format="YYYY-MM" style="width:100%" />
+          <el-date-picker v-model="form.period" type="month" value-format="YYYY-MM" :disabled="!!editingId" style="width:100%" />
         </el-form-item>
-        <el-form-item label="基本工资">
-          <el-input-number v-model="form.base_salary" :precision="2" :controls="false" style="width:100%" />
+        <el-form-item label="应发金额">
+          <el-input-number v-model="form.gross_amount" :min="0" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
-        <el-form-item label="奖金">
-          <el-input-number v-model="form.bonus" :precision="2" :controls="false" style="width:100%" />
+        <el-form-item label="扣除金额">
+          <el-input-number v-model="form.deduction_amount" :min="0" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
-        <el-form-item label="社保">
-          <el-input-number v-model="form.social_insurance" :min="0" :precision="2" :controls="false" style="width:100%" />
-        </el-form-item>
-        <el-form-item label="公积金">
-          <el-input-number v-model="form.housing_fund" :min="0" :precision="2" :controls="false" style="width:100%" />
-        </el-form-item>
-        <el-form-item label="个税">
-          <el-input-number v-model="form.income_tax" :min="0" :precision="2" :controls="false" style="width:100%" />
+        <el-form-item label="实发金额">
+          <el-input-number :model-value="netAmount" disabled :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -109,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   payrollsApi,
@@ -124,20 +107,19 @@ const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
 const dialogVisible = ref(false);
+const editingId = ref<number>();
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const form = reactive({
+  employee_no: "",
   employee_name: "",
-  department: "",
   period: new Date().toISOString().slice(0, 7),
-  base_salary: 0,
-  bonus: 0,
-  social_insurance: 0,
-  housing_fund: 0,
-  income_tax: 0,
+  gross_amount: 0,
+  deduction_amount: 0,
 });
+const netAmount = computed(() => Math.max(0, Number(form.gross_amount || 0) - Number(form.deduction_amount || 0)));
 
 const load = async () => {
   if (!bookId.value) return;
@@ -172,38 +154,48 @@ const openDialog = () => {
     ElMessage.warning("请先选择独立账簿");
     return;
   }
+  form.employee_no = "";
   form.employee_name = "";
-  form.department = "";
   form.period = new Date().toISOString().slice(0, 7);
-  form.base_salary = 0;
-  form.bonus = 0;
-  form.social_insurance = 0;
-  form.housing_fund = 0;
-  form.income_tax = 0;
+  form.gross_amount = 0;
+  form.deduction_amount = 0;
+  editingId.value = undefined;
+  dialogVisible.value = true;
+};
+
+const openEdit = (row: MumarenPayroll) => {
+  if (isReadonly.value || row.workflow_status !== "draft") return;
+  editingId.value = row.id;
+  form.employee_no = row.employee_no;
+  form.employee_name = row.employee_name;
+  form.period = row.period;
+  form.gross_amount = Number(row.gross_amount || 0);
+  form.deduction_amount = Number(row.deduction_amount || 0);
   dialogVisible.value = true;
 };
 
 const save = async () => {
   if (isReadonly.value) return;
   if (!bookId.value) return;
-  if (!form.employee_name) {
-    ElMessage.warning("请填写员工姓名");
+  if (!form.employee_no || !form.employee_name) {
+    ElMessage.warning("请填写员工编号和姓名");
     return;
   }
   saving.value = true;
   try {
-    await payrollsApi.create({
-      book_id: bookId.value,
+    const payload = {
       employee_name: form.employee_name,
-      department: form.department,
-      period: form.period,
-      base_salary: Number(form.base_salary || 0),
-      bonus: Number(form.bonus || 0),
-      social_insurance: Number(form.social_insurance || 0),
-      housing_fund: Number(form.housing_fund || 0),
-      income_tax: Number(form.income_tax || 0),
-    });
-    ElMessage.success("工资记录已录入");
+      gross_amount: Number(form.gross_amount || 0),
+      deduction_amount: Number(form.deduction_amount || 0),
+      net_amount: netAmount.value,
+    };
+    if (editingId.value) {
+      await payrollsApi.update(editingId.value, { book_id: bookId.value, ...payload });
+      ElMessage.success("工资记录已更新");
+    } else {
+      await payrollsApi.create({ book_id: bookId.value, period: form.period, employee_no: form.employee_no, ...payload });
+      ElMessage.success("工资记录已录入");
+    }
     dialogVisible.value = false;
     await load();
   } catch (e: any) {
@@ -215,7 +207,7 @@ const save = async () => {
 
 const pay = async (row: MumarenPayroll) => {
   if (isReadonly.value) return;
-  if (!bookId.value || row.status !== "draft") return;
+  if (!bookId.value || row.workflow_status !== "draft") return;
   actingId.value = row.id;
   try {
     await payrollsApi.pay(row.id, bookId.value);
@@ -249,13 +241,9 @@ const summary = ({ columns, data }: { columns: any[]; data: MumarenPayroll[] }) 
     sums[i] = i === 0 ? "合计" : "";
   });
   const fields: Record<string, keyof MumarenPayroll> = {
-    基本工资: "base_salary",
-    奖金: "bonus",
-    应发: "gross_salary",
-    社保: "social_insurance",
-    公积金: "housing_fund",
-    个税: "income_tax",
-    实发: "net_salary",
+    应发: "gross_amount",
+    扣除: "deduction_amount",
+    实发: "net_amount",
   };
   Object.keys(fields).forEach((label) => {
     const idx = columns.findIndex((c) => c.label === label);

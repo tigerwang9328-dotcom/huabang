@@ -43,6 +43,7 @@
       </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
+          <el-button link type="primary" size="small" :disabled="isReadonly" @click="openEdit(row)">编辑</el-button>
           <el-button link :type="row.is_active ? 'warning' : 'success'" size="small" :disabled="isReadonly" :loading="actingId === row.id" @click="toggle(row)">
             {{ row.is_active ? "停用" : "启用" }}
           </el-button>
@@ -55,10 +56,10 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="新增核算项" width="480px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑核算项' : '新增核算项'" width="480px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="维度">
-          <el-select v-model="form.aux_type" style="width:100%" placeholder="选择维度">
+          <el-select v-model="form.aux_type" :disabled="!!editingId" style="width:100%" placeholder="选择维度">
             <el-option label="客户" value="客户" />
             <el-option label="供应商" value="供应商" />
             <el-option label="部门" value="部门" />
@@ -66,7 +67,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="编码">
-          <el-input v-model="form.code" placeholder="如 C001 / S001 / D001 / P001" />
+          <el-input v-model="form.code" :disabled="!!editingId" placeholder="如 C001 / S001 / D001 / P001" />
         </el-form-item>
         <el-form-item label="名称">
           <el-input v-model="form.name" />
@@ -101,6 +102,7 @@ const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
 const dialogVisible = ref(false);
+const editingId = ref<number>();
 const filterDimension = ref("");
 const auxTypeValue = (label: string) => ({ 客户: "customer", 供应商: "supplier", 员工: "employee", 项目: "project", 部门: "department" }[label] || label);
 const parentNameById = computed(() => new Map(items.value.map((item) => [item.id, `${item.code} - ${item.name}`])));
@@ -153,6 +155,17 @@ const openDialog = () => {
   form.code = "";
   form.name = "";
   form.parent_id = undefined;
+  editingId.value = undefined;
+  dialogVisible.value = true;
+};
+
+const openEdit = (row: MumarenAuxiliaryAccounting) => {
+  if (isReadonly.value) return;
+  editingId.value = row.id;
+  form.aux_type = row.aux_type;
+  form.code = row.code;
+  form.name = row.name;
+  form.parent_id = row.parent_id ?? undefined;
   dialogVisible.value = true;
 };
 
@@ -169,14 +182,23 @@ const save = async () => {
   }
   saving.value = true;
   try {
-    await auxiliaryAccountingsApi.create({
-      book_id: bookId.value,
-      aux_type: auxTypeValue(form.aux_type),
-      code: form.code,
-      name: form.name,
-      parent_id: form.parent_id ?? null,
-    });
-    ElMessage.success("核算项已新增");
+    if (editingId.value) {
+      await auxiliaryAccountingsApi.update(editingId.value, {
+        book_id: bookId.value,
+        name: form.name,
+        parent_id: form.parent_id ?? null,
+      });
+      ElMessage.success("核算项已更新");
+    } else {
+      await auxiliaryAccountingsApi.create({
+        book_id: bookId.value,
+        aux_type: auxTypeValue(form.aux_type),
+        code: form.code,
+        name: form.name,
+        parent_id: form.parent_id ?? null,
+      });
+      ElMessage.success("核算项已新增");
+    }
     dialogVisible.value = false;
     await load();
   } catch (e: any) {

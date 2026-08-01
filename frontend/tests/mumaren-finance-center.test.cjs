@@ -150,10 +150,10 @@ test('固定资产处置将账簿 ID 与目标状态一并放入请求体', () =
   )
 })
 
-test('新增固定资产使用后端的分类字段和按月折旧年限', () => {
+test('新增固定资产使用后端的分类字段和原样的月折旧年限', () => {
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAssets.vue')
   assert.match(page, /asset_category:\s*form\.category/)
-  assert.match(page, /useful_life_months:\s*Number\(form\.useful_life\s*\|\|\s*0\)\s*\*\s*12/)
+  assert.match(page, /useful_life_months:\s*Number\(form\.useful_life_months\s*\|\|\s*0\)/)
 })
 
 test('应收应付审核把当前单据类型传给后端', () => {
@@ -832,6 +832,24 @@ test('当前账可维护科目和税种，历史金蝶账簿不暴露维护入�
   assert.match(tax, /isReadonly/)
 })
 
+test('参考模块已有后端能力的资产、工资与辅助核算编辑入口均可在当前账落库', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const assets = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAssets.vue')
+  const payroll = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePayroll.vue')
+  const auxiliary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceSettingsAuxiliary.vue')
+
+  assert.match(api, /export interface FixedAssetUpdate \{\s+book_id: number;/)
+  assert.match(assets, /编辑/)
+  assert.match(assets, /openEdit/)
+  assert.match(assets, /fixedAssetsApi\.update/)
+  assert.match(payroll, /编辑/)
+  assert.match(payroll, /openEdit/)
+  assert.match(payroll, /payrollsApi\.update/)
+  assert.match(auxiliary, /编辑/)
+  assert.match(auxiliary, /openEdit/)
+  assert.match(auxiliary, /auxiliaryAccountingsApi\.update/)
+})
+
 test('销售月报可导出当前独立账簿的已持久化记录', () => {
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportSalesMonthly.vue')
 
@@ -880,4 +898,30 @@ test('出纳和发票页面与独立后端的实际请求字段保持一致', ()
   assert.match(cashier, /flow_date/)
   assert.match(invoices, /invoice_type/)
   assert.match(invoices, /verification_status/)
+})
+
+test('工资页面使用后端工资草稿模型而非已废弃的薪资拆分字段', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePayroll.vue')
+
+  assert.match(api, /employee_no: string/)
+  assert.match(api, /gross_amount: number/)
+  assert.match(api, /deduction_amount: number/)
+  assert.match(api, /net_amount: number/)
+  assert.match(api, /export interface PayrollUpdate \{\s+book_id: number;/)
+  assert.match(page, /employee_no/)
+  assert.match(page, /gross_amount/)
+  assert.match(page, /deduction_amount/)
+  assert.match(page, /net_amount/)
+  assert.doesNotMatch(page, /base_salary/)
+  assert.doesNotMatch(page, /social_insurance/)
+})
+
+test('固定资产编辑按月保留后端折旧年限，不能四舍五入为整年', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAssets.vue')
+
+  assert.match(page, /折旧月数/)
+  assert.match(page, /useful_life_months/)
+  assert.doesNotMatch(page, /Math\.round\(Number\(row\.useful_life_months/)
+  assert.doesNotMatch(page, /Number\(form\.useful_life \|\| 0\) \* 12/)
 })
