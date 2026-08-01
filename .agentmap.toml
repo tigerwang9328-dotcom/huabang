@@ -1,0 +1,241 @@
+[project]
+name = "huabang-ai-center"
+description = "华邦 AI 中台：以百胜 E3ERP、钉钉和金蝶历史财务为权威来源，沉淀经营分析、正式财务账簿、任务闭环和管理看板。"
+root = "."
+language = "zh-CN"
+max_agent_lines = 220
+max_agent_bytes = 12000
+max_chain_bytes = 28000
+compatibility = ["codex", "claude", "gemini"]
+global_invariants = [
+  "生产服务器通过 SSH 免密连接 xiaohu@100.94.89.49，生产路径为 /srv/huabang-ai-center；未获明确授权不得重启生产服务。",
+  "百胜负责销售、商品、库存、会员和采购入库口径；钉钉负责人员、考勤和审批口径；金蝶历史财务只作为财务账簿和历史凭证来源。",
+  "销售和收款仅统计 7 个销售门店；库存展示统计 7 个销售门店加 GZ001、GZ002、GYNG 三个仓库，gz002 必须按 GZ002 兼容。",
+  "金蝶源快照和导入证据必须保留；不得写回金蝶、不得伪造科目映射，未确认三表映射时状态保持 pending_mapping。",
+  "历史金蝶正式数据已导入正式财务账簿：3 个正式账套、339 张凭证、4596 条分录、416 个科目；重复导入必须幂等。",
+  "正式财务中心复现牧马人结构时，复现交互、权限和会计结构，不复制牧马人专属经营数据或硬编码口径。",
+]
+test_commands = [
+  "cd backend && pytest",
+  "cd frontend && npm run type-check && npm run build",
+]
+
+[discovery]
+ignore_dirs = [".agents", ".claude", ".gemini", ".git", ".hg", ".idea", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".svn", ".tox", ".venv", ".venv-py314-failed", ".vscode", "__pycache__", "archive", "archives", "backup", "backups", "build", "coverage", "dist", "env", "htmlcov", "node_modules", "target", "vendor", "venv"]
+ignore_globs = []
+production_extensions = [".c", ".cc", ".cjs", ".cpp", ".cs", ".dart", ".go", ".h", ".hpp", ".java", ".js", ".json", ".jsx", ".kt", ".kts", ".mjs", ".php", ".py", ".pyi", ".rb", ".rs", ".sql", ".swift", ".toml", ".ts", ".tsx", ".vue", ".wxml", ".wxss", ".yaml", ".yml"]
+
+[[modules]]
+id = "backend"
+name = "后端服务"
+aliases = ["FastAPI", "API", "服务端", "数据仓库"]
+path = "backend"
+purpose = "提供 FastAPI 接口、ETL/同步、数据仓库模型、权限校验和财务中心写入能力。"
+lifecycle = "active"
+volatility = "high"
+entrypoints = ["app/main.py", "alembic.ini"]
+interfaces = [
+  "通过 app/api/v1 暴露业务 API，统一返回 ApiResponse。",
+  "通过 SQLAlchemy/Alembic 维护 PostgreSQL 的 ods/dim/dwd/dws/dm/fin/sys/app 等 schema。",
+  "通过集成模块同步百胜、钉钉、金蝶历史财务等外部来源。",
+]
+invariants = [
+  "数据库迁移必须保持单一 Alembic head。",
+  "业务数据写入必须经过服务层权限和幂等约束，不直接在 API 层拼写持久化细节。",
+  "生产迁移前先备份数据库；未获授权不得重启生产服务。",
+]
+test_commands = [
+  "cd backend && pytest",
+]
+relations = [
+  { target = "frontend", type = "serves", contract = "前端通过 /api/v1 调用后端业务和财务接口；权限不足必须返回明确错误而非空数据。", evidence = ["backend/app/api/v1", "frontend/src/api"], confidence = "verified" },
+  { target = "operations", type = "deployed-by", contract = "生产发布使用 deploy 脚本和 SSH 到 /srv/huabang-ai-center；重启需用户授权。", evidence = ["deploy", "AGENTS.md"], confidence = "declared" },
+]
+
+[[modules]]
+id = "backend_app"
+name = "业务 API 与数据服务"
+aliases = ["app", "正式财务中心", "金蝶历史财务", "百胜同步", "钉钉同步"]
+path = "backend/app"
+parent = "backend"
+purpose = "承载业务路由、模型、schema、核心配置、外部集成、ETL 服务和财务中心会计服务。"
+lifecycle = "active"
+volatility = "high"
+entrypoints = ["main.py", "api/v1/router.py", "api/v1/finance_center.py", "api/v1/kingdee_finance.py"]
+test_paths = ["backend/tests"]
+interfaces = [
+  "app/api/v1/finance_center.py 提供可写正式财务中心接口，包括凭证、期间、报表映射和金蝶历史写入。",
+  "app/api/v1/kingdee_finance.py 提供只读历史财务查询接口。",
+  "app/core/store_whitelist.py 是销售和库存白名单口径的源头。",
+]
+invariants = [
+  "历史金蝶快照不得被覆盖；写入正式账簿时保留 source_system、source_database、source_pk、import_batch_id 等来源追踪。",
+  "凭证写入必须借贷平衡，正式分录保持单边非负，过账、冲销、修订需写操作日志。",
+  "现有 dwd_finance_expense、dwd_finance_cash 不由金蝶历史导入直接覆盖。",
+]
+out_of_scope = [
+  "不直接负责前端导航展示。",
+  "不直接执行生产服务重启。",
+]
+test_commands = [
+  "cd backend && pytest tests/test_finance_center_api.py tests/test_finance_center_models.py tests/test_finance_center_service.py tests/test_import_kingdee_finance.py",
+]
+relations = [
+  { target = "frontend_app", type = "serves", contract = "财务页面消费 /api/v1/finance 和 /api/v1/finance-center；缺映射、缺期间和非正式数据必须显式标识。", evidence = ["backend/app/api/v1/finance_center.py", "backend/app/api/v1/kingdee_finance.py", "frontend/src/views/finance"], confidence = "verified" },
+  { target = "backend_migrations", type = "persists-to", contract = "模型和服务的持久化结构必须由 Alembic 迁移声明并保持单一 head。", evidence = ["backend/app/models", "backend/alembic/versions"], confidence = "verified" },
+]
+
+[[modules]]
+id = "backend_migrations"
+name = "数据库迁移"
+aliases = ["Alembic", "schema", "迁移脚本"]
+path = "backend/alembic"
+parent = "backend"
+purpose = "维护 PostgreSQL schema 版本、表结构、索引、约束和历史财务/正式财务中心迁移。"
+lifecycle = "active"
+volatility = "medium"
+entrypoints = ["env.py", "versions"]
+interfaces = [
+  "由 alembic.ini 和 env.py 驱动数据库迁移。",
+  "迁移脚本必须与 app/models 中的持久化对象和服务层 SQL 兼容。",
+]
+invariants = [
+  "任何新增迁移后必须验证 Alembic 为单一 head。",
+  "正式上线迁移必须先备份生产库；失败时报告实际错误，不隐藏异常。",
+]
+test_commands = [
+  "cd backend && alembic heads",
+  "cd backend && alembic upgrade head",
+]
+relations = [
+  { target = "backend_app", type = "supports", contract = "为后端模型、API 和导入服务提供持久化结构。", evidence = ["backend/app/models", "backend/alembic/versions"], confidence = "verified" },
+]
+
+[[modules]]
+id = "backend_scripts"
+name = "后端脚本与批处理"
+aliases = ["导入脚本", "ETL 脚本", "补采脚本"]
+path = "backend/scripts"
+parent = "backend"
+purpose = "存放一次性导入、同步、校验、报表或维护脚本，服务于后端数据落库和运维验证。"
+lifecycle = "active"
+volatility = "medium"
+interfaces = [
+  "脚本可调用后端模型、数据库连接和服务层逻辑完成批处理。",
+  "对生产数据有写入影响的脚本必须先在测试库或 worktree 验证。",
+]
+invariants = [
+  "脚本不得静默跳过失败；涉及导入、哈希、行数或财务校验时必须输出可追溯结果。",
+  "不得删除未验证备份、源快照或迁移结果文件。",
+]
+relations = [
+  { target = "backend_app", type = "calls", contract = "批处理复用后端配置、模型和服务，不绕过业务不变量。", evidence = ["backend/scripts", "backend/app/services"], confidence = "inferred" },
+]
+
+[[modules]]
+id = "frontend"
+name = "前端应用"
+aliases = ["Vue", "Vite", "中台页面", "导航"]
+path = "frontend"
+purpose = "提供 Vue 3 + Element Plus 单页应用、登录后导航、业务看板和财务中心页面。"
+lifecycle = "active"
+volatility = "high"
+entrypoints = ["src/main.ts", "src/router/index.ts", "src/layouts/MainLayout.vue", "package.json"]
+test_paths = ["frontend/tests"]
+interfaces = [
+  "通过 src/api 调用后端 /api/v1 接口。",
+  "通过 src/router/index.ts 定义页面路由和权限入口。",
+  "通过 src/layouts/MainLayout.vue 和配置文件渲染左侧导航。",
+]
+invariants = [
+  "财务左侧导航必须保持历史模块不删除；新增牧马人复现模块放在 财务利润 > 财务中心 下。",
+  "财务导航的单一来源为 src/config/financeCenterModules.ts，避免 MainLayout 和路由重复散落配置。",
+  "金额、凭证摘要、往来单位和资金余额必须受财务权限保护，不能用空数据冒充无权限。",
+]
+test_commands = [
+  "cd frontend && npm run type-check",
+  "cd frontend && npm run build",
+]
+relations = [
+  { target = "backend_app", type = "consumes-from", contract = "页面消费后端业务和财务接口；pending_mapping/pending_data 需要展示为待补充状态。", evidence = ["frontend/src/api", "frontend/src/views/finance", "backend/app/api/v1"], confidence = "verified" },
+]
+
+[[modules]]
+id = "frontend_app"
+name = "前端源代码"
+aliases = ["src", "财务利润导航", "财务中心页面"]
+path = "frontend/src"
+parent = "frontend"
+purpose = "承载应用入口、路由、布局、API 客户端、状态、配置和业务视图。"
+lifecycle = "active"
+volatility = "high"
+entrypoints = ["main.ts", "router/index.ts", "layouts/MainLayout.vue", "config/financeCenterModules.ts"]
+interfaces = [
+  "config/financeCenterModules.ts 集中维护 财务利润 下的旧模块、历史财务、财务中心和现金安全规划。",
+  "views/finance/FinanceCenterModule.vue 渲染牧马人式财务中心模块说明和状态。",
+  "views/finance/HistoricalFinance.vue 渲染金蝶历史账套、报表、余额、凭证和数据质量。",
+]
+invariants = [
+  "左侧导航层级保持：财务利润 -> 旧模块、历史财务、财务中心、现金安全。",
+  "新增财务模块先接入路由、权限、导航和空/待映射状态，再宣称可用。",
+  "不要删除既有财务首页、利润分析、报销、付款、费用分析和正式账簿入口。",
+]
+test_commands = [
+  "cd frontend && npm run type-check",
+  "cd frontend && npm run build",
+]
+relations = [
+  { target = "backend_app", type = "renders-from", contract = "财务页面展示后端返回的正式账簿、历史财务和数据质量状态。", evidence = ["frontend/src/views/finance", "backend/app/api/v1/finance_center.py", "backend/app/api/v1/kingdee_finance.py"], confidence = "verified" },
+]
+
+[[modules]]
+id = "operations"
+name = "部署与运维"
+aliases = ["deploy", "生产上线", "服务器脚本"]
+path = "deploy"
+purpose = "维护生产发布、服务器检查、备份和上线辅助脚本。"
+lifecycle = "active"
+volatility = "medium"
+interfaces = [
+  "围绕 /srv/huabang-ai-center 生产路径执行发布或验证。",
+  "与根 AGENTS 的 SSH 连接和生产安全规则共同约束所有上线动作。",
+]
+invariants = [
+  "上线前必须区分本地验证、已推送、已部署到磁盘、已迁移数据库和已重启服务。",
+  "没有明确授权时，只交付待上线版本或部署到磁盘，不重启生产服务。",
+]
+relations = [
+  { target = "backend", type = "deploys", contract = "后端代码、迁移和脚本经验证后才能部署到生产路径。", evidence = ["deploy", "backend"], confidence = "declared" },
+  { target = "frontend", type = "deploys", contract = "前端构建产物经 npm build 验证后才能进入生产静态资源。", evidence = ["deploy", "frontend/package.json"], confidence = "declared" },
+]
+
+[[modules]]
+id = "docs"
+name = "项目文档"
+aliases = ["docs", "说明文档", "补采清单"]
+path = "docs"
+purpose = "保存项目骨架、字段对照、运维说明、提示词、技能和数据补采/验收文档。"
+lifecycle = "active"
+volatility = "medium"
+interfaces = [
+  "为后续 Agent、实施人员和验收人员提供上下文，不作为生产代码权威来源。",
+]
+invariants = [
+  "文档结论必须标明证据层级：计划、本地验证、部署到磁盘、生产重启、真实数据验收不能混用。",
+  "不得在文档中保存密码、token、cookie 或完整生产请求体。",
+]
+
+[[modules]]
+id = "root_scripts"
+name = "根脚本"
+aliases = ["scripts", "仓库脚本"]
+path = "scripts"
+purpose = "存放仓库级辅助脚本，通常用于检查、生成、迁移准备或跨目录维护。"
+lifecycle = "active"
+volatility = "medium"
+interfaces = [
+  "脚本可能读取 backend、frontend 或 docs；写入生产前必须回到对应模块规则验证。",
+]
+invariants = [
+  "跨模块脚本必须说明输入、输出、影响范围和失败记录方式。",
+]

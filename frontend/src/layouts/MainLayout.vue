@@ -52,8 +52,46 @@
                     <transition name="submenu">
                       <div v-show="expandedMenus.has(menuKey(item))" class="submenu-list submenu-list-2">
                         <template v-for="leaf in item.children" :key="menuKey(leaf)">
+                          <!-- 第4级:leaf 有 children,可展开 -->
+                          <div v-if="leaf.children?.length" class="nav-submenu nav-submenu-2">
+                            <button
+                              type="button"
+                              class="nav-item nav-sub nav-parent-3"
+                              :class="{ active: isAnyChildActive(leaf.children), expanded: expandedMenus.has(menuKey(leaf)) }"
+                              @click.stop="toggleMenu(menuKey(leaf))"
+                            >
+                              <span>{{ leaf.label }}</span>
+                              <em v-if="leaf.badge" class="nav-badge">{{ leaf.badge }}</em>
+                              <el-icon class="nav-arrow"><ArrowRight /></el-icon>
+                            </button>
+                            <transition name="submenu">
+                              <div v-show="expandedMenus.has(menuKey(leaf))" class="submenu-list submenu-list-3">
+                                <template v-for="leaf2 in leaf.children" :key="menuKey(leaf2)">
+                                  <button
+                                    v-if="leaf2.disabled"
+                                    type="button"
+                                    class="nav-item nav-sub nav-sub-3 nav-disabled"
+                                    disabled
+                                  >
+                                    <span>{{ leaf2.label }}</span>
+                                    <em v-if="leaf2.badge" class="nav-badge">{{ leaf2.badge }}</em>
+                                  </button>
+                                  <router-link
+                                    v-else
+                                    :to="leaf2.path || '/app/dashboard'"
+                                    class="nav-item nav-sub nav-sub-3"
+                                    :class="{ active: isActive(leaf2.path || '') }"
+                                  >
+                                    <span>{{ leaf2.label }}</span>
+                                    <em v-if="leaf2.badge" class="nav-badge">{{ leaf2.badge }}</em>
+                                  </router-link>
+                                </template>
+                              </div>
+                            </transition>
+                          </div>
+                          <!-- 第3级叶子 -->
                           <button
-                            v-if="leaf.disabled"
+                            v-else-if="leaf.disabled"
                             type="button"
                             class="nav-item nav-sub nav-sub-2 nav-disabled"
                             disabled
@@ -165,6 +203,8 @@ import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { authApi } from "@/api/auth";
 import BossAiFloatingAssistant from "@/components/ai/BossAiFloatingAssistant.vue";
+import { financeProfitNavigation } from "@/config/financeCenterModules";
+import { mumarenFinanceCenterMenuItem } from "@/config/mumarenFinanceCenter";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   ArrowRight,
@@ -331,14 +371,7 @@ const menuGroups = computed<MenuGroup[]>(() => [
   {
     label: "财务利润",
     icon: Money,
-    items: [
-      { path: "/app/fin/overview", icon: Money, label: "财务首页", permission: "finance:overview:view" },
-      { path: "/app/finance", icon: TrendCharts, label: "利润分析", permission: "finance:profit:view" },
-      { path: "/app/fin/reimbursements", icon: List, label: "报销管理", permission: "finance:reimbursement:view" },
-      { path: "/app/fin/payments", icon: Money, label: "付款申请", permission: "finance:payment:view" },
-      { path: "/app/fin/expense-analysis", icon: DataLine, label: "费用分析", permission: "finance:expense:view" },
-      { label: "现金安全", icon: Warning, disabled: true, badge: "规划中", permission: "finance:cash:view" },
-    ],
+    items: [mumarenFinanceCenterMenuItem, ...financeProfitNavigation],
   },
   {
     label: "人力资源",
@@ -442,6 +475,15 @@ const expandActiveMenuPath = () => {
         next.add(menuKey(item));
         changed = true;
       }
+      // 展开第3级中包含活跃路由的节点(支持4级菜单)
+      item.children.forEach((leaf) => {
+        if (!leaf.children?.length || !isAnyChildActive(leaf.children)) return;
+        const leafMenuKey = menuKey(leaf);
+        if (!next.has(leafMenuKey)) {
+          next.add(leafMenuKey);
+          changed = true;
+        }
+      });
     });
   });
   if (!changed) return;
@@ -639,7 +681,8 @@ const handleLogout = async () => {
   transition: transform 0.16s ease, color 0.16s ease;
 }
 .nav-parent.expanded .nav-arrow,
-.nav-parent-2.expanded .nav-arrow {
+.nav-parent-2.expanded .nav-arrow,
+.nav-parent-3.expanded .nav-arrow {
   transform: rotate(90deg);
   color: rgba(255, 255, 255, 0.75);
 }
@@ -649,6 +692,9 @@ const handleLogout = async () => {
 .submenu-list-2 {
   padding-left: 8px;
 }
+.submenu-list-3 {
+  padding-left: 8px;
+}
 .nav-sub {
   padding-left: 38px;
   font-size: 13px;
@@ -656,10 +702,19 @@ const handleLogout = async () => {
 .nav-parent-2 {
   padding-left: 38px;
 }
+.nav-parent-3 {
+  padding-left: 50px;
+  font-size: 12.5px;
+}
 .nav-sub-2 {
   padding-left: 50px;
   font-size: 12.5px;
   color: rgba(255, 255, 255, 0.5);
+}
+.nav-sub-3 {
+  padding-left: 62px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
 }
 .submenu-enter-active,
 .submenu-leave-active {

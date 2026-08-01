@@ -1,0 +1,73 @@
+import pytest
+
+from app.services.finance_v2.period_close_domain import (
+    PeriodCloseCheck,
+    PeriodCloseError,
+    PeriodState,
+    approve_reopen,
+    begin_close,
+    complete_close,
+    next_reopen_approval,
+    request_reopen,
+)
+
+
+def test_period_can_close_only_after_all_required_finance_checks_pass():
+    closing = begin_close(PeriodState("open"), PeriodCloseCheck())
+    closed = complete_close(closing)
+
+    assert closing.status == "closing"
+    assert closed.status == "closed"
+
+
+@pytest.mark.parametrize("field", ["unposted_voucher_count", "unbalanced_voucher_count", "source_exception_count", "ledger_difference_count"])
+def test_period_close_is_blocked_by_any_unresolved_finance_check(field):
+    checks = PeriodCloseCheck(**{field: 1})
+
+    with pytest.raises(PeriodCloseError, match=field):
+        begin_close(PeriodState("open"), checks)
+
+
+def test_period_close_requires_manual_profit_closing_evidence_when_activity_exists():
+    checks = PeriodCloseCheck(profit_closing_evidence_missing_count=1)
+
+    with pytest.raises(PeriodCloseError, match="manual profit-closing evidence"):
+        begin_close(PeriodState("open"), checks)
+
+
+def test_reopen_requires_a_reason_and_two_distinct_approvers():
+    reopening = request_reopen(PeriodState("closed"), reason="更正已核对差异", requester="finance-a")
+    with pytest.raises(PeriodCloseError, match="distinct"):
+        approve_reopen(reopening, first_approver="finance-b", second_approver="finance-b")
+
+    reopened = approve_reopen(reopening, first_approver="finance-b", second_approver="finance-c")
+    assert reopened.status == "open"
+
+
+def test_reopen_approval_requires_two_people_distinct_from_requester_and_each_other():
+    first_step, can_reopen = next_reopen_approval(
+        requester="finance-requester",
+        existing_approvers=(),
+        actor="finance-a",
+    )
+    assert (first_step, can_reopen) == (1, False)
+
+    second_step, can_reopen = next_reopen_approval(
+        requester="finance-requester",
+        existing_approvers=("finance-a",),
+        actor="finance-b",
+    )
+    assert (second_step, can_reopen) == (2, True)
+
+    with pytest.raises(PeriodCloseError, match="requester"):
+        next_reopen_approval(
+            requester="finance-requester",
+            existing_approvers=(),
+            actor="finance-requester",
+        )
+    with pytest.raises(PeriodCloseError, match="already approved"):
+        next_reopen_approval(
+            requester="finance-requester",
+            existing_approvers=("finance-a",),
+            actor="finance-a",
+        )

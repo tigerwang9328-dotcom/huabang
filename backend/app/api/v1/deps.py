@@ -59,6 +59,24 @@ async def get_current_user_roles(
     return [row[0] for row in result.fetchall()]
 
 
+async def get_current_user_permissions(
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[str]:
+    """Return active platform permissions for the current principal."""
+    if current_user.is_admin:
+        return ["*"]
+    result = await db.execute(
+        select(SysPermission.code)
+        .join(SysRolePermission, SysRolePermission.permission_id == SysPermission.id)
+        .join(SysRole, SysRole.id == SysRolePermission.role_id)
+        .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+        .where(SysUserRole.user_id == current_user.id, SysRole.status == 1)
+        .distinct()
+    )
+    return [row[0] for row in result.fetchall()]
+
+
 def require_permission(permission_code: str):
     """创建权限校验依赖"""
     async def check_permission(

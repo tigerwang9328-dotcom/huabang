@@ -18,10 +18,20 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始同步 $START_TS ~ $END_TS" | tee -a 
 
 cd "$BACKEND_DIR"
 
-DB_USER=$(grep DB_USER .env | cut -d= -f2)
-DB_PASS=$(grep DB_PASSWORD .env | cut -d= -f2)
+DB_HOST=$(grep '^DB_HOST=' .env | cut -d= -f2-)
+DB_PORT=$(grep '^DB_PORT=' .env | cut -d= -f2-)
+DB_NAME=$(grep '^DB_NAME=' .env | cut -d= -f2-)
+DB_USER=$(grep '^DB_USER=' .env | cut -d= -f2-)
+DB_PASS=$(grep '^DB_PASSWORD=' .env | cut -d= -f2-)
+DB_HOST=${DB_HOST:-localhost}; DB_PORT=${DB_PORT:-5432}; DB_NAME=${DB_NAME:-huabang_ai}
+PGPASSFILE=$(mktemp)
+trap 'rm -f "$PGPASSFILE"' EXIT
+chmod 600 "$PGPASSFILE"
+printf '%s:%s:%s:%s:%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASS" > "$PGPASSFILE"
+export PGPASSFILE
+unset DB_PASS
 
-ETL_ID=$(PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -t -A -q -c \
+ETL_ID=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -q -c \
   "INSERT INTO log.log_etl_run(task_name, started_at, status) VALUES ('${TASK_NAME}', now(), 'running') RETURNING id;" 2>/dev/null | head -n1 | tr -d '[:space:]')
 echo "ETL run id: ${ETL_ID:-<none>}" >> "$LOG_FILE"
 
@@ -58,19 +68,19 @@ if [ $RC -eq 0 ]; then
   REBUILD_RC=$?
   set -e
   if [ $REBUILD_RC -eq 0 ]; then
-    PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
       "UPDATE log.log_etl_run SET finished_at=now(), status='success' WHERE id=${ETL_ID};" \
       >> "$LOG_FILE" 2>&1
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 同步成功 rc=$RC rebuild_rc=$REBUILD_RC" | tee -a "$LOG_FILE"
   else
-    PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
       "UPDATE log.log_etl_run SET finished_at=now(), status='failed', error_msg='商品明细重建失败' WHERE id=${ETL_ID};" \
       >> "$LOG_FILE" 2>&1
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 商品明细重建失败 rc=$REBUILD_RC" | tee -a "$LOG_FILE"
     exit $REBUILD_RC
   fi
 else
-  PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d huabang_ai -c \
+  psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
     "UPDATE log.log_etl_run SET finished_at=now(), status='failed', error_msg='同步脚本返回非0' WHERE id=${ETL_ID};" \
     >> "$LOG_FILE" 2>&1
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] 同步失败 rc=$RC" | tee -a "$LOG_FILE"

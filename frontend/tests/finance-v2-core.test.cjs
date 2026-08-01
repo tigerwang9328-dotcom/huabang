@@ -1,0 +1,209 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const root = path.resolve(__dirname, "..");
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+
+test("finance center base URL opens the V2 core workspace with the platform Finance V2 read permission", () => {
+  const router = read("src/router/index.ts");
+
+  assert.ok(
+    router.includes('{ path: "finance-center", redirect: "/app/finance-center/core-workspace" }'),
+    "the finance center base route must redirect to the V2 core workspace",
+  );
+  assert.ok(
+    router.includes('["/app/finance-center", "finance:center:view"]'),
+    "the finance center route family must use the platform Finance V2 read permission",
+  );
+});
+
+test("finance center navigation uses the platform Finance V2 read permission", () => {
+  const modules = read("src/config/financeCenterModules.ts");
+  const layout = read("src/layouts/MainLayout.vue");
+  const router = read("src/router/index.ts");
+
+  assert.ok(modules.includes('permission: "finance:center:view"'));
+  assert.ok(!modules.includes('key: "finance-center",\n  permission: "finance:profit:view"'));
+  assert.ok(
+    router.includes('["/app/finance-center/core-workspace", "finance:center:view"]'),
+    "a finance-only user must land on the V2 workspace after login",
+  );
+  assert.ok(
+    layout.includes('import { financeProfitNavigation } from "@/config/financeCenterModules";'),
+    "the rendered sidebar must use the central finance navigation policy",
+  );
+  assert.ok(
+    layout.includes("...financeProfitNavigation"),
+    "the rendered sidebar must not duplicate the finance center permission with the legacy profit permission",
+  );
+});
+
+test("V2 workspace reads periods, postable accounts, and voucher workflow state from isolated endpoints", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  for (const token of ["listPeriods", "listAccounts", "listVouchers"]) {
+    assert.ok(api.includes(token), `missing ${token} API`);
+  }
+  for (const token of ["selectedBookId", "loadWorkspace", "vouchers", "accounts"]) {
+    assert.ok(workspace.includes(token), `missing ${token} workspace state`);
+  }
+});
+
+test("V2 workspace exposes immutable historical Kingdee vouchers and their marked line details", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("listHistoryVouchers"));
+  assert.ok(api.includes("listHistoryVoucherLines"));
+  assert.ok(workspace.includes("历史金蝶凭证"));
+  assert.ok(workspace.includes("historical_marker"));
+  assert.ok(workspace.includes("viewHistoryVoucher"));
+});
+
+test("finance center archive uses the isolated V2 history view instead of the legacy Kingdee query view", () => {
+  const module = read("src/views/finance/FinanceCenterModule.vue");
+
+  assert.ok(module.includes('import V2HistoryArchive from "@/views/finance-center/V2HistoryArchive.vue";'));
+  assert.ok(module.includes("<V2HistoryArchive />"));
+  assert.ok(!module.includes("import HistoricalFinance"));
+});
+
+test("finance center voucher entry uses the Gate-protected V2 workspace instead of the legacy formal ledger", () => {
+  const module = read("src/views/finance/FinanceCenterModule.vue");
+
+  assert.ok(module.includes('import V2CoreWorkspace from "@/views/finance-center/V2CoreWorkspace.vue";'));
+  assert.ok(module.includes("<V2CoreWorkspace />"));
+  assert.ok(!module.includes("import FormalLedger"));
+});
+
+test("finance center ledger and report entries never link back to legacy finance routes", () => {
+  const module = read("src/views/finance/FinanceCenterModule.vue");
+
+  assert.ok(!module.includes('to="/app/fin/'));
+  assert.ok(module.includes("module.key === 'ledger' || module.key === 'reports'"));
+  assert.ok(module.includes("<V2CoreWorkspace />"));
+});
+
+test("V2 workspace shows only persisted source dry-run receipts and never an auto-draft action", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("listSourceInbox"));
+  assert.ok(api.includes("listSourcePreviews"));
+  assert.ok(workspace.includes("来源收件箱与 dry-run 预览"));
+  assert.ok(workspace.includes("sourceInbox"));
+  assert.ok(workspace.includes("loadSourceInbox"));
+  assert.ok(!workspace.includes("自动生成来源草稿"));
+});
+
+test("finance center navigation does not present V2 history or current accounts as already production-published", () => {
+  const modules = read("src/config/financeCenterModules.ts");
+
+  assert.ok(modules.includes("待恢复副本验证"));
+  assert.ok(modules.includes("正式报表保持阻断"));
+  assert.ok(!modules.includes("三套正式账套已写入正式账簿"));
+  assert.ok(!modules.includes("416 个科目、1,125 条正式月余额已上线"));
+});
+
+test("V2 workspace exposes write actions only through server-reported Gate readiness", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getWriteReadiness"));
+  assert.ok(api.includes("createDraft"));
+  assert.ok(api.includes("executeCommand"));
+  assert.ok(workspace.includes("writeReadiness"));
+  assert.ok(workspace.includes("draftEnabled"));
+  assert.ok(workspace.includes("runCommand"));
+});
+
+test("V2 workspace exposes the opening-balance cutover boundary without treating it as a write Gate", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  for (const token of ["listOpeningBalances", "createOpeningBalance", "validateOpeningBalance", "lockOpeningBalance"]) {
+    assert.ok(api.includes(token), `missing ${token} API`);
+  }
+  for (const token of ["期初余额批次", "openingBalances", "openingBalance", "validateOpeningBalance"] ) {
+    assert.ok(workspace.includes(token), `missing ${token} workspace state`);
+  }
+  assert.ok(workspace.includes("当前账写入仍受功能 Gate 控制"));
+});
+
+test("V2 workspace can inspect current voucher lines and audit events, while editing only a Gate-enabled draft", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getVoucherDetail"));
+  assert.ok(api.includes("updateDraft"));
+  assert.ok(api.includes("expected_version"));
+  assert.ok(workspace.includes("查看明细"));
+  assert.ok(workspace.includes("operation_events"));
+  assert.ok(workspace.includes("selectedVoucher"));
+  assert.ok(workspace.includes("saveVoucherDraftEdit"));
+  assert.ok(workspace.includes("selectedVoucher?.status === 'draft' && draftEnabled"));
+});
+
+test("V2 workspace exposes period-close readiness and keeps close commands behind their own Gate", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getPeriodCloseReadiness"));
+  assert.ok(api.includes("executePeriodCommand"));
+  assert.ok(workspace.includes("结账检查"));
+  assert.ok(workspace.includes("periodCloseEnabled"));
+  assert.ok(workspace.includes("viewPeriodCloseReadiness"));
+});
+
+test("V2 workspace renders the structured monitoring policy without treating unavailable collectors as zero", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getMonitoringSummary"));
+  assert.ok(workspace.includes("monitoringSummary"));
+  assert.ok(workspace.includes("metric_policies"));
+  assert.ok(workspace.includes("未接入"));
+  assert.ok(workspace.includes("loadMonitoring"));
+});
+
+test("V2 API client unwraps the platform ApiResponse before workspace consumers read data", () => {
+  const api = read("src/api/financeV2.ts");
+
+  assert.ok(api.includes("function unwrapFinanceV2"));
+  assert.ok(api.includes("payload.data"));
+  assert.ok(api.includes("unwrapFinanceV2(request.get"));
+});
+
+test("V2 API client preserves a payload that was already unwrapped by the request boundary", () => {
+  const api = read("src/api/financeV2.ts");
+
+  assert.ok(api.includes("const payload = result.data"));
+  assert.ok(api.includes("\"code\" in payload && \"success\" in payload && \"data\" in payload"));
+  assert.ok(api.includes("return { data }"));
+});
+
+test("V2 workspace exposes versioned formal-report readiness without presenting an export action", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("getReportReadiness"));
+  assert.ok(workspace.includes("正式报表就绪检查"));
+  assert.ok(workspace.includes("reportReadiness"));
+  assert.ok(workspace.includes("loadReportReadiness"));
+  assert.ok(!workspace.includes("导出正式报表"));
+});
+
+test("V2 workspace requires an explicit manual profit-closing voucher before starting a close with activity", () => {
+  const api = read("src/api/financeV2.ts");
+  const workspace = read("src/views/finance-center/V2CoreWorkspace.vue");
+
+  assert.ok(api.includes("voucher_id?: number"));
+  assert.ok(workspace.includes("登记损益结转凭证"));
+  assert.ok(workspace.includes("profit_closing_evidence_missing_count"));
+  assert.ok(workspace.includes("selectedProfitClosingVoucherId"));
+  assert.ok(workspace.includes("closePostedVouchers"));
+  assert.ok(workspace.includes('listVouchers(selectedBookId.value, { period_id: period.id, status: "posted", limit: 200 })'));
+});

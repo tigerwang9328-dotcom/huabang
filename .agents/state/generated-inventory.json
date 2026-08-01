@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-22T06:13:28+00:00",
+  "project": {
+    "name": "huabang-ai-center",
+    "root": "D:\\huabang\\worktrees\\kingdee-finance-local",
+    "git_head": "e33ec03b401b9bee836a2bfa42bea8d85f52c583",
+    "config": "D:\\huabang\\worktrees\\kingdee-finance-local\\.agentmap.toml"
+  },
+  "root_fingerprint": "477e957fe7285d52eb7ab1365ed92a7961956f19d4832088d2d4058683ad7f37",
+  "root_reviewed_at": "2026-07-22T06:13:28+00:00",
+  "modules": {
+    "backend": {
+      "id": "backend",
+      "path": "backend",
+      "subtree_files": 307,
+      "subtree_loc": 56012,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 88,
+      "test_loc": 12059,
+      "test_functions": 541,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [
+        "backend/app/main.py"
+      ],
+      "source_fingerprint": "d64b7651e974fbe1fe50bca505f07c298ca16480753d01f941b1cb629340b743",
+      "last_change": {
+        "commit": "bdf55aad4aa77515f40c48b7116e90cead30ed9a",
+        "date": "2026-07-20T16:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: preserve signed Kingdee balance amounts"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "backend_app": {
+      "id": "backend_app",
+      "path": "backend/app",
+      "subtree_files": 155,
+      "subtree_loc": 38225,
+      "owned_files": 155,
+      "owned_loc": 38225,
+      "test_files": 88,
+      "test_loc": 12059,
+      "test_functions": 541,
+      "route_handlers": 402,
+      "languages": {
+        "Python": 155
+      },
+      "key_files": [
+        "backend/app/main.py",
+        "backend/app/api/v1/router.py",
+        "backend/app/api/v1/finance_center.py",
+        "backend/app/api/v1/kingdee_finance.py",
+        "backend/app/models/app.py",
+        "backend/app/services/ai_diagnosis_service.py",
+        "backend/app/services/command_center_service.py",
+        "backend/app/services/finance_center_service.py"
+      ],
+      "source_fingerprint": "561cdebac92f7f1d70f00b7cb6c69c9b605615628997385384ab64100c73b409",
+      "last_change": {
+        "commit": "bdf55aad4aa77515f40c48b7116e90cead30ed9a",
+        "date": "2026-07-20T16:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: preserve signed Kingdee balance amounts"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "backend_migrations": {
+      "id": "backend_migrations",
+      "path": "backend/alembic",
+      "subtree_files": 51,
+      "subtree_loc": 4339,
+      "owned_files": 51,
+      "owned_loc": 4339,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {
+        "Python": 51
+      },
+      "key_files": [
+        "backend/alembic/env.py",
+        "backend/alembic/versions/3e1f6a7b8c97_full_finance_center.py",
+        "backend/alembic/versions/1f0a2b3c4d5e_task_workflow_notifications.py",
+        "backend/alembic/versions/2a0f6a7b8c93_investment_decision_history.py",
+        "backend/alembic/versions/1b10a07bbe68_add_dingtalk_finance_hr_tables.py",
+        "backend/alembic/versions/e6f7a8b9c0d1_boss_command_center.py",
+        "backend/alembic/versions/f1b2c3d4e5f6_life_data_collector.py",
+        "backend/alembic/versions/0b8c9d0e1f2a_business_exception_evidence.py"
+      ],
+      "source_fingerprint": "4515f0c6fd2bfafe644d8c12799432ef62e03ec220dbff174e44e37d3e3cb855",
+      "last_change": {
+        "commit": "bdf55aad4aa77515f40c48b7116e90cead30ed9a",
+        "date": "2026-07-20T16:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: preserve signed Kingdee balance amounts"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "backend_scripts": {
+      "id": "backend_scripts",
+      "path": "backend/scripts",
+      "subtree_files": 13,
+      "subtree_loc": 1389,
+      "owned_files": 13,
+      "owned_loc": 1389,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {
+        "Python": 13
+      },
+      "key_files": [
+        "backend/scripts/import_kingdee_finance.py",
+        "backend/scripts/seed_module_permissions.py",
+        "backend/scripts/init_db.py",
+        "backend/scripts/export_ai_business_advice_context.py",
+        "backend/scripts/sync_baison_member_deposits.py",
+        "backend/scripts/generate_boss_command_center.py",
+        "backend/scripts/sync_baison_product_inbound.py",
+        "backend/scripts/backfill_investment_metrics.py"
+      ],
+      "source_fingerprint": "4140a052177f4712ca91dd5d2e8f168bc2ee70de36aeaeada6aebae24168bd9b",
+      "last_change": {
+        "commit": "e1b3c08beaaa4bc74e9edd9d3f66d2478c2bb760",
+        "date": "2026-07-19T12:47:14+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "Add read-only Kingdee historical finance warehouse"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "docs": {
+      "id": "docs",
+      "path": "docs",
+      "subtree_files": 0,
+      "subtree_loc": 0,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [],
+      "source_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_change": {
+        "commit": "f074224e6b21da53cf81f9197d0e3a2b298a74b2",
+        "date": "2026-07-20T10:42:54+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "docs: plan Huabang full finance center implementation"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "frontend": {
+      "id": "frontend",
+      "path": "frontend",
+      "subtree_files": 114,
+      "subtree_loc": 24153,
+      "owned_files": 6,
+      "owned_loc": 4993,
+      "test_files": 21,
+      "test_loc": 4570,
+      "test_functions": 207,
+      "route_handlers": 0,
+      "languages": {
+        "JSON": 4,
+        "TypeScript": 1,
+        "JavaScript": 1
+      },
+      "key_files": [
+        "frontend/src/main.ts",
+        "frontend/src/router/index.ts",
+        "frontend/src/layouts/MainLayout.vue",
+        "frontend/package.json",
+        "frontend/vite.config.ts",
+        "frontend/public/life-data-collector.user.js",
+        "frontend/package-lock.json",
+        "frontend/tsconfig.json"
+      ],
+      "source_fingerprint": "f7156affea30649bd3db5e788c8c8be9eee4e296ee11081be519b498e0c666b2",
+      "last_change": {
+        "commit": "e33ec03b401b9bee836a2bfa42bea8d85f52c583",
+        "date": "2026-07-21T10:12:25+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: align finance module hierarchy"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "frontend_app": {
+      "id": "frontend_app",
+      "path": "frontend/src",
+      "subtree_files": 87,
+      "subtree_loc": 14590,
+      "owned_files": 87,
+      "owned_loc": 14590,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {
+        "Vue SFC": 59,
+        "TypeScript": 26,
+        "JavaScript": 2
+      },
+      "key_files": [
+        "frontend/src/main.ts",
+        "frontend/src/router/index.ts",
+        "frontend/src/layouts/MainLayout.vue",
+        "frontend/src/config/financeCenterModules.ts",
+        "frontend/src/App.vue",
+        "frontend/src/views/Login.vue",
+        "frontend/src/views/member/Index.vue",
+        "frontend/src/views/hr/Attendance.vue"
+      ],
+      "source_fingerprint": "7a7c70c877d617b20e92ece7511d6424d8c8863905801ebbdfe5099e22a7323a",
+      "last_change": {
+        "commit": "e33ec03b401b9bee836a2bfa42bea8d85f52c583",
+        "date": "2026-07-21T10:12:25+08:00",
+        "author": "HuaBang AI Dev",
+        "subject": "fix: align finance module hierarchy"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "operations": {
+      "id": "operations",
+      "path": "deploy",
+      "subtree_files": 0,
+      "subtree_loc": 0,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [],
+      "source_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_change": {
+        "commit": "c957ce7a78ccc59b3b3cbb551b23485e6fb22c36",
+        "date": "2026-06-22T03:30:01Z",
+        "author": "HuaBang AI Dev",
+        "subject": "backup: 每日服务器代码备份 2026-06-22 03:30"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    },
+    "root_scripts": {
+      "id": "root_scripts",
+      "path": "scripts",
+      "subtree_files": 0,
+      "subtree_loc": 0,
+      "owned_files": 0,
+      "owned_loc": 0,
+      "test_files": 0,
+      "test_loc": 0,
+      "test_functions": 0,
+      "route_handlers": 0,
+      "languages": {},
+      "key_files": [],
+      "source_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_change": {
+        "commit": "88e3084da2c6fd3086d02b04bc6c2876649b8d2e",
+        "date": "2026-07-15T10:08:42Z",
+        "author": "HuaBang AI Dev",
+        "subject": "Add constrained AI business advice service"
+      },
+      "reviewed_at": "2026-07-22T06:13:28+00:00"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "source_system": "kingdee",
+  "source_batch_key": "mumaren-finance-test-20260731",
+  "vouchers": [
+    {
+      "source_key": "K3:test:voucher:0001",
+      "voucher_no": "记-test-0001",
+      "voucher_date": "2024-01-31",
+      "summary": "金蝶历史测试凭证",
+      "lines": [
+        {
+          "source_key": "K3:test:entry:0001",
+          "line_no": 1,
+          "account_code": "1001",
+          "account_name": "库存现金",
+          "debit_amount": "100.00",
+          "credit_amount": "0.00"
+        },
+        {
+          "source_key": "K3:test:entry:0002",
+          "line_no": 2,
+          "account_code": "3001",
+          "account_name": "实收资本",
+          "debit_amount": "0.00",
+          "credit_amount": "100.00"
+        }
+      ]
+    }
+  ]
+}
