@@ -171,7 +171,9 @@
       </header>
 
       <main class="hb-content">
-        <router-view />
+        <router-view v-slot="{ Component, route }">
+          <component :is="Component" :key="`${route.fullPath}:${mumarenFinanceBookId ?? 'none'}`" />
+        </router-view>
       </main>
 
       <el-dialog v-model="passwordDialogVisible" title="修改密码" width="460px" append-to-body>
@@ -201,6 +203,8 @@
 import { computed, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { storeToRefs } from "pinia";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 import { authApi } from "@/api/auth";
 import BossAiFloatingAssistant from "@/components/ai/BossAiFloatingAssistant.vue";
 import { financeProfitNavigation } from "@/config/financeCenterModules";
@@ -230,6 +234,7 @@ import {
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+const { bookId: mumarenFinanceBookId } = storeToRefs(useMumarenFinanceBookStore());
 const mobileSidebarOpen = ref(false);
 
 watch(() => route.fullPath, () => { mobileSidebarOpen.value = false; });

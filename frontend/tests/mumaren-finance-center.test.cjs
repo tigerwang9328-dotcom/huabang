@@ -627,6 +627,14 @@ test('科目管理与账套管理页面只读,期末结账与辅助核算已持�
   assert.match(closing, /periodsApi/, '结账页面必须调用 periodsApi')
 })
 
+test('共享账簿切换会重建当前页面，避免旧账簿异步响应覆盖新账簿', () => {
+  const layout = read('src', 'layouts', 'MainLayout.vue')
+  assert.match(layout, /useMumarenFinanceBookStore/)
+  assert.match(layout, /storeToRefs\(useMumarenFinanceBookStore\(\)\)/)
+  assert.match(layout, /:key="`\$\{route\.fullPath\}:\$\{mumarenFinanceBookId \?\? 'none'\}`"/)
+  assert.match(read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAccounts.vue'), /await bookStore\.loadBooks\(\);\s*await load\(\);/)
+})
+
 test('辅助核算页面使用独立后端的 parent_id 和 is_active 契约显示层级与启停状态', () => {
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceSettingsAuxiliary.vue')
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
