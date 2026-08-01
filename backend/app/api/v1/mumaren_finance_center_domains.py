@@ -1931,17 +1931,23 @@ def _ar_ap_filter_conditions(
     status: str | None,
     counterparty_name: str | None = None,
 ):
+    # FastAPI resolves Query defaults before normal HTTP handling. Direct
+    # service/test calls can still carry an unresolved Query object, which
+    # must not become a SQL filter value.
+    normalized_period = period.strip() if isinstance(period, str) else ""
+    normalized_status = status.strip() if isinstance(status, str) else ""
+    normalized_counterparty = counterparty_name.strip() if isinstance(counterparty_name, str) else ""
     conditions = [model.book_id == book_id]
-    if period:
-        conditions.append(model.period == period)
-    if counterparty_name and counterparty_name.strip():
-        conditions.append(model.counterparty_name.ilike(f"%{counterparty_name.strip()}%"))
-    if status == "draft":
+    if normalized_period:
+        conditions.append(model.period == normalized_period)
+    if normalized_counterparty:
+        conditions.append(model.counterparty_name.ilike(f"%{normalized_counterparty}%"))
+    if normalized_status == "draft":
         conditions.append(model.workflow_status == "draft")
-    elif status == "open":
+    elif normalized_status == "open":
         conditions.extend((model.workflow_status.in_(("reviewed", "posted")), model.settlement_status == "open"))
-    elif status:
-        conditions.append(model.settlement_status == status)
+    elif normalized_status:
+        conditions.append(model.settlement_status == normalized_status)
     return conditions
 
 
