@@ -59,6 +59,8 @@ def validate_voucher_lines(lines: Sequence[Mapping[str, object]]) -> tuple[Decim
 
 def review_voucher(voucher: FinanceCenterMumarenVoucher, *, operator_id: int) -> None:
     """财务人员审核：只允许草稿进入已审核。"""
+    if voucher.is_readonly:
+        raise HistoricalRecordReadonlyError("历史迁移凭证只读，不能审核")
     if voucher.status != "draft":
         raise InvalidVoucherTransition(f"当前状态 {voucher.status}，无法审核")
     voucher.status = "reviewed"
@@ -68,6 +70,8 @@ def review_voucher(voucher: FinanceCenterMumarenVoucher, *, operator_id: int) ->
 
 def post_voucher(voucher: FinanceCenterMumarenVoucher, *, operator_id: int) -> None:
     """人工过账：必须已经审核，领域层不提供自动过账入口。"""
+    if voucher.is_readonly:
+        raise HistoricalRecordReadonlyError("历史迁移凭证只读，不能人工过账")
     if voucher.status != "reviewed":
         raise InvalidVoucherTransition(f"当前状态 {voucher.status}，需先审核再人工过账")
     voucher.status = "posted"

@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openDialog">新增核算项</el-button>
+        <el-button :disabled="isReadonly || !bookId" type="primary"  @click="openDialog">新增核算项</el-button>
       </div>
     </div>
 
@@ -45,12 +45,12 @@
       </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
-          <el-button link :type="row.status === 'active' ? 'warning' : 'success'" size="small" :loading="actingId === row.id" @click="toggle(row)">
+          <el-button :disabled="isReadonly" link :type="row.status === 'active' ? 'warning' : 'success'" size="small" :loading="actingId === row.id" @click="toggle(row)">
             {{ row.status === "active" ? "停用" : "启用" }}
           </el-button>
           <el-popconfirm title="确定删除该核算项?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button :disabled="isReadonly" link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -82,7 +82,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button :disabled="isReadonly" type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
   </section>
@@ -90,6 +90,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   auxiliaryAccountingsApi,
@@ -97,9 +98,10 @@ import {
   type MumarenAuxiliaryAccounting,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const items = ref<MumarenAuxiliaryAccounting[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -139,8 +141,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await bookStore.loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -148,6 +149,7 @@ onMounted(async () => {
 });
 
 const openDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -161,6 +163,7 @@ const openDialog = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!form.code) {
     ElMessage.warning("请填写编码");
@@ -191,6 +194,7 @@ const save = async () => {
 };
 
 const toggle = async (row: MumarenAuxiliaryAccounting) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -207,6 +211,7 @@ const toggle = async (row: MumarenAuxiliaryAccounting) => {
 };
 
 const remove = async (row: MumarenAuxiliaryAccounting) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

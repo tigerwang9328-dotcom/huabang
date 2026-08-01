@@ -54,10 +54,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { mumarenFinanceCenterApi, type MumarenArApAging, type MumarenFinanceBook } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const aging = ref<MumarenArApAging>();
 const error = ref("");
 const loading = ref(false);
@@ -86,7 +88,7 @@ const load = async () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    await bookStore.loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }

@@ -84,6 +84,10 @@ def _voucher_data(voucher: FinanceCenterMumarenVoucher) -> dict:
         "total_credit": voucher.total_credit,
         "reviewed_by": voucher.reviewed_by,
         "posted_by": voucher.posted_by,
+        "is_readonly": voucher.is_readonly,
+        "is_normalized": voucher.is_normalized,
+        "source_system": voucher.source_system,
+        "source_database": voucher.source_database,
     }
 
 
@@ -105,6 +109,9 @@ async def get_books(
     return ApiResponse.ok(data=[{
         "id": book.id, "book_code": book.book_code, "book_name": book.book_name,
         "company_name": book.company_name, "status": book.status,
+        "is_readonly": book.is_readonly,
+        "source_system": book.source_system,
+        "source_database": book.source_database,
     } for book in books])
 
 

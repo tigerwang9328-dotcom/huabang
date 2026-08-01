@@ -51,7 +51,7 @@
       </el-form>
 
       <div class="dialog-toolbar">
-        <el-button type="primary" plain @click="addLine">添加分录</el-button>
+        <el-button type="primary" plain :disabled="isReadonly" @click="addLine">添加分录</el-button>
         <div class="totals">
           <span>借方 <b>{{ money(totalDebit) }}</b></span>
           <span>贷方 <b>{{ money(totalCredit) }}</b></span>
@@ -84,13 +84,13 @@
         </el-table-column>
         <el-table-column label="操作" width="70" align="center">
           <template #default="{ $index }">
-            <el-button link type="danger" size="small" :disabled="form.lines.length <= 1" @click="removeLine($index)">删除</el-button>
+            <el-button link type="danger" size="small" :disabled="isReadonly || form.lines.length <= 1" @click="removeLine($index)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <div class="form-actions">
-        <el-button type="primary" :loading="saving" :disabled="!canSave" @click="save">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" :disabled="isReadonly || !canSave" @click="save">保存草稿</el-button>
       </div>
 
       <el-alert v-if="created" type="success" :closable="false" show-icon title="凭证草稿已创建">
@@ -109,15 +109,17 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceAccount,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenFinanceAccount[]>([]);
 const error = ref("");
 const saving = ref(false);
@@ -142,7 +144,7 @@ const onBookChange = async () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    await bookStore.loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -168,13 +170,17 @@ const balanceDiff = computed(() => totalDebit.value - totalCredit.value);
 const balanced = computed(() => Math.abs(balanceDiff.value) < 0.005 && totalDebit.value > 0);
 const canSave = computed(() => balanced.value && validLines.value.length >= 2 && !!form.voucher_no && !!form.voucher_date);
 
-const addLine = () => form.lines.push(newLine());
+const addLine = () => {
+  if (isReadonly.value) return;
+  form.lines.push(newLine());
+};
 const removeLine = (index: number) => {
+  if (isReadonly.value) return;
   if (form.lines.length > 1) form.lines.splice(index, 1);
 };
 
 const save = async () => {
-  if (!bookId.value || !canSave.value) return;
+  if (isReadonly.value || !bookId.value || !canSave.value) return;
   // 同一行不能同时填借贷
   if (validLines.value.find((l) => Number(l.debit_amount) > 0 && Number(l.credit_amount) > 0)) {
     ElMessage.error("同一分录行不能同时填写借方和贷方金额");

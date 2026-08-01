@@ -9,14 +9,23 @@
       <span class="status-chip">独立账务区</span>
     </header>
 
+    <el-alert v-if="selectedBook?.is_readonly" class="readonly-source" type="warning" :closable="false" show-icon>
+      <template #title>金蝶迁移账簿（只读）</template>
+      当前账簿来源：{{ selectedBook.source_system || "金蝶" }}{{ selectedBook.source_database ? ` / ${selectedBook.source_database}` : "" }}。可继续查询，录入、编辑、删除、审核和过账均已禁用。
+    </el-alert>
+
     <main class="finance-center-content">
-      <router-view />
+      <router-view :key="bookId ?? 'unselected'" />
     </main>
   </section>
 </template>
 
 <script setup lang="ts">
 // 导航已集成到主侧边栏"财务中心"菜单项下(MainLayout.vue),此处仅渲染内容区。
+import { storeToRefs } from "pinia";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
+
+const { bookId, selectedBook } = storeToRefs(useMumarenFinanceBookStore());
 </script>
 
 <style scoped>
@@ -28,6 +37,7 @@ h1 { margin: 0; font-size: 28px; line-height: 1.2; }
 .status-chip { margin-top: 5px; padding: 6px 10px; border: 1px solid rgba(215, 184, 121, .55); border-radius: 99px; color: #f3d698; font-size: 12px; white-space: nowrap; }
 
 .finance-center-content { margin-top: 20px; min-height: 420px; }
+.readonly-source { margin-top: 16px; }
 
 @media (max-width: 640px) { .finance-center-header { padding: 22px; flex-direction: column; } h1 { font-size: 24px; } }
 </style>

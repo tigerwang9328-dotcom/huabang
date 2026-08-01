@@ -16,7 +16,7 @@ from app.api.v1.mumaren_finance_center import (
     require_mumaren_voucher_write,
 )
 from app.core.database import get_db
-from app.models.mumaren_finance_center import FinanceCenterMumarenAuditLog
+from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenAuxiliaryAccounting,
     FinanceCenterMumarenAutoVoucherRule,
@@ -45,6 +45,24 @@ async def _add_audit_log(db: AsyncSession, *, book_id: int | None, action: str, 
         detail=detail,
     ))
     await db.flush()
+
+
+async def _require_account_in_book(db: AsyncSession, *, account_id: int, book_id: int) -> None:
+    account = await db.get(FinanceCenterMumarenAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail=f"会计科目 {account_id} 不存在")
+    if account.book_id != book_id:
+        raise HTTPException(status_code=400, detail="会计科目不属于当前账簿")
+
+
+async def _require_aux_parent_in_book(db: AsyncSession, *, parent_id: int | None, book_id: int) -> None:
+    if parent_id is None:
+        return
+    parent = await db.get(FinanceCenterMumarenAuxiliaryAccounting, parent_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail=f"辅助核算父项 {parent_id} 不存在")
+    if parent.book_id != book_id:
+        raise HTTPException(status_code=400, detail="辅助核算父项不属于当前账簿")
 
 
 # ===========================================================================
@@ -233,6 +251,8 @@ async def create_auto_voucher_rule(
     db: AsyncSession = Depends(get_db),
 ):
     """创建自动凭证规则;仅持久化规则配置,不真正生成凭证。"""
+    if body.account_id is not None:
+        await _require_account_in_book(db, account_id=body.account_id, book_id=body.book_id)
     rule = FinanceCenterMumarenAutoVoucherRule(
         book_id=body.book_id,
         rule_name=body.rule_name,
@@ -266,6 +286,8 @@ async def update_auto_voucher_rule(
         raise HTTPException(status_code=404, detail=f"自动凭证规则 {rule_id} 不存在")
     if rule.book_id != body.book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿修改")
+    if body.account_id is not None:
+        await _require_account_in_book(db, account_id=body.account_id, book_id=rule.book_id)
     for field in ("rule_name", "trigger_event", "account_id", "direction", "amount_formula", "is_active"):
         value = getattr(body, field)
         if value is not None:
@@ -696,6 +718,7 @@ async def create_bank_reconciliation(
     db: AsyncSession = Depends(get_db),
 ):
     """创建银行调节表(workflow_status=draft);不自动审核、不自动过账。"""
+    await _require_account_in_book(db, account_id=body.cash_account_id, book_id=body.book_id)
     rec = FinanceCenterMumarenBankReconciliation(
         book_id=body.book_id,
         cash_account_id=body.cash_account_id,
@@ -732,6 +755,8 @@ async def update_bank_reconciliation(
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿修改")
     if rec.workflow_status != "draft":
         raise HTTPException(status_code=409, detail=f"当前状态 {rec.workflow_status},仅 draft 可修改")
+    if body.cash_account_id is not None:
+        await _require_account_in_book(db, account_id=body.cash_account_id, book_id=rec.book_id)
     for field in ("cash_account_id", "period", "bank_balance", "book_balance", "adjusted_balance", "items_json"):
         value = getattr(body, field)
         if value is not None:
@@ -836,6 +861,7 @@ async def create_auxiliary_accounting(
     db: AsyncSession = Depends(get_db),
 ):
     """创建辅助核算;不自动审核、不自动过账。"""
+    await _require_aux_parent_in_book(db, parent_id=body.parent_id, book_id=body.book_id)
     aux = FinanceCenterMumarenAuxiliaryAccounting(
         book_id=body.book_id,
         aux_type=body.aux_type,
@@ -868,6 +894,8 @@ async def update_auxiliary_accounting(
         raise HTTPException(status_code=404, detail=f"辅助核算 {aux_id} 不存在")
     if aux.book_id != body.book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿修改")
+    if body.parent_id is not None:
+        await _require_aux_parent_in_book(db, parent_id=body.parent_id, book_id=aux.book_id)
     for field in ("aux_type", "code", "name", "parent_id", "is_active"):
         value = getattr(body, field)
         if value is not None:

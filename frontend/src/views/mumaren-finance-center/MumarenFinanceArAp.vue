@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button :disabled="!bookId" @click="openCreate">录入草稿</el-button>
+        <el-button :disabled="isReadonly || !bookId" @click="openCreate">录入草稿</el-button>
       </div>
     </div>
     <div class="filters">
@@ -48,11 +48,11 @@
         </el-table-column>
         <el-table-column label="操作" width="220">
           <template #default="scope">
-            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="reviewOrder(scope.row)">审核</el-button>
-            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :loading="actingId === scope.row.id" @click="openSettle(scope.row)">人工结算</el-button>
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="reviewOrder(scope.row)">审核</el-button>
+            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="openSettle(scope.row)">人工结算</el-button>
             <el-popconfirm v-if="scope.row.workflow_status === 'draft'" title="确定删除该订单?" @confirm="removeOrder(scope.row)">
               <template #reference>
-                <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
+                <el-button size="small" link type="danger" :disabled="isReadonly" :loading="actingId === scope.row.id">删除</el-button>
               </template>
             </el-popconfirm>
             <span v-if="scope.row.settlement_status === 'settled'" class="done-text">已结算</span>
@@ -101,7 +101,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showCreate = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" :disabled="isReadonly || !canCreate" @click="save">保存草稿</el-button>
       </template>
     </el-dialog>
 
@@ -126,7 +126,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showSettle = false">取消</el-button>
-        <el-button type="primary" :loading="settling" :disabled="!canSettle" @click="confirmSettle">确认结算</el-button>
+        <el-button type="primary" :loading="settling" :disabled="isReadonly || !canSettle" @click="confirmSettle">确认结算</el-button>
       </template>
     </el-dialog>
   </section>
@@ -134,6 +134,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   arApOrdersApi,
@@ -142,9 +143,10 @@ import {
   type MumarenArApOrder,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const orderType = ref<"receivable" | "payable">("receivable");
 const aging = ref<MumarenArApAging>();
 const orders = ref<MumarenArApOrder[]>([]);
@@ -195,8 +197,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await bookStore.loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -218,6 +219,7 @@ const canCreate = computed(
 );
 
 const openCreate = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -231,6 +233,7 @@ const openCreate = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value || !canCreate.value) return;
   saving.value = true;
   try {
@@ -255,6 +258,7 @@ const save = async () => {
 
 // ── 订单审核(状态机:draft → reviewed,禁止反向) ──
 const reviewOrder = async (row: MumarenArApOrder) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.reviewArApOrder(row.id);
@@ -269,6 +273,7 @@ const reviewOrder = async (row: MumarenArApOrder) => {
 
 // ── 订单删除(仅 draft 可删) ──
 const removeOrder = async (row: MumarenArApOrder) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {
@@ -297,6 +302,7 @@ const canSettle = computed(
 );
 
 const openSettle = (row: MumarenArApOrder) => {
+  if (isReadonly.value) return;
   settleTarget.value = row;
   settleForm.amount = Number(row.total_amount) - Number(row.settled_amount);
   settleForm.settlement_date = new Date().toISOString().slice(0, 10);
@@ -305,6 +311,7 @@ const openSettle = (row: MumarenArApOrder) => {
 };
 
 const confirmSettle = async () => {
+  if (isReadonly.value) return;
   if (!settleTarget.value || !canSettle.value) return;
   settling.value = true;
   try {

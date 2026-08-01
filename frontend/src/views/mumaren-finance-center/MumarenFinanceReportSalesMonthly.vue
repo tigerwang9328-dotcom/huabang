@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId" @click="openCreate">录入月报</el-button>
+        <el-button :disabled="isReadonly || !bookId" type="primary"  @click="openCreate">录入月报</el-button>
       </div>
     </div>
 
@@ -42,7 +42,7 @@
             @confirm="removeRow(scope.row)"
           >
             <template #reference>
-              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
+              <el-button :disabled="isReadonly" size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -69,7 +69,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+        <el-button :disabled="isReadonly" type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
   </section>
@@ -77,6 +77,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import {
   salesMonthlyReportsApi,
@@ -84,9 +85,10 @@ import {
   type MumarenSalesMonthlyReport,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const records = ref<MumarenSalesMonthlyReport[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -141,8 +143,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await bookStore.loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -150,6 +151,7 @@ onMounted(async () => {
 });
 
 const openCreate = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -159,6 +161,7 @@ const openCreate = () => {
 };
 
 const submit = async () => {
+  if (isReadonly.value) return;
   if (!formRef.value || !bookId.value) return;
   const bid = bookId.value;
   await formRef.value.validate(async (valid) => {
@@ -185,6 +188,7 @@ const submit = async () => {
 };
 
 const removeRow = async (row: MumarenSalesMonthlyReport) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

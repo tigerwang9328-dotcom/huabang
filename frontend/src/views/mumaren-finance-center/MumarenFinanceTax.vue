@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
-        <el-button :disabled="!bookId" @click="openCreate">录入草稿</el-button>
+        <el-button :disabled="isReadonly || !bookId" @click="openCreate">录入草稿</el-button>
       </div>
     </div>
     <div class="filters">
@@ -49,8 +49,8 @@
         </el-table-column>
         <el-table-column label="操作" width="170">
           <template #default="scope">
-            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
-            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
             <span v-if="scope.row.status === 'paid'" class="done-text">已缴税</span>
           </template>
         </el-table-column>
@@ -80,7 +80,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showCreate = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" :disabled="isReadonly || !canCreate" @click="save">保存草稿</el-button>
       </template>
     </el-dialog>
 
@@ -108,7 +108,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showPay = false">取消</el-button>
-        <el-button type="primary" :loading="paying" :disabled="!canPay" @click="confirmPay">确认缴税</el-button>
+        <el-button type="primary" :loading="paying" :disabled="isReadonly || !canPay" @click="confirmPay">确认缴税</el-button>
       </template>
     </el-dialog>
   </section>
@@ -116,6 +116,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
@@ -123,9 +124,10 @@ import {
   type MumarenTaxAlert,
   type MumarenTaxRecord,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const alerts = ref<MumarenTaxAlert[]>([]);
 const records = ref<MumarenTaxRecord[]>([]);
 const error = ref("");
@@ -183,7 +185,7 @@ onMounted(async () => {
   // 仅加载账簿列表,不自动选择账簿,不自动请求税务接口。
   // 用户必须主动选择独立账簿后才能查询税务台账。
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    await bookStore.loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -191,6 +193,7 @@ onMounted(async () => {
 
 // ── 审核(状态机:draft → reviewed,禁止反向) ──
 const review = async (row: MumarenTaxRecord) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.reviewTaxRecord(row.id);
@@ -216,6 +219,7 @@ const form = reactive({
 const canCreate = computed(() => !!bookId.value && !!form.tax_type_id && !!form.period && form.tax_amount >= 0);
 
 const openCreate = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -229,6 +233,7 @@ const openCreate = () => {
 };
 
 const save = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value || !canCreate.value) return;
   saving.value = true;
   try {
@@ -264,6 +269,7 @@ const canPay = computed(
 );
 
 const openPay = (row: MumarenTaxRecord) => {
+  if (isReadonly.value) return;
   payTarget.value = row;
   payForm.amount = Number(row.unpaid_amount || 0);
   payForm.payment_date = new Date().toISOString().slice(0, 10);
@@ -272,6 +278,7 @@ const openPay = (row: MumarenTaxRecord) => {
 };
 
 const confirmPay = async () => {
+  if (isReadonly.value) return;
   if (!payTarget.value || !canPay.value) return;
   paying.value = true;
   try {
