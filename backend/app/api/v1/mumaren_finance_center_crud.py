@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,10 @@ from app.api.v1.mumaren_finance_center import (
 )
 from app.core.database import get_db
 from app.models.mumaren_finance_center import FinanceCenterMumarenAuditLog
+from app.models.mumaren_finance_center import (
+    FinanceCenterMumarenAccount,
+    FinanceCenterMumarenBook,
+)
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenAuxiliaryAccounting,
     FinanceCenterMumarenAutoVoucherRule,
@@ -51,12 +55,34 @@ async def _add_audit_log(db: AsyncSession, *, book_id: int | None, action: str, 
 # Task 9: 凭证模板 CRUD(finance_center_mumaren_voucher_templates)
 # ===========================================================================
 
+class VoucherTemplateLine(BaseModel):
+    account_id: int = Field(ge=1)
+    summary: str | None = Field(default=None, max_length=500)
+    debit_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    credit_amount: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class VoucherTemplateLines(BaseModel):
+    lines: list[VoucherTemplateLine] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def validate_balanced_lines(self):
+        debit = sum((line.debit_amount for line in self.lines), Decimal("0"))
+        credit = sum((line.credit_amount for line in self.lines), Decimal("0"))
+        for line in self.lines:
+            if (line.debit_amount == 0) == (line.credit_amount == 0):
+                raise ValueError("每条模板分录必须且只能填写借方或贷方金额")
+        if debit != credit:
+            raise ValueError(f"借贷不平衡: 借方={debit}, 贷方={credit}")
+        return self
+
+
 class VoucherTemplateInput(BaseModel):
     book_id: int = Field(ge=1)
     template_name: str = Field(min_length=1, max_length=128)
     voucher_type: str = Field(default="记", max_length=16)
     summary: str | None = Field(default=None, max_length=500)
-    lines_json: dict | None = None
+    lines_json: VoucherTemplateLines
 
 
 class VoucherTemplateUpdate(BaseModel):
@@ -64,7 +90,33 @@ class VoucherTemplateUpdate(BaseModel):
     template_name: str | None = None
     voucher_type: str | None = None
     summary: str | None = None
-    lines_json: dict | None = None
+    lines_json: VoucherTemplateLines | None = None
+
+
+async def _require_writable_book(db: AsyncSession, book_id: int) -> FinanceCenterMumarenBook:
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"账簿 {book_id} 不存在")
+    if book.is_readonly:
+        raise HTTPException(status_code=409, detail="金蝶迁移账簿只读，不能维护凭证模板")
+    return book
+
+
+async def _validate_template_accounts(
+    db: AsyncSession, *, book_id: int, lines_json: VoucherTemplateLines | None,
+) -> None:
+    if lines_json is None:
+        return
+    for line_no, line in enumerate(lines_json.lines, start=1):
+        account = (await db.execute(
+            select(FinanceCenterMumarenAccount).where(
+                FinanceCenterMumarenAccount.id == line.account_id,
+                FinanceCenterMumarenAccount.book_id == book_id,
+                FinanceCenterMumarenAccount.is_active.is_(True),
+            )
+        )).scalar_one_or_none()
+        if account is None:
+            raise HTTPException(status_code=400, detail=f"第{line_no}行会计科目不存在、不属于账簿或已停用")
 
 
 def _voucher_template_data(tpl: FinanceCenterMumarenVoucherTemplate) -> dict:
@@ -104,12 +156,14 @@ async def create_voucher_template(
     db: AsyncSession = Depends(get_db),
 ):
     """创建凭证模板;不自动审核、不自动过账。"""
+    await _require_writable_book(db, body.book_id)
+    await _validate_template_accounts(db, book_id=body.book_id, lines_json=body.lines_json)
     tpl = FinanceCenterMumarenVoucherTemplate(
         book_id=body.book_id,
         template_name=body.template_name,
         voucher_type=body.voucher_type,
         summary=body.summary,
-        lines_json=body.lines_json,
+        lines_json=body.lines_json.model_dump(mode="json") if body.lines_json else None,
         created_by=_actor_id(current_user),
     )
     db.add(tpl)
@@ -135,10 +189,12 @@ async def update_voucher_template(
         raise HTTPException(status_code=404, detail=f"凭证模板 {template_id} 不存在")
     if tpl.book_id != body.book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿修改")
+    await _require_writable_book(db, body.book_id)
+    await _validate_template_accounts(db, book_id=body.book_id, lines_json=body.lines_json)
     for field in ("template_name", "voucher_type", "summary", "lines_json"):
         value = getattr(body, field)
         if value is not None:
-            setattr(tpl, field, value)
+            setattr(tpl, field, value.model_dump(mode="json") if field == "lines_json" and value else value)
     await db.flush()
     await _add_audit_log(
         db, book_id=tpl.book_id, action="update_voucher_template",
@@ -161,6 +217,7 @@ async def delete_voucher_template(
         raise HTTPException(status_code=404, detail=f"凭证模板 {template_id} 不存在")
     if tpl.book_id != book_id:
         raise HTTPException(status_code=400, detail="账簿不一致,禁止跨账簿删除")
+    await _require_writable_book(db, book_id)
     template_name = tpl.template_name
     await db.delete(tpl)
     await _add_audit_log(

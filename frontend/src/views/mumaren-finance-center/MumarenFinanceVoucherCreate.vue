@@ -110,22 +110,26 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
+  voucherTemplatesApi,
   type MumarenFinanceAccount,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
 import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
 const bookStore = useMumarenFinanceBookStore();
+const route = useRoute();
 const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenFinanceAccount[]>([]);
 const accountRequestVersion = ref(0);
 const error = ref("");
 const saving = ref(false);
 const created = ref(false);
+let templateApplyVersion = 0;
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -153,6 +157,7 @@ onMounted(async () => {
   try {
     await bookStore.loadBooks();
     await onBookChange();
+    await applyTemplateFromRoute();
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -170,6 +175,48 @@ const form = reactive({
   summary: "",
   lines: [newLine(), newLine()],
 });
+
+const applyTemplateFromRoute = async () => {
+  const templateId = Number(route.query.template_id);
+  const requestedBookId = bookId.value;
+  const requestedTemplateId = String(route.query.template_id || "");
+  const version = ++templateApplyVersion;
+  if (!templateId || !requestedBookId || isReadonly.value) return;
+  try {
+    const template = (await voucherTemplatesApi.list({ book_id: requestedBookId, limit: 500 })).data.data
+      .find((item) => item.id === templateId);
+    if (version !== templateApplyVersion || requestedBookId !== bookId.value || requestedTemplateId !== String(route.query.template_id || "")) return;
+    if (!template?.lines_json?.lines.length) {
+      resetTemplateDraft();
+      error.value = "所选模板不存在、与当前账簿不一致，或尚未配置分录。";
+      return;
+    }
+    form.voucher_type = template.voucher_type;
+    form.summary = template.summary || "";
+    form.lines = template.lines_json.lines.map((line) => ({
+      key: `line-${lineSeed++}`,
+      account_id: line.account_id,
+      summary: line.summary || "",
+      debit_amount: Number(line.debit_amount),
+      credit_amount: Number(line.credit_amount),
+    }));
+    ElMessage.success(`已套用模板“${template.template_name}”，请填写凭证号后保存草稿。`);
+  } catch {
+    if (version === templateApplyVersion && requestedBookId === bookId.value && requestedTemplateId === String(route.query.template_id || "")) {
+      resetTemplateDraft();
+      error.value = "无法读取所选凭证模板。";
+    }
+  }
+};
+
+const resetTemplateDraft = () => {
+  form.voucher_type = "记";
+  form.summary = "";
+  form.lines = [newLine(), newLine()];
+};
+
+watch(() => route.query.template_id, () => { resetTemplateDraft(); void applyTemplateFromRoute(); });
+watch(bookId, () => { if (route.query.template_id) resetTemplateDraft(); void applyTemplateFromRoute(); });
 
 const validLines = computed(() =>
   form.lines.filter((l) => l.account_id && (Number(l.debit_amount) > 0 || Number(l.credit_amount) > 0)),

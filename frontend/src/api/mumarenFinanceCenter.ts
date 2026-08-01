@@ -499,24 +499,37 @@ export interface MumarenVoucherTemplate {
   book_id: number;
   template_name: string;
   voucher_type: string;
-  summary: string;
+  summary: string | null;
+  lines_json: VoucherTemplateLines | null;
   created_at: string;
+}
+export interface VoucherTemplateLine {
+  account_id: number;
+  summary?: string | null;
+  debit_amount: number;
+  credit_amount: number;
+}
+export interface VoucherTemplateLines {
+  lines: VoucherTemplateLine[];
 }
 export interface VoucherTemplateInput {
   book_id: number;
   template_name: string;
   voucher_type: string;
   summary: string;
+  lines_json: VoucherTemplateLines;
 }
 export interface VoucherTemplateUpdate {
+  book_id: number;
   template_name?: string;
   voucher_type?: string;
   summary?: string;
+  lines_json?: VoucherTemplateLines;
 }
 export const voucherTemplatesApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenVoucherTemplate[]>>(requestPath("/voucher-templates"), { params }),
   create: (data: VoucherTemplateInput) => request.post<ApiResponse<MumarenVoucherTemplate>>(requestPath("/voucher-templates"), data),
-  update: (id: number, data: VoucherTemplateUpdate, book_id: number) => request.put<ApiResponse<MumarenVoucherTemplate>>(requestPath(`/voucher-templates/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: VoucherTemplateUpdate) => request.put<ApiResponse<MumarenVoucherTemplate>>(requestPath(`/voucher-templates/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/voucher-templates/${id}`), { params: { book_id } }),
 };
 
