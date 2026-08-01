@@ -454,6 +454,9 @@ export const arApOrdersApi = {
   delete: (id: number, book_id: number, order_type: string) => request.delete<ApiResponse<null>>(requestPath(`/ar-ap/orders/${id}`), { params: { book_id, order_type } }),
 };
 
+// 付款台账以独立应付单及其人工结算为唯一事实来源，避免重复付款表。
+export const paymentsApi = arApOrdersApi;
+
 // ── 审计日志(只读) ──
 export interface MumarenAuditLog {
   id: number;

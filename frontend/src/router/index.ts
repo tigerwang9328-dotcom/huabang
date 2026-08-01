@@ -106,7 +106,8 @@ const routes = [
           // 资产
           { path: "assets", name: "MumarenFinanceAssets", component: () => import("@/views/mumaren-finance-center/MumarenFinanceAssets.vue"), meta: { title: "资产" } },
           // 发票
-          { path: "invoices", name: "MumarenFinanceInvoices", component: () => import("@/views/mumaren-finance-center/MumarenFinanceInvoices.vue"), meta: { title: "发票" } },
+            { path: "invoices", name: "MumarenFinanceInvoices", component: () => import("@/views/mumaren-finance-center/MumarenFinanceInvoices.vue"), meta: { title: "发票" } },
+            { path: "payments", name: "MumarenFinancePayments", component: () => import("@/views/mumaren-finance-center/MumarenFinancePayments.vue"), meta: { title: "付款" } },
           // 出纳(2 子项)
           { path: "cashier", redirect: "/app/finance-center/mumaren/cashier/accounts" },
           { path: "cashier/accounts", name: "MumarenFinanceCashierAccounts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCashierAccounts.vue"), meta: { title: "账户与流水" } },

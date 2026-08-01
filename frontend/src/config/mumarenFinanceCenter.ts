@@ -89,6 +89,7 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
   { key: "closing", title: "结账", path: `${R}/closing`, routeName: "MumarenFinanceClosing", availability: "available" },
   { key: "assets", title: "资产", path: `${R}/assets`, routeName: "MumarenFinanceAssets", availability: "available" },
   { key: "invoices", title: "发票", path: `${R}/invoices`, routeName: "MumarenFinanceInvoices", availability: "available" },
+  { key: "payments", title: "付款", path: `${R}/payments`, routeName: "MumarenFinancePayments", availability: "available" },
   {
     key: "cashier",
     title: "出纳",
@@ -182,6 +183,7 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
     { path: `${R}/closing`, label: "结账" },
     { path: `${R}/assets`, label: "资产" },
     { path: `${R}/invoices`, label: "发票" },
+    { path: `${R}/payments`, label: "付款" },
     {
       label: "出纳",
       key: "mumaren-cashier",

@@ -215,6 +215,19 @@ test('所有账簿页面使用共享账簿，历史账簿写入页有界面只�
   }
 })
 
+test('付款台账在独立财务中心可访问，并遵循草稿审核人工支付和历史账簿只读规则', () => {
+  const navigation = read('src', 'config', 'mumarenFinanceCenter.ts')
+  const router = read('src', 'router', 'index.ts')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePayments.vue')
+  assert.match(navigation, /key: "payments"/)
+  assert.match(router, /payments[\s\S]*MumarenFinancePayments/)
+  assert.match(api, /paymentsApi/)
+  assert.match(api, /finance-center\/mumaren/)
+  assert.match(page, /MumarenFinanceArAp/)
+  assert.match(page, /fixed-order-type="payable"/)
+})
+
 test('派生展示类页面调用已有 API,不新增后端接口', () => {
   const derivedPages = [
     { file: 'MumarenFinanceCompass.vue', apis: ['listBooks', 'getTrialBalance', 'getProfitStatement'] },
