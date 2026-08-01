@@ -779,3 +779,56 @@ export const auxiliaryAccountingsApi = {
   update: (id: number, data: AuxiliaryAccountingUpdate) => request.put<ApiResponse<MumarenAuxiliaryAccounting>>(requestPath(`/auxiliary-accountings/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/auxiliary-accountings/${id}`), { params: { book_id } }),
 };
+
+// ── 每日经营参数与广告费(独立账簿；不读取旧财务或牧马人数据) ──
+export interface MumarenOperatingStoreGroup {
+  id: number;
+  book_id: number;
+  group_name: string;
+  store_codes: string[];
+}
+export interface MumarenDailyOperatingParameter {
+  id?: number;
+  book_id: number;
+  period: string;
+  store_code: string;
+  store_name: string;
+  platform_income_rate: number;
+  estimated_return_rate_pct: number;
+  refund_only_rate_pct: number;
+  freight_insurance_unit_cost: number;
+  express_unit_cost: number;
+  package_unit_cost: number;
+  promotion_unit_cost: number;
+  return_labor_unit_cost: number;
+  goods_loss_unit_cost: number;
+  return_rate_warning_threshold_pct: number;
+  warning_enabled: boolean;
+  remark: string | null;
+  updated_at?: string | null;
+}
+export interface MumarenDailyAdCost {
+  id?: number;
+  book_id: number;
+  business_date: string;
+  store_code: string;
+  store_name: string;
+  platform: string | null;
+  ad_cost: number;
+  compensation_amount: number;
+  remark: string | null;
+  updated_at?: string | null;
+}
+export const operatingSettingsApi = {
+  listStoreGroups: (params: { book_id: number }) => request.get<ApiResponse<MumarenOperatingStoreGroup[]>>(requestPath("/operating/store-groups"), { params }),
+  createStoreGroup: (data: Omit<MumarenOperatingStoreGroup, "id">) => request.post<ApiResponse<MumarenOperatingStoreGroup>>(requestPath("/operating/store-groups"), data),
+  updateStoreGroup: (id: number, data: Omit<MumarenOperatingStoreGroup, "id">) => request.put<ApiResponse<MumarenOperatingStoreGroup>>(requestPath(`/operating/store-groups/${id}`), data),
+  deleteStoreGroup: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/operating/store-groups/${id}`), { params: { book_id } }),
+  listDailyParameters: (params: { book_id: number; period: string }) => request.get<ApiResponse<MumarenDailyOperatingParameter[]>>(requestPath("/operating/daily-parameters"), { params }),
+  saveDailyParameters: (data: { book_id: number; period: string; rows: Omit<MumarenDailyOperatingParameter, "id" | "book_id" | "period" | "updated_at">[] }) => request.post<ApiResponse<MumarenDailyOperatingParameter[]>>(requestPath("/operating/daily-parameters/batch-save"), data),
+  batchDailyParameter: (data: { book_id: number; period: string; field: string; value: number; store_codes: string[] }) => request.post<ApiResponse<MumarenDailyOperatingParameter[]>>(requestPath("/operating/daily-parameters/batch-field"), data),
+  copyPreviousDailyParameters: (data: { book_id: number; period: string; overwrite?: boolean }) => request.post<ApiResponse<{ source_period: string; copied_count: number; rows: MumarenDailyOperatingParameter[] }>>(requestPath("/operating/daily-parameters/copy-previous"), data),
+  listDailyAdCosts: (params: { book_id: number; business_date: string; platform?: string }) => request.get<ApiResponse<MumarenDailyAdCost[]>>(requestPath("/operating/daily-ad-costs"), { params }),
+  saveDailyAdCosts: (data: { book_id: number; business_date: string; rows: Omit<MumarenDailyAdCost, "id" | "book_id" | "business_date" | "updated_at">[] }) => request.post<ApiResponse<MumarenDailyAdCost[]>>(requestPath("/operating/daily-ad-costs/batch-save"), data),
+  batchDailyAdCost: (data: { book_id: number; business_date: string; store_codes: string[]; ad_cost: number }) => request.post<ApiResponse<MumarenDailyAdCost[]>>(requestPath("/operating/daily-ad-costs/batch-ad-cost"), data),
+};

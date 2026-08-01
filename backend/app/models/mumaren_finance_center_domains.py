@@ -323,6 +323,72 @@ class FinanceCenterMumarenSalesMonthlyReport(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class FinanceCenterMumarenStoreGroup(Base):
+    """每个独立账簿自己的经营门店组，不复用牧马人店铺配置。"""
+    __tablename__ = "finance_center_mumaren_store_groups"
+    __table_args__ = (
+        UniqueConstraint("book_id", "group_name", name="uq_mumaren_finance_store_group"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    group_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    store_codes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenDailyOperatingParameter(Base):
+    """日报利润口径使用的月度参数；仅作为经营参数，不自动产生凭证。"""
+    __tablename__ = "finance_center_mumaren_daily_operating_parameters"
+    __table_args__ = (
+        UniqueConstraint("book_id", "period", "store_code", name="uq_mumaren_finance_daily_operating_parameter"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    store_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    store_name: Mapped[str | None] = mapped_column(String(128))
+    platform_income_rate: Mapped[object] = mapped_column(Numeric(8, 4), nullable=False, default=1)
+    estimated_return_rate_pct: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False, default=0)
+    refund_only_rate_pct: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False, default=0)
+    freight_insurance_unit_cost: Mapped[object] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    express_unit_cost: Mapped[object] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    package_unit_cost: Mapped[object] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    promotion_unit_cost: Mapped[object] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    return_labor_unit_cost: Mapped[object] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    goods_loss_unit_cost: Mapped[object] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    return_rate_warning_threshold_pct: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False, default=8)
+    warning_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    remark: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class FinanceCenterMumarenDailyAdCost(Base):
+    """每日广告费和赔付手工维护记录；不覆盖百胜或牧马人采集数据。"""
+    __tablename__ = "finance_center_mumaren_daily_ad_costs"
+    __table_args__ = (
+        UniqueConstraint("book_id", "business_date", "store_code", name="uq_mumaren_finance_daily_ad_cost"),
+        {"schema": MUMAREN_FINANCE_DOMAIN_SCHEMA},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(_BOOK), nullable=False)
+    business_date: Mapped[object] = mapped_column(Date, nullable=False)
+    store_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    store_name: Mapped[str | None] = mapped_column(String(128))
+    platform: Mapped[str | None] = mapped_column(String(64))
+    ad_cost: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    compensation_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    remark: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class FinanceCenterMumarenBankReconciliation(Base):
     __tablename__ = "finance_center_mumaren_bank_reconciliations"
     __table_args__ = (

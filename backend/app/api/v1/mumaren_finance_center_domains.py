@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,14 +21,18 @@ from app.api.v1.mumaren_finance_center import (
     require_mumaren_voucher_write,
 )
 from app.core.database import get_db
+from app.core.store_whitelist import ALLOWED_STORE_CODES
 from app.models.mumaren_finance_center import (
     FinanceCenterMumarenAuditLog,
+    FinanceCenterMumarenBook,
     FinanceCenterMumarenFiscalPeriod,
     FinanceCenterMumarenVoucher,
 )
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenCashAccount,
     FinanceCenterMumarenCashFlow,
+    FinanceCenterMumarenDailyAdCost,
+    FinanceCenterMumarenDailyOperatingParameter,
     FinanceCenterMumarenArApSettlement,
     FinanceCenterMumarenFixedAsset,
     FinanceCenterMumarenInvoice,
@@ -37,6 +41,7 @@ from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenPayroll,
     FinanceCenterMumarenReceivableOrder,
     FinanceCenterMumarenReceivableOrderLine,
+    FinanceCenterMumarenStoreGroup,
     FinanceCenterMumarenTaxRecord,
     FinanceCenterMumarenTaxType,
 )
@@ -63,6 +68,457 @@ from app.services.mumaren_finance_center.tax import (
 
 
 router = APIRouter(prefix="/finance-center/mumaren", tags=["牧马人财务中心：往来与税务"])
+
+
+_DAILY_PARAMETER_FIELDS = frozenset({
+    "platform_income_rate", "estimated_return_rate_pct", "refund_only_rate_pct",
+    "freight_insurance_unit_cost", "express_unit_cost", "package_unit_cost",
+    "promotion_unit_cost", "return_labor_unit_cost", "goods_loss_unit_cost",
+    "return_rate_warning_threshold_pct",
+})
+
+
+def _is_allowed_operating_store(store_code: str) -> bool:
+    return store_code.strip().upper() in ALLOWED_STORE_CODES
+
+
+def _daily_parameter_data(row: FinanceCenterMumarenDailyOperatingParameter) -> dict:
+    return {
+        "id": row.id, "book_id": row.book_id, "period": row.period,
+        "store_code": row.store_code, "store_name": row.store_name or row.store_code,
+        **{field: getattr(row, field) for field in _DAILY_PARAMETER_FIELDS},
+        "warning_enabled": row.warning_enabled, "remark": row.remark,
+        "updated_at": row.updated_at,
+    }
+
+
+def _daily_ad_cost_data(row: FinanceCenterMumarenDailyAdCost) -> dict:
+    return {
+        "id": row.id, "book_id": row.book_id, "business_date": row.business_date,
+        "store_code": row.store_code, "store_name": row.store_name or row.store_code,
+        "platform": row.platform, "ad_cost": row.ad_cost,
+        "compensation_amount": row.compensation_amount, "remark": row.remark,
+        "updated_at": row.updated_at,
+    }
+
+
+async def _require_writable_operating_book(db: AsyncSession, book_id: int) -> FinanceCenterMumarenBook:
+    """Return a current book, or fail before a history-write reaches the DB trigger."""
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="账簿不存在")
+    if book.is_readonly:
+        raise HTTPException(status_code=409, detail="金蝶迁移账簿只读，不能维护经营设置")
+    return book
+
+
+class StoreGroupInput(BaseModel):
+    book_id: int = Field(ge=1)
+    group_name: str = Field(min_length=1, max_length=128)
+    store_codes: list[str] = Field(min_length=1, max_length=7)
+
+    @field_validator("store_codes")
+    @classmethod
+    def normalize_store_codes(cls, values: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(value.strip().upper() for value in values if value.strip()))
+        if not normalized or any(not _is_allowed_operating_store(value) for value in normalized):
+            raise ValueError("店铺必须是华邦允许的销售门店")
+        return normalized
+
+
+class DailyOperatingParameterInput(BaseModel):
+    store_code: str = Field(min_length=1, max_length=32)
+    store_name: str | None = Field(default=None, max_length=128)
+    platform_income_rate: Decimal = Field(default=Decimal("1"), ge=0, le=2)
+    estimated_return_rate_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    refund_only_rate_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    freight_insurance_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=1000000)
+    express_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=1000000)
+    package_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=1000000)
+    promotion_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=1000000)
+    return_labor_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=1000000)
+    goods_loss_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=1000000)
+    return_rate_warning_threshold_pct: Decimal = Field(default=Decimal("8"), ge=0, le=100)
+    warning_enabled: bool = True
+    remark: str | None = Field(default=None, max_length=500)
+
+    @field_validator("store_code")
+    @classmethod
+    def ensure_allowed_store(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not _is_allowed_operating_store(normalized):
+            raise ValueError("店铺必须是华邦允许的销售门店")
+        return normalized
+
+
+class DailyOperatingParameterSaveInput(BaseModel):
+    book_id: int = Field(ge=1)
+    period: str = Field(pattern=r"^\d{4}-\d{2}$")
+    rows: list[DailyOperatingParameterInput] = Field(min_length=1, max_length=7)
+
+    @model_validator(mode="after")
+    def reject_duplicate_store_codes(self):
+        if len({row.store_code for row in self.rows}) != len(self.rows):
+            raise ValueError("店铺编码不能重复")
+        return self
+
+
+class DailyOperatingParameterBatchInput(BaseModel):
+    book_id: int = Field(ge=1)
+    period: str = Field(pattern=r"^\d{4}-\d{2}$")
+    field: str = Field(min_length=1, max_length=64)
+    value: Decimal = Field(ge=0, le=1000000)
+    store_codes: list[str] = Field(min_length=1, max_length=7)
+
+    @model_validator(mode="after")
+    def validate_known_field(self):
+        if self.field not in _DAILY_PARAMETER_FIELDS:
+            raise ValueError("不支持批量维护该参数字段")
+        if self.field in {"platform_income_rate"} and self.value > 2:
+            raise ValueError("平台收入系数不能超过 2")
+        if self.field.endswith("_pct") and self.value > 100:
+            raise ValueError("百分比参数不能超过 100")
+        self.store_codes = StoreGroupInput(book_id=self.book_id, group_name="批量", store_codes=self.store_codes).store_codes
+        return self
+
+
+class DailyParameterCopyInput(BaseModel):
+    book_id: int = Field(ge=1)
+    period: str = Field(pattern=r"^\d{4}-\d{2}$")
+    overwrite: bool = False
+
+
+class DailyAdCostInput(BaseModel):
+    store_code: str = Field(min_length=1, max_length=32)
+    store_name: str | None = Field(default=None, max_length=128)
+    platform: str | None = Field(default=None, max_length=64)
+    ad_cost: Decimal = Field(default=Decimal("0"), ge=0, le=100000000)
+    compensation_amount: Decimal = Field(default=Decimal("0"), ge=0, le=100000000)
+    remark: str | None = Field(default=None, max_length=500)
+
+    @field_validator("store_code")
+    @classmethod
+    def ensure_allowed_store(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not _is_allowed_operating_store(normalized):
+            raise ValueError("店铺必须是华邦允许的销售门店")
+        return normalized
+
+
+class DailyAdCostSaveInput(BaseModel):
+    book_id: int = Field(ge=1)
+    business_date: date
+    rows: list[DailyAdCostInput] = Field(min_length=1, max_length=7)
+
+    @model_validator(mode="after")
+    def reject_duplicate_store_codes(self):
+        if len({row.store_code for row in self.rows}) != len(self.rows):
+            raise ValueError("店铺编码不能重复")
+        return self
+
+
+class DailyAdCostBatchInput(BaseModel):
+    book_id: int = Field(ge=1)
+    business_date: date
+    store_codes: list[str] = Field(min_length=1, max_length=7)
+    ad_cost: Decimal = Field(ge=0, le=100000000)
+
+    @field_validator("store_codes")
+    @classmethod
+    def normalize_store_codes(cls, values: list[str]) -> list[str]:
+        return StoreGroupInput(book_id=1, group_name="批量", store_codes=values).store_codes
+
+
+def _apply_daily_parameter(
+    row: FinanceCenterMumarenDailyOperatingParameter,
+    payload: DailyOperatingParameterInput,
+    *,
+    actor_id: int,
+) -> None:
+    row.store_name = payload.store_name or payload.store_code
+    for field in _DAILY_PARAMETER_FIELDS:
+        setattr(row, field, getattr(payload, field))
+    row.warning_enabled = payload.warning_enabled
+    row.remark = payload.remark
+    row.updated_by = actor_id
+
+
+async def _upsert_daily_parameter_rows(
+    db: AsyncSession,
+    *,
+    book_id: int,
+    period: str,
+    rows: list[DailyOperatingParameterInput],
+    actor_id: int,
+) -> list[FinanceCenterMumarenDailyOperatingParameter]:
+    codes = [row.store_code for row in rows]
+    existing = {
+        row.store_code: row
+        for row in (await db.execute(select(FinanceCenterMumarenDailyOperatingParameter).where(
+            FinanceCenterMumarenDailyOperatingParameter.book_id == book_id,
+            FinanceCenterMumarenDailyOperatingParameter.period == period,
+            FinanceCenterMumarenDailyOperatingParameter.store_code.in_(codes),
+        ))).scalars()
+    }
+    result = []
+    for payload in rows:
+        row = existing.get(payload.store_code)
+        if row is None:
+            row = FinanceCenterMumarenDailyOperatingParameter(
+                book_id=book_id, period=period, store_code=payload.store_code,
+            )
+            db.add(row)
+        _apply_daily_parameter(row, payload, actor_id=actor_id)
+        result.append(row)
+    await db.flush()
+    return result
+
+
+async def _upsert_daily_ad_cost_rows(
+    db: AsyncSession,
+    *,
+    book_id: int,
+    business_date: date,
+    rows: list[DailyAdCostInput],
+    actor_id: int,
+) -> list[FinanceCenterMumarenDailyAdCost]:
+    codes = [row.store_code for row in rows]
+    existing = {
+        row.store_code: row
+        for row in (await db.execute(select(FinanceCenterMumarenDailyAdCost).where(
+            FinanceCenterMumarenDailyAdCost.book_id == book_id,
+            FinanceCenterMumarenDailyAdCost.business_date == business_date,
+            FinanceCenterMumarenDailyAdCost.store_code.in_(codes),
+        ))).scalars()
+    }
+    result = []
+    for payload in rows:
+        row = existing.get(payload.store_code)
+        if row is None:
+            row = FinanceCenterMumarenDailyAdCost(
+                book_id=book_id, business_date=business_date, store_code=payload.store_code,
+            )
+            db.add(row)
+        row.store_name = payload.store_name or payload.store_code
+        row.platform = payload.platform
+        row.ad_cost = payload.ad_cost
+        row.compensation_amount = payload.compensation_amount
+        row.remark = payload.remark
+        row.updated_by = actor_id
+        result.append(row)
+    await db.flush()
+    return result
+
+
+@router.get("/operating/store-groups", response_model=ApiResponse)
+async def list_operating_store_groups(
+    book_id: int = Query(ge=1),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = list((await db.execute(select(FinanceCenterMumarenStoreGroup).where(
+        FinanceCenterMumarenStoreGroup.book_id == book_id,
+    ).order_by(FinanceCenterMumarenStoreGroup.group_name))).scalars())
+    return ApiResponse.ok(data=[{"id": row.id, "book_id": row.book_id, "group_name": row.group_name, "store_codes": row.store_codes} for row in rows])
+
+
+@router.post("/operating/store-groups", response_model=ApiResponse)
+async def create_operating_store_group(
+    body: StoreGroupInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    row = FinanceCenterMumarenStoreGroup(
+        book_id=body.book_id, group_name=body.group_name.strip(), store_codes=body.store_codes, created_by=_actor_id(current_user),
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except Exception as error:
+        raise HTTPException(status_code=409, detail="店铺组名称已存在") from error
+    _add_audit_log(db, book_id=body.book_id, action="create_store_group", operator_id=_actor_id(current_user), detail=f"创建店铺组 {row.group_name}")
+    return ApiResponse.ok(data={"id": row.id, "book_id": row.book_id, "group_name": row.group_name, "store_codes": row.store_codes})
+
+
+@router.put("/operating/store-groups/{group_id}", response_model=ApiResponse)
+async def update_operating_store_group(
+    group_id: int,
+    body: StoreGroupInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    row = await db.get(FinanceCenterMumarenStoreGroup, group_id)
+    if row is None or row.book_id != body.book_id:
+        raise HTTPException(status_code=404, detail="店铺组不存在")
+    row.group_name, row.store_codes = body.group_name.strip(), body.store_codes
+    await db.flush()
+    _add_audit_log(db, book_id=body.book_id, action="update_store_group", operator_id=_actor_id(current_user), detail=f"更新店铺组 {row.group_name}")
+    return ApiResponse.ok(data={"id": row.id, "book_id": row.book_id, "group_name": row.group_name, "store_codes": row.store_codes})
+
+
+@router.delete("/operating/store-groups/{group_id}", response_model=ApiResponse)
+async def delete_operating_store_group(
+    group_id: int,
+    book_id: int = Query(ge=1),
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, book_id)
+    row = await db.get(FinanceCenterMumarenStoreGroup, group_id)
+    if row is None or row.book_id != book_id:
+        raise HTTPException(status_code=404, detail="店铺组不存在")
+    await db.delete(row)
+    _add_audit_log(db, book_id=book_id, action="delete_store_group", operator_id=_actor_id(current_user), detail=f"删除店铺组 {row.group_name}")
+    return ApiResponse.ok(data=None)
+
+
+@router.get("/operating/daily-parameters", response_model=ApiResponse)
+async def list_daily_operating_parameters(
+    book_id: int = Query(ge=1),
+    period: str = Query(pattern=r"^\d{4}-\d{2}$"),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = list((await db.execute(select(FinanceCenterMumarenDailyOperatingParameter).where(
+        FinanceCenterMumarenDailyOperatingParameter.book_id == book_id,
+        FinanceCenterMumarenDailyOperatingParameter.period == period,
+    ))).scalars())
+    by_code = {row.store_code: row for row in rows}
+    data = [_daily_parameter_data(row) for row in rows]
+    for code in sorted(ALLOWED_STORE_CODES - by_code.keys()):
+        data.append(_daily_parameter_data(FinanceCenterMumarenDailyOperatingParameter(
+            book_id=book_id, period=period, store_code=code, store_name=code,
+        )))
+    return ApiResponse.ok(data=sorted(data, key=lambda row: row["store_code"]))
+
+
+@router.post("/operating/daily-parameters/batch-save", response_model=ApiResponse)
+async def save_daily_operating_parameters(
+    body: DailyOperatingParameterSaveInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    rows = await _upsert_daily_parameter_rows(db, book_id=body.book_id, period=body.period, rows=body.rows, actor_id=_actor_id(current_user))
+    _add_audit_log(db, book_id=body.book_id, action="save_daily_operating_parameters", operator_id=_actor_id(current_user), detail=f"保存 {body.period} 日报参数 {len(rows)} 条")
+    return ApiResponse.ok(data=[_daily_parameter_data(row) for row in rows])
+
+
+@router.post("/operating/daily-parameters/batch-field", response_model=ApiResponse)
+async def batch_update_daily_operating_parameter(
+    body: DailyOperatingParameterBatchInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    existing = {row.store_code: row for row in (await db.execute(select(FinanceCenterMumarenDailyOperatingParameter).where(
+        FinanceCenterMumarenDailyOperatingParameter.book_id == body.book_id,
+        FinanceCenterMumarenDailyOperatingParameter.period == body.period,
+        FinanceCenterMumarenDailyOperatingParameter.store_code.in_(body.store_codes),
+    ))).scalars()}
+    result = []
+    for code in body.store_codes:
+        row = existing.get(code)
+        if row is None:
+            row = FinanceCenterMumarenDailyOperatingParameter(book_id=body.book_id, period=body.period, store_code=code, store_name=code, updated_by=_actor_id(current_user))
+            db.add(row)
+        setattr(row, body.field, body.value)
+        row.updated_by = _actor_id(current_user)
+        result.append(row)
+    await db.flush()
+    _add_audit_log(db, book_id=body.book_id, action="batch_update_daily_operating_parameter", operator_id=_actor_id(current_user), detail=f"批量更新 {body.period} 参数 {body.field}，{len(result)} 家店铺")
+    return ApiResponse.ok(data=[_daily_parameter_data(row) for row in result])
+
+
+@router.post("/operating/daily-parameters/copy-previous", response_model=ApiResponse)
+async def copy_previous_daily_operating_parameters(
+    body: DailyParameterCopyInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    year, month = (int(part) for part in body.period.split("-"))
+    previous_period = f"{year - 1:04d}-12" if month == 1 else f"{year:04d}-{month - 1:02d}"
+    source = list((await db.execute(select(FinanceCenterMumarenDailyOperatingParameter).where(
+        FinanceCenterMumarenDailyOperatingParameter.book_id == body.book_id,
+        FinanceCenterMumarenDailyOperatingParameter.period == previous_period,
+    ))).scalars())
+    if not source:
+        raise HTTPException(status_code=404, detail="上月没有可复制的日报参数")
+    current = {row.store_code: row for row in (await db.execute(select(FinanceCenterMumarenDailyOperatingParameter).where(
+        FinanceCenterMumarenDailyOperatingParameter.book_id == body.book_id,
+        FinanceCenterMumarenDailyOperatingParameter.period == body.period,
+    ))).scalars()}
+    copied = []
+    for source_row in source:
+        target = current.get(source_row.store_code)
+        if target is not None and not body.overwrite:
+            continue
+        if target is None:
+            target = FinanceCenterMumarenDailyOperatingParameter(book_id=body.book_id, period=body.period, store_code=source_row.store_code)
+            db.add(target)
+        for field in _DAILY_PARAMETER_FIELDS:
+            setattr(target, field, getattr(source_row, field))
+        target.store_name = source_row.store_name
+        target.warning_enabled = source_row.warning_enabled
+        target.remark = source_row.remark
+        target.updated_by = _actor_id(current_user)
+        copied.append(target)
+    await db.flush()
+    _add_audit_log(db, book_id=body.book_id, action="copy_daily_operating_parameters", operator_id=_actor_id(current_user), detail=f"从 {previous_period} 复制到 {body.period}，{len(copied)} 条")
+    return ApiResponse.ok(data={"source_period": previous_period, "copied_count": len(copied), "rows": [_daily_parameter_data(row) for row in copied]})
+
+
+@router.get("/operating/daily-ad-costs", response_model=ApiResponse)
+async def list_daily_ad_costs(
+    book_id: int = Query(ge=1),
+    business_date: date = Query(),
+    platform: str | None = Query(default=None, max_length=64),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    statement = select(FinanceCenterMumarenDailyAdCost).where(
+        FinanceCenterMumarenDailyAdCost.book_id == book_id,
+        FinanceCenterMumarenDailyAdCost.business_date == business_date,
+    )
+    if platform:
+        statement = statement.where(FinanceCenterMumarenDailyAdCost.platform == platform)
+    rows = list((await db.execute(statement)).scalars())
+    by_code = {row.store_code: row for row in rows}
+    data = [_daily_ad_cost_data(row) for row in rows]
+    if not platform:
+        for code in sorted(ALLOWED_STORE_CODES - by_code.keys()):
+            data.append(_daily_ad_cost_data(FinanceCenterMumarenDailyAdCost(book_id=book_id, business_date=business_date, store_code=code, store_name=code)))
+    return ApiResponse.ok(data=sorted(data, key=lambda row: row["store_code"]))
+
+
+@router.post("/operating/daily-ad-costs/batch-save", response_model=ApiResponse)
+async def save_daily_ad_costs(
+    body: DailyAdCostSaveInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    rows = await _upsert_daily_ad_cost_rows(db, book_id=body.book_id, business_date=body.business_date, rows=body.rows, actor_id=_actor_id(current_user))
+    _add_audit_log(db, book_id=body.book_id, action="save_daily_ad_costs", operator_id=_actor_id(current_user), detail=f"保存 {body.business_date} 广告费 {len(rows)} 条")
+    return ApiResponse.ok(data=[_daily_ad_cost_data(row) for row in rows])
+
+
+@router.post("/operating/daily-ad-costs/batch-ad-cost", response_model=ApiResponse)
+async def batch_update_daily_ad_cost(
+    body: DailyAdCostBatchInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_writable_operating_book(db, body.book_id)
+    rows = await _upsert_daily_ad_cost_rows(
+        db, book_id=body.book_id, business_date=body.business_date,
+        rows=[DailyAdCostInput(store_code=code, ad_cost=body.ad_cost) for code in body.store_codes], actor_id=_actor_id(current_user),
+    )
+    _add_audit_log(db, book_id=body.book_id, action="batch_update_daily_ad_cost", operator_id=_actor_id(current_user), detail=f"批量设置 {body.business_date} 广告费，{len(rows)} 家店铺")
+    return ApiResponse.ok(data=[_daily_ad_cost_data(row) for row in rows])
 
 
 def _actor_id(user: SysUser) -> int:
