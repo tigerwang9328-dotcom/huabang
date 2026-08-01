@@ -15,7 +15,6 @@ export interface MumarenFinanceBook {
   book_name: string;
   company_name: string | null;
   status: string;
-  /** 金蝶迁移账簿为只读；普通账簿继续走草稿、审核、人工过账。 */
   is_readonly: boolean;
   source_system: string | null;
   source_database: string | null;
@@ -109,7 +108,12 @@ export interface MumarenTaxType {
   id: number;
   tax_code: string;
   tax_name: string;
+  default_rate: number;
 }
+
+export const taxTypesApi = {
+  list: (params: { book_id: number }) => request.get<ApiResponse<MumarenTaxType[]>>(requestPath("/tax-types"), { params }),
+};
 
 export interface MumarenFinanceVoucher {
   id: number;
@@ -608,9 +612,8 @@ export interface MumarenAuxiliaryAccounting {
   aux_type: string;
   code: string;
   name: string;
-  parent_code: string | null;
-  status: "active" | "inactive";
-  remark: string;
+  parent_id: number | null;
+  is_active: boolean;
   created_at: string;
 }
 export interface AuxiliaryAccountingInput {
@@ -618,14 +621,12 @@ export interface AuxiliaryAccountingInput {
   aux_type: string;
   code: string;
   name: string;
-  parent_code?: string | null;
-  remark: string;
+  parent_id?: number | null;
 }
 export interface AuxiliaryAccountingUpdate {
   name?: string;
-  parent_code?: string | null;
-  status?: "active" | "inactive";
-  remark?: string;
+  parent_id?: number | null;
+  is_active?: boolean;
 }
 export const auxiliaryAccountingsApi = {
   list: (params: { book_id: number; aux_type?: string; limit?: number }) => request.get<ApiResponse<MumarenAuxiliaryAccounting[]>>(requestPath("/auxiliary-accountings"), { params }),

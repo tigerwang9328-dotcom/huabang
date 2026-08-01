@@ -89,6 +89,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
@@ -99,7 +100,7 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { bookId, initializeBook } = useMumarenFinanceBook();
 const items = ref<MumarenAuxiliaryAccounting[]>([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -107,6 +108,7 @@ const error = ref("");
 const actingId = ref<number>();
 const dialogVisible = ref(false);
 const filterDimension = ref("");
+const auxTypeValue = (label: string) => ({ 客户: "customer", 供应商: "supplier", 员工: "employee", 项目: "project", 部门: "department" }[label] || label);
 
 const form = reactive({
   aux_type: "客户",
@@ -123,7 +125,7 @@ const load = async () => {
   try {
     items.value = (await auxiliaryAccountingsApi.list({
       book_id: bookId.value,
-      aux_type: filterDimension.value || undefined,
+      aux_type: filterDimension.value ? auxTypeValue(filterDimension.value) : undefined,
     })).data.data;
   } catch {
     error.value = "无法加载辅助核算项。";
@@ -140,7 +142,7 @@ const onBookChange = () => {
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    initializeBook(books.value);
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -174,7 +176,7 @@ const save = async () => {
   try {
     await auxiliaryAccountingsApi.create({
       book_id: bookId.value,
-      aux_type: form.aux_type,
+      aux_type: auxTypeValue(form.aux_type),
       code: form.code,
       name: form.name,
       parent_code: form.parent_code || null,
@@ -195,7 +197,7 @@ const toggle = async (row: MumarenAuxiliaryAccounting) => {
   actingId.value = row.id;
   try {
     await auxiliaryAccountingsApi.update(row.id, {
-      status: row.status === "active" ? "inactive" : "active",
+      is_active: !row.is_active,
     }, bookId.value);
     ElMessage.success(row.status === "active" ? "已停用" : "已启用");
     await load();

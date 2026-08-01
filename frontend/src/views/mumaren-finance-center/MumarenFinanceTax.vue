@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
-        <el-button :disabled="isReadonly || !bookId" @click="openCreate">录入草稿</el-button>
+        <el-button :disabled="!bookId" @click="openCreate">录入草稿</el-button>
       </div>
     </div>
     <div class="filters">
@@ -49,8 +49,8 @@
         </el-table-column>
         <el-table-column label="操作" width="170">
           <template #default="scope">
-            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
-            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
             <span v-if="scope.row.status === 'paid'" class="done-text">已缴税</span>
           </template>
         </el-table-column>
@@ -61,9 +61,10 @@
     <!-- 录入税务草稿对话框 -->
     <el-dialog v-model="showCreate" title="录入税务草稿" width="480px" destroy-on-close :close-on-click-modal="false">
       <el-form :model="form" label-width="90px">
-        <el-form-item label="税种 ID" required>
-          <el-input-number v-model="form.tax_type_id" :min="1" :controls="false" style="width:100%" placeholder="税种 ID" />
-          <p class="field-hint">税种列表接口待接入；请填写已配置的税种 ID（由系统管理员在账簿中维护）。</p>
+        <el-form-item label="税种" required>
+          <el-select v-model="form.tax_type_id" placeholder="选择税种" style="width:100%">
+            <el-option v-for="taxType in taxTypes" :key="taxType.id" :value="taxType.id" :label="`${taxType.tax_name}（${taxType.tax_code}）`" />
+          </el-select>
         </el-form-item>
         <el-form-item label="所属期间" required>
           <el-date-picker v-model="form.period" type="month" value-format="YYYY-MM" style="width:100%" placeholder="如 2026-07" />
@@ -80,7 +81,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showCreate = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="isReadonly || !canCreate" @click="save">保存草稿</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!canCreate" @click="save">保存草稿</el-button>
       </template>
     </el-dialog>
 
@@ -108,28 +109,30 @@
       </el-form>
       <template #footer>
         <el-button @click="showPay = false">取消</el-button>
-        <el-button type="primary" :loading="paying" :disabled="isReadonly || !canPay" @click="confirmPay">确认缴税</el-button>
+        <el-button type="primary" :loading="paying" :disabled="!canPay" @click="confirmPay">确认缴税</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, reactive, ref } from "vue";
-import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
+  taxTypesApi,
   type MumarenFinanceBook,
   type MumarenTaxAlert,
   type MumarenTaxRecord,
+  type MumarenTaxType,
 } from "@/api/mumarenFinanceCenter";
-import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const bookStore = useMumarenFinanceBookStore();
-const { books, bookId, isReadonly } = storeToRefs(bookStore);
+const books = ref<MumarenFinanceBook[]>([]);
+const { bookId, initializeBook } = useMumarenFinanceBook();
 const alerts = ref<MumarenTaxAlert[]>([]);
 const records = ref<MumarenTaxRecord[]>([]);
+const taxTypes = ref<MumarenTaxType[]>([]);
 const error = ref("");
 const loading = ref(false);
 const loaded = ref(false);
@@ -185,7 +188,8 @@ onMounted(async () => {
   // 仅加载账簿列表,不自动选择账簿,不自动请求税务接口。
   // 用户必须主动选择独立账簿后才能查询税务台账。
   try {
-    await bookStore.loadBooks();
+    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    initializeBook(books.value);
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -193,7 +197,6 @@ onMounted(async () => {
 
 // ── 审核(状态机:draft → reviewed,禁止反向) ──
 const review = async (row: MumarenTaxRecord) => {
-  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.reviewTaxRecord(row.id);
@@ -218,10 +221,15 @@ const form = reactive({
 });
 const canCreate = computed(() => !!bookId.value && !!form.tax_type_id && !!form.period && form.tax_amount >= 0);
 
-const openCreate = () => {
-  if (isReadonly.value) return;
+const openCreate = async () => {
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
+    return;
+  }
+  try {
+    taxTypes.value = (await taxTypesApi.list({ book_id: bookId.value })).data.data;
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "无法加载当前账簿税种");
     return;
   }
   form.tax_type_id = undefined;
@@ -233,7 +241,6 @@ const openCreate = () => {
 };
 
 const save = async () => {
-  if (isReadonly.value) return;
   if (!bookId.value || !canCreate.value) return;
   saving.value = true;
   try {
@@ -269,7 +276,6 @@ const canPay = computed(
 );
 
 const openPay = (row: MumarenTaxRecord) => {
-  if (isReadonly.value) return;
   payTarget.value = row;
   payForm.amount = Number(row.unpaid_amount || 0);
   payForm.payment_date = new Date().toISOString().slice(0, 10);
@@ -278,7 +284,6 @@ const openPay = (row: MumarenTaxRecord) => {
 };
 
 const confirmPay = async () => {
-  if (isReadonly.value) return;
   if (!payTarget.value || !canPay.value) return;
   paying.value = true;
   try {
