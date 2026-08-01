@@ -47,14 +47,16 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceBook,
   type MumarenTaxRecord,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const records = ref<MumarenTaxRecord[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -94,7 +96,7 @@ onMounted(async () => {
   // 仅加载账簿列表,不自动选择账簿,不自动请求税务接口。
   // 用户必须主动选择独立账簿后才能查询税务明细(沿用 Tax.vue 约定)。
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    await bookStore.loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }

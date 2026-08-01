@@ -15,6 +15,9 @@ export interface MumarenFinanceBook {
   book_name: string;
   company_name: string | null;
   status: string;
+  is_readonly: boolean;
+  source_system: string | null;
+  source_database: string | null;
 }
 
 export interface MumarenFinanceAccount {

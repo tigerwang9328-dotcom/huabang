@@ -8,8 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button :disabled="!bookId" @click="openAccountDialog">新增账户</el-button>
-        <el-button type="primary" :disabled="!bookId || accounts.length === 0" @click="openTxnDialog">录入流水</el-button>
+        <el-button :disabled="isReadonly || !bookId" @click="openAccountDialog">新增账户</el-button>
+        <el-button :disabled="isReadonly || !bookId || accounts.length === 0" type="primary"  @click="openTxnDialog">录入流水</el-button>
       </div>
     </div>
 
@@ -35,7 +35,7 @@
         <template #default="{ row }">
           <el-popconfirm title="确定删除该账户?关联流水将一并删除" @confirm="removeAccount(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
+              <el-button :disabled="isReadonly" link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -79,7 +79,7 @@
       </el-form>
       <template #footer>
         <el-button @click="accountDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="savingAccount" @click="saveAccount">保存</el-button>
+        <el-button :disabled="isReadonly" type="primary" :loading="savingAccount" @click="saveAccount">保存</el-button>
       </template>
     </el-dialog>
 
@@ -111,7 +111,7 @@
       </el-form>
       <template #footer>
         <el-button @click="txnDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="savingTxn" @click="saveTxn">保存</el-button>
+        <el-button :disabled="isReadonly" type="primary" :loading="savingTxn" @click="saveTxn">保存</el-button>
       </template>
     </el-dialog>
   </section>
@@ -119,6 +119,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   cashAccountsApi,
@@ -128,9 +129,10 @@ import {
   type MumarenCashFlow,
   type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenCashAccount[]>([]);
 const transactions = ref<MumarenCashFlow[]>([]);
 const loading = ref(false);
@@ -190,8 +192,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await bookStore.loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -199,6 +200,7 @@ onMounted(async () => {
 });
 
 const openAccountDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -210,6 +212,7 @@ const openAccountDialog = () => {
 };
 
 const saveAccount = async () => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   if (!accountForm.account_name) {
     ElMessage.warning("请填写账户名称");
@@ -234,6 +237,7 @@ const saveAccount = async () => {
 };
 
 const openTxnDialog = () => {
+  if (isReadonly.value) return;
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -284,6 +288,7 @@ const saveTxn = async () => {
 };
 
 const removeAccount = async (row: MumarenCashAccount) => {
+  if (isReadonly.value) return;
   if (!bookId.value) return;
   actingId.value = row.id;
   try {

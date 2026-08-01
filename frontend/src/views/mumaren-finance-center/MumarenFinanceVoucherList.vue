@@ -9,7 +9,7 @@
       <div class="heading-actions">
         <el-button :loading="loading" @click="load">刷新</el-button>
         <router-link to="/app/finance-center/mumaren/vouchers/create">
-          <el-button type="primary">录入新凭证</el-button>
+          <el-button type="primary" :disabled="isReadonly">录入新凭证</el-button>
         </router-link>
       </div>
     </div>
@@ -39,8 +39,8 @@
       </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="scope">
-          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
-          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :loading="actingId === scope.row.id" @click="post(scope.row)">人工过账</el-button>
+          <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+          <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="post(scope.row)">人工过账</el-button>
           <span v-if="scope.row.status === 'posted'" class="done-text">已过账</span>
         </template>
       </el-table-column>
@@ -50,15 +50,17 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceBook,
   type MumarenFinanceVoucher,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const vouchers = ref<MumarenFinanceVoucher[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -88,7 +90,7 @@ const onBookChange = async () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    await bookStore.loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }
@@ -97,6 +99,7 @@ onMounted(async () => {
 
 // ── 审核与人工过账(状态机:draft → reviewed → posted,禁止反向) ──
 const review = async (row: MumarenFinanceVoucher) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.reviewVoucher(row.id);
@@ -110,6 +113,7 @@ const review = async (row: MumarenFinanceVoucher) => {
 };
 
 const post = async (row: MumarenFinanceVoucher) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.postVoucher(row.id);

@@ -33,12 +33,12 @@
         <template #default="{ row }">
           <el-popconfirm v-if="row.status === 'open'" title="确定对该期间结账?" @confirm="close(row)">
             <template #reference>
-              <el-button link type="success" size="small" :loading="actingId === row.id">结账</el-button>
+              <el-button :disabled="isReadonly" link type="success" size="small" :loading="actingId === row.id">结账</el-button>
             </template>
           </el-popconfirm>
           <el-popconfirm v-if="row.status === 'closed'" title="确定重新开启该期间?" @confirm="reopen(row)">
             <template #reference>
-              <el-button link type="warning" size="small" :loading="actingId === row.id">重新开启</el-button>
+              <el-button :disabled="isReadonly" link type="warning" size="small" :loading="actingId === row.id">重新开启</el-button>
             </template>
           </el-popconfirm>
           <span v-if="row.status === 'closing'" class="done-text">结账中</span>
@@ -50,6 +50,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
@@ -57,9 +58,10 @@ import {
   type MumarenFinanceBook,
   type MumarenPeriod,
 } from "@/api/mumarenFinanceCenter";
+import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const bookStore = useMumarenFinanceBookStore();
+const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const periods = ref<MumarenPeriod[]>([]);
 const loading = ref(false);
 const error = ref("");
@@ -89,8 +91,7 @@ const onBookChange = () => {
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    await bookStore.loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
@@ -98,6 +99,7 @@ onMounted(async () => {
 });
 
 const close = async (row: MumarenPeriod) => {
+  if (isReadonly.value) return;
   if (!bookId.value || row.status !== "open") return;
   actingId.value = row.id;
   try {
@@ -112,6 +114,7 @@ const close = async (row: MumarenPeriod) => {
 };
 
 const reopen = async (row: MumarenPeriod) => {
+  if (isReadonly.value) return;
   if (!bookId.value || row.status !== "closed") return;
   actingId.value = row.id;
   try {

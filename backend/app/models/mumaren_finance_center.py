@@ -42,6 +42,13 @@ class FinanceCenterMumarenBook(Base):
     accounting_standard: Mapped[str] = mapped_column(String(64), nullable=False, default="小企业会计准则")
     base_currency: Mapped[str] = mapped_column(String(8), nullable=False, default="CNY")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    source_system: Mapped[str | None] = mapped_column(String(32))
+    source_database: Mapped[str | None] = mapped_column(String(128))
+    source_company_name: Mapped[str | None] = mapped_column(String(255))
+    source_key: Mapped[str | None] = mapped_column(String(256))
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    import_batch_key: Mapped[str | None] = mapped_column(String(128))
+    is_readonly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -63,6 +70,12 @@ class FinanceCenterMumarenAccount(Base):
     parent_id: Mapped[int | None] = mapped_column(BigInteger)
     level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source_system: Mapped[str | None] = mapped_column(String(32))
+    source_key: Mapped[str | None] = mapped_column(String(256))
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    import_batch_key: Mapped[str | None] = mapped_column(String(128))
+    is_readonly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_payload: Mapped[dict | None] = mapped_column(JSON)
 
 
 class FinanceCenterMumarenFiscalPeriod(Base):
@@ -81,6 +94,12 @@ class FinanceCenterMumarenFiscalPeriod(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
     closed_by: Mapped[int | None] = mapped_column(BigInteger)
     closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    source_system: Mapped[str | None] = mapped_column(String(32))
+    source_key: Mapped[str | None] = mapped_column(String(256))
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    import_batch_key: Mapped[str | None] = mapped_column(String(128))
+    is_readonly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_payload: Mapped[dict | None] = mapped_column(JSON)
 
 
 class FinanceCenterMumarenVoucher(Base):
@@ -105,6 +124,14 @@ class FinanceCenterMumarenVoucher(Base):
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     posted_by: Mapped[int | None] = mapped_column(BigInteger)
     posted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    source_system: Mapped[str | None] = mapped_column(String(32))
+    source_database: Mapped[str | None] = mapped_column(String(128))
+    source_key: Mapped[str | None] = mapped_column(String(256))
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    import_batch_key: Mapped[str | None] = mapped_column(String(128))
+    is_readonly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_normalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_payload: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -126,6 +153,55 @@ class FinanceCenterMumarenVoucherLine(Base):
     summary: Mapped[str | None] = mapped_column(String(500))
     debit_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     credit_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    source_system: Mapped[str | None] = mapped_column(String(32))
+    source_key: Mapped[str | None] = mapped_column(String(256))
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    import_batch_key: Mapped[str | None] = mapped_column(String(128))
+    is_readonly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_payload: Mapped[dict | None] = mapped_column(JSON)
+
+
+class FinanceCenterMumarenBalanceSnapshot(Base):
+    """Readonly source balance evidence; never included in current-book reports."""
+
+    __tablename__ = "finance_center_mumaren_balance_snapshots"
+    __table_args__ = (
+        UniqueConstraint("source_system", "source_database", "source_key", name="uq_mumaren_finance_balance_snapshot_source"),
+        {"schema": MUMAREN_FINANCE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey(f"{MUMAREN_FINANCE_SCHEMA}.finance_center_mumaren_books.id"), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey(f"{MUMAREN_FINANCE_SCHEMA}.finance_center_mumaren_accounts.id"), nullable=False)
+    period_code: Mapped[str] = mapped_column(String(7), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(32), nullable=False, default="kingdee_history")
+    source_database: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    import_batch_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    is_readonly: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    opening_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    period_debit: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    period_credit: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    closing_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    source_payload: Mapped[dict | None] = mapped_column(JSON)
+
+
+class FinanceCenterMumarenKingdeeImportBatch(Base):
+    __tablename__ = "finance_center_mumaren_kingdee_import_batches"
+    __table_args__ = {"schema": MUMAREN_FINANCE_SCHEMA}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    source_system: Mapped[str] = mapped_column(String(32), nullable=False, default="kingdee_history")
+    manifest_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")
+    expected_book_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_voucher_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_line_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_balance_snapshot_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    imported_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    validation_payload: Mapped[dict | None] = mapped_column(JSON)
 
 
 class FinanceCenterMumarenAuditLog(Base):
