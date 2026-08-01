@@ -46,6 +46,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { onMounted, ref } from "vue";
 import {
   mumarenFinanceCenterApi,
@@ -54,7 +55,7 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { bookId, initializeBook } = useMumarenFinanceBook();
 const records = ref<MumarenTaxRecord[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -95,6 +96,7 @@ onMounted(async () => {
   // 用户必须主动选择独立账簿后才能查询税务明细(沿用 Tax.vue 约定)。
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    initializeBook(books.value);
   } catch {
     error.value = "无法加载独立账簿。";
   }

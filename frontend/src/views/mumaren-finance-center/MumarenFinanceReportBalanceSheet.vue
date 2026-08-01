@@ -77,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, ref } from "vue";
 import { mumarenFinanceCenterApi, type MumarenFinanceBook, type MumarenTrialBalanceRow } from "@/api/mumarenFinanceCenter";
 
@@ -86,7 +87,7 @@ interface TrialRowWithType extends MumarenTrialBalanceRow {
 }
 
 const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { bookId, initializeBook } = useMumarenFinanceBook();
 const rows = ref<TrialRowWithType[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -145,6 +146,7 @@ const load = async () => {
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
+    initializeBook(books.value);
   } catch {
     error.value = "无法加载独立账簿。";
   }

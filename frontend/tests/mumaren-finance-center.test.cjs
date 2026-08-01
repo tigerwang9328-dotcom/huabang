@@ -249,6 +249,41 @@ test('mumarenFinanceCenterMenuItem 带 children(13个一级条目),不再直接�
   }
 })
 
+test('未接通的凭证模板和自动凭证不显示在主侧边栏', () => {
+  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
+  const menuStart = config.indexOf('export const mumarenFinanceCenterMenuItem')
+  const menuConfig = config.slice(menuStart)
+
+  assert.doesNotMatch(menuConfig, /path:\s*`\$\{R\}\/vouchers\/template`/)
+  assert.doesNotMatch(menuConfig, /path:\s*`\$\{R\}\/vouchers\/auto`/)
+})
+
+test('财务中心各账簿页面共享并持久化所选账簿', () => {
+  const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
+
+  assert.match(sharedBook, /localStorage/)
+  assert.match(sharedBook, /selectedBookId/)
+  assert.match(sharedBook, /initializeBook/)
+
+  for (const view of [
+    'MumarenFinanceInvoices', 'MumarenFinanceCashierAccounts',
+    'MumarenFinanceCashierReconciliation', 'MumarenFinanceSettingsAuxiliary',
+    'MumarenFinanceTax', 'MumarenFinanceReportBalanceSheet',
+  ]) {
+    assert.match(read('src', 'views', 'mumaren-finance-center', `${view}.vue`), /useMumarenFinanceBook/)
+  }
+})
+
+test('税务草稿从当前账簿的启用税种下拉选择', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const view = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+
+  assert.match(api, /taxTypesApi/)
+  assert.match(api, /requestPath\("\/tax-types"\)/)
+  assert.match(view, /taxTypesApi\.list\(\{ book_id: bookId\.value \}\)/)
+  assert.match(view, /<el-select v-model="form\.tax_type_id"/)
+})
+
 test('MainLayout 模板支持第4级菜单(submenu-list-3)', () => {
   const layout = read('src', 'layouts', 'MainLayout.vue')
 

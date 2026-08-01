@@ -155,6 +155,29 @@ async def get_ar_ap_aging(
     return ApiResponse.ok(data={"order_type": order_type, **result})
 
 
+@router.get("/tax-types", response_model=ApiResponse)
+async def list_tax_types(
+    book_id: int = Query(ge=1),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """List active tax types configured for one isolated finance book."""
+    rows = list((await db.execute(
+        select(FinanceCenterMumarenTaxType)
+        .where(
+            FinanceCenterMumarenTaxType.book_id == book_id,
+            FinanceCenterMumarenTaxType.is_active.is_(True),
+        )
+        .order_by(FinanceCenterMumarenTaxType.tax_code, FinanceCenterMumarenTaxType.id)
+    )).scalars().all())
+    return ApiResponse.ok(data=[{
+        "id": row.id,
+        "tax_code": row.tax_code,
+        "tax_name": row.tax_name,
+        "default_rate": float(row.default_rate),
+    } for row in rows])
+
+
 @router.get("/tax/alerts", response_model=ApiResponse)
 async def get_tax_alerts(
     book_id: int = Query(ge=1),

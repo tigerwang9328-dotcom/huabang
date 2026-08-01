@@ -133,6 +133,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
@@ -144,7 +145,7 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const bookId = ref<number>();
+const { bookId, initializeBook } = useMumarenFinanceBook();
 const orderType = ref<"receivable" | "payable">("receivable");
 const aging = ref<MumarenArApAging>();
 const orders = ref<MumarenArApOrder[]>([]);
@@ -196,7 +197,7 @@ const onBookChange = () => {
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    bookId.value = books.value[0]?.id;
+    initializeBook(books.value);
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
