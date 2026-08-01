@@ -741,6 +741,17 @@ test('应收应付台账支持单据明细行和逐笔回款付款流水查询',
   assert.match(api, /detail: \(id: number, book_id: number, order_type: "receivable" \| "payable"\)/)
 })
 
+test('应收应付明细支持录入并展示税率和税额，税额随金额和税率重新计算', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+
+  assert.match(page, /label="税率\(%\)"/)
+  assert.match(page, /label="税额"/)
+  assert.match(page, /v-model="scope\.row\.tax_rate"/)
+  assert.match(page, /scope\.row\.tax_amount/)
+  assert.match(page, /syncTaxAmount\(scope\.row\)/)
+  assert.match(page, /const syncTaxAmount/)
+})
+
 test('应收应付台账按往来单位筛选时列表与汇总使用同一独立账簿查询条件', () => {
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')

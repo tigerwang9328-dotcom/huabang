@@ -78,7 +78,7 @@
 
     <el-alert v-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿只读：可查询台账，不能录入、审核、回款、付款或删除。" />
 
-    <el-dialog v-model="showCreate" :title="editingId ? `编辑${typeText}草稿` : `录入${typeText}草稿`" width="500px" destroy-on-close :close-on-click-modal="false">
+    <el-dialog v-model="showCreate" :title="editingId ? `编辑${typeText}草稿` : `录入${typeText}草稿`" width="820px" destroy-on-close :close-on-click-modal="false">
       <el-form :model="form" label-width="90px">
         <el-form-item label="单号" required><el-input v-model="form.order_no" :disabled="!!editingId" :placeholder="orderType === 'receivable' ? '如 AR-2026-08-001' : '如 AP-2026-08-001'" /></el-form-item>
         <el-form-item label="单据日期" required><el-date-picker v-model="form.order_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
@@ -93,6 +93,8 @@
               <el-table-column label="数量" width="105"><template #default="scope"><el-input-number v-model="scope.row.quantity" :min="0.0001" :precision="4" :controls="false" @change="syncLineAmount(scope.row)" /></template></el-table-column>
               <el-table-column label="单价" width="115"><template #default="scope"><el-input-number v-model="scope.row.unit_price" :min="0" :precision="4" :controls="false" @change="syncLineAmount(scope.row)" /></template></el-table-column>
               <el-table-column label="金额" width="115" align="right"><template #default="scope">{{ money(scope.row.amount) }}</template></el-table-column>
+              <el-table-column label="税率(%)" width="105"><template #default="scope"><el-input-number v-model="scope.row.tax_rate" :min="0" :max="100" :precision="4" :controls="false" @change="syncTaxAmount(scope.row)" /></template></el-table-column>
+              <el-table-column label="税额" width="105" align="right"><template #default="scope">{{ money(scope.row.tax_amount || 0) }}</template></el-table-column>
               <el-table-column label="操作" width="65"><template #default="scope"><el-button link type="danger" @click="removeLine(scope.$index)">删除</el-button></template></el-table-column>
             </el-table>
             <span v-if="form.lines.length" class="muted">明细合计：{{ money(lineTotal) }}，已作为{{ amountLabel }}保存。</span>
@@ -128,7 +130,7 @@
       <el-divider content-position="left">单据明细</el-divider>
       <el-table :data="detailOrder?.lines || []" size="small" empty-text="该单据未录入明细行">
         <el-table-column prop="line_no" label="#" width="55" /><el-table-column prop="item_name" label="项目" min-width="150" /><el-table-column prop="spec" label="规格" min-width="100" />
-        <el-table-column prop="quantity" label="数量" width="90" align="right" /><el-table-column prop="unit_price" label="单价" width="100" align="right" /><el-table-column label="金额" width="110" align="right"><template #default="scope">{{ money(scope.row.amount) }}</template></el-table-column>
+        <el-table-column prop="quantity" label="数量" width="90" align="right" /><el-table-column prop="unit_price" label="单价" width="100" align="right" /><el-table-column label="金额" width="110" align="right"><template #default="scope">{{ money(scope.row.amount) }}</template></el-table-column><el-table-column label="税率(%)" width="90" align="right"><template #default="scope">{{ Number(scope.row.tax_rate || 0).toFixed(4) }}</template></el-table-column><el-table-column label="税额" width="110" align="right"><template #default="scope">{{ money(scope.row.tax_amount || 0) }}</template></el-table-column>
       </el-table>
       <el-divider content-position="left">{{ isReceivable ? '回款' : '付款' }}流水</el-divider>
       <el-table :data="detailOrder?.settlements || []" size="small" empty-text="暂无人工结算流水">
@@ -266,7 +268,8 @@ const removeOrder = async (row: MumarenArApOrder) => {
 };
 const addLine = () => { form.lines.push({ item_name: "", spec: "", quantity: 1, unit_price: 0, amount: 0, tax_rate: 0, tax_amount: 0, remark: "" }); };
 const removeLine = (index: number) => { form.lines.splice(index, 1); if (!form.lines.length) form.total_amount = 0; else form.total_amount = lineTotal.value; };
-const syncLineAmount = (line: ArApOrderLineInput) => { line.amount = Number((Number(line.quantity || 0) * Number(line.unit_price || 0)).toFixed(2)); form.total_amount = lineTotal.value; };
+const syncTaxAmount = (line: ArApOrderLineInput) => { line.tax_amount = Number((Number(line.amount || 0) * Number(line.tax_rate || 0) / 100).toFixed(2)); };
+const syncLineAmount = (line: ArApOrderLineInput) => { line.amount = Number((Number(line.quantity || 0) * Number(line.unit_price || 0)).toFixed(2)); syncTaxAmount(line); form.total_amount = lineTotal.value; };
 const openDetail = async (row: MumarenArApOrder) => {
   if (!bookId.value) return;
   showDetail.value = true;
