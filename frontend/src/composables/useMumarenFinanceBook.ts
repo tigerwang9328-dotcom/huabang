@@ -5,7 +5,8 @@ import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
 export const useMumarenFinanceBook = () => {
   const store = useMumarenFinanceBookStore();
-  const { bookId, isReadonly } = storeToRefs(store);
+  const { books, bookId, isReadonly } = storeToRefs(store);
+  const { loadBooks } = store;
 
   const initializeBook = (books: MumarenFinanceBook[]) => {
     if (!books.some((book) => book.id === bookId.value)) {
@@ -17,5 +18,5 @@ export const useMumarenFinanceBook = () => {
     bookId.value = nextBookId;
   };
 
-  return { bookId, isReadonly, initializeBook, selectBook };
+  return { books, bookId, isReadonly, loadBooks, initializeBook, selectBook };
 };

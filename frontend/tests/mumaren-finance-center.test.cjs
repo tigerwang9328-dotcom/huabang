@@ -165,6 +165,33 @@ test('应收应付审核把当前单据类型传给后端', () => {
   assert.match(page, /settleArApOrder\(settleTarget\.value\.id,\s*orderType\.value,/)
 })
 
+test('应收应付拆分为应收单台账、应付单台账和账龄分析入口', () => {
+  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
+  const router = read('src', 'router', 'index.ts')
+
+  assert.match(config, /key: "ar-ap"[\s\S]*children:/)
+  assert.match(config, /title: "应收单台账"/)
+  assert.match(config, /path: `\$\{R\}\/ar-ap\/receivable`/)
+  assert.match(config, /title: "应付单台账"/)
+  assert.match(config, /path: `\$\{R\}\/ar-ap\/payable`/)
+  assert.match(config, /title: "账龄分析"/)
+  assert.match(config, /path: `\$\{R\}\/ar-ap\/aging`/)
+  assert.match(router, /path: "ar-ap\/receivable", name: "MumarenFinanceReceivableLedger"/)
+  assert.match(router, /path: "ar-ap\/payable", name: "MumarenFinancePayableLedger"/)
+  assert.match(router, /path: "ar-ap\/aging", name: "MumarenFinanceArApAging"/)
+})
+
+test('拆分后的应收应付页面从共享账簿仓库加载并随路由账簿类型刷新', () => {
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+  const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
+
+  assert.match(sharedBook, /return \{ books, bookId, isReadonly, loadBooks, initializeBook \}/)
+  assert.match(ledger, /await loadBooks\(\)/)
+  assert.match(ledger, /watch\(\(\) => props\.fixedOrderType/)
+  assert.match(aging, /await loadBooks\(\)/)
+})
+
 test('派生展示类页面调用已有 API,不新增后端接口', () => {
   const derivedPages = [
     { file: 'MumarenFinanceCompass.vue', apis: ['listBooks', 'getTrialBalance', 'getProfitStatement'] },

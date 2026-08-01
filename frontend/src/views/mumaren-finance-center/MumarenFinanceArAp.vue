@@ -3,19 +3,19 @@
     <div class="heading">
       <div>
         <p class="panel-kicker">独立往来账</p>
-        <h2>应收应付</h2>
-        <p>独立 AR/AP 台账与账龄：草稿录入 → 财务审核 → 人工结算；不自动生成凭证。按独立账簿隔离,数据持久化。</p>
+        <h2>{{ pageTitle }}</h2>
+        <p>独立{{ orderType === "receivable" ? "应收" : "应付" }}单台账：草稿录入 → 财务审核 → 人工结算；不自动生成凭证。按独立账簿隔离,数据持久化。</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button :disabled="!bookId" @click="openCreate">录入草稿</el-button>
+        <el-button :disabled="!bookId || isReadonly" @click="openCreate">录入草稿</el-button>
       </div>
     </div>
     <div class="filters">
       <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
-      <el-radio-group v-model="orderType" @change="load">
+      <el-radio-group v-if="!fixedOrderType" v-model="orderType" @change="load">
         <el-radio-button label="receivable">应收</el-radio-button>
         <el-radio-button label="payable">应付</el-radio-button>
       </el-radio-group>
@@ -48,9 +48,9 @@
         </el-table-column>
         <el-table-column label="操作" width="220">
           <template #default="scope">
-            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="reviewOrder(scope.row)">审核</el-button>
-            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :loading="actingId === scope.row.id" @click="openSettle(scope.row)">人工结算</el-button>
-            <el-popconfirm v-if="scope.row.workflow_status === 'draft'" title="确定删除该订单?" @confirm="removeOrder(scope.row)">
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="reviewOrder(scope.row)">审核</el-button>
+            <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="openSettle(scope.row)">人工结算</el-button>
+            <el-popconfirm v-if="scope.row.workflow_status === 'draft' && !isReadonly" title="确定删除该订单?" @confirm="removeOrder(scope.row)">
               <template #reference>
                 <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
               </template>
@@ -61,24 +61,7 @@
       </el-table>
     </el-card>
 
-    <template v-if="aging">
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="截止日">{{ aging.as_of }}</el-descriptions-item>
-        <el-descriptions-item label="未结余额">{{ money(aging.total_balance) }}</el-descriptions-item>
-      </el-descriptions>
-      <div class="bucket-grid">
-        <div v-for="(amount, bucket) in aging.buckets" :key="bucket" class="bucket">
-          <span>{{ bucket }}</span><strong>{{ money(amount) }}</strong>
-        </div>
-      </div>
-      <el-table :data="aging.counterparties" empty-text="暂无未结往来余额" stripe>
-        <el-table-column prop="counterparty_name" label="往来单位" min-width="200" />
-        <el-table-column label="未结余额" width="160" align="right">
-          <template #default="scope">{{ money(scope.row.total_balance) }}</template>
-        </el-table-column>
-      </el-table>
-    </template>
-    <el-empty v-else-if="!error && !loading" description="请选择独立账簿后查询账龄" />
+    <el-alert v-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿只读：可查询台账，不能录入、审核、结算或删除。" />
 
     <!-- 录入 AR/AP 草稿对话框 -->
     <el-dialog v-model="showCreate" :title="`录入${orderType === 'receivable' ? '应收' : '应付'}草稿`" width="500px" destroy-on-close :close-on-click-modal="false">
@@ -134,20 +117,18 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   arApOrdersApi,
   mumarenFinanceCenterApi,
-  type MumarenArApAging,
   type MumarenArApOrder,
-  type MumarenFinanceBook,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
-const orderType = ref<"receivable" | "payable">("receivable");
-const aging = ref<MumarenArApAging>();
+const props = defineProps<{ fixedOrderType?: "receivable" | "payable" }>();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
+const orderType = ref<"receivable" | "payable">(props.fixedOrderType || "receivable");
+const pageTitle = computed(() => orderType.value === "receivable" ? "应收单台账" : "应付单台账");
 const orders = ref<MumarenArApOrder[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -175,12 +156,7 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const [agingRes, ordersRes] = await Promise.all([
-      mumarenFinanceCenterApi.getArApAging({ book_id: bookId.value, order_type: orderType.value }),
-      arApOrdersApi.list({ book_id: bookId.value, order_type: orderType.value }),
-    ]);
-    aging.value = agingRes.data.data;
-    orders.value = ordersRes.data.data;
+    orders.value = (await arApOrdersApi.list({ book_id: bookId.value, order_type: orderType.value })).data.data;
   } catch {
     error.value = "无法加载独立应收应付数据。";
   } finally {
@@ -189,19 +165,23 @@ const load = async () => {
 };
 
 const onBookChange = () => {
-  aging.value = undefined;
   orders.value = [];
   load();
 };
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
     if (bookId.value) await load();
   } catch {
     error.value = "无法加载独立账簿。";
   }
+});
+
+watch(() => props.fixedOrderType, async (value) => {
+  if (!value || value === orderType.value) return;
+  orderType.value = value;
+  await load();
 });
 
 // ── 录入草稿对话框 ──
@@ -219,6 +199,10 @@ const canCreate = computed(
 );
 
 const openCreate = () => {
+  if (isReadonly.value) {
+    ElMessage.warning("金蝶迁移账簿只读，不能录入应收应付单据");
+    return;
+  }
   if (!bookId.value) {
     ElMessage.warning("请先选择独立账簿");
     return;
@@ -232,7 +216,7 @@ const openCreate = () => {
 };
 
 const save = async () => {
-  if (!bookId.value || !canCreate.value) return;
+  if (!bookId.value || isReadonly.value || !canCreate.value) return;
   saving.value = true;
   try {
     await mumarenFinanceCenterApi.createArApOrder({
@@ -256,6 +240,7 @@ const save = async () => {
 
 // ── 订单审核(状态机:draft → reviewed,禁止反向) ──
 const reviewOrder = async (row: MumarenArApOrder) => {
+  if (isReadonly.value) return;
   actingId.value = row.id;
   try {
     await mumarenFinanceCenterApi.reviewArApOrder(row.id, orderType.value);
@@ -270,7 +255,7 @@ const reviewOrder = async (row: MumarenArApOrder) => {
 
 // ── 订单删除(仅 draft 可删) ──
 const removeOrder = async (row: MumarenArApOrder) => {
-  if (!bookId.value) return;
+  if (!bookId.value || isReadonly.value) return;
   actingId.value = row.id;
   try {
     await arApOrdersApi.delete(row.id, bookId.value, orderType.value);
@@ -298,6 +283,7 @@ const canSettle = computed(
 );
 
 const openSettle = (row: MumarenArApOrder) => {
+  if (isReadonly.value) return;
   settleTarget.value = row;
   settleForm.amount = Number(row.total_amount) - Number(row.settled_amount);
   settleForm.settlement_date = new Date().toISOString().slice(0, 10);
@@ -306,7 +292,7 @@ const openSettle = (row: MumarenArApOrder) => {
 };
 
 const confirmSettle = async () => {
-  if (!settleTarget.value || !canSettle.value) return;
+  if (isReadonly.value || !settleTarget.value || !canSettle.value) return;
   settling.value = true;
   try {
     await mumarenFinanceCenterApi.settleArApOrder(settleTarget.value.id, orderType.value, {

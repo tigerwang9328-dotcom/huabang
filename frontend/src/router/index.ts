@@ -97,7 +97,10 @@ const routes = [
           { path: "reports/tax-detail", name: "MumarenFinanceTaxDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceTaxRecords.vue"), meta: { title: "税金明细表" } },
           { path: "reports/sales-monthly", name: "MumarenFinanceSalesMonthly", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportSalesMonthly.vue"), meta: { title: "销售月报表" } },
           // 应收应付
-          { path: "ar-ap", name: "MumarenFinanceArAp", component: () => import("@/views/mumaren-finance-center/MumarenFinanceArAp.vue"), meta: { title: "应收应付" } },
+          { path: "ar-ap", name: "MumarenFinanceArAp", redirect: "/app/finance-center/mumaren/ar-ap/receivable" },
+          { path: "ar-ap/receivable", name: "MumarenFinanceReceivableLedger", component: () => import("@/views/mumaren-finance-center/MumarenFinanceArAp.vue"), props: { fixedOrderType: "receivable" }, meta: { title: "应收单台账" } },
+          { path: "ar-ap/payable", name: "MumarenFinancePayableLedger", component: () => import("@/views/mumaren-finance-center/MumarenFinanceArAp.vue"), props: { fixedOrderType: "payable" }, meta: { title: "应付单台账" } },
+          { path: "ar-ap/aging", name: "MumarenFinanceArApAging", component: () => import("@/views/mumaren-finance-center/MumarenFinanceArApAging.vue"), meta: { title: "账龄分析" } },
           // 结账
           { path: "closing", name: "MumarenFinanceClosing", component: () => import("@/views/mumaren-finance-center/MumarenFinanceClosing.vue"), meta: { title: "结账" } },
           // 资产
