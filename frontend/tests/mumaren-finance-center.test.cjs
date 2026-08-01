@@ -817,6 +817,23 @@ test('对照牧马人快捷操作，数据罗盘只导航到受控录入流程�
   assert.match(closing, /periodsApi\.precheck/)
 })
 
+test('应收应付完整保留联系人、草稿明细编辑和账龄来源单据钻取', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+
+  assert.match(api, /contact\?: string \| null/)
+  assert.match(api, /contact: string \| null/)
+  assert.match(ledger, /<el-form-item label="联系人"/)
+  assert.match(ledger, /prop="contact"/)
+  assert.match(ledger, /lines: \(detail\.lines \|\| \[\]\)\.map/)
+  assert.match(ledger, /lines: form\.lines/)
+  assert.match(ledger, /remark: detail\.remark \|\| ""/)
+  assert.doesNotMatch(ledger, /<el-form-item v-if="!editingId" label="单据明细">/)
+  assert.match(aging, /type="expand"/)
+  assert.match(aging, /scope\.row\.orders/)
+})
+
 test('当前账可维护科目和税种，历史金蝶账簿不暴露维护入口', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   const accounts = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAccounts.vue')

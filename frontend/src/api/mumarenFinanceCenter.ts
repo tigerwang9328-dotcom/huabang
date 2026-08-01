@@ -104,6 +104,7 @@ export interface ArApOrderCreatePayload {
   order_date: string;
   counterparty_id?: number | null;
   counterparty_name: string;
+  contact?: string | null;
   total_amount: number;
   remark?: string | null;
   lines?: ArApOrderLineInput[];
@@ -126,8 +127,10 @@ export interface MumarenArApOrder {
   order_date: string;
   counterparty_id: number | null;
   counterparty_name: string;
+  contact: string | null;
   total_amount: number;
   settled_amount: number;
+  remark: string | null;
   settlement_status: "open" | "partial" | "settled";
   workflow_status: "draft" | "reviewed" | "posted";
   has_details?: boolean;
@@ -528,9 +531,11 @@ export const periodsApi = {
 // ── AR/AP 订单(补充列表查询与删除) ──
 export interface ArApOrderUpdate {
   counterparty_name?: string;
+  contact?: string | null;
   total_amount?: number;
   order_date?: string;
   remark?: string | null;
+  lines?: ArApOrderLineInput[];
 }
 export interface MumarenArApSummary {
   total_count: number;

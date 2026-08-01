@@ -18,6 +18,7 @@
       <el-row :gutter="12"><el-col v-for="bucket in buckets" :key="bucket" :xs="12" :sm="4"><el-card shadow="never" class="bucket"><span>{{ bucket }}</span><strong>{{ money(aging.buckets[bucket] || 0) }}</strong></el-card></el-col></el-row>
       <el-card shadow="never"><template #header>往来单位未结余额</template>
         <el-table :data="aging.counterparties" v-loading="loading" empty-text="暂无未结往来余额" stripe>
+          <el-table-column type="expand" width="48"><template #default="scope"><el-table :data="scope.row.orders || []" size="small" empty-text="暂无来源单据"><el-table-column prop="order_no" label="单号" min-width="140" /><el-table-column prop="order_date" label="单据日期" width="120" /><el-table-column prop="days" label="账龄(天)" width="100" align="right" /><el-table-column prop="bucket" label="账龄区间" width="120" /><el-table-column label="未结余额" width="130" align="right"><template #default="orderScope">{{ money(orderScope.row.balance) }}</template></el-table-column></el-table></template></el-table-column>
           <el-table-column prop="counterparty_name" :label="orderType === 'receivable' ? '客户' : '供应商'" min-width="180" />
           <el-table-column v-for="bucket in buckets" :key="bucket" :label="bucket" width="120" align="right"><template #default="scope">{{ money(scope.row[bucket] || 0) }}</template></el-table-column>
           <el-table-column label="未结余额" width="130" align="right"><template #default="scope">{{ money(scope.row.total_balance) }}</template></el-table-column>

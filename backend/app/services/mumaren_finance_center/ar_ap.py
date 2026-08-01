@@ -55,6 +55,14 @@ def _period_from_date(order_date: date) -> str:
     return f"{order_date.year:04d}-{order_date.month:02d}"
 
 
+def validate_ar_ap_detail_total(lines: Iterable[Mapping[str, Any]], total_amount: Any) -> list[Mapping[str, Any]]:
+    """Materialize editable detail lines and require their amount total to equal the order."""
+    line_rows = list(lines)
+    if line_rows and sum((_amount(line.get("amount")) for line in line_rows), ZERO) != _amount(total_amount):
+        raise ValueError("明细金额合计必须等于单据总金额")
+    return line_rows
+
+
 def aging_bucket(days: int) -> str:
     if days <= 30:
         return BUCKETS[0]
@@ -136,6 +144,7 @@ async def create_ar_ap_order(
     total_amount: Any,
     operator_id: int,
     counterparty_id: int | None = None,
+    contact: str | None = None,
     remark: str | None = None,
     lines: Iterable[Mapping[str, Any]] | None = None,
 ) -> FinanceCenterMumarenReceivableOrder | FinanceCenterMumarenPayableOrder:
@@ -146,8 +155,8 @@ async def create_ar_ap_order(
     line_rows = list(lines or ())
     if amount < ZERO:
         raise ValueError("单据金额不能为负数")
-    if line_rows and sum((_amount(line.get("amount")) for line in line_rows), ZERO) != amount:
-        raise ValueError("明细金额合计必须等于单据总金额")
+    if line_rows:
+        validate_ar_ap_detail_total(line_rows, amount)
     if counterparty_id is not None:
         await _load_counterparty(db, counterparty_id=counterparty_id, book_id=book_id)
 
@@ -159,6 +168,7 @@ async def create_ar_ap_order(
         period=_period_from_date(order_date),
         counterparty_id=counterparty_id,
         counterparty_name=counterparty_name,
+        contact=contact,
         total_amount=amount,
         settled_amount=ZERO,
         settlement_status="open",
@@ -183,6 +193,39 @@ async def create_ar_ap_order(
             remark=line.get("remark"),
         ))
     return order
+
+
+async def replace_ar_ap_order_lines(
+    db: AsyncSession,
+    *,
+    order_type: str,
+    order_id: int,
+    total_amount: Any,
+    lines: Iterable[Mapping[str, Any]],
+) -> None:
+    """Replace all draft order lines only after validating the complete new set."""
+    if order_type not in _ORDER_LINE_MODELS:
+        raise ValueError(f"未知的往来单据类型: {order_type}")
+    line_rows = validate_ar_ap_detail_total(lines, total_amount)
+    line_model = _ORDER_LINE_MODELS[order_type]
+    existing_lines = list((await db.execute(
+        select(line_model).where(line_model.order_id == order_id)
+    )).scalars())
+    for line in existing_lines:
+        await db.delete(line)
+    for line_no, line in enumerate(line_rows, start=1):
+        db.add(line_model(
+            order_id=order_id,
+            line_no=line_no,
+            item_name=str(line["item_name"]),
+            spec=line.get("spec"),
+            quantity=_amount(line.get("quantity") or 1),
+            unit_price=_amount(line.get("unit_price")),
+            amount=_amount(line.get("amount")),
+            tax_rate=_amount(line.get("tax_rate")),
+            tax_amount=_amount(line.get("tax_amount")),
+            remark=line.get("remark"),
+        ))
 
 
 async def review_ar_ap_order(

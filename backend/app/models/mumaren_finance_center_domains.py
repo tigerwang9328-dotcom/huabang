@@ -42,6 +42,7 @@ class _MumarenOrderBase:
     period: Mapped[str] = mapped_column(String(7), nullable=False)
     counterparty_id: Mapped[int | None] = mapped_column(BigInteger)
     counterparty_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    contact: Mapped[str | None] = mapped_column(String(128))
     total_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     settled_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     settlement_status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")

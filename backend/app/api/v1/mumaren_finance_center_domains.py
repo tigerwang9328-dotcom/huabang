@@ -53,6 +53,7 @@ from app.services.mumaren_finance_center.ar_ap import (
     InvalidOrderTransition,
     build_aging,
     create_ar_ap_order,
+    replace_ar_ap_order_lines,
     review_ar_ap_order,
     settle_ar_ap_order,
 )
@@ -545,6 +546,7 @@ class ArApOrderInput(BaseModel):
     order_date: date
     counterparty_id: int | None = Field(default=None, ge=1)
     counterparty_name: str = Field(min_length=1, max_length=128)
+    contact: str | None = Field(default=None, max_length=128)
     total_amount: Decimal = Field(ge=0)
     remark: str | None = Field(default=None, max_length=500)
     lines: list[ArApOrderLineInput] = Field(default_factory=list, max_length=200)
@@ -602,10 +604,12 @@ def _order_data(order, *, has_details: bool = False) -> dict:
         "order_date": order.order_date,
         "counterparty_id": order.counterparty_id,
         "counterparty_name": order.counterparty_name,
+        "contact": order.contact,
         "total_amount": order.total_amount,
         "settled_amount": order.settled_amount,
         "settlement_status": order.settlement_status,
         "workflow_status": order.workflow_status,
+        "remark": order.remark,
         "has_details": has_details,
     }
 
@@ -838,6 +842,7 @@ async def create_ar_ap_order_endpoint(
             order_date=body.order_date,
             counterparty_id=body.counterparty_id,
             counterparty_name=body.counterparty_name,
+            contact=body.contact,
             total_amount=body.total_amount,
             operator_id=_actor_id(current_user),
             remark=body.remark,
@@ -1969,8 +1974,19 @@ class ArApOrderUpdate(BaseModel):
     book_id: int = Field(ge=1)
     order_date: date | None = None
     counterparty_name: str | None = None
+    contact: str | None = Field(default=None, max_length=128)
     total_amount: Decimal | None = Field(default=None, ge=0)
     remark: str | None = Field(default=None, max_length=500)
+    lines: list[ArApOrderLineInput] | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_replacement_detail_total(self):
+        if self.lines:
+            if self.total_amount is None:
+                raise ValueError("替换明细时必须同时提交单据总金额")
+            if sum((line.amount for line in self.lines), Decimal("0")) != self.total_amount:
+                raise ValueError("明细金额合计必须等于单据总金额")
+        return self
 
 
 _AR_AP_MODELS = {
@@ -2107,10 +2123,23 @@ async def update_ar_ap_order(
         order.period = _period_code_from_date(body.order_date)
     if body.counterparty_name is not None:
         order.counterparty_name = body.counterparty_name
+    if "contact" in body.model_fields_set:
+        order.contact = body.contact
     if body.total_amount is not None:
         order.total_amount = body.total_amount
-    if body.remark is not None:
+    if "remark" in body.model_fields_set:
         order.remark = body.remark
+    if body.lines is not None:
+        try:
+            await replace_ar_ap_order_lines(
+                db,
+                order_type=order_type,
+                order_id=order.id,
+                total_amount=order.total_amount,
+                lines=[line.model_dump() for line in body.lines],
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
     await db.flush()
     action = f"update_{order_type}_order"
     _add_audit_log(
