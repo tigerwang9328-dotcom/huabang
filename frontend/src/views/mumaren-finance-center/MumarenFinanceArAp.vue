@@ -8,6 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button :disabled="!bookId || !orders.length" @click="exportLedger">导出当前台账</el-button>
         <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">录入{{ typeText }}草稿</el-button>
       </div>
     </div>
@@ -276,6 +277,25 @@ const openDetail = async (row: MumarenArApOrder) => {
   detailOrder.value = row;
   try { detailOrder.value = (await arApOrdersApi.detail(row.id, bookId.value, orderType.value)).data.data; }
   catch (e: any) { ElMessage.error(e?.response?.data?.detail || "无法加载单据详情"); }
+};
+
+const exportLedger = () => {
+  const escape = (value: unknown) => {
+    const text = String(value ?? "");
+    const safe = /^[=+@-]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  const rows = [
+    ["单号", "单据日期", counterpartyLabel.value, amountLabel.value, settledLabel.value, "未结余额", "状态"],
+    ...orders.value.map((row) => [row.order_no, row.order_date, row.counterparty_name, row.total_amount, row.settled_amount, balanceOf(row), statusLabel(row)]),
+  ];
+  const csv = `\uFEFF${rows.map((row) => row.map(escape).join(",")).join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${typeText.value}单台账-${bookId.value}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 const showSettle = ref(false);

@@ -2,7 +2,10 @@
   <section class="panel">
     <div class="heading">
       <div><p class="panel-kicker">独立往来账</p><h2>账龄分析</h2><p>按账簿、应收或应付分别查看未结余额与账龄区间；历史迁移账簿仅查询。</p></div>
-      <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+      <div class="heading-actions">
+        <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button :disabled="!bookId || loading || !orderRows.length" @click="exportAging">导出账龄明细</el-button>
+      </div>
     </div>
     <div class="filters">
       <el-select v-model="bookId" placeholder="选择独立账簿" clearable><el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" /></el-select>
@@ -59,10 +62,30 @@ const load = async () => {
     if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
-watch(bookId, load); watch(orderType, load); watch(asOf, load);
+const exportAging = () => {
+  const escape = (value: unknown) => {
+    const text = String(value ?? "");
+    const safe = /^[=+@-]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  const counterpartyLabel = orderType.value === "receivable" ? "客户" : "供应商";
+  const rows = [
+    [counterpartyLabel, "单号", "单据日期", "账龄(天)", "账龄区间", "未结余额"],
+    ...orderRows.value.map((row) => [row.counterparty_name, row.order_no, row.order_date, row.days, row.bucket, row.balance]),
+  ];
+  const csv = `\uFEFF${rows.map((row) => row.map(escape).join(",")).join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${orderType.value === "receivable" ? "应收" : "应付"}账龄-${aging.value?.as_of || "截至日"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+watch([bookId, orderType], () => { aging.value = undefined; load(); });
+watch(asOf, load);
 onMounted(async () => { try { await loadBooks(); await load(); } catch { error.value = "无法加载独立账簿。"; } });
 </script>
 
 <style scoped>
-.panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }.heading, .filters { display: flex; gap: 12px; align-items: center; }.heading { justify-content: space-between; align-items: flex-start; }.filters { flex-wrap: wrap; }.bucket { text-align: center; color: #5d6b7e; }.bucket strong { display: block; margin-top: 6px; color: #172033; font-size: 17px; }.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }h2 { margin: 8px 0; }p { color: #5d6b7e; }@media (max-width: 640px) { .filters, .heading { align-items: stretch; flex-direction: column; } }
+.panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }.heading, .heading-actions, .filters { display: flex; gap: 12px; align-items: center; }.heading { justify-content: space-between; align-items: flex-start; }.filters { flex-wrap: wrap; }.bucket { text-align: center; color: #5d6b7e; }.bucket strong { display: block; margin-top: 6px; color: #172033; font-size: 17px; }.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }h2 { margin: 8px 0; }p { color: #5d6b7e; }@media (max-width: 640px) { .filters, .heading { align-items: stretch; flex-direction: column; } }
 </style>

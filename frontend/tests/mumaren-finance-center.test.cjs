@@ -198,6 +198,8 @@ test('应收应付与账龄分析不会让旧账簿请求覆盖当前选择', ()
   assert.match(ledger, /requestedBookId\s*!==\s*bookId\.value/)
   assert.match(aging, /loadRequestVersion/)
   assert.match(aging, /requestedBookId\s*!==\s*bookId\.value/)
+  assert.match(aging, /watch\(\[bookId, orderType\], \(\) => \{ aging\.value = undefined; load\(\); \}\)/)
+  assert.match(aging, /:disabled="!bookId \|\| loading \|\| !orderRows\.length"/)
 })
 
 test('清空账簿会结束应收应付与账龄页面在途请求的加载状态', () => {
@@ -214,7 +216,7 @@ test('账龄分析展示往来单位各账龄段和单据明细', () => {
   for (const label of ['0-30天', '31-60天', '61-90天', '91-120天', '120天以上', '单据明细']) {
     assert.match(aging, new RegExp(label), `账龄分析缺少：${label}`)
   }
-  assert.match(aging, /watch\(bookId/)
+  assert.match(aging, /watch\(\[bookId, orderType\]/)
 })
 
 test('应收应付拆分为应收单台账、应付单台账和账龄分析入口', () => {
@@ -828,6 +830,28 @@ test('当前账可维护科目和税种，历史金蝶账簿不暴露维护入�
   assert.match(accounts, /isReadonly/)
   assert.match(tax, /管理税种/)
   assert.match(tax, /isReadonly/)
+})
+
+test('销售月报可导出当前独立账簿的已持久化记录', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportSalesMonthly.vue')
+
+  assert.match(page, /导出当前月报/)
+  assert.match(page, /exportReports/)
+  assert.match(page, /text\/csv/)
+  assert.match(page, /[=+@-]/)
+  assert.match(page, /`'\$\{text\}`/)
+})
+
+test('应收应付台账与账龄分析可安全导出当前账簿的核对数据', () => {
+  const ledger = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+
+  assert.match(ledger, /导出当前台账/)
+  assert.match(ledger, /exportLedger/)
+  assert.match(aging, /导出账龄明细/)
+  assert.match(aging, /exportAging/)
+  assert.match(ledger, /`'\$\{text\}`/)
+  assert.match(aging, /`'\$\{text\}`/)
 })
 
 test('出纳和发票页面与独立后端的实际请求字段保持一致', () => {
