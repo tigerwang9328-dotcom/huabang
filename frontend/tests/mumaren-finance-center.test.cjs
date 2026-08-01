@@ -439,6 +439,8 @@ test('录凭证页会随共享账簿加载科目,并将金蝶历史账簿整表�
 
   assert.match(voucherCreate, /await bookStore\.loadBooks\(\);\s*await onBookChange\(\)/)
   assert.match(voucherCreate, /watch\(bookId,\s*\(\)\s*=>\s*void onBookChange\(\)\)/)
+  assert.doesNotMatch(voucherCreate, /@change="onBookChange"/)
+  assert.match(voucherCreate, /const accountRequestVersion = ref\(0\)/)
   assert.match(voucherCreate, /<el-form :model="form" label-width="84px" :disabled="isReadonly">/)
   assert.match(voucherCreate, /<el-table[^>]*:class="\{ 'is-readonly': isReadonly \}"/)
 })

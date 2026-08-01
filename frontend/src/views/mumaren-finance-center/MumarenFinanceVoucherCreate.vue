@@ -14,7 +14,7 @@
     </div>
 
     <div class="filters">
-      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable>
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
     </div>
@@ -122,6 +122,7 @@ import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 const bookStore = useMumarenFinanceBookStore();
 const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenFinanceAccount[]>([]);
+const accountRequestVersion = ref(0);
 const error = ref("");
 const saving = ref(false);
 const created = ref(false);
@@ -132,11 +133,16 @@ const money = (value: number) =>
 const onBookChange = async () => {
   // 选择账簿后加载科目列表供录入使用
   created.value = false;
-  if (bookId.value) {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++accountRequestVersion.value;
+  if (requestedBookId) {
     try {
-      accounts.value = (await mumarenFinanceCenterApi.listAccounts(bookId.value)).data.data;
+      const result = await mumarenFinanceCenterApi.listAccounts(requestedBookId);
+      if (requestVersion === accountRequestVersion.value && requestedBookId === bookId.value) {
+        accounts.value = result.data.data;
+      }
     } catch {
-      accounts.value = [];
+      if (requestVersion === accountRequestVersion.value) accounts.value = [];
     }
   } else {
     accounts.value = [];
