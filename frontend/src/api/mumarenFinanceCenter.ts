@@ -345,11 +345,14 @@ export interface FixedAssetInput {
   useful_life_months: number;
 }
 export interface FixedAssetUpdate {
+  book_id: number;
   asset_name?: string;
-  category?: string;
+  asset_category?: string;
+  purchase_date?: string;
   original_value?: number;
-  useful_life?: number;
-  status?: "in_use" | "disposed";
+  residual_value?: number;
+  useful_life_months?: number;
+  status?: "disposed";
 }
 export const fixedAssetsApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenFixedAsset[]>>(requestPath("/fixed-assets"), { params }),
@@ -458,43 +461,35 @@ export const cashFlowsApi = {
 export interface MumarenPayroll {
   id: number;
   book_id: number;
+  employee_no: string;
   employee_name: string;
-  department: string;
   period: string;
-  base_salary: number;
-  bonus: number;
-  gross_salary: number;
-  social_insurance: number;
-  housing_fund: number;
-  income_tax: number;
-  net_salary: number;
-  status: "draft" | "paid";
-  created_at: string;
+  gross_amount: number;
+  deduction_amount: number;
+  net_amount: number;
+  workflow_status: "draft" | "paid";
+  voucher_id: number | null;
 }
 export interface PayrollInput {
   book_id: number;
-  employee_name: string;
-  department: string;
   period: string;
-  base_salary: number;
-  bonus: number;
-  social_insurance: number;
-  housing_fund: number;
-  income_tax: number;
+  employee_no: string;
+  employee_name: string;
+  gross_amount: number;
+  deduction_amount: number;
+  net_amount: number;
 }
 export interface PayrollUpdate {
+  book_id: number;
   employee_name?: string;
-  department?: string;
-  base_salary?: number;
-  bonus?: number;
-  social_insurance?: number;
-  housing_fund?: number;
-  income_tax?: number;
+  gross_amount?: number;
+  deduction_amount?: number;
+  net_amount?: number;
 }
 export const payrollsApi = {
   list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenPayroll[]>>(requestPath("/payrolls"), { params }),
   create: (data: PayrollInput) => request.post<ApiResponse<MumarenPayroll>>(requestPath("/payrolls"), data),
-  update: (id: number, data: PayrollUpdate, book_id: number) => request.put<ApiResponse<MumarenPayroll>>(requestPath(`/payrolls/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: PayrollUpdate) => request.put<ApiResponse<MumarenPayroll>>(requestPath(`/payrolls/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/payrolls/${id}`), { params: { book_id } }),
   pay: (id: number, book_id: number) => request.post<ApiResponse<MumarenPayroll>>(requestPath(`/payrolls/${id}/pay`), null, { params: { book_id } }),
 };

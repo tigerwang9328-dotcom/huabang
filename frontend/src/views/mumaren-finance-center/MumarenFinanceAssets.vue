@@ -42,6 +42,7 @@
       </el-table-column>
       <el-table-column label="操作" width="220">
         <template #default="{ row }">
+          <el-button link type="primary" size="small" :disabled="isReadonly || row.status === 'disposed'" @click="openEdit(row)">编辑</el-button>
           <el-button link type="primary" size="small" :disabled="isReadonly || row.status === 'disposed'" :loading="actingId === row.id" @click="depreciate(row)">折旧</el-button>
           <el-popconfirm title="确认处置该资产?" @confirm="dispose(row)">
             <template #reference>
@@ -57,10 +58,10 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="新增资产" width="520px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑资产' : '新增资产'" width="520px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px">
         <el-form-item label="资产编码">
-          <el-input v-model="form.asset_code" placeholder="如 FA-2026-001" />
+          <el-input v-model="form.asset_code" :disabled="!!editingId" placeholder="如 FA-2026-001" />
         </el-form-item>
         <el-form-item label="资产名称">
           <el-input v-model="form.asset_name" />
@@ -80,8 +81,8 @@
         <el-form-item label="购入日期">
           <el-date-picker v-model="form.purchase_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
         </el-form-item>
-        <el-form-item label="折旧年限">
-          <el-input-number v-model="form.useful_life" :min="1" :max="50" style="width:100%" />
+        <el-form-item label="折旧月数">
+          <el-input-number v-model="form.useful_life_months" :min="1" :max="1200" style="width:100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -108,6 +109,7 @@ const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
 const dialogVisible = ref(false);
+const editingId = ref<number>();
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -118,7 +120,7 @@ const form = reactive({
   category: "电子设备",
   original_value: 0,
   purchase_date: new Date().toISOString().slice(0, 10),
-  useful_life: 5,
+  useful_life_months: 60,
 });
 
 const load = async () => {
@@ -162,7 +164,20 @@ const openCreate = () => {
   form.category = "电子设备";
   form.original_value = 0;
   form.purchase_date = new Date().toISOString().slice(0, 10);
-  form.useful_life = 5;
+  form.useful_life_months = 60;
+  editingId.value = undefined;
+  dialogVisible.value = true;
+};
+
+const openEdit = (row: MumarenFixedAsset) => {
+  if (isReadonly.value || row.status === "disposed") return;
+  editingId.value = row.id;
+  form.asset_code = row.asset_code;
+  form.asset_name = row.asset_name;
+  form.category = row.asset_category || "其他";
+  form.original_value = Number(row.original_value || 0);
+  form.purchase_date = row.purchase_date;
+  form.useful_life_months = Math.max(1, Number(row.useful_life_months || 12));
   dialogVisible.value = true;
 };
 
@@ -175,17 +190,29 @@ const save = async () => {
   }
   saving.value = true;
   try {
-    await fixedAssetsApi.create({
-      book_id: bookId.value,
-      asset_code: form.asset_code,
-      asset_name: form.asset_name,
-      asset_category: form.category,
-      original_value: Number(form.original_value || 0),
-      residual_value: 0,
-      purchase_date: form.purchase_date,
-      useful_life_months: Number(form.useful_life || 0) * 12,
-    });
-    ElMessage.success("资产已新增");
+    if (editingId.value) {
+      await fixedAssetsApi.update(editingId.value, {
+        book_id: bookId.value,
+        asset_name: form.asset_name,
+        asset_category: form.category,
+        original_value: Number(form.original_value || 0),
+        purchase_date: form.purchase_date,
+        useful_life_months: Number(form.useful_life_months || 0),
+      });
+      ElMessage.success("资产已更新");
+    } else {
+      await fixedAssetsApi.create({
+        book_id: bookId.value,
+        asset_code: form.asset_code,
+        asset_name: form.asset_name,
+        asset_category: form.category,
+        original_value: Number(form.original_value || 0),
+        residual_value: 0,
+        purchase_date: form.purchase_date,
+        useful_life_months: Number(form.useful_life_months || 0),
+      });
+      ElMessage.success("资产已新增");
+    }
     dialogVisible.value = false;
     await load();
   } catch (e: any) {
