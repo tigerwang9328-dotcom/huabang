@@ -15,12 +15,21 @@
       <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
+      <el-input v-model="periodInput" placeholder="YYYY-MM" maxlength="7" />
+      <el-button :disabled="!bookId || isReadonly || !isPeriodCode" :loading="initializing" @click="initializePeriod">初始化期间</el-button>
+      <el-button :disabled="!bookId || !isPeriodCode" :loading="prechecking" @click="precheck">结账预检</el-button>
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="precheckResult" :type="precheckResult.can_close ? 'success' : 'warning'" :closable="false" show-icon :title="precheckResult.can_close ? `${precheckResult.period} 可结账` : `${precheckResult.period} 存在 ${precheckResult.blocking_count} 项结账阻塞`" />
+    <el-table v-if="precheckResult" :data="precheckResult.checks" size="small" stripe>
+      <el-table-column prop="title" label="检查项" min-width="150" />
+      <el-table-column label="结果" width="110"><template #default="{ row }"><el-tag :type="row.passed ? 'success' : 'danger'">{{ row.passed ? '通过' : '阻塞' }}</el-tag></template></el-table-column>
+      <el-table-column prop="message" label="说明" min-width="280" />
+    </el-table>
 
     <el-table v-loading="loading" :data="periods" empty-text="暂无结账期间" stripe>
-      <el-table-column prop="period" label="期间" width="140" />
+      <el-table-column prop="period_code" label="期间" width="140" />
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
@@ -49,11 +58,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   periodsApi,
   type MumarenPeriod,
+  type MumarenPeriodPrecheck,
 } from "@/api/mumarenFinanceCenter";
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 
@@ -62,6 +72,11 @@ const periods = ref<MumarenPeriod[]>([]);
 const loading = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+const initializing = ref(false);
+const prechecking = ref(false);
+const periodInput = ref(new Date().toISOString().slice(0, 7));
+const precheckResult = ref<MumarenPeriodPrecheck>();
+const isPeriodCode = computed(() => /^\d{4}-(0[1-9]|1[0-2])$/.test(periodInput.value));
 
 const statusLabel = (s: string) => (s === "open" ? "未结账" : s === "closing" ? "结账中" : "已结账");
 const statusTagType = (s: string): "info" | "warning" | "success" =>
@@ -82,6 +97,7 @@ const load = async () => {
 
 const onBookChange = () => {
   periods.value = [];
+  precheckResult.value = undefined;
   load();
 };
 
@@ -98,8 +114,15 @@ const close = async (row: MumarenPeriod) => {
   if (isReadonly.value || !bookId.value || row.status !== "open") return;
   actingId.value = row.id;
   try {
+    const result = await periodsApi.precheck(bookId.value, row.period_code);
+    precheckResult.value = result.data.data;
+    periodInput.value = row.period_code;
+    if (!precheckResult.value.can_close) {
+      ElMessage.warning("结账预检未通过，请先处理阻塞项");
+      return;
+    }
     await periodsApi.close(row.id, bookId.value);
-    ElMessage.success(`期间 ${row.period} 已结账`);
+    ElMessage.success(`期间 ${row.period_code} 已结账`);
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "结账失败");
@@ -108,12 +131,39 @@ const close = async (row: MumarenPeriod) => {
   }
 };
 
+const initializePeriod = async () => {
+  if (!bookId.value || isReadonly.value || !isPeriodCode.value) return;
+  initializing.value = true;
+  try {
+    await periodsApi.initialize(bookId.value, periodInput.value);
+    ElMessage.success(`会计期间 ${periodInput.value} 已初始化`);
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "初始化期间失败");
+  } finally {
+    initializing.value = false;
+  }
+};
+
+const precheck = async () => {
+  if (!bookId.value || !isPeriodCode.value) return;
+  prechecking.value = true;
+  try {
+    precheckResult.value = (await periodsApi.precheck(bookId.value, periodInput.value)).data.data;
+  } catch (e: any) {
+    precheckResult.value = undefined;
+    ElMessage.error(e?.response?.data?.detail || "结账预检失败");
+  } finally {
+    prechecking.value = false;
+  }
+};
+
 const reopen = async (row: MumarenPeriod) => {
   if (isReadonly.value || !bookId.value || row.status !== "closed") return;
   actingId.value = row.id;
   try {
     await periodsApi.reopen(row.id, bookId.value);
-    ElMessage.success(`期间 ${row.period} 已重新开启`);
+    ElMessage.success(`期间 ${row.period_code} 已重新开启`);
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "重新开启失败");

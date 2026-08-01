@@ -462,13 +462,23 @@ export const payrollsApi = {
 export interface MumarenPeriod {
   id: number;
   book_id: number;
-  period: string;
-  status: "open" | "closing" | "closed";
+  period_code: string;
+  start_date: string;
+  end_date: string;
+  status: "open" | "closed";
+  closed_by: number | null;
   closed_at: string | null;
-  created_at: string;
+}
+export interface MumarenPeriodPrecheck {
+  period: string;
+  can_close: boolean;
+  blocking_count: number;
+  checks: Array<{ key: string; title: string; count: number; passed: boolean; message: string }>;
 }
 export const periodsApi = {
   list: (params: { book_id: number }) => request.get<ApiResponse<MumarenPeriod[]>>(requestPath("/periods"), { params }),
+  initialize: (book_id: number, period: string) => request.post<ApiResponse<MumarenPeriod>>(requestPath("/periods/initialize"), null, { params: { book_id, period } }),
+  precheck: (book_id: number, period: string) => request.post<ApiResponse<MumarenPeriodPrecheck>>(requestPath("/periods/pre-check"), null, { params: { book_id, period } }),
   close: (id: number, book_id: number) => request.post<ApiResponse<MumarenPeriod>>(requestPath(`/periods/${id}/close`), null, { params: { book_id } }),
   reopen: (id: number, book_id: number) => request.post<ApiResponse<MumarenPeriod>>(requestPath(`/periods/${id}/reopen`), null, { params: { book_id } }),
 };

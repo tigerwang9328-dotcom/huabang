@@ -271,7 +271,7 @@ test('数据罗盘以共享账簿为唯一来源，并在账簿切换后重新�
   const compass = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCompass.vue')
   const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
 
-  assert.match(compass, /const \{ books, bookId, loadBooks, error: bookError \} = useMumarenFinanceBook\(\)/)
+  assert.match(compass, /const \{ books, bookId, (?:isReadonly, )?loadBooks, error: bookError \} = useMumarenFinanceBook\(\)/)
   assert.match(compass, /await loadBooks\(\);\s*booksLoaded\.value = true;\s*await load\(\)/)
   assert.match(compass, /watch\(bookId,\s*\(\)\s*=>\s*\{\s*if \(booksLoaded\.value\) void load\(\);/)
   assert.match(compass, /const requestVersion = ref\(0\)/)
@@ -793,4 +793,22 @@ test('账套管理可创建独立当前账，凭证列表仅允许删除草稿',
   assert.match(books, /createBook/)
   assert.match(vouchers, /scope\.row\.status === 'draft'/)
   assert.match(vouchers, /deleteVoucher/)
+})
+
+test('对照牧马人快捷操作，数据罗盘只导航到受控录入流程，资产负债表和利润表可打印', () => {
+  const compass = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCompass.vue')
+  const balanceSheet = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportBalanceSheet.vue')
+  const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
+  const closing = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceClosing.vue')
+
+  assert.match(compass, /记录回款/)
+  assert.match(compass, /录入费用/)
+  assert.match(compass, /\/ar-ap\/receivable/)
+  assert.match(compass, /\/reports\/expense-detail/)
+  assert.match(balanceSheet, /window\.print\(\)/)
+  assert.match(profit, /window\.print\(\)/)
+  assert.match(closing, /初始化期间/)
+  assert.match(closing, /结账预检/)
+  assert.match(closing, /periodsApi\.initialize/)
+  assert.match(closing, /periodsApi\.precheck/)
 })

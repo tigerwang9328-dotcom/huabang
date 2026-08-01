@@ -1723,6 +1723,108 @@ def _fiscal_period_data(period: FinanceCenterMumarenFiscalPeriod) -> dict:
     }
 
 
+def _period_bounds(period_code: str) -> tuple[date, date]:
+    """Return inclusive calendar-month bounds for a validated YYYY-MM period."""
+    year, month = (int(value) for value in period_code.split("-"))
+    if not 1 <= year <= 9998:
+        raise HTTPException(status_code=422, detail="会计期间年份必须在 0001 至 9998 之间")
+    start = date(year, month, 1)
+    next_start = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    return start, next_start.fromordinal(next_start.toordinal() - 1)
+
+
+async def _period_close_precheck(db: AsyncSession, period: FinanceCenterMumarenFiscalPeriod) -> dict:
+    """Expose the same blockers enforced by close, without changing accounting data."""
+    not_posted_count = int((await db.execute(
+        select(func.count(FinanceCenterMumarenVoucher.id)).where(
+            FinanceCenterMumarenVoucher.book_id == period.book_id,
+            FinanceCenterMumarenVoucher.voucher_date >= period.start_date,
+            FinanceCenterMumarenVoucher.voucher_date <= period.end_date,
+            FinanceCenterMumarenVoucher.status != "posted",
+        )
+    )).scalar_one())
+    totals = (await db.execute(
+        select(
+            func.coalesce(func.sum(FinanceCenterMumarenVoucher.total_debit), 0),
+            func.coalesce(func.sum(FinanceCenterMumarenVoucher.total_credit), 0),
+        ).where(
+            FinanceCenterMumarenVoucher.book_id == period.book_id,
+            FinanceCenterMumarenVoucher.voucher_date >= period.start_date,
+            FinanceCenterMumarenVoucher.voucher_date <= period.end_date,
+        )
+    )).one()
+    total_debit, total_credit = Decimal(totals[0]), Decimal(totals[1])
+    checks = [
+        {
+            "key": "not_posted", "title": "未过账凭证", "count": not_posted_count,
+            "passed": not_posted_count == 0,
+            "message": "本期没有未过账凭证" if not_posted_count == 0 else f"本期存在 {not_posted_count} 张未过账凭证",
+        },
+        {
+            "key": "trial_balance", "title": "试算平衡", "count": 0 if total_debit == total_credit else 1,
+            "passed": total_debit == total_credit,
+            "message": "借贷平衡" if total_debit == total_credit else f"借方 {total_debit} 与贷方 {total_credit} 不平衡",
+        },
+    ]
+    blocking_count = sum(1 for check in checks if not check["passed"])
+    return {
+        "period": period.period_code,
+        "can_close": blocking_count == 0,
+        "blocking_count": blocking_count,
+        "checks": checks,
+    }
+
+
+@router.post("/periods/initialize", response_model=ApiResponse)
+async def initialize_fiscal_period(
+    book_id: int = Query(ge=1),
+    period: str = Query(pattern=r"^\d{4}-\d{2}$"),
+    current_user: SysUser = Depends(require_mumaren_voucher_post),
+    db: AsyncSession = Depends(get_db),
+):
+    """Initialize one writable book's calendar-month period; repeated calls are idempotent."""
+    await _require_writable_operating_book(db, book_id)
+    start_date, end_date = _period_bounds(period)
+    existing = (await db.execute(
+        select(FinanceCenterMumarenFiscalPeriod).where(
+            FinanceCenterMumarenFiscalPeriod.book_id == book_id,
+            FinanceCenterMumarenFiscalPeriod.period_code == period,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        return ApiResponse.ok(data=_fiscal_period_data(existing), message="会计期间已存在")
+    row = FinanceCenterMumarenFiscalPeriod(
+        book_id=book_id, period_code=period, start_date=start_date, end_date=end_date, status="open",
+    )
+    db.add(row)
+    await db.flush()
+    _add_audit_log(
+        db, book_id=book_id, action="initialize_period", operator_id=_actor_id(current_user),
+        detail=f"初始化会计期间 {period}",
+    )
+    await db.flush()
+    return ApiResponse.ok(data=_fiscal_period_data(row), message="会计期间已初始化")
+
+
+@router.post("/periods/pre-check", response_model=ApiResponse)
+async def precheck_fiscal_period_close(
+    book_id: int = Query(ge=1),
+    period: str = Query(pattern=r"^\d{4}-\d{2}$"),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only close precheck. It never creates vouchers or changes period state."""
+    row = (await db.execute(
+        select(FinanceCenterMumarenFiscalPeriod).where(
+            FinanceCenterMumarenFiscalPeriod.book_id == book_id,
+            FinanceCenterMumarenFiscalPeriod.period_code == period,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"会计期间 {period} 不存在")
+    return ApiResponse.ok(data=await _period_close_precheck(db, row))
+
+
 @router.get("/periods", response_model=ApiResponse)
 async def list_fiscal_periods(
     book_id: int = Query(ge=1),
@@ -1755,34 +1857,12 @@ async def close_fiscal_period(
         raise HTTPException(status_code=404, detail=f"会计期间 {period_id} 不存在")
     if period.status != "open":
         raise HTTPException(status_code=409, detail=f"当前状态 {period.status},无法结账")
-
-    not_posted_count = int((await db.execute(
-        select(func.count(FinanceCenterMumarenVoucher.id)).where(
-            FinanceCenterMumarenVoucher.book_id == period.book_id,
-            FinanceCenterMumarenVoucher.voucher_date >= period.start_date,
-            FinanceCenterMumarenVoucher.voucher_date <= period.end_date,
-            FinanceCenterMumarenVoucher.status != "posted",
-        )
-    )).scalar_one())
-    if not_posted_count > 0:
-        raise HTTPException(status_code=409, detail=f"本期存在 {not_posted_count} 张未过账凭证,禁止结账")
-
-    totals = (await db.execute(
-        select(
-            func.coalesce(func.sum(FinanceCenterMumarenVoucher.total_debit), 0),
-            func.coalesce(func.sum(FinanceCenterMumarenVoucher.total_credit), 0),
-        ).where(
-            FinanceCenterMumarenVoucher.book_id == period.book_id,
-            FinanceCenterMumarenVoucher.voucher_date >= period.start_date,
-            FinanceCenterMumarenVoucher.voucher_date <= period.end_date,
-        )
-    )).one()
-    total_debit, total_credit = Decimal(totals[0]), Decimal(totals[1])
-    if total_debit != total_credit:
-        raise HTTPException(
-            status_code=409,
-            detail=f"试算不平衡:借方 {total_debit} ≠ 贷方 {total_credit},禁止结账",
-        )
+    await _require_writable_operating_book(db, period.book_id)
+    precheck = await _period_close_precheck(db, period)
+    if not precheck["can_close"]:
+        raise HTTPException(status_code=409, detail="；".join(
+            check["message"] for check in precheck["checks"] if not check["passed"]
+        ))
 
     period.status = "closed"
     period.closed_by = _actor_id(current_user)
@@ -1811,6 +1891,7 @@ async def reopen_fiscal_period(
         raise HTTPException(status_code=404, detail=f"会计期间 {period_id} 不存在")
     if period.status != "closed":
         raise HTTPException(status_code=409, detail=f"当前状态 {period.status},仅 closed 可反结账")
+    await _require_writable_operating_book(db, period.book_id)
     period.status = "open"
     period.closed_by = None
     period.closed_at = None

@@ -2,7 +2,9 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
 
+from app.api.v1.mumaren_finance_center_domains import _period_bounds
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenCashFlow,
     FinanceCenterMumarenReceivableOrder,
@@ -62,6 +64,13 @@ def test_aging_excludes_documents_after_the_selected_cutoff_date():
 
     assert result["total_balance"] == Decimal("100")
     assert [row["order_no"] for row in result["counterparties"][0]["orders"]] == ["AR-before"]
+
+
+def test_period_bounds_rejects_calendar_years_outside_python_date_range():
+    with pytest.raises(HTTPException) as exc_info:
+        _period_bounds("0000-01")
+
+    assert exc_info.value.status_code == 422
 
 
 def test_business_depreciation_is_prorated_and_never_exceeds_original_value():

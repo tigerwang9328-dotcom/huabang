@@ -8,6 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">刷新</el-button>
+        <router-link to="/app/finance-center/mumaren/ar-ap/receivable"><el-button :disabled="!bookId || isReadonly">记录回款</el-button></router-link>
+        <router-link to="/app/finance-center/mumaren/reports/expense-detail"><el-button :disabled="!bookId || isReadonly">录入费用</el-button></router-link>
       </div>
     </div>
 
@@ -56,7 +58,7 @@ import {
   type MumarenTrialBalanceRow,
 } from "@/api/mumarenFinanceCenter";
 
-const { books, bookId, loadBooks, error: bookError } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks, error: bookError } = useMumarenFinanceBook();
 const profit = ref<Partial<MumarenProfitStatement>>({});
 const trialRows = ref<MumarenTrialBalanceRow[]>([]);
 const error = ref("");
