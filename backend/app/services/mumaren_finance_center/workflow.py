@@ -49,7 +49,7 @@ async def create_book(
     db: AsyncSession, *, book_code: str, book_name: str, company_name: str | None,
     status: str, operator_id: int,
 ) -> FinanceCenterMumarenBook:
-    """创建独立账簿，并初始化标准科目与 2026 会计期间。"""
+    """Create an isolated current ledger with the minimum starter chart and periods."""
     normalized_code = book_code.strip().upper()
     normalized_name = book_name.strip()
     normalized_company = company_name.strip() if company_name else None
@@ -66,7 +66,7 @@ async def create_book(
         raise ValueError("账簿编码已存在")
     book = FinanceCenterMumarenBook(
         book_code=normalized_code, book_name=normalized_name, company_name=normalized_company,
-        status=status, created_by=operator_id,
+        status=status, is_readonly=False, created_by=operator_id,
     )
     db.add(book)
     await db.flush()
@@ -75,10 +75,11 @@ async def create_book(
             book_id=book.id, account_code=account_code, account_name=account_name,
             account_type=account_type, direction=direction, level=1, is_active=True,
         ))
+    fiscal_year = date.today().year
     for month in range(1, 13):
-        next_month = date(2026, month + 1, 1) if month < 12 else date(2027, 1, 1)
+        next_month = date(fiscal_year, month + 1, 1) if month < 12 else date(fiscal_year + 1, 1, 1)
         db.add(FinanceCenterMumarenFiscalPeriod(
-            book_id=book.id, period_code=f"2026-{month:02d}", start_date=date(2026, month, 1),
+            book_id=book.id, period_code=f"{fiscal_year}-{month:02d}", start_date=date(fiscal_year, month, 1),
             end_date=next_month.fromordinal(next_month.toordinal() - 1), status="open",
         ))
     db.add(FinanceCenterMumarenAuditLog(

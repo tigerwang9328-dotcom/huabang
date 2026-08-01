@@ -779,3 +779,18 @@ test('所有牧马人财务中心页面不得调用旧财务 API 或残留牧马
   assert.doesNotMatch(api, /\/api\/v1\/finance(?!-center\/mumaren)[/'"`]/)
   assert.doesNotMatch(api, /mumaren\.cn|mumaren\.com|finance_module\/api\//)
 })
+
+test('账套管理可创建独立当前账，凭证列表仅允许删除草稿', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const router = read('src', 'router', 'index.ts')
+  const books = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceBooks.vue')
+  const vouchers = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+
+  assert.match(api, /createBook:\s*\(data:/)
+  assert.match(api, /deleteVoucher:\s*\(voucherId: number\)/)
+  assert.match(router, /MumarenFinanceSettingsBooks[\s\S]*MumarenFinanceBooks\.vue/)
+  assert.match(books, /新增账簿/)
+  assert.match(books, /createBook/)
+  assert.match(vouchers, /scope\.row\.status === 'draft'/)
+  assert.match(vouchers, /deleteVoucher/)
+})

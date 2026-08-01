@@ -218,13 +218,9 @@ async def delete_draft_voucher(
         raise HTTPException(status_code=409, detail="历史只读凭证禁止删除")
     if voucher.status != "draft":
         raise HTTPException(status_code=409, detail="仅草稿凭证可删除")
-
     db.add(FinanceCenterMumarenAuditLog(
-        book_id=voucher.book_id,
-        voucher_id=voucher.id,
-        action="delete_voucher",
-        operator_id=_actor_id(current_user),
-        detail=voucher.voucher_no,
+        book_id=voucher.book_id, voucher_id=voucher.id, action="delete_voucher",
+        operator_id=_actor_id(current_user), detail=voucher.voucher_no,
     ))
     await db.delete(voucher)
     await db.flush()

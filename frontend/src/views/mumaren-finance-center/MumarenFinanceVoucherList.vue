@@ -38,9 +38,12 @@
       <el-table-column label="贷方" width="140" align="right">
         <template #default="scope">{{ money(scope.row.total_credit) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="160">
+      <el-table-column label="操作" width="220">
         <template #default="scope">
           <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+          <el-popconfirm v-if="scope.row.status === 'draft' && !isReadonly" title="确定删除该草稿凭证？此操作不可恢复。" @confirm="remove(scope.row)">
+            <template #reference><el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button></template>
+          </el-popconfirm>
           <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="post(scope.row)">人工过账</el-button>
           <span v-if="scope.row.status === 'posted'" class="done-text">已过账</span>
         </template>
@@ -131,6 +134,20 @@ const review = async (row: MumarenFinanceVoucher) => {
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "审核失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+const remove = async (row: MumarenFinanceVoucher) => {
+  if (isReadonly.value || row.status !== "draft") return;
+  actingId.value = row.id;
+  try {
+    await mumarenFinanceCenterApi.deleteVoucher(row.id);
+    ElMessage.success("草稿凭证已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
   } finally {
     actingId.value = undefined;
   }

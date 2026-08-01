@@ -119,7 +119,7 @@ const routes = [
           // 设置(6 子项)
           { path: "settings", redirect: "/app/finance-center/mumaren/settings/accounts" },
           { path: "settings/accounts", name: "MumarenFinanceSettingsAccounts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceAccounts.vue"), meta: { title: "科目管理" } },
-          { path: "settings/books", name: "MumarenFinanceSettingsBooks", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgers.vue"), meta: { title: "账套管理" } },
+          { path: "settings/books", name: "MumarenFinanceSettingsBooks", component: () => import("@/views/mumaren-finance-center/MumarenFinanceBooks.vue"), meta: { title: "账套管理" } },
           { path: "settings/auxiliary", name: "MumarenFinanceSettingsAuxiliary", component: () => import("@/views/mumaren-finance-center/MumarenFinanceSettingsAuxiliary.vue"), meta: { title: "辅助核算" } },
           { path: "settings/audit-logs", name: "MumarenFinanceSettingsAuditLogs", component: () => import("@/views/mumaren-finance-center/MumarenFinanceSettingsAuditLogs.vue"), meta: { title: "操作日志" } },
           { path: "settings/daily-parameters", name: "MumarenFinanceDailyParameters", component: () => import("@/views/mumaren-finance-center/MumarenFinanceDailyParameters.vue"), meta: { title: "每日经营参数" } },
