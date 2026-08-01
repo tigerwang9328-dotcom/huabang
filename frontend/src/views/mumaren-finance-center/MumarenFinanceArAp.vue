@@ -51,6 +51,7 @@
         <el-table-column prop="order_no" label="单号" min-width="140" />
         <el-table-column prop="order_date" label="日期" width="120" />
         <el-table-column prop="counterparty_name" :label="counterpartyLabel" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="contact" label="联系人" min-width="140" show-overflow-tooltip />
         <el-table-column :label="amountLabel" width="120" align="right">
           <template #default="scope">{{ money(scope.row.total_amount) }}</template>
         </el-table-column>
@@ -66,7 +67,7 @@
         <el-table-column label="操作" width="250" @click.stop>
           <template #default="scope">
             <el-button size="small" link @click.stop="openDetail(scope.row)">详情</el-button>
-            <el-button v-if="scope.row.workflow_status === 'draft' && !scope.row.has_details" size="small" link type="primary" :disabled="isReadonly" @click.stop="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="openEdit(scope.row)">编辑</el-button>
             <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="reviewOrder(scope.row)">审核</el-button>
             <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.settlement_status !== 'settled'" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click.stop="openSettle(scope.row)">{{ settlementAction }}</el-button>
             <el-popconfirm v-if="scope.row.workflow_status === 'draft' && !isReadonly" title="确定删除该订单？" @confirm="removeOrder(scope.row)">
@@ -84,8 +85,9 @@
         <el-form-item label="单号" required><el-input v-model="form.order_no" :disabled="!!editingId" :placeholder="orderType === 'receivable' ? '如 AR-2026-08-001' : '如 AP-2026-08-001'" /></el-form-item>
         <el-form-item label="单据日期" required><el-date-picker v-model="form.order_date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
         <el-form-item :label="counterpartyLabel" required><el-input v-model="form.counterparty_name" maxlength="128" :placeholder="counterpartyLabel" /></el-form-item>
+        <el-form-item label="联系人"><el-input v-model="form.contact" maxlength="128" placeholder="联系人及电话（可选）" /></el-form-item>
         <el-form-item :label="amountLabel" required><el-input-number v-model="form.total_amount" :min="0.01" :precision="2" :controls="false" :disabled="form.lines.length > 0" style="width:100%" /></el-form-item>
-        <el-form-item v-if="!editingId" label="单据明细">
+        <el-form-item label="单据明细">
           <div class="line-editor">
             <el-button size="small" @click="addLine">添加明细</el-button>
             <el-table v-if="form.lines.length" :data="form.lines" size="small" border>
@@ -123,6 +125,7 @@
         <el-descriptions-item label="单号">{{ detailOrder.order_no }}</el-descriptions-item>
         <el-descriptions-item label="日期">{{ detailOrder.order_date }}</el-descriptions-item>
         <el-descriptions-item :label="counterpartyLabel">{{ detailOrder.counterparty_name }}</el-descriptions-item>
+        <el-descriptions-item v-if="detailOrder.contact" label="联系人">{{ detailOrder.contact }}</el-descriptions-item>
         <el-descriptions-item :label="amountLabel">{{ money(detailOrder.total_amount) }}</el-descriptions-item>
         <el-descriptions-item :label="settledLabel">{{ money(detailOrder.settled_amount) }}</el-descriptions-item>
         <el-descriptions-item label="未结余额">{{ money(balanceOf(detailOrder)) }}</el-descriptions-item>
@@ -222,31 +225,44 @@ onMounted(async () => { try { await loadBooks(); await load(); } catch { error.v
 const showCreate = ref(false);
 const saving = ref(false);
 const editingId = ref<number>();
-const form = reactive({ order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "", lines: [] as ArApOrderLineInput[] });
+const form = reactive({ order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", contact: "", total_amount: 0, remark: "", lines: [] as ArApOrderLineInput[] });
 const lineTotal = computed(() => form.lines.reduce((total, line) => total + Number(line.amount || 0), 0));
 const canCreate = computed(() => !!bookId.value && !!form.order_no && !!form.order_date && !!form.counterparty_name && form.total_amount > 0 && (!form.lines.length || form.lines.every((line) => !!line.item_name.trim() && line.quantity > 0 && line.amount >= 0)));
 const openCreate = () => {
   if (isReadonly.value) { ElMessage.warning("金蝶迁移账簿只读，不能录入应收应付单据"); return; }
   if (!bookId.value) { ElMessage.warning("请先选择独立账簿"); return; }
-  Object.assign(form, { order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", total_amount: 0, remark: "", lines: [] });
+  Object.assign(form, { order_no: "", order_date: new Date().toISOString().slice(0, 10), counterparty_name: "", contact: "", total_amount: 0, remark: "", lines: [] });
   editingId.value = undefined;
   showCreate.value = true;
 };
-const openEdit = (row: MumarenArApOrder) => {
-  if (isReadonly.value || row.workflow_status !== "draft") return;
-  editingId.value = row.id;
-  Object.assign(form, { order_no: row.order_no, order_date: row.order_date, counterparty_name: row.counterparty_name, total_amount: Number(row.total_amount), remark: "", lines: [] });
-  showCreate.value = true;
+const openEdit = async (row: MumarenArApOrder) => {
+  if (!bookId.value || isReadonly.value || row.workflow_status !== "draft") return;
+  actingId.value = row.id;
+  try {
+    const detail = (await arApOrdersApi.detail(row.id, bookId.value, orderType.value)).data.data;
+    editingId.value = row.id;
+    Object.assign(form, {
+      order_no: detail.order_no,
+      order_date: detail.order_date,
+      counterparty_name: detail.counterparty_name,
+      contact: detail.contact || "",
+      total_amount: Number(detail.total_amount),
+      remark: detail.remark || "",
+      lines: (detail.lines || []).map((line) => ({ ...line })),
+    });
+    showCreate.value = true;
+  } catch (e: any) { ElMessage.error(e?.response?.data?.detail || "无法加载草稿明细"); }
+  finally { actingId.value = undefined; }
 };
 const save = async () => {
   if (!bookId.value || isReadonly.value || !canCreate.value) return;
   saving.value = true;
   try {
     if (editingId.value) {
-      await arApOrdersApi.update(editingId.value, { order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null }, bookId.value, orderType.value);
+      await arApOrdersApi.update(editingId.value, { order_date: form.order_date, counterparty_name: form.counterparty_name, contact: form.contact || null, total_amount: form.total_amount, remark: form.remark || null, lines: form.lines }, bookId.value, orderType.value);
       ElMessage.success(`${typeText.value}草稿已更新`);
     } else {
-      await mumarenFinanceCenterApi.createArApOrder({ book_id: bookId.value, order_type: orderType.value, order_no: form.order_no, order_date: form.order_date, counterparty_name: form.counterparty_name, total_amount: form.total_amount, remark: form.remark || null, lines: form.lines });
+      await mumarenFinanceCenterApi.createArApOrder({ book_id: bookId.value, order_type: orderType.value, order_no: form.order_no, order_date: form.order_date, counterparty_name: form.counterparty_name, contact: form.contact || null, total_amount: form.total_amount, remark: form.remark || null, lines: form.lines });
       ElMessage.success(`${typeText.value}草稿已创建`);
     }
     showCreate.value = false; await load();
@@ -286,8 +302,8 @@ const exportLedger = () => {
     return `"${safe.replace(/"/g, '""')}"`;
   };
   const rows = [
-    ["单号", "单据日期", counterpartyLabel.value, amountLabel.value, settledLabel.value, "未结余额", "状态"],
-    ...orders.value.map((row) => [row.order_no, row.order_date, row.counterparty_name, row.total_amount, row.settled_amount, balanceOf(row), statusLabel(row)]),
+    ["单号", "单据日期", counterpartyLabel.value, "联系人", amountLabel.value, settledLabel.value, "未结余额", "状态"],
+    ...orders.value.map((row) => [row.order_no, row.order_date, row.counterparty_name, row.contact || "", row.total_amount, row.settled_amount, balanceOf(row), statusLabel(row)]),
   ];
   const csv = `\uFEFF${rows.map((row) => row.map(escape).join(",")).join("\r\n")}`;
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
