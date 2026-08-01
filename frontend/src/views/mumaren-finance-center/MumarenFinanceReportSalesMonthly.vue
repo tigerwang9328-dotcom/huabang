@@ -8,6 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
+        <el-button :disabled="!bookId || !records.length" @click="exportReports">导出当前月报</el-button>
         <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">录入月报</el-button>
       </div>
     </div>
@@ -233,6 +234,25 @@ const removeRow = async (row: MumarenSalesMonthlyReport) => {
   } finally {
     actingId.value = undefined;
   }
+};
+
+const exportReports = () => {
+  const escape = (value: unknown) => {
+    const text = String(value ?? "");
+    const safe = /^[=+@-]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  const rows = [
+    ["月份", "门店编码", "门店名称", "销售额", "退货额", "净销售额", "备注"],
+    ...records.value.map((row) => [row.period, row.store_code, row.store_name, row.sales_amount, row.return_amount, row.net_sales, row.remark]),
+  ];
+  const csv = `\uFEFF${rows.map((row) => row.map(escape).join(",")).join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `销售月报-${bookId.value}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 const getSummaries = (param: { columns: any[]; data: MumarenSalesMonthlyReport[] }) => {
