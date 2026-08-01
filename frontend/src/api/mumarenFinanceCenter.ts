@@ -343,6 +343,7 @@ export interface InvoiceInput {
   invoice_date: string;
 }
 export interface InvoiceUpdate {
+  book_id: number;
   invoice_type?: "input" | "output";
   counterparty_name?: string | null;
   amount?: number;
@@ -352,7 +353,7 @@ export interface InvoiceUpdate {
 export const invoicesApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenInvoice[]>>(requestPath("/invoices"), { params }),
   create: (data: InvoiceInput) => request.post<ApiResponse<MumarenInvoice>>(requestPath("/invoices"), data),
-  update: (id: number, data: InvoiceUpdate, book_id: number) => request.put<ApiResponse<MumarenInvoice>>(requestPath(`/invoices/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: InvoiceUpdate) => request.put<ApiResponse<MumarenInvoice>>(requestPath(`/invoices/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/invoices/${id}`), { params: { book_id } }),
   verify: (id: number, book_id: number) => request.post<ApiResponse<MumarenInvoice>>(requestPath(`/invoices/${id}/verify`), null, { params: { book_id } }),
 };
@@ -375,6 +376,7 @@ export interface CashAccountInput {
   currency: string;
 }
 export interface CashAccountUpdate {
+  book_id: number;
   account_name?: string;
   account_type?: string;
   currency?: string;
@@ -382,7 +384,7 @@ export interface CashAccountUpdate {
 export const cashAccountsApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenCashAccount[]>>(requestPath("/cash-accounts"), { params }),
   create: (data: CashAccountInput) => request.post<ApiResponse<MumarenCashAccount>>(requestPath("/cash-accounts"), data),
-  update: (id: number, data: CashAccountUpdate, book_id: number) => request.put<ApiResponse<MumarenCashAccount>>(requestPath(`/cash-accounts/${id}`), data, { params: { book_id } }),
+  update: (id: number, data: CashAccountUpdate) => request.put<ApiResponse<MumarenCashAccount>>(requestPath(`/cash-accounts/${id}`), data),
   delete: (id: number, book_id: number) => request.delete<ApiResponse<null>>(requestPath(`/cash-accounts/${id}`), { params: { book_id } }),
 };
 
