@@ -7,6 +7,7 @@
         <p>独立当前账凭证草稿录入;借贷平衡后保存为草稿。</p>
       </div>
       <div class="heading-actions">
+        <el-button :disabled="!bookId" @click="reloadAll">刷新</el-button>
         <router-link to="/app/finance-center/mumaren/vouchers/list">
           <el-button>查看凭证列表</el-button>
         </router-link>
@@ -157,11 +158,16 @@ const onBookChange = async () => {
   }
 };
 
+const reloadAll = async () => {
+  error.value = "";
+  await bookStore.loadBooks();
+  await onBookChange();
+  await applyTemplateFromRoute();
+};
+
 onMounted(async () => {
   try {
-    await bookStore.loadBooks();
-    await onBookChange();
-    await applyTemplateFromRoute();
+    await reloadAll();
   } catch {
     error.value = "无法加载独立账簿。";
   }

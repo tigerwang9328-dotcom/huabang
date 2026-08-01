@@ -45,7 +45,7 @@
         </el-row>
         <el-form-item label="摘要"><el-input v-model="form.summary" type="textarea" :rows="2" maxlength="200" show-word-limit /></el-form-item>
       </el-form>
-      <div class="line-heading"><strong>模板分录</strong><el-button size="small" type="primary" plain @click="addLine">添加分录</el-button></div>
+      <div class="line-heading"><strong>模板分录</strong><div><el-button size="small" :disabled="!form.lines.length" @click="copyLastLine">复制上一行</el-button><el-button size="small" type="primary" plain @click="addLine">添加分录</el-button></div></div>
       <el-table :data="form.lines" border size="small">
         <el-table-column type="index" label="#" width="42" />
         <el-table-column label="会计科目" min-width="250"><template #default="{ row }"><el-select v-model="row.account_id" filterable placeholder="选择科目" style="width:100%"><el-option v-for="account in accounts" :key="account.id" :label="`${account.account_code} ${account.account_name}`" :value="account.id" /></el-select></template></el-table-column>
@@ -125,6 +125,11 @@ const openEdit = (row: MumarenVoucherTemplate) => {
   dialogVisible.value = true;
 };
 const addLine = () => form.lines.push(newLine());
+const copyLastLine = () => {
+  const line = form.lines[form.lines.length - 1];
+  if (!line) return;
+  form.lines.push({ ...line });
+};
 const removeLine = (index: number) => { if (form.lines.length > 2) form.lines.splice(index, 1); };
 const submit = async () => {
   if (isReadonly.value || !bookId.value || !canSave.value) return;

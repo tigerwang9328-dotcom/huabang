@@ -656,6 +656,16 @@ test('录凭证补齐牧马人辅助录入按钮，导出不改变人工审核�
   assert.doesNotMatch(`${create}\n${list}`, /unreviewVoucher|unpostVoucher|reversePostVoucher/)
 })
 
+test('凭证模板与录凭证页保留牧马人安全的复制和刷新辅助操作', () => {
+  const template = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherTemplate.vue')
+  const create = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
+
+  assert.match(template, /复制上一行/)
+  assert.match(template, /const copyLastLine/)
+  assert.match(create, /@click="reloadAll"/)
+  assert.match(create, /const reloadAll = async/)
+})
+
 test('共享账簿切换会重建当前页面，避免旧账簿异步响应覆盖新账簿', () => {
   const layout = read('src', 'layouts', 'MainLayout.vue')
   assert.match(layout, /useMumarenFinanceBookStore/)
