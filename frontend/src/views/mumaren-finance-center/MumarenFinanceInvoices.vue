@@ -21,14 +21,13 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="invoices" empty-text="暂无发票记录" stripe show-summary :summary-method="summary">
-      <el-table-column prop="invoice_code" label="发票代码" width="140" />
       <el-table-column prop="invoice_no" label="号码" width="130" />
-      <el-table-column label="方向" width="90">
+      <el-table-column prop="invoice_type" label="类型" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.direction === 'input' ? 'warning' : 'success'" size="small">{{ row.direction === 'input' ? '进项' : '销项' }}</el-tag>
+          <el-tag :type="row.invoice_type === 'input' ? 'warning' : 'success'" size="small">{{ row.invoice_type === 'input' ? '进项' : '销项' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="counterparty" label="对方" min-width="180" />
+      <el-table-column prop="counterparty_name" label="对方" min-width="180" />
       <el-table-column label="金额" width="130" align="right">
         <template #default="{ row }">{{ money(row.amount) }}</template>
       </el-table-column>
@@ -36,12 +35,12 @@
         <template #default="{ row }">{{ money(row.tax_amount) }}</template>
       </el-table-column>
       <el-table-column label="价税合计" width="140" align="right">
-        <template #default="{ row }">{{ money(row.total_amount) }}</template>
+        <template #default="{ row }">{{ money(Number(row.amount || 0) + Number(row.tax_amount || 0)) }}</template>
       </el-table-column>
       <el-table-column prop="invoice_date" label="日期" width="130" />
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'verified' ? 'success' : 'info'" size="small">{{ row.status === 'verified' ? '已认证' : '草稿' }}</el-tag>
+          <el-tag :type="row.verification_status === 'verified' ? 'success' : 'info'" size="small">{{ row.verification_status === 'verified' ? '已认证' : '草稿' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160">
@@ -58,20 +57,17 @@
 
     <el-dialog v-model="dialogVisible" title="登记发票" width="520px" :close-on-click-modal="false">
       <el-form :model="form" label-width="110px">
-        <el-form-item label="发票代码">
-          <el-input v-model="form.invoice_code" />
-        </el-form-item>
         <el-form-item label="发票号码">
           <el-input v-model="form.invoice_no" />
         </el-form-item>
-        <el-form-item label="方向">
-          <el-radio-group v-model="form.direction">
+        <el-form-item label="发票类型">
+          <el-radio-group v-model="form.invoice_type">
             <el-radio label="input">进项</el-radio>
             <el-radio label="output">销项</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="对方单位">
-          <el-input v-model="form.counterparty" />
+          <el-input v-model="form.counterparty_name" />
         </el-form-item>
         <el-form-item label="金额(不含税)">
           <el-input-number v-model="form.amount" :min="0" :precision="2" :controls="false" style="width:100%" />
@@ -118,10 +114,9 @@ const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const form = reactive({
-  invoice_code: "",
   invoice_no: "",
-  direction: "input" as "input" | "output",
-  counterparty: "",
+  invoice_type: "input",
+  counterparty_name: "",
   amount: 0,
   tax_amount: 0,
   invoice_date: new Date().toISOString().slice(0, 10),
@@ -162,10 +157,9 @@ const openCreate = () => {
     ElMessage.warning("请先选择独立账簿");
     return;
   }
-  form.invoice_code = "";
   form.invoice_no = "";
-  form.direction = "input";
-  form.counterparty = "";
+  form.invoice_type = "input";
+  form.counterparty_name = "";
   form.amount = 0;
   form.tax_amount = 0;
   form.invoice_date = new Date().toISOString().slice(0, 10);
@@ -174,18 +168,17 @@ const openCreate = () => {
 
 const save = async () => {
   if (!bookId.value) return;
-  if (!form.invoice_code || !form.invoice_no) {
-    ElMessage.warning("请填写发票代码与号码");
+  if (!form.invoice_no) {
+    ElMessage.warning("请填写发票号码");
     return;
   }
   saving.value = true;
   try {
     await invoicesApi.create({
       book_id: bookId.value,
-      invoice_code: form.invoice_code,
       invoice_no: form.invoice_no,
-      direction: form.direction,
-      counterparty: form.counterparty,
+      invoice_type: form.invoice_type,
+      counterparty_name: form.counterparty_name || null,
       amount: Number(form.amount || 0),
       tax_amount: Number(form.tax_amount || 0),
       invoice_date: form.invoice_date,
@@ -200,7 +193,7 @@ const save = async () => {
   }
 };
 
-const canVerify = (row: MumarenInvoice) => row.direction === "input" && row.status !== "verified";
+const canVerify = (row: MumarenInvoice) => row.invoice_type === "input" && row.verification_status !== "verified";
 
 const verify = async (row: MumarenInvoice) => {
   if (!bookId.value || !canVerify(row)) return;
@@ -240,7 +233,7 @@ const summary = ({ columns, data }: { columns: any[]; data: MumarenInvoice[] }) 
   const idxTotal = columns.findIndex((c) => c.label === "价税合计");
   if (idxAmount >= 0) sums[idxAmount] = money(data.reduce((s, r) => s + Number(r.amount || 0), 0));
   if (idxTax >= 0) sums[idxTax] = money(data.reduce((s, r) => s + Number(r.tax_amount || 0), 0));
-  if (idxTotal >= 0) sums[idxTotal] = money(data.reduce((s, r) => s + Number(r.total_amount || 0), 0));
+  if (idxTotal >= 0) sums[idxTotal] = money(data.reduce((s, r) => s + Number(r.amount || 0) + Number(r.tax_amount || 0), 0));
   return sums;
 };
 </script>

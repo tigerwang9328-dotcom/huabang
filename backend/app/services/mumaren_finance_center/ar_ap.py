@@ -86,6 +86,8 @@ def build_aging(documents: Iterable[Mapping[str, Any]], *, as_of: date) -> dict:
         order_date = document.get("order_date")
         if not isinstance(order_date, date):
             raise ValueError("单据日期必须为 date")
+        if order_date > as_of:
+            continue
         days = max((as_of - order_date).days, 0)
         bucket = aging_bucket(days)
         name = str(document.get("counterparty_name") or "未命名往来单位")

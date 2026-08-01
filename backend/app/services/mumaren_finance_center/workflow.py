@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import re
 from typing import Mapping, Sequence
 
 from sqlalchemy import select
@@ -12,9 +13,23 @@ from app.models.mumaren_finance_center import (
     FinanceCenterMumarenAccount,
     FinanceCenterMumarenAuditLog,
     FinanceCenterMumarenBook,
+    FinanceCenterMumarenFiscalPeriod,
     FinanceCenterMumarenHistoryVoucher,
     FinanceCenterMumarenVoucher,
     FinanceCenterMumarenVoucherLine,
+)
+
+
+_BOOK_CODE_PATTERN = re.compile(r"^[A-Z0-9_-]{1,64}$")
+_STARTER_ACCOUNTS: tuple[tuple[str, str, str, str], ...] = (
+    ("1001", "库存现金", "asset", "debit"), ("1002", "银行存款", "asset", "debit"),
+    ("1122", "应收账款", "asset", "debit"), ("1405", "库存商品", "asset", "debit"),
+    ("1601", "固定资产", "asset", "debit"), ("2202", "应付账款", "liability", "credit"),
+    ("2211", "应付职工薪酬", "liability", "credit"), ("2221", "应交税费", "liability", "credit"),
+    ("4001", "实收资本", "equity", "credit"), ("4103", "本年利润", "equity", "credit"),
+    ("6001", "主营业务收入", "income", "credit"), ("6401", "主营业务成本", "expense", "debit"),
+    ("6601", "销售费用", "expense", "debit"), ("6602", "管理费用", "expense", "debit"),
+    ("6603", "财务费用", "expense", "debit"),
 )
 
 
@@ -28,6 +43,48 @@ class UnbalancedVoucherError(ValueError):
 
 class HistoricalRecordReadonlyError(ValueError):
     """历史来源数据不得进入当前账工作流或被修改。"""
+
+
+async def create_book(
+    db: AsyncSession, *, book_code: str, book_name: str, company_name: str | None,
+    status: str, operator_id: int,
+) -> FinanceCenterMumarenBook:
+    """创建独立账簿，并初始化标准科目与 2026 会计期间。"""
+    normalized_code = book_code.strip().upper()
+    normalized_name = book_name.strip()
+    normalized_company = company_name.strip() if company_name else None
+    if not _BOOK_CODE_PATTERN.fullmatch(normalized_code):
+        raise ValueError("账簿编码只能包含大写字母、数字、下划线或连字符，长度不超过64位")
+    if not normalized_name:
+        raise ValueError("账簿名称不能为空")
+    if status not in {"active", "inactive"}:
+        raise ValueError("账簿状态只能为 active 或 inactive")
+    existing = (await db.execute(
+        select(FinanceCenterMumarenBook).where(FinanceCenterMumarenBook.book_code == normalized_code)
+    )).scalar_one_or_none()
+    if existing is not None:
+        raise ValueError("账簿编码已存在")
+    book = FinanceCenterMumarenBook(
+        book_code=normalized_code, book_name=normalized_name, company_name=normalized_company,
+        status=status, created_by=operator_id,
+    )
+    db.add(book)
+    await db.flush()
+    for account_code, account_name, account_type, direction in _STARTER_ACCOUNTS:
+        db.add(FinanceCenterMumarenAccount(
+            book_id=book.id, account_code=account_code, account_name=account_name,
+            account_type=account_type, direction=direction, level=1, is_active=True,
+        ))
+    for month in range(1, 13):
+        next_month = date(2026, month + 1, 1) if month < 12 else date(2027, 1, 1)
+        db.add(FinanceCenterMumarenFiscalPeriod(
+            book_id=book.id, period_code=f"2026-{month:02d}", start_date=date(2026, month, 1),
+            end_date=next_month.fromordinal(next_month.toordinal() - 1), status="open",
+        ))
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=book.id, action="create_book", operator_id=operator_id, detail=normalized_code,
+    ))
+    return book
 
 
 def _amount(line: Mapping[str, object], key: str) -> Decimal:

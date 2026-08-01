@@ -21,8 +21,8 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
     <el-table v-loading="loading" :data="records" empty-text="暂无对账记录" stripe show-summary :summary-method="summary">
-      <el-table-column prop="account_name" label="账户" min-width="180" />
-      <el-table-column prop="reconcile_date" label="对账日期" width="130" />
+      <el-table-column prop="cash_account_id" label="账户ID" min-width="120" />
+      <el-table-column prop="period" label="对账期间" width="130" />
       <el-table-column label="账面余额" width="150" align="right">
         <template #default="{ row }">{{ money(row.book_balance) }}</template>
       </el-table-column>
@@ -31,29 +31,21 @@
       </el-table-column>
       <el-table-column label="差异" width="150" align="right">
         <template #default="{ row }">
-          <span :class="{ 'diff-warn': Math.abs(row.difference) > 0.001 }">{{ money(row.difference) }}</span>
+          <span :class="{ 'diff-warn': Math.abs(difference(row)) > 0.001 }">{{ money(difference(row)) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'pending' ? 'warning' : 'success'" size="small">
-            {{ row.status === "pending" ? "待调节" : "已调节" }}
+          <el-tag :type="row.workflow_status === 'draft' ? 'warning' : 'success'" size="small">
+            {{ row.workflow_status === "draft" ? "草稿" : row.workflow_status === "reviewed" ? "已审核" : "已过账" }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="备注" min-width="160" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.remark || "—" }}</template>
+      <el-table-column label="调节后余额" width="150" align="right">
+        <template #default="{ row }">{{ money(row.adjusted_balance) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
-          <el-button
-            v-if="row.status === 'pending'"
-            link
-            type="primary"
-            size="small"
-            :loading="actingId === row.id"
-            @click="reconcile(row)"
-          >调节</el-button>
           <el-popconfirm title="确定删除该对账记录?" @confirm="remove(row)">
             <template #reference>
               <el-button link type="danger" size="small" :loading="actingId === row.id">删除</el-button>
@@ -65,11 +57,11 @@
 
     <el-dialog v-model="dialogVisible" title="新增对账记录" width="480px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px">
-        <el-form-item label="账户名称">
-          <el-input v-model="form.account_name" placeholder="如 招行基本户" />
+        <el-form-item label="出纳账户ID">
+          <el-input-number v-model="form.cash_account_id" :min="1" :controls="false" style="width:100%" />
         </el-form-item>
-        <el-form-item label="对账日期">
-          <el-date-picker v-model="form.reconcile_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        <el-form-item label="对账期间">
+          <el-input v-model="form.period" placeholder="YYYY-MM" />
         </el-form-item>
         <el-form-item label="账面余额">
           <el-input-number v-model="form.book_balance" :precision="2" :controls="false" style="width:100%" />
@@ -77,8 +69,8 @@
         <el-form-item label="银行余额">
           <el-input-number v-model="form.bank_balance" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" />
+        <el-form-item label="调节后余额">
+          <el-input-number v-model="form.adjusted_balance" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -113,12 +105,14 @@ const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const form = reactive({
-  account_name: "",
-  reconcile_date: new Date().toISOString().slice(0, 10),
+  cash_account_id: 0,
+  period: new Date().toISOString().slice(0, 7),
   book_balance: 0,
   bank_balance: 0,
-  remark: "",
+  adjusted_balance: 0,
 });
+
+const difference = (row: MumarenBankReconciliation) => Number(row.bank_balance || 0) - Number(row.book_balance || 0);
 
 const load = async () => {
   if (!bookId.value) return;
@@ -153,29 +147,29 @@ const openDialog = () => {
     ElMessage.warning("请先选择独立账簿");
     return;
   }
-  form.account_name = "";
-  form.reconcile_date = new Date().toISOString().slice(0, 10);
+  form.cash_account_id = 0;
+  form.period = new Date().toISOString().slice(0, 7);
   form.book_balance = 0;
   form.bank_balance = 0;
-  form.remark = "";
+  form.adjusted_balance = 0;
   dialogVisible.value = true;
 };
 
 const save = async () => {
   if (!bookId.value) return;
-  if (!form.account_name) {
-    ElMessage.warning("请填写账户名称");
+  if (!form.cash_account_id || !/^\d{4}-\d{2}$/.test(form.period)) {
+    ElMessage.warning("请填写有效的出纳账户ID和 YYYY-MM 对账期间");
     return;
   }
   saving.value = true;
   try {
     await bankReconciliationsApi.create({
       book_id: bookId.value,
-      account_name: form.account_name,
-      reconcile_date: form.reconcile_date,
+      cash_account_id: form.cash_account_id,
+      period: form.period,
       book_balance: Number(form.book_balance || 0),
       bank_balance: Number(form.bank_balance || 0),
-      remark: form.remark,
+      adjusted_balance: Number(form.adjusted_balance || 0),
     });
     ElMessage.success("对账记录已新增");
     dialogVisible.value = false;
@@ -184,20 +178,6 @@ const save = async () => {
     ElMessage.error(e?.response?.data?.detail || "保存失败");
   } finally {
     saving.value = false;
-  }
-};
-
-const reconcile = async (row: MumarenBankReconciliation) => {
-  if (!bookId.value || row.status !== "pending") return;
-  actingId.value = row.id;
-  try {
-    await bankReconciliationsApi.update(row.id, { status: "reconciled" }, bookId.value);
-    ElMessage.success("已调节");
-    await load();
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || "调节失败");
-  } finally {
-    actingId.value = undefined;
   }
 };
 
@@ -225,7 +205,7 @@ const summary = ({ columns, data }: { columns: any[]; data: MumarenBankReconcili
   const idxDiff = columns.findIndex((c) => c.label === "差异");
   if (idxBook >= 0) sums[idxBook] = money(data.reduce((s, r) => s + Number(r.book_balance || 0), 0));
   if (idxBank >= 0) sums[idxBank] = money(data.reduce((s, r) => s + Number(r.bank_balance || 0), 0));
-  if (idxDiff >= 0) sums[idxDiff] = money(data.reduce((s, r) => s + Number(r.difference || 0), 0));
+  if (idxDiff >= 0) sums[idxDiff] = money(data.reduce((s, r) => s + difference(r), 0));
   return sums;
 };
 </script>

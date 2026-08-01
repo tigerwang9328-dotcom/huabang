@@ -20,6 +20,13 @@ export interface MumarenFinanceBook {
   source_database: string | null;
 }
 
+export interface CreateMumarenFinanceBookPayload {
+  book_code: string;
+  book_name: string;
+  company_name?: string | null;
+  status: "active" | "inactive";
+}
+
 export interface MumarenFinanceAccount {
   id: number;
   account_code: string;
@@ -189,6 +196,7 @@ export const mumarenFinanceCenterApi = {
   getCatalog: () => request.get<ApiResponse<FinanceCenterCatalog>>(requestPath("/catalog")),
   listVouchers: (params?: { book_id?: number }) => request.get<ApiResponse<MumarenFinanceVoucher[]>>(requestPath("/vouchers"), { params }),
   listBooks: () => request.get<ApiResponse<MumarenFinanceBook[]>>(requestPath("/books")),
+  createBook: (payload: CreateMumarenFinanceBookPayload) => request.post<ApiResponse<MumarenFinanceBook>>(requestPath("/books"), payload),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
@@ -201,6 +209,7 @@ export const mumarenFinanceCenterApi = {
 
   // ── 凭证写入:草稿 → 财务审核 → 人工过账(禁止自动过账) ──
   createVoucher: (payload: VoucherCreatePayload) => request.post<ApiResponse<MumarenFinanceVoucher>>(requestPath("/vouchers"), payload),
+  deleteVoucher: (voucherId: number) => request.delete<ApiResponse<null>>(requestPath(`/vouchers/${voucherId}`)),
   reviewVoucher: (voucherId: number) => request.post<ApiResponse<MumarenFinanceVoucher>>(requestPath(`/vouchers/${voucherId}/review`)),
   postVoucher: (voucherId: number) => request.post<ApiResponse<MumarenFinanceVoucher>>(requestPath(`/vouchers/${voucherId}/post`)),
 
@@ -263,33 +272,31 @@ export const fixedAssetsApi = {
 export interface MumarenInvoice {
   id: number;
   book_id: number;
-  invoice_code: string;
   invoice_no: string;
-  direction: "input" | "output";
-  counterparty: string;
+  invoice_type: string;
+  invoice_date: string;
+  counterparty_name: string | null;
   amount: number;
   tax_amount: number;
-  total_amount: number;
-  invoice_date: string;
-  certified: boolean;
-  status: "draft" | "verified";
-  created_at: string;
+  verification_status: string;
+  workflow_status: "draft" | "reviewed" | "posted";
 }
 export interface InvoiceInput {
   book_id: number;
-  invoice_code: string;
   invoice_no: string;
-  direction: "input" | "output";
-  counterparty: string;
+  invoice_type: string;
+  invoice_date: string;
+  counterparty_name?: string | null;
   amount: number;
   tax_amount: number;
-  invoice_date: string;
 }
 export interface InvoiceUpdate {
-  counterparty?: string;
+  book_id: number;
+  invoice_type?: string;
   amount?: number;
   tax_amount?: number;
   invoice_date?: string;
+  counterparty_name?: string | null;
 }
 export const invoicesApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenInvoice[]>>(requestPath("/invoices"), { params }),
@@ -303,21 +310,24 @@ export const invoicesApi = {
 export interface MumarenCashAccount {
   id: number;
   book_id: number;
+  account_code: string;
   account_name: string;
-  account_type: string;
-  opening_balance: number;
-  current_balance: number;
-  created_at: string;
+  account_type: "bank" | "cash";
+  currency: string;
+  is_active: boolean;
 }
 export interface CashAccountInput {
   book_id: number;
+  account_code: string;
   account_name: string;
-  account_type: string;
-  opening_balance: number;
+  account_type: "bank" | "cash";
+  currency?: string;
 }
 export interface CashAccountUpdate {
+  book_id: number;
   account_name?: string;
-  account_type?: string;
+  account_type?: "bank" | "cash";
+  currency?: string;
 }
 export const cashAccountsApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenCashAccount[]>>(requestPath("/cash-accounts"), { params }),
@@ -331,21 +341,21 @@ export interface MumarenCashFlow {
   id: number;
   book_id: number;
   cash_account_id: number;
-  transaction_date: string;
-  direction: "income" | "expense";
+  flow_date: string;
+  direction: "in" | "out";
   amount: number;
-  counterparty: string;
-  remark: string;
-  created_at: string;
+  category: string | null;
+  counterparty_name: string | null;
+  workflow_status: "draft" | "reviewed" | "posted";
 }
 export interface CashFlowInput {
   book_id: number;
   cash_account_id: number;
-  transaction_date: string;
-  direction: "income" | "expense";
+  flow_date: string;
+  direction: "in" | "out";
   amount: number;
-  counterparty: string;
-  remark: string;
+  category?: string | null;
+  counterparty_name?: string | null;
 }
 export const cashFlowsApi = {
   list: (params: { book_id: number; cash_account_id?: number; limit?: number }) => request.get<ApiResponse<MumarenCashFlow[]>>(requestPath("/cash-flows"), { params }),
@@ -356,38 +366,30 @@ export const cashFlowsApi = {
 export interface MumarenPayroll {
   id: number;
   book_id: number;
+  employee_no: string;
   employee_name: string;
-  department: string;
   period: string;
-  base_salary: number;
-  bonus: number;
-  gross_salary: number;
-  social_insurance: number;
-  housing_fund: number;
-  income_tax: number;
-  net_salary: number;
-  status: "draft" | "paid";
-  created_at: string;
+  gross_amount: number;
+  deduction_amount: number;
+  net_amount: number;
+  workflow_status: "draft" | "paid";
+  voucher_id: number | null;
 }
 export interface PayrollInput {
   book_id: number;
+  employee_no: string;
   employee_name: string;
-  department: string;
   period: string;
-  base_salary: number;
-  bonus: number;
-  social_insurance: number;
-  housing_fund: number;
-  income_tax: number;
+  gross_amount: number;
+  deduction_amount: number;
+  net_amount: number;
 }
 export interface PayrollUpdate {
+  book_id: number;
   employee_name?: string;
-  department?: string;
-  base_salary?: number;
-  bonus?: number;
-  social_insurance?: number;
-  housing_fund?: number;
-  income_tax?: number;
+  gross_amount?: number;
+  deduction_amount?: number;
+  net_amount?: number;
 }
 export const payrollsApi = {
   list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenPayroll[]>>(requestPath("/payrolls"), { params }),
@@ -401,13 +403,40 @@ export const payrollsApi = {
 export interface MumarenPeriod {
   id: number;
   book_id: number;
-  period: string;
-  status: "open" | "closing" | "closed";
+  period_code: string;
+  start_date: string;
+  end_date: string;
+  status: "open" | "closed";
+  closed_by: number | null;
   closed_at: string | null;
-  created_at: string;
+  source_system: string | null;
+}
+export interface MumarenPeriodCheck {
+  key: string;
+  title: string;
+  severity: "success" | "warning" | "error";
+  passed: boolean;
+  count: number;
+  message: string;
+}
+export interface MumarenPeriodPrecheck {
+  period: string;
+  can_close: boolean;
+  blocking_count: number;
+  warning_count: number;
+  checks: MumarenPeriodCheck[];
+  message: string;
+}
+export interface MumarenCarryForwardResult {
+  voucher_id: number | null;
+  voucher_no: string | null;
+  status: string;
 }
 export const periodsApi = {
   list: (params: { book_id: number }) => request.get<ApiResponse<MumarenPeriod[]>>(requestPath("/periods"), { params }),
+  initialize: (book_id: number, period: string) => request.post<ApiResponse<MumarenPeriod>>(requestPath("/periods/initialize"), null, { params: { book_id, period } }),
+  precheck: (book_id: number, period: string) => request.post<ApiResponse<MumarenPeriodPrecheck>>(requestPath("/periods/pre-check"), null, { params: { book_id, period } }),
+  carryForward: (book_id: number, period: string) => request.post<ApiResponse<MumarenCarryForwardResult>>(requestPath("/periods/carry-forward"), null, { params: { book_id, period } }),
   close: (id: number, book_id: number) => request.post<ApiResponse<MumarenPeriod>>(requestPath(`/periods/${id}/close`), null, { params: { book_id } }),
   reopen: (id: number, book_id: number) => request.post<ApiResponse<MumarenPeriod>>(requestPath(`/periods/${id}/reopen`), null, { params: { book_id } }),
 };
@@ -575,28 +604,33 @@ export const salesMonthlyReportsApi = {
 export interface MumarenBankReconciliation {
   id: number;
   book_id: number;
-  account_name: string;
-  reconcile_date: string;
-  book_balance: number;
+  cash_account_id: number;
+  period: string;
   bank_balance: number;
-  difference: number;
-  status: "pending" | "reconciled";
-  remark: string;
+  book_balance: number;
+  adjusted_balance: number;
+  items_json: Record<string, unknown> | null;
+  workflow_status: "draft" | "reviewed" | "posted";
+  created_by: number;
   created_at: string;
 }
 export interface BankReconciliationInput {
   book_id: number;
-  account_name: string;
-  reconcile_date: string;
-  book_balance: number;
+  cash_account_id: number;
+  period: string;
   bank_balance: number;
-  remark: string;
+  book_balance: number;
+  adjusted_balance: number;
+  items_json?: Record<string, unknown> | null;
 }
 export interface BankReconciliationUpdate {
+  book_id: number;
+  cash_account_id?: number;
+  period?: string;
   book_balance?: number;
   bank_balance?: number;
-  status?: "pending" | "reconciled";
-  remark?: string;
+  adjusted_balance?: number;
+  items_json?: Record<string, unknown> | null;
 }
 export const bankReconciliationsApi = {
   list: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenBankReconciliation[]>>(requestPath("/bank-reconciliations"), { params }),

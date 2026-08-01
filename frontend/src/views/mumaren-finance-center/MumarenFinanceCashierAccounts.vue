@@ -23,14 +23,12 @@
 
     <h3 class="block-title">资金账户</h3>
     <el-table v-loading="loading" :data="accounts" empty-text="暂无账户" stripe show-summary :summary-method="accountSummary">
+      <el-table-column prop="account_code" label="账户编码" width="140" />
       <el-table-column prop="account_name" label="账户名称" min-width="180" />
-      <el-table-column prop="account_type" label="类型" width="120" />
-      <el-table-column label="期初余额" width="150" align="right">
-        <template #default="{ row }">{{ money(row.opening_balance) }}</template>
+      <el-table-column label="类型" width="120">
+        <template #default="{ row }">{{ row.account_type === "bank" ? "银行" : "现金" }}</template>
       </el-table-column>
-      <el-table-column label="当前余额" width="150" align="right">
-        <template #default="{ row }">{{ money(row.current_balance) }}</template>
-      </el-table-column>
+      <el-table-column prop="currency" label="币种" width="90" />
       <el-table-column label="操作" width="120">
         <template #default="{ row }">
           <el-popconfirm title="确定删除该账户?关联流水将一并删除" @confirm="removeAccount(row)">
@@ -44,37 +42,35 @@
 
     <h3 class="block-title">日记账流水</h3>
     <el-table v-loading="loading" :data="transactions" empty-text="暂无流水" stripe show-summary :summary-method="txnSummary">
-      <el-table-column prop="transaction_date" label="日期" width="130" />
+      <el-table-column prop="flow_date" label="日期" width="130" />
       <el-table-column label="账户" min-width="160">
-        <template #default="{ row }">{{ accountName(row.account_id) }}</template>
+        <template #default="{ row }">{{ accountName(row.cash_account_id) }}</template>
       </el-table-column>
       <el-table-column label="方向" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.direction === 'income' ? 'success' : 'warning'" size="small">{{ row.direction === 'income' ? '收入' : '支出' }}</el-tag>
+          <el-tag :type="row.direction === 'in' ? 'success' : 'warning'" size="small">{{ row.direction === 'in' ? '收入' : '支出' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="金额" width="140" align="right">
         <template #default="{ row }">{{ money(row.amount) }}</template>
       </el-table-column>
-      <el-table-column prop="counterparty" label="对方" min-width="160" />
-      <el-table-column prop="remark" label="备注" min-width="160" />
+      <el-table-column prop="counterparty_name" label="对方" min-width="160" />
+      <el-table-column prop="category" label="分类" min-width="160" />
     </el-table>
 
     <el-dialog v-model="accountDialogVisible" title="新增账户" width="460px" :close-on-click-modal="false">
       <el-form :model="accountForm" label-width="100px">
+        <el-form-item label="账户编码">
+          <el-input v-model="accountForm.account_code" placeholder="如 BANK-001" />
+        </el-form-item>
         <el-form-item label="账户名称">
           <el-input v-model="accountForm.account_name" />
         </el-form-item>
         <el-form-item label="类型">
           <el-select v-model="accountForm.account_type" style="width:100%">
-            <el-option label="银行" value="银行" />
-            <el-option label="支付宝" value="支付宝" />
-            <el-option label="微信" value="微信" />
-            <el-option label="现金" value="现金" />
+            <el-option label="银行" value="bank" />
+            <el-option label="现金" value="cash" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="期初余额">
-          <el-input-number v-model="accountForm.opening_balance" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -91,22 +87,22 @@
           </el-select>
         </el-form-item>
         <el-form-item label="日期">
-          <el-date-picker v-model="txnForm.transaction_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+          <el-date-picker v-model="txnForm.flow_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
         </el-form-item>
         <el-form-item label="方向">
           <el-radio-group v-model="txnForm.direction">
-            <el-radio label="income">收入</el-radio>
-            <el-radio label="expense">支出</el-radio>
+            <el-radio label="in">收入</el-radio>
+            <el-radio label="out">支出</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="金额">
           <el-input-number v-model="txnForm.amount" :min="0" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
         <el-form-item label="对方">
-          <el-input v-model="txnForm.counterparty" />
+          <el-input v-model="txnForm.counterparty_name" />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="txnForm.remark" />
+        <el-form-item label="分类">
+          <el-input v-model="txnForm.category" placeholder="如销售回款、采购付款" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -146,18 +142,18 @@ const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const accountForm = reactive({
+  account_code: "",
   account_name: "",
-  account_type: "银行",
-  opening_balance: 0,
+  account_type: "bank" as "bank" | "cash",
 });
 
 const txnForm = reactive({
   account_id: undefined as number | undefined,
-  transaction_date: new Date().toISOString().slice(0, 10),
-  direction: "income" as "income" | "expense",
+  flow_date: new Date().toISOString().slice(0, 10),
+  direction: "in" as "in" | "out",
   amount: 0,
-  counterparty: "",
-  remark: "",
+  counterparty_name: "",
+  category: "",
 });
 
 const accountName = (id: number) => {
@@ -204,25 +200,26 @@ const openAccountDialog = () => {
     ElMessage.warning("请先选择独立账簿");
     return;
   }
+  accountForm.account_code = "";
   accountForm.account_name = "";
-  accountForm.account_type = "银行";
-  accountForm.opening_balance = 0;
+  accountForm.account_type = "bank";
   accountDialogVisible.value = true;
 };
 
 const saveAccount = async () => {
   if (!bookId.value) return;
-  if (!accountForm.account_name) {
-    ElMessage.warning("请填写账户名称");
+  if (!accountForm.account_code || !accountForm.account_name) {
+    ElMessage.warning("请填写账户编码和账户名称");
     return;
   }
   savingAccount.value = true;
   try {
     await cashAccountsApi.create({
       book_id: bookId.value,
+      account_code: accountForm.account_code,
       account_name: accountForm.account_name,
       account_type: accountForm.account_type,
-      opening_balance: Number(accountForm.opening_balance || 0),
+      currency: "CNY",
     });
     ElMessage.success("账户已新增");
     accountDialogVisible.value = false;
@@ -244,11 +241,11 @@ const openTxnDialog = () => {
     return;
   }
   txnForm.account_id = accounts.value[0].id;
-  txnForm.transaction_date = new Date().toISOString().slice(0, 10);
-  txnForm.direction = "income";
+  txnForm.flow_date = new Date().toISOString().slice(0, 10);
+  txnForm.direction = "in";
   txnForm.amount = 0;
-  txnForm.counterparty = "";
-  txnForm.remark = "";
+  txnForm.counterparty_name = "";
+  txnForm.category = "";
   txnDialogVisible.value = true;
 };
 
@@ -268,11 +265,11 @@ const saveTxn = async () => {
     await cashFlowsApi.create({
       book_id: bookId.value,
       cash_account_id: txnForm.account_id,
-      transaction_date: txnForm.transaction_date,
+      flow_date: txnForm.flow_date,
       direction: txnForm.direction,
       amount,
-      counterparty: txnForm.counterparty,
-      remark: txnForm.remark,
+      counterparty_name: txnForm.counterparty_name || null,
+      category: txnForm.category || null,
     });
     ElMessage.success("流水已录入");
     txnDialogVisible.value = false;
@@ -303,10 +300,6 @@ const accountSummary = ({ columns, data }: { columns: any[]; data: MumarenCashAc
   columns.forEach((_, i) => {
     sums[i] = i === 0 ? "合计" : "";
   });
-  const idxOpening = columns.findIndex((c) => c.label === "期初余额");
-  const idxCurrent = columns.findIndex((c) => c.label === "当前余额");
-  if (idxOpening >= 0) sums[idxOpening] = money(data.reduce((s, a) => s + Number(a.opening_balance || 0), 0));
-  if (idxCurrent >= 0) sums[idxCurrent] = money(data.reduce((s, a) => s + Number(a.current_balance || 0), 0));
   return sums;
 };
 

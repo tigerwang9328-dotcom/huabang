@@ -18,11 +18,26 @@
       <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
+      <el-input v-model="keyword" clearable placeholder="搜索凭证号或摘要" />
+      <el-select v-model="statusFilter" clearable placeholder="全部状态">
+        <el-option label="草稿" value="draft" />
+        <el-option label="已审核" value="reviewed" />
+        <el-option label="已过账" value="posted" />
+      </el-select>
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        value-format="YYYY-MM-DD"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        range-separator="至"
+      />
+      <el-button :disabled="!keyword && !statusFilter && !dateRange" @click="clearFilters">清空条件</el-button>
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
-    <el-table v-else :data="vouchers" empty-text="暂无独立当前账凭证" stripe>
+    <el-table v-else :data="filteredVouchers" empty-text="暂无符合条件的凭证" stripe>
       <el-table-column prop="voucher_no" label="凭证号" min-width="130" />
       <el-table-column prop="voucher_date" label="日期" width="120" />
       <el-table-column prop="summary" label="摘要" min-width="180" show-overflow-tooltip />
@@ -37,9 +52,14 @@
       <el-table-column label="贷方" width="140" align="right">
         <template #default="scope">{{ money(scope.row.total_credit) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="160">
+      <el-table-column label="操作" width="200">
         <template #default="scope">
           <el-button v-if="scope.row.status === 'draft'" size="small" link type="primary" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+          <el-popconfirm v-if="scope.row.status === 'draft'" title="确定删除该草稿凭证?此操作不可恢复" @confirm="remove(scope.row)">
+            <template #reference>
+              <el-button size="small" link type="danger" :loading="actingId === scope.row.id">删除</el-button>
+            </template>
+          </el-popconfirm>
           <el-button v-if="scope.row.status === 'reviewed'" size="small" link type="success" :loading="actingId === scope.row.id" @click="post(scope.row)">人工过账</el-button>
           <span v-if="scope.row.status === 'posted'" class="done-text">已过账</span>
         </template>
@@ -50,7 +70,7 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
@@ -61,6 +81,9 @@ import {
 const books = ref<MumarenFinanceBook[]>([]);
 const { bookId, initializeBook } = useMumarenFinanceBook();
 const vouchers = ref<MumarenFinanceVoucher[]>([]);
+const keyword = ref("");
+const statusFilter = ref<"" | MumarenFinanceVoucher["status"]>("");
+const dateRange = ref<[string, string] | null>(null);
 const error = ref("");
 const loading = ref(false);
 const actingId = ref<number>(); // 当前正在审核/过账的凭证 id
@@ -70,6 +93,25 @@ const money = (value: number) =>
 
 const statusLabel = (s: string) => ({ draft: "草稿", reviewed: "已审核", posted: "已过账" }[s] || s);
 const statusTagType = (s: string): "" | "warning" | "success" => (s === "draft" ? "" : s === "reviewed" ? "warning" : "success");
+
+const filteredVouchers = computed(() => {
+  const term = keyword.value.trim().toLowerCase();
+  const [startDate, endDate] = dateRange.value || [];
+  return vouchers.value.filter((voucher) => {
+    const matchedKeyword = !term || [voucher.voucher_no, voucher.summary]
+      .some((value) => String(value || "").toLowerCase().includes(term));
+    const matchedStatus = !statusFilter.value || voucher.status === statusFilter.value;
+    const matchedStart = !startDate || voucher.voucher_date >= startDate;
+    const matchedEnd = !endDate || voucher.voucher_date <= endDate;
+    return matchedKeyword && matchedStatus && matchedStart && matchedEnd;
+  });
+});
+
+const clearFilters = () => {
+  keyword.value = "";
+  statusFilter.value = "";
+  dateRange.value = null;
+};
 
 const load = async () => {
   loading.value = true;
@@ -106,6 +148,19 @@ const review = async (row: MumarenFinanceVoucher) => {
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "审核失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+const remove = async (row: MumarenFinanceVoucher) => {
+  actingId.value = row.id;
+  try {
+    await mumarenFinanceCenterApi.deleteVoucher(row.id);
+    ElMessage.success("草稿凭证已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
   } finally {
     actingId.value = undefined;
   }

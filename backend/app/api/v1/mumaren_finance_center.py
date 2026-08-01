@@ -9,12 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission, require_roles
 from app.core.database import get_db
-from app.models.mumaren_finance_center import FinanceCenterMumarenVoucher
+from app.models.mumaren_finance_center import FinanceCenterMumarenAuditLog, FinanceCenterMumarenVoucher
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.mumaren_finance_center.workflow import (
     InvalidVoucherTransition,
     UnbalancedVoucherError,
+    create_book as create_mumaren_book,
     create_voucher as create_mumaren_voucher,
     list_accounts,
     list_books,
@@ -68,6 +69,13 @@ class VoucherCreateInput(BaseModel):
     lines: list[VoucherLineInput] = Field(min_length=1)
 
 
+class BookCreateInput(BaseModel):
+    book_code: str = Field(min_length=1, max_length=64)
+    book_name: str = Field(min_length=1, max_length=128)
+    company_name: str | None = Field(default=None, max_length=255)
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+
+
 def _actor_id(user: SysUser) -> int:
     return int(user.id)
 
@@ -113,6 +121,25 @@ async def get_books(
         "source_system": book.source_system,
         "source_database": book.source_database,
     } for book in books])
+
+
+@router.post("/books", response_model=ApiResponse)
+async def create_book_endpoint(
+    body: BookCreateInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        book = await create_mumaren_book(
+            db, book_code=body.book_code, book_name=body.book_name,
+            company_name=body.company_name, status=body.status, operator_id=_actor_id(current_user),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ApiResponse.ok(data={
+        "id": book.id, "book_code": book.book_code, "book_name": book.book_name,
+        "company_name": book.company_name, "status": book.status,
+    }, message="账簿已创建并完成基础数据初始化")
 
 
 @router.get("/books/{book_id}/accounts", response_model=ApiResponse)
@@ -176,6 +203,32 @@ async def review_voucher(
     except InvalidVoucherTransition as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return ApiResponse.ok(data=_voucher_data(voucher), message="凭证已审核")
+
+
+@router.delete("/vouchers/{voucher_id}", response_model=ApiResponse)
+async def delete_draft_voucher(
+    voucher_id: int,
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    voucher = await db.get(FinanceCenterMumarenVoucher, voucher_id)
+    if voucher is None:
+        raise HTTPException(status_code=404, detail="凭证不存在")
+    if voucher.is_readonly:
+        raise HTTPException(status_code=409, detail="历史只读凭证禁止删除")
+    if voucher.status != "draft":
+        raise HTTPException(status_code=409, detail="仅草稿凭证可删除")
+
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=voucher.book_id,
+        voucher_id=voucher.id,
+        action="delete_voucher",
+        operator_id=_actor_id(current_user),
+        detail=voucher.voucher_no,
+    ))
+    await db.delete(voucher)
+    await db.flush()
+    return ApiResponse.ok(data=None, message="草稿凭证已删除")
 
 
 @router.post("/vouchers/{voucher_id}/post", response_model=ApiResponse)

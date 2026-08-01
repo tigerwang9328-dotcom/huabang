@@ -223,6 +223,5 @@ export const mirroredFinanceCenterNavigation: FinanceNavigationItem = {
 export const financeProfitNavigation: FinanceNavigationItem[] = [
   ...financeLegacyModules,
   financeHistoryModules,
-  mirroredFinanceCenterNavigation,
   { label: "现金安全", icon: Box, disabled: true, badge: "规划中", permission: "finance:cash:view" },
 ];

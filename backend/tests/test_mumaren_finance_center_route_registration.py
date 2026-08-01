@@ -53,6 +53,17 @@ def test_api_root_registers_ar_ap_and_tax_write_endpoints():
     assert "/api/v1/finance-center/mumaren/tax/records/{record_id}/pay" in paths
 
 
+def test_draft_voucher_delete_route_is_registered_and_protects_reviewed_history():
+    from app.api.v1 import mumaren_finance_center
+
+    paths = {route.path for route in mumaren_finance_center.router.routes}
+    assert "/finance-center/mumaren/vouchers/{voucher_id}" in paths
+    source = open(mumaren_finance_center.__file__, encoding="utf-8").read()
+    assert '@router.delete("/vouchers/{voucher_id}"' in source
+    assert 'voucher.status != "draft"' in source
+    assert 'voucher.is_readonly' in source
+
+
 def test_domain_read_routes_apply_a_bounded_response_limit():
     from app.api.v1 import mumaren_finance_center_domains
 

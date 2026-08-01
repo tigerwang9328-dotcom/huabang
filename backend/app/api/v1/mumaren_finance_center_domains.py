@@ -29,6 +29,7 @@ from app.models.mumaren_finance_center import (
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenCashAccount,
     FinanceCenterMumarenCashFlow,
+    FinanceCenterMumarenArApSettlement,
     FinanceCenterMumarenFixedAsset,
     FinanceCenterMumarenInvoice,
     FinanceCenterMumarenPayableOrder,
@@ -142,16 +143,30 @@ async def get_ar_ap_aging(
 ):
     """Return ageing derived only from current, isolated AR/AP orders."""
     model = FinanceCenterMumarenReceivableOrder if order_type == "receivable" else FinanceCenterMumarenPayableOrder
+    cutoff = as_of or date.today()
     rows = list((await db.execute(
-        select(model).where(model.book_id == book_id).order_by(model.order_date, model.id).limit(limit)
+        select(model).where(model.book_id == book_id, model.order_date <= cutoff).order_by(model.order_date, model.id).limit(limit)
     )).scalars())
+    settled_as_of = {}
+    if rows:
+        settlement_rows = (await db.execute(
+            select(FinanceCenterMumarenArApSettlement.order_id, func.coalesce(func.sum(FinanceCenterMumarenArApSettlement.amount), 0))
+            .where(
+                FinanceCenterMumarenArApSettlement.book_id == book_id,
+                FinanceCenterMumarenArApSettlement.settlement_type == order_type,
+                FinanceCenterMumarenArApSettlement.settlement_date <= cutoff,
+                FinanceCenterMumarenArApSettlement.order_id.in_([row.id for row in rows]),
+            )
+            .group_by(FinanceCenterMumarenArApSettlement.order_id)
+        )).all()
+        settled_as_of = {order_id: amount for order_id, amount in settlement_rows}
     result = build_aging(({
         "counterparty_name": row.counterparty_name,
         "order_no": row.order_no,
         "order_date": row.order_date,
         "total_amount": row.total_amount,
-        "settled_amount": row.settled_amount,
-    } for row in rows), as_of=as_of or date.today())
+        "settled_amount": settled_as_of.get(row.id, 0),
+    } for row in rows), as_of=cutoff)
     return ApiResponse.ok(data={"order_type": order_type, **result})
 
 
@@ -1309,23 +1324,62 @@ _AR_AP_MODELS = {
 }
 
 
+def _ar_ap_filter_conditions(model, *, book_id: int, period: str | None, status: str | None):
+    conditions = [model.book_id == book_id]
+    if period:
+        conditions.append(model.period == period)
+    if status == "draft":
+        conditions.append(model.workflow_status == "draft")
+    elif status == "open":
+        conditions.extend((model.workflow_status.in_(("reviewed", "posted")), model.settlement_status == "open"))
+    elif status:
+        conditions.append(model.settlement_status == status)
+    return conditions
+
+
 @router.get("/ar-ap/orders", response_model=ApiResponse)
 async def list_ar_ap_orders(
     book_id: int = Query(ge=1),
     order_type: str = Query(default="receivable", pattern=r"^(receivable|payable)$"),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    status: str | None = Query(default=None, pattern=r"^(draft|open|partial|settled)$"),
     limit: int = Query(default=100, ge=1, le=500),
     _: SysUser = Depends(require_mumaren_finance_access),
     db: AsyncSession = Depends(get_db),
 ):
     """列出租收应付单据,支持 book_id 与 order_type 过滤,默认 limit 100,最大 500。"""
     model = _AR_AP_MODELS[order_type]
-    rows = list((await db.execute(
-        select(model)
-        .where(model.book_id == book_id)
-        .order_by(model.order_date.desc(), model.id.desc())
-        .limit(limit)
-    )).scalars())
+    conditions = _ar_ap_filter_conditions(model, book_id=book_id, period=period, status=status)
+    rows = list((await db.execute(select(model).where(*conditions).order_by(model.order_date.desc(), model.id.desc()).limit(limit))).scalars())
     return ApiResponse.ok(data=[_order_data(row) for row in rows])
+
+
+@router.get("/ar-ap/orders/summary", response_model=ApiResponse)
+async def summarize_ar_ap_orders(
+    book_id: int = Query(ge=1),
+    order_type: str = Query(default="receivable", pattern=r"^(receivable|payable)$"),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    status: str | None = Query(default=None, pattern=r"^(draft|open|partial|settled)$"),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """汇总整个账簿的 AR/AP，不受列表明细上限影响。"""
+    model = _AR_AP_MODELS[order_type]
+    conditions = _ar_ap_filter_conditions(model, book_id=book_id, period=period, status=status)
+    row = (await db.execute(select(
+        func.count(model.id),
+        func.coalesce(func.sum(model.total_amount), 0),
+        func.coalesce(func.sum(model.settled_amount), 0),
+        func.count(model.id).filter(model.total_amount > model.settled_amount),
+    ).where(*conditions))).one()
+    total_amount, settled_amount = Decimal(row[1]), Decimal(row[2])
+    return ApiResponse.ok(data={
+        "total_count": int(row[0]),
+        "total_amount": total_amount,
+        "settled_amount": settled_amount,
+        "outstanding_amount": total_amount - settled_amount,
+        "open_count": int(row[3]),
+    })
 
 
 @router.put("/ar-ap/orders/{order_id}", response_model=ApiResponse)

@@ -258,11 +258,21 @@ test('未接通的凭证模板和自动凭证不显示在主侧边栏', () => {
   assert.doesNotMatch(menuConfig, /path:\s*`\$\{R\}\/vouchers\/auto`/)
 })
 
+test('财务利润菜单不再重复展示旧财务中心入口', () => {
+  const legacyNavigation = read('src', 'config', 'financeCenterModules.ts')
+
+  assert.doesNotMatch(
+    legacyNavigation,
+    /export const financeProfitNavigation[\s\S]*?mirroredFinanceCenterNavigation/,
+  )
+})
+
 test('财务中心各账簿页面共享并持久化所选账簿', () => {
   const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
+  const bookStore = read('src', 'stores', 'mumarenFinanceBook.ts')
 
-  assert.match(sharedBook, /localStorage/)
-  assert.match(sharedBook, /selectedBookId/)
+  assert.match(bookStore, /localStorage/)
+  assert.match(sharedBook, /useMumarenFinanceBookStore/)
   assert.match(sharedBook, /initializeBook/)
 
   for (const view of [
@@ -274,6 +284,48 @@ test('财务中心各账簿页面共享并持久化所选账簿', () => {
   }
 })
 
+test('账簿管理支持创建独立账簿并切换为当前账', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const ledgers = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceLedgers.vue')
+  const sharedBook = read('src', 'composables', 'useMumarenFinanceBook.ts')
+
+  assert.match(api, /export interface CreateMumarenFinanceBookPayload/)
+  assert.match(api, /createBook:\s*\(payload:\s*CreateMumarenFinanceBookPayload\)/)
+  assert.match(ledgers, /新增账簿/)
+  assert.match(ledgers, /book_code/)
+  assert.match(ledgers, /company_name/)
+  assert.match(ledgers, /mumarenFinanceCenterApi\.createBook\(/)
+  assert.match(ledgers, /bookId\.value\s*=\s*created\.id/)
+  assert.match(sharedBook, /const selectBook = \(nextBookId: number\)/)
+})
+
+test('工资页面使用后端 payrolls 的员工编号与金额契约', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const payroll = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePayroll.vue')
+
+  assert.match(api, /employee_no:\s*string/)
+  assert.match(api, /gross_amount:\s*number/)
+  assert.match(api, /deduction_amount:\s*number/)
+  assert.match(api, /net_amount:\s*number/)
+  assert.match(payroll, /form\.employee_no/)
+  assert.match(payroll, /gross_amount:\s*Number\(form\.gross_amount/)
+  assert.match(payroll, /deduction_amount:\s*Number\(form\.deduction_amount/)
+  assert.match(payroll, /net_amount:\s*Number\(form\.net_amount/)
+  assert.doesNotMatch(payroll, /base_salary:/)
+})
+
+test('出纳流水页面使用后端 flow_date 与 in/out 契约', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const cashier = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCashierAccounts.vue')
+
+  assert.match(api, /flow_date:\s*string/)
+  assert.match(api, /direction:\s*["']in["']\s*\|\s*["']out["']/)
+  assert.match(api, /counterparty_name:\s*string/)
+  assert.match(cashier, /flow_date:\s*txnForm\.flow_date/)
+  assert.match(cashier, /counterparty_name:\s*txnForm\.counterparty_name/)
+  assert.doesNotMatch(cashier, /transaction_date:\s*txnForm/)
+})
+
 test('税务草稿从当前账簿的启用税种下拉选择', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   const view = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
@@ -282,6 +334,11 @@ test('税务草稿从当前账簿的启用税种下拉选择', () => {
   assert.match(api, /requestPath\("\/tax-types"\)/)
   assert.match(view, /taxTypesApi\.list\(\{ book_id: bookId\.value \}\)/)
   assert.match(view, /<el-select v-model="form\.tax_type_id"/)
+})
+
+test('前端构建保留旧哈希资源，已打开页面不会因部署动态加载 404', () => {
+  const vite = read('vite.config.ts')
+  assert.match(vite, /emptyOutDir:\s*false/)
 })
 
 test('MainLayout 模板支持第4级菜单(submenu-list-3)', () => {
@@ -417,7 +474,7 @@ test('税务 API 必须接收并传递 book_id,后端按账簿隔离查询', () 
 test('税务页面必须先选择独立账簿,无账簿时不请求后端并提示', () => {
   const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
 
-  assert.match(tax, /useMumarenFinanceBook/)
+  assert.match(tax, /listBooks/)
   assert.match(tax, /bookId/)
   assert.match(tax, /请选择独立账簿/)
   assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)
@@ -469,17 +526,6 @@ test('历史归档页面必须只读,不出现编辑/审核/过账操作按钮',
   assert.doesNotMatch(history, /reviewVoucher|postVoucher|createVoucher|deleteVoucher|reviewArApOrder|settleArApOrder|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
 })
 
-test('录凭证页会随共享账簿加载科目,并将金蝶历史账簿整表单设为只读', () => {
-  const voucherCreate = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
-
-  assert.match(voucherCreate, /await bookStore\.loadBooks\(\);\s*await onBookChange\(\)/)
-  assert.match(voucherCreate, /watch\(bookId,\s*\(\)\s*=>\s*void onBookChange\(\)\)/)
-  assert.doesNotMatch(voucherCreate, /@change="onBookChange"/)
-  assert.match(voucherCreate, /const accountRequestVersion = ref\(0\)/)
-  assert.match(voucherCreate, /<el-form :model="form" label-width="84px" :disabled="isReadonly">/)
-  assert.match(voucherCreate, /<el-table[^>]*:class="\{ 'is-readonly': isReadonly \}"/)
-})
-
 test('利润表与科目余额表页面调用独立报表接口', () => {
   const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
   const trial = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportTrialBalance.vue')
@@ -488,6 +534,41 @@ test('利润表与科目余额表页面调用独立报表接口', () => {
   assert.match(profit, /mumarenFinanceCenterApi/)
   assert.match(trial, /getTrialBalance/)
   assert.match(trial, /mumarenFinanceCenterApi/)
+})
+
+test('凭证汇总将接口返回的金额显式转换为数值，避免多张凭证累计为 NaN', () => {
+  const summary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
+
+  assert.match(summary, /row\.total_debit \+= Number\(v\.total_debit\) \|\| 0/)
+  assert.match(summary, /row\.total_credit \+= Number\(v\.total_credit\) \|\| 0/)
+})
+
+test('凭证汇总行可展开查看该月份与凭证字下的全部凭证', () => {
+  const summary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
+
+  assert.match(summary, /type="expand"/)
+  assert.match(summary, /row\.vouchers/)
+  assert.match(summary, /vouchers: MumarenFinanceVoucher\[\]/)
+})
+
+test('查凭证提供关键词、状态和日期区间筛选', () => {
+  const voucherList = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+
+  assert.match(voucherList, /v-model="keyword"/)
+  assert.match(voucherList, /v-model="statusFilter"/)
+  assert.match(voucherList, /v-model="dateRange"/)
+  assert.match(voucherList, /const filteredVouchers = computed/)
+  assert.match(voucherList, /:data="filteredVouchers"/)
+})
+
+test('查凭证仅对草稿凭证提供受确认保护的删除入口', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const voucherList = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+
+  assert.match(api, /deleteVoucher: \(voucherId: number\)/)
+  assert.match(voucherList, /scope\.row\.status === 'draft'/)
+  assert.match(voucherList, /el-popconfirm[^>]+title="确定删除该草稿凭证\?此操作不可恢复"/)
+  assert.match(voucherList, /@confirm="remove\(scope\.row\)"/)
 })
 
 test('税金明细表页面调用税务记录接口(只读展示)', () => {

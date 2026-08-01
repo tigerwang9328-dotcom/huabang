@@ -13,5 +13,9 @@ export const useMumarenFinanceBook = () => {
     }
   };
 
-  return { bookId, isReadonly, initializeBook };
+  const selectBook = (nextBookId: number) => {
+    bookId.value = nextBookId;
+  };
+
+  return { bookId, isReadonly, initializeBook, selectBook };
 };
