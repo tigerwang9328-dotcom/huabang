@@ -13,6 +13,7 @@ from app.api.v1.mumaren_finance_center_crud import (
     update_auto_voucher_rule,
 )
 from app.models.mumaren_finance_center_domains import FinanceCenterMumarenAutoVoucherRule
+from app.models.mumaren_finance_center import FinanceCenterMumarenAccount
 
 
 def _rule(*, rid=1, book_id=1, name="销售收款规则", is_active=True):
@@ -26,7 +27,8 @@ def _rule(*, rid=1, book_id=1, name="销售收款规则", is_active=True):
 
 @pytest.mark.asyncio
 async def test_create_auto_voucher_rule_persists_and_writes_audit_log():
-    db = _MockDb()
+    account = FinanceCenterMumarenAccount(id=10, book_id=1, account_code="1001", account_name="库存现金", account_type="asset")
+    db = _MockDb(get_map={FinanceCenterMumarenAccount: {10: account}})
     user = _FakeUser(user_id=7)
     res = await create_auto_voucher_rule(
         body=AutoVoucherRuleInput(
@@ -41,6 +43,18 @@ async def test_create_auto_voucher_rule_persists_and_writes_audit_log():
     assert len(logs) == 1
     assert logs[0].book_id == 1
     assert logs[0].operator_id == 7
+
+
+@pytest.mark.asyncio
+async def test_create_auto_voucher_rule_rejects_an_account_from_another_book():
+    foreign_account = FinanceCenterMumarenAccount(id=10, book_id=2, account_code="1001", account_name="库存现金", account_type="asset")
+    db = _MockDb(get_map={FinanceCenterMumarenAccount: {10: foreign_account}})
+    with pytest.raises(HTTPException) as exc:
+        await create_auto_voucher_rule(
+            body=AutoVoucherRuleInput(book_id=1, rule_name="跨账簿", trigger_event="sale", account_id=10),
+            current_user=_FakeUser(), db=db,
+        )
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio

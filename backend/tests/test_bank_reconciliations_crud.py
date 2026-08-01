@@ -18,6 +18,7 @@ from app.api.v1.mumaren_finance_center_crud import (
     update_bank_reconciliation,
 )
 from app.models.mumaren_finance_center_domains import FinanceCenterMumarenBankReconciliation
+from app.models.mumaren_finance_center import FinanceCenterMumarenAccount
 
 
 def _rec(*, rid=1, book_id=1, status="draft"):
@@ -31,7 +32,8 @@ def _rec(*, rid=1, book_id=1, status="draft"):
 
 @pytest.mark.asyncio
 async def test_create_bank_reconciliation_persists_draft_and_writes_audit_log():
-    db = _MockDb()
+    account = FinanceCenterMumarenAccount(id=10, book_id=1, account_code="1002", account_name="银行存款", account_type="asset")
+    db = _MockDb(get_map={FinanceCenterMumarenAccount: {10: account}})
     res = await create_bank_reconciliation(
         body=BankReconciliationInput(
             book_id=1, cash_account_id=10, period="2026-07",
@@ -44,6 +46,18 @@ async def test_create_bank_reconciliation_persists_draft_and_writes_audit_log():
     logs = db.audit_logs("create_bank_reconciliation")
     assert len(logs) == 1
     assert logs[0].operator_id == 5
+
+
+@pytest.mark.asyncio
+async def test_create_bank_reconciliation_rejects_cash_account_from_another_book():
+    foreign_account = FinanceCenterMumarenAccount(id=10, book_id=2, account_code="1002", account_name="银行存款", account_type="asset")
+    db = _MockDb(get_map={FinanceCenterMumarenAccount: {10: foreign_account}})
+    with pytest.raises(HTTPException) as exc:
+        await create_bank_reconciliation(
+            body=BankReconciliationInput(book_id=1, cash_account_id=10, period="2026-07", bank_balance=Decimal("1"), book_balance=Decimal("1"), adjusted_balance=Decimal("1")),
+            current_user=_FakeUser(), db=db,
+        )
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio

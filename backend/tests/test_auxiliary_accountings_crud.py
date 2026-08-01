@@ -43,6 +43,18 @@ async def test_create_auxiliary_accounting_persists_and_writes_audit_log():
 
 
 @pytest.mark.asyncio
+async def test_create_auxiliary_accounting_rejects_parent_from_another_book():
+    foreign_parent = _aux(aid=8, book_id=2)
+    db = _MockDb(get_map={FinanceCenterMumarenAuxiliaryAccounting: {8: foreign_parent}})
+    with pytest.raises(HTTPException) as exc:
+        await create_auxiliary_accounting(
+            body=AuxiliaryAccountingInput(book_id=1, aux_type="customer", code="C002", name="客户B", parent_id=8),
+            current_user=_FakeUser(), db=db,
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_list_auxiliary_accountings_filters_by_aux_type():
     rows = [_aux(aid=1, aux_type="customer"), _aux(aid=2, aux_type="supplier")]
     db = _MockDb(execute_results=[_MockResult(scalars=rows)])
