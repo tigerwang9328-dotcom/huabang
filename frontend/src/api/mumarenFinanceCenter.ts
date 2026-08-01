@@ -183,6 +183,20 @@ export interface MumarenProfitStatement {
   net_profit: number;
 }
 
+export interface MumarenCashFlowSection {
+  inflow: number;
+  outflow: number;
+  net: number;
+}
+
+export interface MumarenCashFlowStatement {
+  sections: Record<"operating" | "investing" | "financing", MumarenCashFlowSection>;
+  total_inflow: number;
+  total_outflow: number;
+  total_net: number;
+  cash_net_increase: number;
+}
+
 export interface MumarenArApAging {
   as_of: string;
   total_balance: number;
@@ -237,6 +251,7 @@ export const mumarenFinanceCenterApi = {
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
+  getCashFlowStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenCashFlowStatement>>(requestPath("/reports/cash-flow-statement"), { params }),
   getArApAging: (params: { book_id: number; order_type: "receivable" | "payable"; as_of?: string }) => request.get<ApiResponse<MumarenArApAging>>(requestPath("/ar-ap/aging"), { params }),
   getTaxAlerts: (params: { book_id: number; today?: string }) => request.get<ApiResponse<{ alerts: MumarenTaxAlert[]; record_count: number }>>(requestPath("/tax/alerts"), { params }),
   listTaxRecords: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenTaxRecord[]>>(requestPath("/tax/records"), { params }),

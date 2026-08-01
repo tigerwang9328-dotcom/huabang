@@ -303,7 +303,7 @@ test('派生展示类页面调用已有 API,不新增后端接口', () => {
     { file: 'MumarenFinanceVoucherSummary.vue', apis: ['listBooks', 'listVouchers'] },
     { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'listVouchers'] },
     { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },
-    { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getTrialBalance'] },
+    { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getCashFlowStatement'] },
     { file: 'MumarenFinanceReportReceivable.vue', apis: ['listBooks', 'getArApAging'] },
     { file: 'MumarenFinanceReportPayable.vue', apis: ['listBooks', 'getArApAging'] },
   ]
@@ -698,11 +698,16 @@ test('录凭证页会随共享账簿加载科目,并将金蝶历史账簿整表�
 test('利润表与科目余额表页面调用独立报表接口', () => {
   const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
   const trial = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportTrialBalance.vue')
+  const cashFlow = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportCashFlow.vue')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
 
   assert.match(profit, /getProfitStatement/)
   assert.match(profit, /mumarenFinanceCenterApi/)
   assert.match(trial, /getTrialBalance/)
   assert.match(trial, /mumarenFinanceCenterApi/)
+  assert.match(api, /getCashFlowStatement/)
+  assert.match(cashFlow, /getCashFlowStatement/)
+  assert.doesNotMatch(cashFlow, /待后端补/)
 })
 
 test('税金明细表页面调用税务记录接口(只读展示)', () => {

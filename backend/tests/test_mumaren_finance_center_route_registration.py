@@ -38,6 +38,7 @@ def test_api_root_registers_independent_ar_ap_and_tax_routes():
     paths = {route.path for route in api_router.routes}
     assert "/api/v1/finance-center/mumaren/ar-ap/aging" in paths
     assert "/api/v1/finance-center/mumaren/tax/alerts" in paths
+    assert "/api/v1/finance-center/mumaren/reports/cash-flow-statement" in paths
 
 
 def test_api_root_registers_ar_ap_and_tax_write_endpoints():

@@ -8,6 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
+        <el-button :disabled="!bookId" @click="printReport">打印</el-button>
+        <el-button :disabled="!bookId" @click="exportStatement">导出</el-button>
       </div>
     </div>
 
@@ -35,9 +37,12 @@
       </el-table>
 
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="现金净增加合计">{{ money(cashNetIncrease) }}</el-descriptions-item>
+        <el-descriptions-item label="现金流入合计">{{ money(statement.total_inflow) }}</el-descriptions-item>
+        <el-descriptions-item label="现金流出合计">{{ money(statement.total_outflow) }}</el-descriptions-item>
+        <el-descriptions-item label="现金流净额">{{ money(statement.total_net) }}</el-descriptions-item>
+        <el-descriptions-item label="现金净增加（已过账凭证）">{{ money(statement.cash_net_increase) }}</el-descriptions-item>
       </el-descriptions>
-      <p class="gap-note">注:投资/筹资活动现金流待后端补独立接口,当前仅由现金类科目(1001 库存现金 / 1002 银行存款 / 1012 其他货币资金)派生经营活动净额与现金净增加。</p>
+      <p class="gap-note">报表仅汇总当前独立账簿中已过账资金流水；未过账草稿不进入报表。现金净增加另按已过账凭证的现金类科目计算，用于核对。</p>
     </template>
 
     <el-empty v-else description="请选择独立账簿后查看现金流量表" />
@@ -47,59 +52,43 @@
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, ref } from "vue";
-import { mumarenFinanceCenterApi, type MumarenFinanceBook, type MumarenTrialBalanceRow } from "@/api/mumarenFinanceCenter";
+import { mumarenFinanceCenterApi, type MumarenCashFlowStatement, type MumarenFinanceBook } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
 const { bookId, initializeBook } = useMumarenFinanceBook();
-const rows = ref<MumarenTrialBalanceRow[]>([]);
+const statement = ref<MumarenCashFlowStatement>({
+  sections: {
+    operating: { inflow: 0, outflow: 0, net: 0 },
+    investing: { inflow: 0, outflow: 0, net: 0 },
+    financing: { inflow: 0, outflow: 0, net: 0 },
+  },
+  total_inflow: 0,
+  total_outflow: 0,
+  total_net: 0,
+  cash_net_increase: 0,
+});
 const error = ref("");
 const loading = ref(false);
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
-const isCashCode = (code: string, prefixes: string[]) => {
-  const c = (code || "").trim();
-  return prefixes.some((p) => c.startsWith(p));
-};
-
-// 经营活动:1001 库存现金、1002 银行存款。
-const operatingRows = computed(() =>
-  rows.value.filter((r) => isCashCode(r.account_code, ["1001", "1002"])),
-);
-// 现金类科目(含 1012 其他货币资金),用于现金净增加合计。
-const cashRows = computed(() =>
-  rows.value.filter((r) => isCashCode(r.account_code, ["1001", "1002", "1012"])),
-);
-
-const operatingInflow = computed(() => operatingRows.value.reduce((s, r) => s + Number(r.debit_amount), 0));
-const operatingOutflow = computed(() => operatingRows.value.reduce((s, r) => s + Number(r.credit_amount), 0));
-const operatingNet = computed(() => operatingInflow.value - operatingOutflow.value);
-
-// 现金净增加 = 现金类科目期末 (借方 - 贷方) 合计。
-const cashNetIncrease = computed(() =>
-  cashRows.value.reduce((s, r) => s + (Number(r.closing_debit) - Number(r.closing_credit)), 0),
-);
-
 const activities = computed(() => [
-  { category: "经营活动", inflow: operatingInflow.value, outflow: operatingOutflow.value, net: operatingNet.value, note: "" },
-  { category: "投资活动", inflow: 0, outflow: 0, net: 0, note: "投资活动现金流待后端补" },
-  { category: "筹资活动", inflow: 0, outflow: 0, net: 0, note: "筹资活动现金流待后端补" },
+  { category: "经营活动", ...statement.value.sections.operating, note: "已过账经营类资金流水" },
+  { category: "投资活动", ...statement.value.sections.investing, note: "已过账投资类资金流水" },
+  { category: "筹资活动", ...statement.value.sections.financing, note: "已过账筹资类资金流水" },
 ]);
 
 const load = async () => {
   if (!bookId.value) {
-    rows.value = [];
     return;
   }
   loading.value = true;
   error.value = "";
   try {
-    const result = await mumarenFinanceCenterApi.getTrialBalance({ book_id: bookId.value });
-    rows.value = result.data.data.rows || [];
+    statement.value = (await mumarenFinanceCenterApi.getCashFlowStatement({ book_id: bookId.value })).data.data;
   } catch {
     error.value = "无法加载现金流量表数据。";
-    rows.value = [];
   } finally {
     loading.value = false;
   }
@@ -113,6 +102,27 @@ onMounted(async () => {
     error.value = "无法加载独立账簿。";
   }
 });
+
+const printReport = () => window.print();
+
+const exportStatement = () => {
+  const rows = [
+    ["活动类别", "现金流入", "现金流出", "净额", "备注"],
+    ...activities.value.map((row) => [row.category, money(row.inflow), money(row.outflow), money(row.net), row.note]),
+    ["现金流入合计", money(statement.value.total_inflow), "", "", ""],
+    ["现金流出合计", "", money(statement.value.total_outflow), "", ""],
+    ["现金流净额", "", "", money(statement.value.total_net), ""],
+    ["现金净增加（已过账凭证）", "", "", money(statement.value.cash_net_increase), ""],
+  ];
+  const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const blob = new Blob([`\uFEFF${rows.map((row) => row.map(quote).join(",")).join("\r\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `独立财务现金流量表-${bookId.value}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
 </script>
 
 <style scoped>
