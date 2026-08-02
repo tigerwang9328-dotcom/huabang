@@ -300,6 +300,7 @@ export const mumarenFinanceCenterApi = {
   createBook: (data: MumarenFinanceBookCreatePayload) => request.post<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status">>>(requestPath("/books"), data),
   updateBook: (bookId: number, data: MumarenFinanceBookUpdatePayload) => request.put<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status" | "is_readonly">>>(requestPath(`/books/${bookId}`), data),
   replenishStarterAccounts: (bookId: number) => request.post<ApiResponse<{ added: number }>>(requestPath(`/books/${bookId}/starter-accounts`)),
+  getLedgerLines: (params: { book_id: number; account_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceLedgerLinePage>>(requestPath("/ledger/lines"), { params }),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getHistoryBalanceSnapshots: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceBalanceSnapshot[]>>(requestPath("/history/balance-snapshots"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
@@ -381,6 +382,31 @@ export interface MumarenFinanceBalanceSnapshot {
   closing_amount: number;
   source_database: string;
   is_readonly: boolean;
+}
+
+export interface MumarenFinanceLedgerLine {
+  id: number;
+  voucher_id: number;
+  line_no: number;
+  voucher_no: string;
+  voucher_type: string;
+  voucher_date: string;
+  voucher_summary?: string;
+  line_summary?: string;
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  debit_amount: number;
+  credit_amount: number;
+  running_balance: number;
+  balance_direction: "debit" | "credit";
+  is_readonly: boolean;
+}
+
+export interface MumarenFinanceLedgerLinePage {
+  rows: MumarenFinanceLedgerLine[];
+  has_more: boolean;
+  next_offset: number;
 }
 export const fixedAssetsApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenFixedAsset[]>>(requestPath("/fixed-assets"), { params }),
