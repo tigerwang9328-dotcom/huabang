@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.8
+// @version      3.5.9
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.8';
+  const SCRIPT_VERSION = '3.5.9';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -403,8 +403,9 @@
   async function heartbeat(status) {
     const settings = await config(); if (!settings?.uploadToken) return;
     const state = await queueState(); const stableInstallationId = await ensureInstallationId();
+    const pendingBatches = state.batches.filter((item) => !item.uploaded);
     await scheduledRequest({ method: 'POST', url: `${API_ORIGIN}${API_PREFIX}/collector-heartbeats`, headers: { Authorization: `Bearer ${settings.uploadToken}`, 'Content-Type': 'application/json' },
-      data: JSON.stringify({ installation_id: stableInstallationId, script_version: SCRIPT_VERSION, schema_version: SCHEMA_VERSION, observed_creator_id: settings.observedCreatorId || undefined, observed_account_name: settings.observedAccountName || undefined, current_page_path: location.pathname, current_page_type: 'creator_page', document_visibility: document.visibilityState, queued_batch_count: state.batches.length, queued_bytes: bytes(state) }) });
+      data: JSON.stringify({ installation_id: stableInstallationId, script_version: SCRIPT_VERSION, schema_version: SCHEMA_VERSION, observed_creator_id: settings.observedCreatorId || undefined, observed_account_name: settings.observedAccountName || undefined, current_page_path: location.pathname, current_page_type: 'creator_page', document_visibility: document.visibilityState, queued_batch_count: pendingBatches.length, queued_bytes: bytes({ batches: pendingBatches }) }) });
     console.info('douyin-color-v31-status', status);
   }
   async function uploadPending() {

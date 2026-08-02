@@ -78,6 +78,7 @@ function response(body, status = 200) {
 function createHarness(options = {}) {
   const storage = new Map();
   const gmStorage = new Map();
+  const gmRequests = [];
   const intervals = [];
   let catalogFailures = options.catalogFailures || 0;
   const page = {
@@ -127,7 +128,10 @@ function createHarness(options = {}) {
     GM_getValue: (key) => gmStorage.get(key),
     GM_setValue: (key, value) => gmStorage.set(key, value),
     GM_registerMenuCommand: () => undefined,
-    GM_xmlhttpRequest: () => undefined,
+    GM_xmlhttpRequest: (details) => {
+      gmRequests.push(details);
+      queueMicrotask(() => details.onload?.({ status: 200, responseText: "{}" }));
+    },
     setInterval: (callback, delay) => { intervals.push({ callback, delay }); return intervals.length; },
     setTimeout,
     console,
@@ -144,18 +148,34 @@ function createHarness(options = {}) {
       fixedCatalogUrl, fixedCurveUrl, recordFromAnalysis, collectCatalogPages,
       collectCatalogCurves, startFixedCollection, runScheduledCollection, queueState, captureCatalog, enqueueObservedAnalysis,
       setRuntimeConfig: (value) => { runtimeConfig = value; },
+      setQueueState: async (value) => queueWrite(value),
       getRuntimeConfig: () => structuredClone(runtimeConfig),
       getSavedRuntimeConfig: () => GM_getValue(CONFIG_STORAGE_KEY),
     };
     // 启动路径会先发送心跳；该单元测试不连接管理后台，因此两种
     // 网络副作用都由桩替代，保留目录与曲线采集行为供断言。
+    const realHeartbeat = heartbeat;
+    PAGE_WINDOW.__huabangDouyinColorV31TestApi.heartbeat = realHeartbeat;
     heartbeat = async () => {};
     uploadPending = async () => {};
   `);
   assert.notEqual(testScript, script, "test injection marker must remain in the userscript");
   vm.runInNewContext(testScript, sandbox, { filename: "collector.user.js" });
-  return { api: page.__huabangDouyinColorV31TestApi, intervals };
+  return { api: page.__huabangDouyinColorV31TestApi, intervals, gmRequests };
 }
+
+test("heartbeat reports only unfinished local batches as pending", async () => {
+  const { api, gmRequests } = createHarness();
+  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
+  const completed = { id: "done", uploaded: true, status: "completed", records: [{ record: { video_id: "old" } }] };
+  const pending = { id: "pending", uploaded: false, status: "receiving", records: [{ record: { video_id: "new" } }] };
+  await api.setQueueState({ batches: [completed, pending] });
+  await api.heartbeat("online_active");
+  const request = gmRequests.find((entry) => entry.url.endsWith("/collector-heartbeats"));
+  const payload = JSON.parse(request.data);
+  assert.equal(payload.queued_batch_count, 1);
+  assert.equal(payload.queued_bytes, new TextEncoder().encode(JSON.stringify({ batches: [pending] })).byteLength);
+});
 
 test("automatic fixed collection enqueues retention and bounce without observed page requests", async () => {
   const { api } = createHarness();
