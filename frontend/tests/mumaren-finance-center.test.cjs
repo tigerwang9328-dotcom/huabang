@@ -75,7 +75,8 @@ test('金蝶迁移账簿在历史查询页和核心汇总页初始化后会自�
 
   assert.match(history, /listVouchers\(\{ book_id: bookId\.value \}\)/)
   assert.match(history, /金蝶迁移凭证/)
-  for (const page of [voucherSummary, balanceSheet, cashFlow]) {
+  assert.match(voucherSummary, /await loadBooks\(\)[\s\S]*await load\(\)/)
+  for (const page of [balanceSheet, cashFlow]) {
     assert.match(page, /initializeBook\(books\.value\)[\s\S]*await load\(\)/)
   }
   assert.match(ledgerDetail, /initializeBook\(books\.value\)[\s\S]*await onBookChange\(\)/)
@@ -144,6 +145,8 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   const payable = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportPayable.vue')
   const voucherTemplate = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherTemplate.vue')
   const voucherAuto = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherAuto.vue')
+  const auditLogs = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceSettingsAuditLogs.vue')
+  const voucherSummary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
 
   assert.match(compass, /v-else-if="isReadonly"/)
   assert.match(compass, /余额快照核对/)
@@ -171,6 +174,10 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
     assert.match(page, /金蝶迁移账簿未导入/)
     assert.match(page, /if\s*\(isReadonly\.value\)/)
   }
+  assert.match(auditLogs, /金蝶迁移账簿未导入操作审计日志/)
+  assert.match(auditLogs, /if \(isReadonly\.value\)/)
+  assert.match(voucherSummary, /金蝶迁移账簿已导入的已过账凭证/)
+  assert.match(voucherSummary, /loadBooks/)
 })
 
 test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {
@@ -422,7 +429,7 @@ test('付款台账在独立财务中心可访问，并遵循草稿审核人工�
 test('展示类页面调用明确的独立财务接口', () => {
   const derivedPages = [
     { file: 'MumarenFinanceCompass.vue', apis: ['loadBooks', 'getTrialBalance', 'getProfitStatement'] },
-    { file: 'MumarenFinanceVoucherSummary.vue', apis: ['listBooks', 'listVouchers'] },
+    { file: 'MumarenFinanceVoucherSummary.vue', apis: ['loadBooks', 'listVouchers'] },
     { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'getLedgerLines'] },
     { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },
     { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getCashFlowStatement'] },
