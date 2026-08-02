@@ -262,13 +262,15 @@ async def update_account_endpoint(
 @router.get("/vouchers", response_model=ApiResponse)
 async def get_vouchers(
     book_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     _: SysUser = Depends(require_mumaren_voucher_view),
     db: AsyncSession = Depends(get_db),
 ):
     statement = select(FinanceCenterMumarenVoucher).order_by(FinanceCenterMumarenVoucher.id.desc())
     if book_id is not None:
         statement = statement.where(FinanceCenterMumarenVoucher.book_id == book_id)
-    result = await db.execute(statement.limit(200))
+    result = await db.execute(statement.offset(offset).limit(limit))
     return ApiResponse.ok(data=[_voucher_data(voucher) for voucher in result.scalars()])
 
 
@@ -428,6 +430,7 @@ async def get_history_balance_snapshots(
     book_id: int = Query(ge=1),
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     limit: int = Query(default=500, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     _: SysUser = Depends(require_mumaren_history_view),
     db: AsyncSession = Depends(get_db),
 ):
@@ -445,10 +448,10 @@ async def get_history_balance_snapshots(
         ))
         .where(FinanceCenterMumarenBalanceSnapshot.book_id == book_id)
         .order_by(FinanceCenterMumarenBalanceSnapshot.period_code.desc(), FinanceCenterMumarenAccount.account_code)
-        .limit(limit)
     )
     if period:
         statement = statement.where(FinanceCenterMumarenBalanceSnapshot.period_code == period)
+    statement = statement.offset(offset).limit(limit)
     return ApiResponse.ok(data=[{
         "id": row.id, "period_code": row.period_code, "account_code": account.account_code,
         "account_name": account.account_name, "opening_amount": row.opening_amount,

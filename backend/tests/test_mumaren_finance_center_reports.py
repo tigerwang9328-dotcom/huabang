@@ -68,6 +68,25 @@ def test_ledger_line_endpoint_calculates_directional_running_balance_with_pagina
     assert '"has_more"' in source
 
 
+def test_history_snapshot_endpoint_supports_offset_pagination():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_history_balance_snapshots)
+
+    assert "offset: int = Query(default=0, ge=0)" in source
+    assert ".offset(offset)" in source
+
+
+def test_voucher_list_endpoint_supports_bounded_pagination():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_vouchers)
+
+    assert "limit: int = Query(default=200, ge=1, le=500)" in source
+    assert "offset: int = Query(default=0, ge=0)" in source
+    assert ".offset(offset).limit(limit)" in source
+
+
 def test_balance_snapshot_query_joins_account_within_the_same_book():
     from app.api.v1 import mumaren_finance_center
 

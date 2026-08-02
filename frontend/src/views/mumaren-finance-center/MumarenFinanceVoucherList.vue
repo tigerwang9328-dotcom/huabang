@@ -67,6 +67,7 @@ const vouchers = ref<MumarenFinanceVoucher[]>([]);
 const error = ref("");
 const loading = ref(false);
 const actingId = ref<number>(); // 当前正在审核/过账的凭证 id
+let loadRequestVersion = 0;
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -75,14 +76,21 @@ const statusLabel = (s: string) => ({ draft: "草稿", reviewed: "已审核", po
 const statusTagType = (s: string): "" | "warning" | "success" => (s === "draft" ? "" : s === "reviewed" ? "warning" : "success");
 
 const load = async () => {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
   loading.value = true;
   error.value = "";
   try {
-    vouchers.value = (await mumarenFinanceCenterApi.listVouchers(bookId.value ? { book_id: bookId.value } : undefined)).data.data;
+    const response = await mumarenFinanceCenterApi.listVouchers(requestedBookId ? { book_id: requestedBookId, limit: 500 } : { limit: 500 });
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
+      vouchers.value = response.data.data;
+    }
   } catch {
-    error.value = "无法加载独立当前账凭证。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
+      error.value = "无法加载独立当前账凭证。";
+    }
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) loading.value = false;
   }
 };
 

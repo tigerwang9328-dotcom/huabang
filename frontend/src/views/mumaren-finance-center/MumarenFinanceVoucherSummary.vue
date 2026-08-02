@@ -156,7 +156,7 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const response = await mumarenFinanceCenterApi.listVouchers({ book_id: requestedBookId });
+    const response = await mumarenFinanceCenterApi.listVouchers({ book_id: requestedBookId, limit: 500 });
     if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
       vouchers.value = response.data.data;
     }

@@ -73,7 +73,7 @@ test('金蝶迁移账簿在历史查询页和核心汇总页初始化后会自�
   const balanceSheet = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportBalanceSheet.vue')
   const cashFlow = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportCashFlow.vue')
 
-  assert.match(history, /listVouchers\(\{ book_id: bookId\.value \}\)/)
+  assert.match(history, /listVouchers\(\{ book_id: requestedBookId, limit: 500 \}\)/)
   assert.match(history, /金蝶迁移凭证/)
   assert.match(voucherSummary, /await loadBooks\(\)[\s\S]*await load\(\)/)
   for (const page of [balanceSheet, cashFlow]) {
@@ -94,7 +94,33 @@ test('金蝶余额快照有独立只读查询页，不混入当前账报表', ()
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistoryBalanceSnapshots.vue')
   assert.match(page, /filter\(\(book\) => book\.is_readonly\)/)
   assert.match(page, /getHistoryBalanceSnapshots/)
+  assert.match(page, /offset/)
+  assert.match(page, /加载更多/)
   assert.doesNotMatch(page, /request\.post\(|request\.put\(|request\.delete\(/)
+})
+
+test('金蝶迁移凭证与汇总查询至少覆盖单账簿 339 张凭证', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const list = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+  const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
+  const summary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
+
+  assert.match(api, /listVouchers: \(params\?: \{ book_id\?: number; limit\?: number; offset\?: number \}\)/)
+  for (const page of [list, history, summary]) {
+    assert.match(page, /limit: 500/)
+  }
+})
+
+test('历史凭证与查凭证切换账簿时不会被旧请求覆盖', () => {
+  const list = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+  const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
+
+  for (const page of [list, history]) {
+    assert.match(page, /loadRequestVersion/)
+    assert.match(page, /requestedBookId/)
+    assert.match(page, /requestedBookId === bookId\.value/)
+    assert.match(page, /if \(requestVersion === loadRequestVersion && requestedBookId === bookId\.value\) loading\.value = false;/)
+  }
 })
 
 test('明细账查询真实已过账分录，不再按凭证头摘要模糊匹配', () => {
@@ -822,7 +848,7 @@ test('金蝶迁移凭证页只读查询迁移账簿,不出现编辑/审核/过�
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
 
   assert.match(history, /金蝶迁移|is_readonly|只读/)
-  assert.match(history, /listVouchers\(\{ book_id: bookId\.value \}\)/)
+  assert.match(history, /listVouchers\(\{ book_id: requestedBookId, limit: 500 \}\)/)
   assert.doesNotMatch(history, /reviewVoucher|postVoucher|createVoucher|deleteVoucher|reviewArApOrder|settleArApOrder|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
 })
 
