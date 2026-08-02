@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.5
+// @version      3.5.8
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.5';
+  const SCRIPT_VERSION = '3.5.8';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -33,6 +33,7 @@
 
   let runtimeConfig = null;
   let fixedCollectionInFlight = false;
+  const observedAnalyses = new Map();
   let paused = document.visibilityState !== 'visible';
   let lastWakeCheckAt = now();
 
@@ -48,7 +49,15 @@
       if (!control) { console.warn('[douyin-color] 已保存的令牌已失效,请重新配置'); GM_setValue(CONFIG_STORAGE_KEY, ''); return; }
       runtimeConfig = { ...parsed, max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
       console.info('[douyin-color] 已自动加载保存的令牌,采集器就绪');
-      void runScheduledCollection();
+      const state = await queueState();
+      if (state.fullBackfillVersion !== SCRIPT_VERSION) {
+        // 每个脚本版本至多自动做一次完整回填；日常恢复只上传队列，
+        // 防止切换标签、网络恢复或五分钟心跳重复扫历史视频。
+        await mutateQueue((current) => { current.fullBackfillVersion = SCRIPT_VERSION; });
+        void startFixedCollection();
+      } else {
+        void runScheduledCollection();
+      }
     } catch (e) { console.warn('[douyin-color] 加载保存的令牌失败:', e.message); }
   }
   function openQueueDb() {
@@ -149,7 +158,9 @@
     console.warn('douyin-color-v31-status', 'auth_required');
   }
   function recordFromAnalysis(response, analysisType, requestedVideoId) {
-    if (hasSensitive(response) || !guardObservedCreator(response)) return null;
+    // 平台响应还带有不参与采集的关联项等字段；只从中投影冻结的
+    // 曲线白名单，不能因为无关字段名触发敏感字段保护而丢弃整条曲线。
+    if (!guardObservedCreator(response)) return null;
     const videoId = requestedVideoId || currentVideoId();
     const currentItem = curve(response?.analysis_trend?.current_item);
     if (!videoId || !currentItem.length || ![1, 7].includes(analysisType)) return null;
@@ -159,7 +170,7 @@
     return {
       video_id: videoId, analysis_type: analysisType, http_status: 200,
       business_status_code: Number.isInteger(response.status_code) ? response.status_code : undefined,
-      analysis_trend: trend,
+      response_data: { analysis_trend: trend },
     };
   }
   function catalogItemsFromResponse(response) {
@@ -211,6 +222,22 @@
       return true;
     });
     if (!accepted) await heartbeat('upload_blocked');
+  }
+  async function enqueueObservedAnalysis(record) {
+    if (!record?.video_id || ![1, 7].includes(record.analysis_type)) return;
+    const pair = observedAnalyses.get(record.video_id) || {};
+    pair[record.analysis_type] = record;
+    if (!pair[1] || !pair[7]) {
+      observedAnalyses.set(record.video_id, pair);
+      return;
+    }
+    observedAnalyses.delete(record.video_id);
+    await enqueue({
+      video_id: record.video_id,
+      source_type: 'video',
+      retention: pair[1],
+      platform_bounce: pair[7],
+    });
   }
   async function captureCatalog(response) {
     // 兼容新旧接口:aweme_list[] 或 items[]
@@ -300,6 +327,7 @@
     const state = await queueState();
     for (const item of state.catalogItems || []) {
       if (onlyDueObservationWindows && !observationWindow(item.published_at_epoch_seconds)) continue;
+      const analyses = {};
       for (const analysisType of [1, 7]) {
       if (paused) return;
       const url = fixedCurveUrl(item.video_id, creatorId, analysisType);
@@ -310,16 +338,27 @@
         if (response?.status === 401 || response?.status === 403) { paused = true; return; }
         if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, Math.min(60000, 1000 * (2 ** attempt) + Math.floor(Math.random() * 501))));
       }
-      if (response?.ok) {
-        try {
+        if (response?.ok) {
+          try {
           const record = recordFromAnalysis(await response.clone().json(), analysisType, item.video_id);
-          if (record) { await enqueue(record); continue; }
-        } catch (_) { /* invalid curve response is recorded below */ }
+          if (record) { analyses[analysisType] = record; continue; }
+          } catch (_) { /* invalid curve response is recorded below */ }
       }
       await mutateQueue((current) => {
         current.curveFailures = current.curveFailures || [];
         current.curveFailures.push({ video_id: item.video_id, analysis_type: analysisType, attempts: 5, http_status: Number(response?.status || 0) });
       });
+      }
+      if (analyses[1] && analyses[7]) {
+        await enqueue({
+          video_id: item.video_id,
+          source_type: 'video',
+          sanitized_title: item.sanitized_title,
+          published_at_epoch_seconds: item.published_at_epoch_seconds,
+          duration_ms: item.duration_ms,
+          retention: analyses[1],
+          platform_bounce: analyses[7],
+        });
       }
     }
   }
@@ -444,7 +483,7 @@
         if (url.pathname === CURVE_ENDPOINT) {
           observerState.observed += 1;
           const record = recordFromAnalysis(await result.clone().json(), Number(url.searchParams.get('analysis_type')), url.searchParams.get('item_id'));
-          if (record) void enqueue(record);
+          if (record) void enqueueObservedAnalysis(record);
         }
       } catch (_) { /* collection must never alter the creator page */ }
       return result;
@@ -459,7 +498,7 @@
           if (url.pathname === CURVE_ENDPOINT) {
             observerState.observed += 1;
             const record = recordFromAnalysis(JSON.parse(this.responseText), Number(url.searchParams.get('analysis_type')), url.searchParams.get('item_id'));
-            if (record) void enqueue(record);
+            if (record) void enqueueObservedAnalysis(record);
           }
         } catch (_) { /* collection must never alter the creator page */ }
       });

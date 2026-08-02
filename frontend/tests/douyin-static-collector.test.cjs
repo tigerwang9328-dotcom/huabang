@@ -31,7 +31,9 @@ test("fixed collection does not require learned requests or relabel metrics tren
   assert.ok(script.includes("let url = fixedCatalogUrl();"));
   assert.ok(script.includes("const url = fixedCurveUrl(item.video_id, creatorId, analysisType);"));
   assert.ok(script.includes("const record = recordFromAnalysis(await response.clone().json(), analysisType, item.video_id);"));
-  assert.match(script, /if \(record\) \{ await enqueue\(record\); continue; \}/);
+  assert.match(script, /if \(record\) \{ analyses\[analysisType\] = record; continue; \}/);
+  assert.match(script, /retention: analyses\[1\],/);
+  assert.match(script, /platform_bounce: analyses\[7\],/);
   assert.ok(script.includes("async function startFixedCollection()"));
   assert.ok(script.includes("void startFixedCollection();"));
 });
@@ -57,6 +59,16 @@ test("visibility and periodic recovery only heartbeat and upload, never repeat a
   assert.doesNotMatch(recovery, /collectCatalogPages|collectCatalogCurves/);
   assert.match(scheduled, /await recoverPending\(\);/);
   assert.doesNotMatch(scheduled, /startFixedCollection/);
+});
+
+test("saved configuration runs at most one full backfill per collector version", () => {
+  const start = script.indexOf("async function loadSavedConfig()");
+  const end = script.indexOf("function openQueueDb()", start);
+  const body = script.slice(start, end);
+  assert.match(body, /state\.fullBackfillVersion !== SCRIPT_VERSION/);
+  assert.match(body, /current\.fullBackfillVersion = SCRIPT_VERSION/);
+  assert.match(body, /void startFixedCollection\(\);/);
+  assert.match(body, /void runScheduledCollection\(\);/);
 });
 
 function response(body, status = 200) {
@@ -130,7 +142,7 @@ function createHarness(options = {}) {
   const testScript = script.replace(marker, `
     PAGE_WINDOW.__huabangDouyinColorV31TestApi = {
       fixedCatalogUrl, fixedCurveUrl, recordFromAnalysis, collectCatalogPages,
-      collectCatalogCurves, startFixedCollection, runScheduledCollection, queueState, captureCatalog,
+      collectCatalogCurves, startFixedCollection, runScheduledCollection, queueState, captureCatalog, enqueueObservedAnalysis,
       setRuntimeConfig: (value) => { runtimeConfig = value; },
       getRuntimeConfig: () => structuredClone(runtimeConfig),
       getSavedRuntimeConfig: () => GM_getValue(CONFIG_STORAGE_KEY),
@@ -151,8 +163,12 @@ test("automatic fixed collection enqueues retention and bounce without observed 
   await api.startFixedCollection();
   const queue = await api.queueState();
   const records = queue.batches.flatMap((batch) => batch.records.map((item) => item.record));
-  assert.deepEqual(records.map((item) => item.analysis_type).sort(), [1, 7]);
-  assert.ok(records.every((item) => item.analysis_trend.current_item.length === 1));
+  assert.equal(records.length, 1);
+  assert.equal(records[0].source_type, "video");
+  assert.equal(records[0].retention.analysis_type, 1);
+  assert.equal(records[0].platform_bounce.analysis_type, 7);
+  assert.ok(records.every((item) => item.retention.response_data.analysis_trend.current_item.length === 1));
+  assert.ok(records.every((item) => item.platform_bounce.response_data.analysis_trend.current_item.length === 1));
 });
 
 test("catalog-based creator discovery persists the id before collection retries", async () => {
@@ -166,6 +182,20 @@ test("catalog-based creator discovery persists the id before collection retries"
 
   assert.equal(api.getRuntimeConfig().observedCreatorId, "creator");
   assert.equal(JSON.parse(api.getSavedRuntimeConfig()).observedCreatorId, "creator");
+});
+
+test("observed retention and bounce responses are paired before upload", async () => {
+  const { api } = createHarness();
+  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
+  const retention = api.recordFromAnalysis({ status_code: 0, analysis_trend: { current_item: [{ key: "00:00", value: 1 }] } }, 1, "video");
+  const bounce = api.recordFromAnalysis({ status_code: 0, analysis_trend: { current_item: [{ key: "00:00", value: 1 }] } }, 7, "video");
+  await api.enqueueObservedAnalysis(retention);
+  assert.equal((await api.queueState()).batches.length, 0);
+  await api.enqueueObservedAnalysis(bounce);
+  const records = (await api.queueState()).batches.flatMap((batch) => batch.records.map((item) => item.record));
+  assert.equal(records.length, 1);
+  assert.equal(records[0].retention.analysis_type, 1);
+  assert.equal(records[0].platform_bounce.analysis_type, 7);
 });
 
 test("trend map data is never relabeled as a curve", () => {
