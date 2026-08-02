@@ -53,11 +53,13 @@
       </el-form>
 
       <div class="dialog-toolbar">
-        <el-button type="primary" plain :disabled="isReadonly" @click="addLine">添加分录</el-button>
-        <el-button :disabled="isReadonly || !form.lines.length" @click="copyLastLine">复制上一行</el-button>
-        <el-button :disabled="isReadonly" @click="addReceiptPair">收款分录</el-button>
-        <el-button :disabled="isReadonly" @click="addPaymentPair">付款分录</el-button>
-        <el-button :disabled="isReadonly || !form.lines.length" @click="balanceLastLine">自动找平</el-button>
+        <div class="voucher-actions">
+          <el-button type="primary" plain :disabled="isReadonly" @click="addLine">添加分录</el-button>
+          <el-button :disabled="isReadonly || !form.lines.length" @click="copyLastLine">复制上一行</el-button>
+          <el-button :disabled="isReadonly" @click="addReceiptPair">收款分录</el-button>
+          <el-button :disabled="isReadonly" @click="addPaymentPair">付款分录</el-button>
+          <el-button :disabled="isReadonly || !form.lines.length" @click="balanceLastLine">自动找平</el-button>
+        </div>
         <div class="totals">
           <span>借方 <b>{{ money(totalDebit) }}</b></span>
           <span>贷方 <b>{{ money(totalCredit) }}</b></span>
@@ -333,10 +335,11 @@ const save = async () => {
 h2 { margin: 8px 0; }
 p { color: #5d6b7e; }
 .dialog-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
-.totals { display: flex; align-items: center; gap: 14px; font-size: 13px; color: #4b5563; }
+.voucher-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.totals { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; color: #4b5563; }
 .totals b { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #111827; }
 .totals .danger { color: #dc2626; }
 .form-actions { display: flex; justify-content: flex-end; }
 .success-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-@media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } }
+@media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } .dialog-toolbar { align-items: flex-start; } .totals { margin-left: 0; flex-wrap: wrap; } }
 </style>

@@ -956,3 +956,12 @@ test('当前账簿可受控编辑并幂等补齐基础科目，金蝶迁移账�
   assert.match(page, /replenishStarterAccounts/)
   assert.match(page, /row\.is_readonly/)
 })
+
+test('录凭证快捷操作左对齐，金额汇总独立靠右并支持小屏换行', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
+
+  assert.match(page, /<div class="voucher-actions">[\s\S]*添加分录[\s\S]*自动找平[\s\S]*<\/div>/)
+  assert.match(page, /<div class="totals">[\s\S]*借方[\s\S]*贷方[\s\S]*差额[\s\S]*<\/div>/)
+  assert.match(page, /\.voucher-actions\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:/)
+  assert.match(page, /@media \(max-width: 640px\)[\s\S]*\.dialog-toolbar\s*\{[^}]*align-items:\s*flex-start/)
+})
