@@ -7,9 +7,9 @@
         <p>按现金类科目派生经营/投资/筹资活动现金流。</p>
       </div>
       <div class="heading-actions">
-        <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
-        <el-button :disabled="!bookId" @click="printReport">打印</el-button>
-        <el-button :disabled="!bookId" @click="exportStatement">导出</el-button>
+        <el-button :loading="loading" :disabled="!bookId || isHistoricalBook" @click="load">查询</el-button>
+        <el-button :disabled="!bookId || isHistoricalBook" @click="printReport">打印</el-button>
+        <el-button :disabled="!bookId || isHistoricalBook" @click="exportStatement">导出</el-button>
       </div>
     </div>
 
@@ -20,6 +20,8 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+
+    <el-alert v-else-if="isHistoricalBook" type="warning" :closable="false" show-icon title="金蝶迁移账簿的现金流量表科目待映射；请使用科目余额表和明细账核对原始已过账数据。" />
 
     <template v-else-if="bookId">
       <el-table :data="activities" empty-text="暂无现金类科目数据" stripe size="small">
@@ -55,7 +57,7 @@ import { computed, onMounted, ref } from "vue";
 import { mumarenFinanceCenterApi, type MumarenCashFlowStatement, type MumarenFinanceBook } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { bookId, initializeBook, isReadonly } = useMumarenFinanceBook();
 const statement = ref<MumarenCashFlowStatement>({
   sections: {
     operating: { inflow: 0, outflow: 0, net: 0 },
@@ -69,6 +71,9 @@ const statement = ref<MumarenCashFlowStatement>({
 });
 const error = ref("");
 const loading = ref(false);
+const isHistoricalBook = computed(() =>
+  isReadonly.value || Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly),
+);
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -80,7 +85,7 @@ const activities = computed(() => [
 ]);
 
 const load = async () => {
-  if (!bookId.value) {
+  if (!bookId.value || isHistoricalBook.value) {
     return;
   }
   loading.value = true;
@@ -98,6 +103,7 @@ onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
     initializeBook(books.value);
+    await load();
   } catch {
     error.value = "无法加载独立账簿。";
   }

@@ -7,8 +7,8 @@
         <p>按独立当前账已过账凭证计算损益;不混入历史归档。</p>
       </div>
       <div class="heading-actions">
-        <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
-        <el-button :disabled="!bookId" @click="printReport">打印</el-button>
+        <el-button :loading="loading" :disabled="!bookId || isHistoricalBook" @click="load">查询</el-button>
+        <el-button :disabled="!bookId || isHistoricalBook" @click="printReport">打印</el-button>
       </div>
     </div>
 
@@ -21,6 +21,8 @@
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
+    <el-alert v-else-if="isHistoricalBook" type="warning" :closable="false" show-icon title="金蝶迁移账簿的利润表科目待映射；请使用科目余额表和明细账核对原始已过账数据。" />
+
     <el-descriptions v-else title="利润表" :column="3" border>
       <el-descriptions-item label="收入">{{ money(profit.total_income) }}</el-descriptions-item>
       <el-descriptions-item label="费用">{{ money(profit.total_expense) }}</el-descriptions-item>
@@ -31,7 +33,7 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceBook,
@@ -39,18 +41,21 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { bookId, initializeBook, isReadonly } = useMumarenFinanceBook();
 const period = ref("");
 const profit = ref<Partial<MumarenProfitStatement>>({});
 const error = ref("");
 const loading = ref(false);
+const isHistoricalBook = computed(() =>
+  isReadonly.value || Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly),
+);
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 const printReport = () => window.print();
 
 const load = async () => {
-  if (!bookId.value) return;
+  if (!bookId.value || isHistoricalBook.value) return;
   loading.value = true;
   error.value = "";
   try {

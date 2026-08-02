@@ -66,6 +66,32 @@ test('每日经营参数和每日广告费仅撤销前端入口，保留数据�
   assert.match(api, /daily-ad-costs/)
 })
 
+test('金蝶迁移账簿在历史查询页和核心汇总页初始化后会自动读取已有数据', () => {
+  const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
+  const voucherSummary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
+  const ledgerDetail = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceLedgerDetail.vue')
+  const balanceSheet = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportBalanceSheet.vue')
+  const cashFlow = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportCashFlow.vue')
+
+  assert.match(history, /listVouchers\(\{ book_id: bookId\.value \}\)/)
+  assert.match(history, /金蝶迁移凭证/)
+  for (const page of [voucherSummary, ledgerDetail, balanceSheet, cashFlow]) {
+    assert.match(page, /initializeBook\(books\.value\)[\s\S]*await load\(\)/)
+  }
+})
+
+test('未确认报表映射的金蝶迁移账簿不会把三张正式报表伪装为可用', () => {
+  for (const filename of [
+    'MumarenFinanceReportBalanceSheet.vue',
+    'MumarenFinanceReportProfit.vue',
+    'MumarenFinanceReportCashFlow.vue',
+  ]) {
+    const page = read('src', 'views', 'mumaren-finance-center', filename)
+    assert.match(page, /isReadonly/)
+    assert.match(page, /待映射/)
+  }
+})
+
 test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {
   const router = read('src', 'router', 'index.ts')
 
@@ -703,11 +729,11 @@ test('辅助核算页面使用独立后端的 parent_id 和 is_active 契约显�
   assert.match(api, /request\.put<ApiResponse<MumarenAuxiliaryAccounting>>\(requestPath\(`\/auxiliary-accountings\/\$\{id\}`\), data\)/)
 })
 
-test('历史归档页面必须只读,不出现编辑/审核/过账操作按钮', () => {
+test('金蝶迁移凭证页只读查询迁移账簿,不出现编辑/审核/过账操作按钮', () => {
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
 
-  assert.match(history, /历史数据|is_readonly|只读/)
-  assert.match(history, /listHistory/)
+  assert.match(history, /金蝶迁移|is_readonly|只读/)
+  assert.match(history, /listVouchers\(\{ book_id: bookId\.value \}\)/)
   assert.doesNotMatch(history, /reviewVoucher|postVoucher|createVoucher|deleteVoucher|reviewArApOrder|settleArApOrder|payTaxRecord|request\.post\(|request\.put\(|request\.delete\(/)
 })
 

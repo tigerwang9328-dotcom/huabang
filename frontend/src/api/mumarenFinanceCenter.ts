@@ -200,6 +200,11 @@ export interface MumarenFinanceVoucher {
   status: "draft" | "reviewed" | "posted";
   total_debit: number;
   total_credit: number;
+  /** 金蝶迁移凭证的只读来源标记；普通当前账为空。 */
+  source_system?: string | null;
+  source_database?: string | null;
+  is_readonly?: boolean;
+  is_normalized?: boolean;
 }
 
 export interface MumarenFinanceHistoryVoucher {
