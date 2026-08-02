@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">财务报表</p>
         <h2>应收明细</h2>
-        <p>按客户展开应收明细与账龄分桶。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入应收业务单据与账龄；请通过原始凭证、明细账和余额快照核对。" : "按客户展开应收明细与账龄分桶。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
@@ -12,12 +12,13 @@
     </div>
 
     <div class="filters">
-      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="load">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-else-if="isReadonly" type="warning" title="金蝶迁移账簿未导入应收业务单据与账龄，当前页面不以零余额表示历史应收。" :closable="false" show-icon />
 
     <template v-else-if="aging">
       <el-descriptions :column="2" border>
@@ -48,20 +49,20 @@
       </el-table>
     </template>
 
-    <el-empty v-else-if="!error" description="请选择独立账簿后查询应收明细" />
+    <el-empty v-else-if="!error && !isReadonly" description="请选择独立账簿后查询应收明细" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, ref } from "vue";
-import { mumarenFinanceCenterApi, type MumarenArApAging, type MumarenFinanceBook } from "@/api/mumarenFinanceCenter";
+import { mumarenFinanceCenterApi, type MumarenArApAging } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const aging = ref<MumarenArApAging>();
 const error = ref("");
 const loading = ref(false);
+let loadRequestVersion = 0;
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -69,26 +70,47 @@ const money = (value?: number) =>
 const bucketKeys = computed<string[]>(() => (aging.value ? Object.keys(aging.value.buckets) : []));
 
 const load = async () => {
-  if (!bookId.value) {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
     aging.value = undefined;
+    loading.value = false;
+    error.value = "";
+    return;
+  }
+  if (isReadonly.value) {
+    aging.value = undefined;
+    loading.value = false;
+    error.value = "";
     return;
   }
   loading.value = true;
   error.value = "";
   try {
-    aging.value = (await mumarenFinanceCenterApi.getArApAging({ book_id: bookId.value, order_type: "receivable" })).data.data;
+    const response = await mumarenFinanceCenterApi.getArApAging({ book_id: requestedBookId, order_type: "receivable" });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    aging.value = response.data.data;
   } catch {
-    error.value = "无法加载应收账龄数据。";
-    aging.value = undefined;
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) {
+      error.value = "无法加载应收账龄数据。";
+      aging.value = undefined;
+    }
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
+};
+
+const onBookChange = () => {
+  loadRequestVersion += 1;
+  aging.value = undefined;
+  loading.value = false;
+  error.value = "";
+  void load();
 };
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }

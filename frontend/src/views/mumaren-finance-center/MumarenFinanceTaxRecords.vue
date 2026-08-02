@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">报表</p>
         <h2>税金明细表</h2>
-        <p>按独立账簿展示税务记录明细;只读。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入税务业务台账；请通过原始凭证、明细账和余额快照核对。" : "按独立账簿展示税务记录明细;只读。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
@@ -18,6 +18,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-else-if="isReadonly" type="warning" title="金蝶迁移账簿未导入税务业务台账，当前页面不以空表或无预警表示历史税务为零。" :closable="false" show-icon />
 
     <template v-else-if="loaded">
       <el-table :data="records" empty-text="暂无独立税务记录" stripe>
@@ -50,16 +51,15 @@ import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { onMounted, ref } from "vue";
 import {
   mumarenFinanceCenterApi,
-  type MumarenFinanceBook,
   type MumarenTaxRecord,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const records = ref<MumarenTaxRecord[]>([]);
 const error = ref("");
 const loading = ref(false);
 const loaded = ref(false);
+let loadRequestVersion = 0;
 
 const money = (value: number | undefined) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -68,25 +68,44 @@ const money = (value: number | undefined) =>
 const statusLabel = (s: string) => (s === "paid" ? "已缴" : "未缴");
 
 const load = async () => {
-  if (!bookId.value) {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
+    records.value = [];
     loaded.value = false;
+    loading.value = false;
+    error.value = "";
+    return;
+  }
+  if (isReadonly.value) {
+    records.value = [];
+    loaded.value = false;
+    loading.value = false;
+    error.value = "";
     return;
   }
   loading.value = true;
   error.value = "";
   try {
-    records.value = (await mumarenFinanceCenterApi.listTaxRecords({ book_id: bookId.value })).data.data;
+    const response = await mumarenFinanceCenterApi.listTaxRecords({ book_id: requestedBookId });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    records.value = response.data.data;
     loaded.value = true;
   } catch {
-    error.value = "无法加载独立税务明细。";
-    loaded.value = false;
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) {
+      error.value = "无法加载独立税务明细。";
+      loaded.value = false;
+    }
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 const onBookChange = () => {
   // 切换账簿时清空已加载数据,必须由用户主动点击"查询"
+  loadRequestVersion += 1;
+  loading.value = false;
+  error.value = "";
   loaded.value = false;
   records.value = [];
 };
@@ -95,8 +114,7 @@ onMounted(async () => {
   // 仅加载账簿列表,不自动选择账簿,不自动请求税务接口。
   // 用户必须主动选择独立账簿后才能查询税务明细(沿用 Tax.vue 约定)。
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
   } catch {
     error.value = "无法加载独立账簿。";
   }
