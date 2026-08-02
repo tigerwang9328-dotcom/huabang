@@ -24,6 +24,16 @@ def test_new_router_exposes_isolated_trial_balance_and_profit_statement_endpoint
     assert "/finance-center/mumaren/reports/profit-statement" in paths
 
 
+def test_report_endpoints_scope_the_service_read_to_the_requested_book():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center)
+
+    assert "get_trial_balance(db, book_id=book_id, period=period)" in source
+    assert "get_profit_statement(db, book_id=book_id, period=period)" in source
+    assert "get_cash_flow_statement(db, book_id=book_id, period=period)" in source
+
+
 def test_new_router_exposes_readonly_kingdee_balance_snapshot_endpoint():
     from app.api.v1.mumaren_finance_center import router
 

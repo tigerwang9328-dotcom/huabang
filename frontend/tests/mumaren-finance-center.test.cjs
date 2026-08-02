@@ -181,7 +181,7 @@ test('明细账查询真实已过账分录，不再按凭证头摘要模糊匹�
   assert.doesNotMatch(page, /summary\.includes\(keyword\)/)
 })
 
-test('未确认报表映射的金蝶迁移账簿不会把三张正式报表伪装为可用', () => {
+test('金蝶迁移账簿在三张正式报表中展示真实只读汇总，打印与导出仍受限', () => {
   for (const filename of [
     'MumarenFinanceReportBalanceSheet.vue',
     'MumarenFinanceReportProfit.vue',
@@ -189,7 +189,9 @@ test('未确认报表映射的金蝶迁移账簿不会把三张正式报表伪�
   ]) {
     const page = read('src', 'views', 'mumaren-finance-center', filename)
     assert.match(page, /isReadonly/)
-    assert.match(page, /待映射/)
+    assert.match(page, /金蝶迁移账簿只读/)
+    assert.doesNotMatch(page, /v-else-if="isHistoricalBook"/)
+    assert.doesNotMatch(page, /:loading="loading" :disabled="!bookId \|\| isHistoricalBook" @click="load"/)
   }
 })
 
@@ -1160,4 +1162,26 @@ test('录凭证快捷操作左对齐，金额汇总独立靠右并支持小屏�
   assert.match(page, /<div class="totals">[\s\S]*借方[\s\S]*贷方[\s\S]*差额[\s\S]*<\/div>/)
   assert.match(page, /\.voucher-actions\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:/)
   assert.match(page, /@media \(max-width: 640px\)[\s\S]*\.dialog-toolbar\s*\{[^}]*align-items:\s*flex-start/)
+})
+
+test('金蝶历史账簿报表仍查询同一账簿数据，且不允许旧响应覆盖新的账簿选择', () => {
+  const balanceSheet = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportBalanceSheet.vue')
+  const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
+  const cashFlow = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportCashFlow.vue')
+  const trial = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportTrialBalance.vue')
+
+  for (const source of [balanceSheet, profit, cashFlow]) {
+    assert.doesNotMatch(source, /:loading="loading" :disabled="!bookId \|\| isHistoricalBook" @click="load"/)
+    assert.doesNotMatch(source, /v-else-if="isHistoricalBook"/)
+    assert.match(source, /const requestedBookId = bookId\.value;/)
+    assert.match(source, /const requestVersion = \+\+loadRequestVersion;/)
+    assert.match(source, /requestVersion !== loadRequestVersion \|\| requestedBookId !== bookId\.value/)
+    assert.match(source, /:disabled="!bookId \|\| isHistoricalBook"[^\n]*@(click|click)=/)
+  }
+
+  assert.match(trial, /const requestedBookId = bookId\.value;/)
+  assert.match(trial, /const requestVersion = \+\+loadRequestVersion;/)
+  assert.match(trial, /requestVersion !== loadRequestVersion \|\| requestedBookId !== bookId\.value/)
+  assert.match(profit, /const onBookChange = async \(\) => \{\s*await load\(\);\s*\};/)
+  assert.match(trial, /const onBookChange = async \(\) => \{\s*await load\(\);\s*\};/)
 })

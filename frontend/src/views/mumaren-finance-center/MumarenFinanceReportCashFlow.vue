@@ -7,7 +7,7 @@
         <p>按现金类科目派生经营/投资/筹资活动现金流。</p>
       </div>
       <div class="heading-actions">
-        <el-button :loading="loading" :disabled="!bookId || isHistoricalBook" @click="load">查询</el-button>
+        <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
         <el-button :disabled="!bookId || isHistoricalBook" @click="printReport">打印</el-button>
         <el-button :disabled="!bookId || isHistoricalBook" @click="exportStatement">导出</el-button>
       </div>
@@ -21,9 +21,9 @@
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
-    <el-alert v-else-if="isHistoricalBook" type="warning" :closable="false" show-icon title="金蝶迁移账簿的现金流量表科目待映射；请使用科目余额表和明细账核对原始已过账数据。" />
+    <el-alert v-if="isHistoricalBook" type="info" :closable="false" show-icon title="金蝶迁移账簿只读；以下数据按该账簿已过账凭证和现金科目汇总。" />
 
-    <template v-else-if="bookId">
+    <template v-if="bookId">
       <el-table :data="activities" empty-text="暂无现金类科目数据" stripe size="small">
         <el-table-column prop="category" label="活动类别" min-width="140" />
         <el-table-column label="现金流入" align="right">
@@ -71,6 +71,7 @@ const statement = ref<MumarenCashFlowStatement>({
 });
 const error = ref("");
 const loading = ref(false);
+let loadRequestVersion = 0;
 const isHistoricalBook = computed(() =>
   isReadonly.value || Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly),
 );
@@ -85,17 +86,26 @@ const activities = computed(() => [
 ]);
 
 const load = async () => {
-  if (!bookId.value || isHistoricalBook.value) {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
+    statement.value = {
+      sections: { operating: { inflow: 0, outflow: 0, net: 0 }, investing: { inflow: 0, outflow: 0, net: 0 }, financing: { inflow: 0, outflow: 0, net: 0 } },
+      total_inflow: 0, total_outflow: 0, total_net: 0, cash_net_increase: 0,
+    };
+    loading.value = false;
     return;
   }
   loading.value = true;
   error.value = "";
   try {
-    statement.value = (await mumarenFinanceCenterApi.getCashFlowStatement({ book_id: bookId.value })).data.data;
+    const result = await mumarenFinanceCenterApi.getCashFlowStatement({ book_id: requestedBookId });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value) return;
+    statement.value = result.data.data;
   } catch {
-    error.value = "无法加载现金流量表数据。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) error.value = "无法加载现金流量表数据。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 

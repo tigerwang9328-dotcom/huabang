@@ -48,41 +48,43 @@ const period = ref("");
 const trialRows = ref<MumarenTrialBalanceRow[]>([]);
 const error = ref("");
 const loading = ref(false);
+let loadRequestVersion = 0;
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestedPeriod = period.value || undefined;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
+    trialRows.value = [];
+    loading.value = false;
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
     const result = await mumarenFinanceCenterApi.getTrialBalance({
-      book_id: bookId.value,
-      period: period.value || undefined,
+      book_id: requestedBookId,
+      period: requestedPeriod,
     });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedPeriod !== (period.value || undefined)) return;
     trialRows.value = result.data.data.rows || [];
   } catch {
-    error.value = "无法加载独立当前账科目余额表。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && requestedPeriod === (period.value || undefined)) error.value = "无法加载独立账簿科目余额表。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 const onBookChange = async () => {
-  // 选择账簿后自动加载第一个账簿
-  if (bookId.value) {
-    await load();
-  } else {
-    trialRows.value = [];
-  }
+  await load();
 };
 
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
-    // 自动加载第一个账簿
     initializeBook(books.value);
     if (bookId.value) await load();
   } catch {
