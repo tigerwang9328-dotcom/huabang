@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">凭证管理</p>
         <h2>凭证模板</h2>
-        <p>模板保存科目和借贷分录；套用只预填录凭证草稿，仍须人工审核、人工过账。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入可维护凭证模板；请查询原始凭证、明细账和余额快照。" : "模板保存科目和借贷分录；套用只预填录凭证草稿，仍须人工审核、人工过账。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -18,9 +18,9 @@
       </el-select>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能维护或套用凭证模板。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入可维护凭证模板，当前页面不以空表表示历史模板为零。" :closable="false" show-icon />
 
-    <el-table v-loading="loading" :data="templates" empty-text="暂无凭证模板" stripe>
+    <el-table v-if="!isReadonly" v-loading="loading" :data="templates" empty-text="暂无凭证模板" stripe>
       <el-table-column prop="template_name" label="模板名称" min-width="150" show-overflow-tooltip />
       <el-table-column prop="voucher_type" label="凭证字" width="88" />
       <el-table-column label="分录" width="90" align="right"><template #default="{ row }">{{ row.lines_json?.lines.length || 0 }} 行</template></el-table-column>
@@ -93,23 +93,25 @@ const load = async () => {
   const requestedBookId = bookId.value;
   const version = ++templateRequestVersion;
   if (!requestedBookId) { templates.value = []; error.value = ""; loading.value = false; return; }
+  if (isReadonly.value) { templates.value = []; error.value = ""; loading.value = false; return; }
   loading.value = true; error.value = "";
   try {
     const rows = (await voucherTemplatesApi.list({ book_id: requestedBookId })).data.data;
-    if (version === templateRequestVersion && requestedBookId === bookId.value) templates.value = rows;
+    if (version === templateRequestVersion && requestedBookId === bookId.value && !isReadonly.value) templates.value = rows;
   } catch {
-    if (version === templateRequestVersion && requestedBookId === bookId.value) error.value = "无法加载凭证模板。";
+    if (version === templateRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载凭证模板。";
   } finally {
-    if (version === templateRequestVersion && requestedBookId === bookId.value) loading.value = false;
+    if (version === templateRequestVersion) loading.value = false;
   }
 };
 const loadAccounts = async () => {
   const requestedBookId = bookId.value;
   const version = ++accountRequestVersion;
   if (!requestedBookId) { accounts.value = []; return; }
+  if (isReadonly.value) { accounts.value = []; return; }
   try {
     const result = await mumarenFinanceCenterApi.listAccounts(requestedBookId);
-    if (version === accountRequestVersion && requestedBookId === bookId.value) accounts.value = result.data.data;
+    if (version === accountRequestVersion && requestedBookId === bookId.value && !isReadonly.value) accounts.value = result.data.data;
   } catch { if (version === accountRequestVersion) accounts.value = []; }
 };
 const reloadForBook = async () => { await Promise.all([load(), loadAccounts()]); };

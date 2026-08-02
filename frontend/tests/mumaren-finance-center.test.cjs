@@ -139,6 +139,11 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   const expense = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportExpense.vue')
   const salesMonthly = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportSalesMonthly.vue')
   const auxiliary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceSettingsAuxiliary.vue')
+  const taxRecords = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTaxRecords.vue')
+  const receivable = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportReceivable.vue')
+  const payable = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportPayable.vue')
+  const voucherTemplate = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherTemplate.vue')
+  const voucherAuto = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherAuto.vue')
 
   assert.match(compass, /v-else-if="isReadonly"/)
   assert.match(compass, /余额快照核对/)
@@ -161,6 +166,10 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
     assert.match(page, /金蝶迁移账簿未导入/)
     assert.match(page, /if \(isReadonly\.value\)/)
     assert.match(page, /loadRequestVersion/)
+  }
+  for (const page of [taxRecords, receivable, payable, voucherTemplate, voucherAuto]) {
+    assert.match(page, /金蝶迁移账簿未导入/)
+    assert.match(page, /if\s*\(isReadonly\.value\)/)
   }
 })
 
@@ -417,8 +426,8 @@ test('展示类页面调用明确的独立财务接口', () => {
     { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'getLedgerLines'] },
     { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },
     { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getCashFlowStatement'] },
-    { file: 'MumarenFinanceReportReceivable.vue', apis: ['listBooks', 'getArApAging'] },
-    { file: 'MumarenFinanceReportPayable.vue', apis: ['listBooks', 'getArApAging'] },
+    { file: 'MumarenFinanceReportReceivable.vue', apis: ['loadBooks', 'getArApAging'] },
+    { file: 'MumarenFinanceReportPayable.vue', apis: ['loadBooks', 'getArApAging'] },
   ]
   for (const { file, apis } of derivedPages) {
     const source = read('src', 'views', 'mumaren-finance-center', file)
