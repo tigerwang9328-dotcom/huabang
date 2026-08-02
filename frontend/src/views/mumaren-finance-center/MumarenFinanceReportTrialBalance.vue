@@ -21,7 +21,7 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <el-alert v-if="hasPendingHistoricalMapping" type="warning" :closable="false" show-icon :title="mappingWarning" />
 
-    <el-table v-else :data="trialRows" empty-text="暂无已过账数据" stripe>
+    <el-table v-if="!error" :data="trialRows" empty-text="暂无已过账数据" stripe>
       <el-table-column prop="account_code" label="科目编码" />
       <el-table-column prop="account_name" label="科目名称" min-width="180" />
       <el-table-column label="借方" align="right">

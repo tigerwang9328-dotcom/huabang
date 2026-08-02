@@ -1219,6 +1219,8 @@ test('金蝶未分类科目不伪造三表映射，并向用户说明零值含�
   }
   assert.match(balanceSheet, /hasPendingHistoricalMapping/)
   assert.match(balanceSheet, /if \(hasPendingHistoricalMapping\.value\) return "other"/)
+  assert.match(trial, /<el-table v-if="!error"/)
+  assert.doesNotMatch(trial, /<el-table v-else/)
 })
 
 test('税务草稿仅在当前账簿可删除，金蝶历史账簿不提供删除入口', () => {
