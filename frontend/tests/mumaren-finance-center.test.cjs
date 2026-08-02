@@ -134,11 +134,21 @@ test('金蝶余额快照有独立只读查询页，不混入当前账报表', ()
   assert.match(history, /余额快照核对/)
   assert.match(router, /history\/balance-snapshots/)
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistoryBalanceSnapshots.vue')
-  assert.match(page, /filter\(\(book\) => book\.is_readonly\)/)
+  assert.match(page, /isHistoricalBook/)
   assert.match(page, /getHistoryBalanceSnapshots/)
   assert.match(page, /offset/)
   assert.match(page, /加载更多/)
   assert.doesNotMatch(page, /request\.post\(|request\.put\(|request\.delete\(/)
+})
+
+test('余额快照页不应覆盖全局账簿选择，当前账只提示无金蝶快照', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistoryBalanceSnapshots.vue')
+
+  assert.match(page, /initializeBook\(books\.value\)/)
+  assert.doesNotMatch(page, /initializeBook\(readonlyBooks\.value\)/)
+  assert.doesNotMatch(page, /bookId\.value = readonlyBooks\.value\[0\]/)
+  assert.match(page, /isHistoricalBook/)
+  assert.match(page, /当前账簿没有金蝶迁移余额快照/)
 })
 
 test('金蝶迁移凭证与汇总查询至少覆盖单账簿 339 张凭证', () => {
