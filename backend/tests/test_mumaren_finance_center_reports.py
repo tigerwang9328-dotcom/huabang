@@ -24,14 +24,64 @@ def test_new_router_exposes_isolated_trial_balance_and_profit_statement_endpoint
     assert "/finance-center/mumaren/reports/profit-statement" in paths
 
 
-def test_report_endpoints_scope_the_service_read_to_the_requested_book():
-    from app.api.v1 import mumaren_finance_center
+def test_history_book_report_reads_only_its_own_posted_voucher_lines():
+    from app.models.mumaren_finance_center import (
+        FinanceCenterMumarenAccount,
+        FinanceCenterMumarenVoucherLine,
+    )
+    from app.services.mumaren_finance_center.reports import get_trial_balance
 
-    source = __import__("inspect").getsource(mumaren_finance_center)
+    readonly_kingdee_books = [
+        SimpleNamespace(id=101, is_readonly=True, source_system="kingdee_history"),
+        SimpleNamespace(id=202, is_readonly=True, source_system="kingdee_history"),
+    ]
+    assert all(book.is_readonly and book.source_system == "kingdee_history" for book in readonly_kingdee_books)
 
-    assert "get_trial_balance(db, book_id=book_id, period=period)" in source
-    assert "get_profit_statement(db, book_id=book_id, period=period)" in source
-    assert "get_cash_flow_statement(db, book_id=book_id, period=period)" in source
+    accounts_by_book = {
+        101: [_account(1, "1001", "金蝶A现金", "asset"), _account(2, "6001", "金蝶A收入", "income", "credit")],
+        202: [_account(3, "1002", "金蝶B现金", "asset"), _account(4, "6002", "金蝶B收入", "income", "credit")],
+    }
+    posted_lines_by_book = {
+        101: [
+            SimpleNamespace(account_id=1, debit_amount=Decimal("10"), credit_amount=Decimal("0")),
+            SimpleNamespace(account_id=2, debit_amount=Decimal("0"), credit_amount=Decimal("10")),
+        ],
+        202: [
+            SimpleNamespace(account_id=3, debit_amount=Decimal("99"), credit_amount=Decimal("0")),
+            SimpleNamespace(account_id=4, debit_amount=Decimal("0"), credit_amount=Decimal("99")),
+        ],
+    }
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return self.rows
+
+        def all(self):
+            return self.rows
+
+    class TwoBookReadOnlyDb:
+        async def execute(self, statement):
+            entity = statement.column_descriptions[0].get("entity")
+            book_id = next(value for key, value in statement.compile().params.items() if key.startswith("book_id"))
+            if entity is FinanceCenterMumarenAccount:
+                return Result(accounts_by_book[book_id])
+            if entity is FinanceCenterMumarenVoucherLine:
+                return Result(posted_lines_by_book[book_id])
+            return Result([])
+
+    first_report = asyncio.run(get_trial_balance(TwoBookReadOnlyDb(), book_id=readonly_kingdee_books[0].id))
+    second_report = asyncio.run(get_trial_balance(TwoBookReadOnlyDb(), book_id=readonly_kingdee_books[1].id))
+
+    assert first_report["total_debit"] == Decimal("10")
+    assert first_report["total_credit"] == Decimal("10")
+    assert {row["account_name"] for row in first_report["rows"]} == {"金蝶A现金", "金蝶A收入"}
+    assert all("金蝶B" not in row["account_name"] for row in first_report["rows"])
+    assert second_report["total_debit"] == Decimal("99")
+    assert {row["account_name"] for row in second_report["rows"]} == {"金蝶B现金", "金蝶B收入"}
+    assert all("金蝶A" not in row["account_name"] for row in second_report["rows"])
 
 
 def test_new_router_exposes_readonly_kingdee_balance_snapshot_endpoint():
