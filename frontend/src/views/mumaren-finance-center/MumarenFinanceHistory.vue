@@ -1,5 +1,5 @@
 <template>
-  <section class="panel"><div class="heading"><div><p class="panel-kicker">金蝶迁移数据</p><h2>金蝶迁移凭证</h2><p>按账簿查看三套金蝶迁移凭证；迁移账簿永久只读，不混入当前账。</p></div><el-button :loading="loading" :disabled="!bookId" @click="load">刷新</el-button></div>
+  <section class="panel"><div class="heading"><div><p class="panel-kicker">金蝶迁移数据</p><h2>金蝶迁移凭证</h2><p>按账簿查看三套金蝶迁移凭证；迁移账簿永久只读，不混入当前账。</p></div><div><router-link to="/app/finance-center/mumaren/history/balance-snapshots"><el-button>余额快照核对</el-button></router-link><el-button :loading="loading" :disabled="!bookId" @click="load">刷新</el-button></div></div>
     <el-select v-model="bookId" placeholder="选择金蝶迁移账簿" clearable @change="load"><el-option v-for="book in readonlyBooks" :key="book.id" :label="book.book_name" :value="book.id" /></el-select>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <el-empty v-else-if="!bookId" description="请选择金蝶迁移账簿" />

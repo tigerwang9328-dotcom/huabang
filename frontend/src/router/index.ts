@@ -74,6 +74,7 @@ const routes = [
           { path: "compass", name: "MumarenFinanceCompass", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCompass.vue"), meta: { title: "数据罗盘" } },
           // 历史数据存档
           { path: "history", name: "MumarenFinanceHistory", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistory.vue"), meta: { title: "历史数据存档" } },
+          { path: "history/balance-snapshots", name: "MumarenFinanceHistoryBalanceSnapshots", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistoryBalanceSnapshots.vue"), meta: { title: "余额快照核对" } },
           // 凭证(5 子项)
           { path: "vouchers", redirect: "/app/finance-center/mumaren/vouchers/list" },
           { path: "vouchers/create", name: "MumarenFinanceVoucherCreate", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherCreate.vue"), meta: { title: "录凭证" } },
