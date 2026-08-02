@@ -14,7 +14,8 @@
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <template v-else-if="isReadonly">
-      <el-alert type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入应收应付业务单据，不能据此生成账龄；请通过原始凭证、明细账和余额快照核对。" />
+      <MumarenFinanceHistoricalSourceNotice :readonly="isReadonly" module-key="ar-ap-aging" />
+      <p>金蝶迁移账簿未导入应收应付业务单据，不能据此生成账龄。</p>
       <div class="history-actions">
         <router-link to="/app/finance-center/mumaren/ledgers/detail"><el-button>查看明细账</el-button></router-link>
         <router-link to="/app/finance-center/mumaren/history/balance-snapshots"><el-button type="primary">余额快照核对</el-button></router-link>
@@ -41,6 +42,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { mumarenFinanceCenterApi, type MumarenArApAging } from "@/api/mumarenFinanceCenter";
 

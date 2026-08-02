@@ -9,7 +9,7 @@
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
         <el-button :disabled="!bookId || !orders.length" @click="exportLedger">导出当前台账</el-button>
-        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">录入{{ typeText }}草稿</el-button>
+        <el-button v-if="!isReadonly" type="primary" :disabled="!bookId" @click="openCreate">录入{{ typeText }}草稿</el-button>
       </div>
     </div>
 
@@ -32,7 +32,11 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-else-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入应收应付业务单据；当前页面不以空台账表示历史业务为零。" />
+    <MumarenFinanceHistoricalSourceNotice
+      v-else-if="isReadonly"
+      :readonly="isReadonly"
+      :module-key="orderType === 'receivable' ? 'ar-ap-receivable' : 'ar-ap-payable'"
+    />
     <el-alert v-else-if="summary && summary.total_count > orders.length" type="warning" :closable="false" show-icon title="明细最多显示最近 500 条；上方汇总已按当前筛选条件统计全部单据。" />
 
     <el-row v-if="!isReadonly" :gutter="12" class="metric-grid">
@@ -146,6 +150,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { arApOrdersApi, mumarenFinanceCenterApi, type ArApOrderLineInput, type MumarenArApOrder, type MumarenArApSummary } from "@/api/mumarenFinanceCenter";
 

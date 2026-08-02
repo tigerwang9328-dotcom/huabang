@@ -8,8 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button :disabled="!bookId || isReadonly" @click="openAccountDialog">新增账户</el-button>
-        <el-button type="primary" :disabled="!bookId || isReadonly || accounts.length === 0" @click="openTxnDialog">录入流水</el-button>
+        <el-button v-if="!isReadonly" :disabled="!bookId" @click="openAccountDialog">新增账户</el-button>
+        <el-button v-if="!isReadonly" type="primary" :disabled="!bookId || accounts.length === 0" @click="openTxnDialog">录入流水</el-button>
       </div>
     </div>
 
@@ -20,7 +20,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入出纳账户与资金流水，当前页面不以空表表示历史出纳数据为零。" :closable="false" show-icon />
+    <MumarenFinanceHistoricalSourceNotice :readonly="isReadonly" module-key="cashier-accounts" />
 
     <h3 v-if="!isReadonly" class="block-title">资金账户</h3>
     <el-table v-if="!isReadonly" v-loading="loading" :data="accounts" empty-text="暂无账户" stripe show-summary :summary-method="accountSummary">
@@ -118,6 +118,7 @@
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   cashAccountsApi,
   cashFlowsApi,

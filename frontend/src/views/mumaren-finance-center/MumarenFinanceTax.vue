@@ -8,8 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
-        <el-button :disabled="isReadonly || !bookId" @click="openCreate">录入草稿</el-button>
-        <el-button :disabled="isReadonly || !bookId" @click="openTaxTypes">管理税种</el-button>
+        <el-button v-if="!isReadonly" :disabled="!bookId" @click="openCreate">录入草稿</el-button>
+        <el-button v-if="!isReadonly" :disabled="!bookId" @click="openTaxTypes">管理税种</el-button>
       </div>
     </div>
     <div class="filters">
@@ -18,7 +18,7 @@
       </el-select>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-else-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入税务业务台账，当前页面不以空表或无预警表示历史税务为零。" />
+    <MumarenFinanceHistoricalSourceNotice v-else-if="isReadonly" :readonly="isReadonly" module-key="tax" />
     <template v-else-if="loaded">
       <el-alert v-if="alerts.length" type="warning" :closable="false" show-icon title="存在待处理税务预警">
         <template #default>
@@ -130,6 +130,7 @@
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   mumarenFinanceCenterApi,
   taxTypesApi,

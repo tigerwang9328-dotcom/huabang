@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">登记发票</el-button>
+        <el-button v-if="!isReadonly" type="primary" :disabled="!bookId" @click="openCreate">登记发票</el-button>
       </div>
     </div>
 
@@ -19,7 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-else-if="isReadonly" type="warning" title="金蝶迁移账簿未导入发票业务台账，当前页面不以空表表示历史发票为零。" :closable="false" show-icon />
+    <MumarenFinanceHistoricalSourceNotice v-else-if="isReadonly" :readonly="isReadonly" module-key="invoices" />
 
     <el-table v-if="!isReadonly" v-loading="loading" :data="invoices" empty-text="暂无发票记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="invoice_no" label="号码" width="130" />
@@ -95,6 +95,7 @@
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   invoicesApi,
   type MumarenFinanceBook,

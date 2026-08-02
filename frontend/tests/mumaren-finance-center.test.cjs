@@ -64,6 +64,37 @@ test('无金蝶来源的历史页面明确展示只读缺失状态且不提供�
   assert.doesNotMatch(source, /新增|保存|删除/)
 })
 
+test('运行时牧马人导航和实际历史账页面消费共享来源缺失状态', () => {
+  const navigation = read('src', 'config', 'mumarenFinanceCenter.ts')
+  const router = read('src', 'router', 'index.ts')
+  const notice = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistoricalSourceNotice.vue')
+
+  assert.match(navigation, /MumarenFinanceCapabilityAvailability\s*=\s*[^;]*["']historical_source_unavailable["']/)
+  for (const key of ['ar-ap-receivable', 'ar-ap-payable', 'ar-ap-aging', 'assets', 'invoices', 'cashier-accounts', 'cashier-reconciliation', 'payroll', 'tax']) {
+    assert.match(navigation, new RegExp(`key:\\s*["']${key}["'][\\s\\S]{0,240}?availability:\\s*["']historical_source_unavailable["']`))
+  }
+  assert.match(notice, /isMumarenHistoricalSourceUnavailable/)
+  assert.match(notice, /历史来源未迁入/)
+  assert.doesNotMatch(notice, /新增|保存|删除/)
+
+  for (const filename of [
+    'MumarenFinanceArAp.vue',
+    'MumarenFinanceArApAging.vue',
+    'MumarenFinanceAssets.vue',
+    'MumarenFinanceInvoices.vue',
+    'MumarenFinanceCashierAccounts.vue',
+    'MumarenFinanceCashierReconciliation.vue',
+    'MumarenFinancePayroll.vue',
+    'MumarenFinanceTax.vue',
+  ]) {
+    const page = read('src', 'views', 'mumaren-finance-center', filename)
+    assert.match(page, /MumarenFinanceHistoricalSourceNotice/)
+    assert.match(page, /:readonly="isReadonly"/)
+  }
+  assert.match(router, /MumarenFinanceAssets\.vue/)
+  assert.match(router, /MumarenFinanceTax\.vue/)
+})
+
 test('每日经营参数和每日广告费仅撤销前端入口，保留数据接口代码', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')

@@ -2,7 +2,10 @@ import type { FinanceNavigationItem } from "@/config/financeCenterModules";
 
 export const MUMAREN_FINANCE_CENTER_ROOT = "/app/finance-center/mumaren";
 
-export type MumarenFinanceCapabilityAvailability = "available" | "planned_backend";
+export type MumarenFinanceCapabilityAvailability = "available" | "planned_backend" | "historical_source_unavailable";
+
+export const MUMAREN_HISTORICAL_SOURCE_UNAVAILABLE_REASON =
+  "该类历史来源未迁入；历史凭证、余额快照和报表不受影响。";
 
 export interface MumarenFinanceCapability {
   title: string;
@@ -81,15 +84,15 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
     routeName: "MumarenFinanceArAp",
     availability: "available",
     children: [
-      { key: "ar-ap-receivable", title: "应收单台账", path: `${R}/ar-ap/receivable`, routeName: "MumarenFinanceReceivableLedger", availability: "available" },
-      { key: "ar-ap-payable", title: "应付单台账", path: `${R}/ar-ap/payable`, routeName: "MumarenFinancePayableLedger", availability: "available" },
-      { key: "ar-ap-aging", title: "账龄分析", path: `${R}/ar-ap/aging`, routeName: "MumarenFinanceArApAging", availability: "available" },
+      { key: "ar-ap-receivable", title: "应收单台账", path: `${R}/ar-ap/receivable`, routeName: "MumarenFinanceReceivableLedger", availability: "historical_source_unavailable" },
+      { key: "ar-ap-payable", title: "应付单台账", path: `${R}/ar-ap/payable`, routeName: "MumarenFinancePayableLedger", availability: "historical_source_unavailable" },
+      { key: "ar-ap-aging", title: "账龄分析", path: `${R}/ar-ap/aging`, routeName: "MumarenFinanceArApAging", availability: "historical_source_unavailable" },
     ],
   },
   { key: "closing", title: "结账", path: `${R}/closing`, routeName: "MumarenFinanceClosing", availability: "available" },
-  { key: "assets", title: "资产", path: `${R}/assets`, routeName: "MumarenFinanceAssets", availability: "available" },
-  { key: "invoices", title: "发票", path: `${R}/invoices`, routeName: "MumarenFinanceInvoices", availability: "available" },
-  { key: "payments", title: "付款", path: `${R}/payments`, routeName: "MumarenFinancePayments", availability: "available" },
+  { key: "assets", title: "资产", path: `${R}/assets`, routeName: "MumarenFinanceAssets", availability: "historical_source_unavailable" },
+  { key: "invoices", title: "发票", path: `${R}/invoices`, routeName: "MumarenFinanceInvoices", availability: "historical_source_unavailable" },
+  { key: "payments", title: "付款", path: `${R}/payments`, routeName: "MumarenFinancePayments", availability: "historical_source_unavailable" },
   {
     key: "cashier",
     title: "出纳",
@@ -97,12 +100,12 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
     routeName: "MumarenFinanceCashier",
     availability: "available",
     children: [
-      { key: "cashier-accounts", title: "账户与流水", path: `${R}/cashier/accounts`, routeName: "MumarenFinanceCashierAccounts", availability: "available" },
-      { key: "cashier-reconciliation", title: "银行余额调节表", path: `${R}/cashier/reconciliation`, routeName: "MumarenFinanceCashierReconciliation", availability: "available" },
+      { key: "cashier-accounts", title: "账户与流水", path: `${R}/cashier/accounts`, routeName: "MumarenFinanceCashierAccounts", availability: "historical_source_unavailable" },
+      { key: "cashier-reconciliation", title: "银行余额调节表", path: `${R}/cashier/reconciliation`, routeName: "MumarenFinanceCashierReconciliation", availability: "historical_source_unavailable" },
     ],
   },
-  { key: "payroll", title: "工资", path: `${R}/payroll`, routeName: "MumarenFinancePayroll", availability: "available" },
-  { key: "tax", title: "税务", path: `${R}/tax`, routeName: "MumarenFinanceTax", availability: "available" },
+  { key: "payroll", title: "工资", path: `${R}/payroll`, routeName: "MumarenFinancePayroll", availability: "historical_source_unavailable" },
+  { key: "tax", title: "税务", path: `${R}/tax`, routeName: "MumarenFinanceTax", availability: "historical_source_unavailable" },
   {
     key: "settings",
     title: "设置",
@@ -130,6 +133,11 @@ export const flattenMumarenFinanceNavigation = (): MumarenFinanceNavItem[] => {
   walk(mumarenFinanceNavigation);
   return result;
 };
+
+export const isMumarenHistoricalSourceUnavailable = (key: string): boolean =>
+  flattenMumarenFinanceNavigation().some(
+    (item) => item.key === key && item.availability === "historical_source_unavailable",
+  );
 
 // 主侧边栏"财务中心"菜单项:可展开,children 为 13 个一级条目(其中有子项的再展开)。
 export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
