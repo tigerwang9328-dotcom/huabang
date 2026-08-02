@@ -371,3 +371,23 @@ async def replenish_starter_accounts(
     ))
     await db.flush()
     return added
+
+
+async def update_book(
+    db: AsyncSession, *, book_id: int, book_name: str | None, company_name: str | None,
+    operator_id: int,
+) -> FinanceCenterMumarenBook:
+    """Update only current-book display metadata; a Kingdee book remains immutable."""
+    book = await assert_book_writable(db, book_id=book_id)
+    if book_name is not None:
+        normalized_name = book_name.strip()
+        if not normalized_name:
+            raise ValueError("账簿名称不能为空")
+        book.book_name = normalized_name
+    if company_name is not None:
+        book.company_name = company_name.strip() or None
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=book_id, action="update_book", operator_id=operator_id, detail=book.book_code,
+    ))
+    await db.flush()
+    return book
