@@ -1,18 +1,23 @@
 <template>
-  <MumarenFinanceCapabilityBoard
+  <section
     v-if="item?.placeholder"
-    :title="item.title"
-    :summary="item.placeholder.summary"
-    :capabilities="capabilitiesWithAvailability"
-  />
+    class="historical-source-unavailable"
+    :data-availability="availability"
+  >
+    <el-empty description="历史来源未迁入">
+      <template #description>
+        <p>历史来源未迁入</p>
+        <p>{{ unavailableReason }}</p>
+      </template>
+    </el-empty>
+  </section>
   <el-empty v-else description="未配置占位信息" />
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { flattenMumarenFinanceNavigation, type MumarenFinanceCapability } from "@/config/mumarenFinanceCenter";
-import MumarenFinanceCapabilityBoard from "./MumarenFinanceCapabilityBoard.vue";
+import { flattenMumarenFinanceNavigation } from "@/config/mumarenFinanceCenter";
 
 const route = useRoute();
 
@@ -22,8 +27,17 @@ const item = computed(() => {
   return flattenMumarenFinanceNavigation().find((it) => it.key === key);
 });
 
-const capabilitiesWithAvailability = computed<MumarenFinanceCapability[]>(() => {
-  if (!item.value?.placeholder) return [];
-  return item.value.placeholder.capabilities.map((c) => ({ ...c, availability: "planned_backend" as const }));
-});
+const availability = "historical_source_unavailable";
+const unavailableReason = "该类历史来源未迁入；历史凭证、余额快照和报表不受影响。";
 </script>
+
+<style scoped>
+.historical-source-unavailable {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  border: 1px solid #e1e7ef;
+  border-radius: 14px;
+  background: #fff;
+}
+</style>

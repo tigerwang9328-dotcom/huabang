@@ -53,6 +53,17 @@ test('所有导航项 availability 全部为 available,无 planned_backend 占�
   assert.doesNotMatch(config, /badge:\s*['"]待适配['"]/)
 })
 
+test('无金蝶来源的历史页面明确展示只读缺失状态且不提供写入操作', () => {
+  const moduleConfig = read('src', 'config', 'financeCenterModules.ts')
+  const source = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePlaceholder.vue')
+
+  assert.match(moduleConfig, /availability:\s*["']historical_source_unavailable["']/)
+  assert.match(moduleConfig, /unavailableReason:\s*["']该类历史来源未迁入；历史凭证、余额快照和报表不受影响。["']/)
+  assert.match(source, /历史来源未迁入/)
+  assert.match(source, /historical_source_unavailable/)
+  assert.doesNotMatch(source, /新增|保存|删除/)
+})
+
 test('每日经营参数和每日广告费仅撤销前端入口，保留数据接口代码', () => {
   const config = read('src', 'config', 'mumarenFinanceCenter.ts')
   const router = read('src', 'router', 'index.ts')
