@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.9
+// @version      3.5.10
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.9';
+  const SCRIPT_VERSION = '3.5.10';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -34,8 +34,18 @@
   let runtimeConfig = null;
   let fixedCollectionInFlight = false;
   const observedAnalyses = new Map();
-  let paused = document.visibilityState !== 'visible';
+  // `paused` 只表示鉴权失效或抖音账号切换，不能把窗口失焦当成停止采集。
+  // Chrome 在后台会限速计时器，但仍可按小时继续执行；请求节流由队列锁统一控制。
+  let paused = false;
   let lastWakeCheckAt = now();
+  let lastClaimedCollectionHour = null;
+
+  function claimCollectionHour(epochMs = now()) {
+    const hour = Math.floor(epochMs / 3600000);
+    if (lastClaimedCollectionHour === hour) return false;
+    lastClaimedCollectionHour = hour;
+    return true;
+  }
 
   // v3.5.0: 启动时从 GM 存储加载已保存的 token,实现持久化
   const CONFIG_STORAGE_KEY = 'huabang:douyinColor:runtimeConfig';
@@ -49,15 +59,10 @@
       if (!control) { console.warn('[douyin-color] 已保存的令牌已失效,请重新配置'); GM_setValue(CONFIG_STORAGE_KEY, ''); return; }
       runtimeConfig = { ...parsed, max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
       console.info('[douyin-color] 已自动加载保存的令牌,采集器就绪');
-      const state = await queueState();
-      if (state.fullBackfillVersion !== SCRIPT_VERSION) {
-        // 每个脚本版本至多自动做一次完整回填；日常恢复只上传队列，
-        // 防止切换标签、网络恢复或五分钟心跳重复扫历史视频。
-        await mutateQueue((current) => { current.fullBackfillVersion = SCRIPT_VERSION; });
-        void startFixedCollection();
-      } else {
-        void runScheduledCollection();
-      }
+      // 每次页面打开或刷新都立即采集一次；随后由整点调度器继续采集。
+      // 小时标记仅保存在当前页面生命周期，刷新后的立即采集符合运营要求。
+      claimCollectionHour(now());
+      void startFixedCollection();
     } catch (e) { console.warn('[douyin-color] 加载保存的令牌失败:', e.message); }
   }
   function openQueueDb() {
@@ -297,26 +302,26 @@
     return response.status >= 200 && response.status < 300;
   }
   async function scheduledRequest(details) {
-    if (paused || document.visibilityState !== 'visible') return { status: 0, paused: true };
+    if (paused) return { status: 0, paused: true };
     return navigator.locks.request('huabang-douyin-color-v31-network', async () => {
       const delay = await mutateQueue((state) => {
         const startAt = Math.max(now(), Number(state.nextRequestStartAt || 0));
         state.nextRequestStartAt = startAt + 1000; return startAt - now();
       });
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-      if (paused || document.visibilityState !== 'visible') return { status: 0, paused: true };
+      if (paused) return { status: 0, paused: true };
       return request(details);
     });
   }
   async function scheduledPageFetch(url) {
-    if (paused || document.visibilityState !== 'visible') return null;
+    if (paused) return null;
     return navigator.locks.request('huabang-douyin-color-v31-network', async () => {
       const delay = await mutateQueue((state) => {
         const startAt = Math.max(now(), Number(state.nextRequestStartAt || 0));
         state.nextRequestStartAt = startAt + 1000; return startAt - now();
       });
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-      if (paused || document.visibilityState !== 'visible') return null;
+      if (paused) return null;
       return fetch(url);
     });
   }
@@ -391,14 +396,16 @@
     }
   }
   async function recoverPending() {
-    if (paused || !runtimeConfig?.uploadToken) return;
+    // 后台页面不再扫描目录或曲线，但必须维持采集器心跳并上传已采集队列。
+    // 这样独立窗口、切换后台标签或浏览器失焦不会把服务端状态误判为离线。
+    if (!runtimeConfig?.uploadToken) return;
     await heartbeat('online_active');
     await uploadPending();
   }
   async function runScheduledCollection() {
-    // 页面恢复、定时器和网络恢复只负责可靠上传；全量目录/曲线回填
-    // 只能由首次明确配置或菜单主动触发，避免重复请求全部历史作品。
+    // 每次调度先可靠上传；每个自然小时只允许一次目录及曲线采集。
     await recoverPending();
+    if (claimCollectionHour(now())) await startFixedCollection();
   }
   async function heartbeat(status) {
     const settings = await config(); if (!settings?.uploadToken) return;
@@ -464,10 +471,8 @@
     lastWakeCheckAt = now();
     if (document.visibilityState !== 'visible' || timerDriftMs <= 120000) return;
     await heartbeat('suspended');
-    paused = true;
     setTimeout(() => {
       if (document.visibilityState !== 'visible') return;
-      paused = false;
       void heartbeat('online_active');
       void runScheduledCollection();
     }, 5000);
@@ -520,6 +525,7 @@
         console.warn('[douyin-color] 创作者 ID 将在您浏览作品或数据中心时自动识别,无需手动输入');
       }
       console.info('[douyin-color] 令牌已保存,采集器就绪');
+      claimCollectionHour(now());
       void startFixedCollection();
       alert('令牌已保存成功！采集器已就绪。\n刷新页面或重启浏览器后无需重新配置。\n创作者 ID 将在浏览作品时自动识别。');
     });
@@ -533,9 +539,8 @@
     });
   }
   observePageRequests(); registerMenus(); void loadSavedConfig();
-  document.addEventListener('visibilitychange', () => { paused = document.visibilityState !== 'visible'; if (!paused) void runScheduledCollection(); });
-  window.addEventListener('pagehide', () => { paused = true; });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void recoverPending(); });
   window.addEventListener('online', () => void runScheduledCollection());
   setInterval(() => void detectTimerDrift(), 60 * 1000);
-  setInterval(() => void runScheduledCollection(), 5 * 60 * 1000);
+  setInterval(() => void runScheduledCollection(), 60 * 1000);
 }());

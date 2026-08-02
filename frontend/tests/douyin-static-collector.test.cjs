@@ -50,7 +50,7 @@ test("saved collector configuration reports and flushes pending work before a lo
   );
 });
 
-test("visibility and periodic recovery only heartbeat and upload, never repeat a full backfill", () => {
+test("scheduled collection uploads first and starts a single collection when an hourly window is claimed", () => {
   const heartbeatStart = script.indexOf("async function heartbeat(status)");
   const recovery = script.slice(script.indexOf("async function recoverPending()"), heartbeatStart);
   const scheduled = script.slice(script.indexOf("async function runScheduledCollection()"), heartbeatStart);
@@ -58,17 +58,16 @@ test("visibility and periodic recovery only heartbeat and upload, never repeat a
   assert.match(recovery, /await uploadPending\(\);/);
   assert.doesNotMatch(recovery, /collectCatalogPages|collectCatalogCurves/);
   assert.match(scheduled, /await recoverPending\(\);/);
-  assert.doesNotMatch(scheduled, /startFixedCollection/);
+  assert.match(scheduled, /claimCollectionHour\(now\(\)\)/);
+  assert.match(scheduled, /await startFixedCollection\(\);/);
 });
 
-test("saved configuration runs at most one full backfill per collector version", () => {
+test("saved configuration collects once for every page load, independent of script version", () => {
   const start = script.indexOf("async function loadSavedConfig()");
   const end = script.indexOf("function openQueueDb()", start);
   const body = script.slice(start, end);
-  assert.match(body, /state\.fullBackfillVersion !== SCRIPT_VERSION/);
-  assert.match(body, /current\.fullBackfillVersion = SCRIPT_VERSION/);
   assert.match(body, /void startFixedCollection\(\);/);
-  assert.match(body, /void runScheduledCollection\(\);/);
+  assert.doesNotMatch(body, /fullBackfillVersion/);
 });
 
 function response(body, status = 200) {
@@ -116,10 +115,11 @@ function createHarness(options = {}) {
     },
   };
   const listeners = new Map();
+  const document = { visibilityState: "visible", addEventListener: (name, fn) => listeners.set(name, fn) };
   const sandbox = {
     unsafeWindow: page,
     fetch: page.fetch,
-    document: { visibilityState: "visible", addEventListener: (name, fn) => listeners.set(name, fn) },
+    document,
     window: { addEventListener: (name, fn) => listeners.set(name, fn) },
     navigator: { locks: { request: async (_name, fn) => fn() } },
     location: { origin: "https://creator.douyin.com", pathname: "/creator-micro/data-center/content" },
@@ -146,9 +146,13 @@ function createHarness(options = {}) {
   const testScript = script.replace(marker, `
     PAGE_WINDOW.__huabangDouyinColorV31TestApi = {
       fixedCatalogUrl, fixedCurveUrl, recordFromAnalysis, collectCatalogPages,
-      collectCatalogCurves, startFixedCollection, runScheduledCollection, queueState, captureCatalog, enqueueObservedAnalysis,
+      collectCatalogCurves, startFixedCollection, runScheduledCollection, recoverPending, queueState, captureCatalog, enqueueObservedAnalysis,
+      claimCollectionHour: typeof claimCollectionHour === 'function' ? claimCollectionHour : null,
       setRuntimeConfig: (value) => { runtimeConfig = value; },
       setQueueState: async (value) => queueWrite(value),
+      setPaused: (value) => { paused = value; },
+      setPageVisibility: (value) => { document.visibilityState = value; },
+      recoveryCalls: [],
       getRuntimeConfig: () => structuredClone(runtimeConfig),
       getSavedRuntimeConfig: () => GM_getValue(CONFIG_STORAGE_KEY),
     };
@@ -156,8 +160,8 @@ function createHarness(options = {}) {
     // 网络副作用都由桩替代，保留目录与曲线采集行为供断言。
     const realHeartbeat = heartbeat;
     PAGE_WINDOW.__huabangDouyinColorV31TestApi.heartbeat = realHeartbeat;
-    heartbeat = async () => {};
-    uploadPending = async () => {};
+    heartbeat = async (status) => { PAGE_WINDOW.__huabangDouyinColorV31TestApi.recoveryCalls.push(['heartbeat', status]); };
+    uploadPending = async () => { PAGE_WINDOW.__huabangDouyinColorV31TestApi.recoveryCalls.push(['upload']); };
   `);
   assert.notEqual(testScript, script, "test injection marker must remain in the userscript");
   vm.runInNewContext(testScript, sandbox, { filename: "collector.user.js" });
@@ -175,6 +179,37 @@ test("heartbeat reports only unfinished local batches as pending", async () => {
   const payload = JSON.parse(request.data);
   assert.equal(payload.queued_batch_count, 1);
   assert.equal(payload.queued_bytes, new TextEncoder().encode(JSON.stringify({ batches: [pending] })).byteLength);
+});
+
+test("background recovery keeps heartbeat and uploads queued work without collecting catalog curves", async () => {
+  const { api } = createHarness();
+  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
+  api.setPageVisibility("hidden");
+
+  await api.recoverPending();
+
+  assert.equal(JSON.stringify(api.recoveryCalls), JSON.stringify([["heartbeat", "online_active"], ["upload"]]));
+});
+
+test("background collection is allowed and enqueues retention plus bounce", async () => {
+  const { api } = createHarness();
+  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
+  api.setPageVisibility("hidden");
+
+  await api.startFixedCollection();
+
+  const records = (await api.queueState()).batches.flatMap((batch) => batch.records.map((item) => item.record));
+  assert.equal(records.length, 1);
+  assert.equal(records[0].retention.analysis_type, 1);
+  assert.equal(records[0].platform_bounce.analysis_type, 7);
+});
+
+test("hourly collection claim accepts the first run in an hour and rejects duplicates", () => {
+  const { api } = createHarness();
+  assert.equal(typeof api.claimCollectionHour, "function");
+  assert.equal(api.claimCollectionHour(Date.UTC(2026, 7, 2, 14, 0, 0)), true);
+  assert.equal(api.claimCollectionHour(Date.UTC(2026, 7, 2, 14, 59, 59)), false);
+  assert.equal(api.claimCollectionHour(Date.UTC(2026, 7, 2, 15, 0, 0)), true);
 });
 
 test("automatic fixed collection enqueues retention and bounce without observed page requests", async () => {
@@ -221,14 +256,4 @@ test("observed retention and bounce responses are paired before upload", async (
 test("trend map data is never relabeled as a curve", () => {
   const { api } = createHarness();
   assert.equal(api.recordFromAnalysis({ trend_map: { metric: { 0: [{ date_time: "00:00", value: 1 }] } } }, 1, "video"), null);
-});
-
-test("periodic collector recovery does not repeat a failed full catalog backfill", async () => {
-  const { api, intervals } = createHarness({ catalogFailures: 1 });
-  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
-  await api.startFixedCollection();
-  assert.equal((await api.queueState()).batches.length, 0);
-  assert.ok(intervals.some((entry) => entry.delay === 5 * 60 * 1000), "collector retry interval must be registered");
-  await api.runScheduledCollection();
-  assert.equal((await api.queueState()).batches.length, 0);
 });
