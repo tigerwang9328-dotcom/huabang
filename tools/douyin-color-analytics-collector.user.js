@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.0
+// @version      3.5.3
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,18 +20,19 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.0';
+  const SCRIPT_VERSION = '3.5.3';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
+  const CATALOG_ENDPOINT = '/web/api/creator/item/list';
+  const CURVE_ENDPOINT = '/janus/douyin/creator/data/realtime/analysis/data_center';
   const SENSITIVE_KEY = /(?:token|cookie|authorization|signature|captcha|query|url|hash)/i;
   const now = () => Date.now();
   let installationId = null;
   const PAGE_WINDOW = unsafeWindow;
 
   let runtimeConfig = null;
-  let learnedCurveRequest = null;
-  let learnedCatalogRequest = null;
+  let fixedCollectionInFlight = false;
   let paused = document.visibilityState !== 'visible';
   let lastWakeCheckAt = now();
 
@@ -47,6 +48,7 @@
       if (!control) { console.warn('[douyin-color] 已保存的令牌已失效,请重新配置'); GM_setValue(CONFIG_STORAGE_KEY, ''); return; }
       runtimeConfig = { ...parsed, max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
       console.info('[douyin-color] 已自动加载保存的令牌,采集器就绪');
+      void startFixedCollection();
     } catch (e) { console.warn('[douyin-color] 加载保存的令牌失败:', e.message); }
   }
   function openQueueDb() {
@@ -103,6 +105,19 @@
   function currentVideoId() {
     const match = location.pathname.match(/work-detail\/(\d+)/);
     return match ? match[1] : null;
+  }
+  function fixedCatalogUrl() {
+    const url = new URL(CATALOG_ENDPOINT, location.origin);
+    url.searchParams.set('count', '20');
+    url.searchParams.set('cursor', '0');
+    return url;
+  }
+  function fixedCurveUrl(videoId, creatorId, analysisType) {
+    const url = new URL(CURVE_ENDPOINT, location.origin);
+    url.searchParams.set('item_id', String(videoId));
+    url.searchParams.set('user_id', String(creatorId));
+    url.searchParams.set('analysis_type', String(analysisType));
+    return url;
   }
   function curve(points) {
     return Array.isArray(points) ? points.filter((item) => item && typeof item.key === 'string' && Number.isFinite(item.value))
@@ -197,20 +212,13 @@
     });
     if (!accepted) await heartbeat('upload_blocked');
   }
-  async function captureCatalog(response, rawUrl) {
-    if (rawUrl) learnedCatalogRequest = rawUrl;
+  async function captureCatalog(response) {
     // 兼容新旧接口:aweme_list[] 或 items[]
     const list = Array.isArray(response?.aweme_list) ? response.aweme_list : (Array.isArray(response?.items) ? response.items : []);
     const catalogCreatorId = list.find((item) => item?.author_user_id || item?.user_id)?.author_user_id || list.find((item) => item?.user_id)?.user_id || null;
     const catalogNickname = list.find((item) => item?.author?.nickname)?.author?.nickname || list.find((item) => item?.nickname)?.nickname || null;
-    if (catalogCreatorId && runtimeConfig && !runtimeConfig.observedCreatorId) {
-      runtimeConfig.observedCreatorId = String(catalogCreatorId);
-      if (catalogNickname) runtimeConfig.observedAccountName = catalogNickname;
-      console.info('[douyin-color] 已从作品目录识别创作者:', runtimeConfig.observedCreatorId, runtimeConfig.observedAccountName || '(昵称待补)');
-    }
-    if (catalogNickname && runtimeConfig && !runtimeConfig.observedAccountName) {
-      runtimeConfig.observedAccountName = catalogNickname;
-    }
+    // 统一交给 guardObservedCreator 写回 GM 存储；不能先只改内存，
+    // 否则刷新后 observedCreatorId 丢失，待上传批次会被永久阻止。
     if (catalogCreatorId && !guardObservedCreator({ user_id: catalogCreatorId, author: { nickname: catalogNickname } })) return;
     const items = catalogItemsFromResponse(response); if (!items.length) return;
     await mutateQueue((state) => {
@@ -286,14 +294,15 @@
     });
   }
   async function collectCatalogCurves({ onlyDueObservationWindows = false } = {}) {
-    if (!learnedCurveRequest) return;
+    if (!runtimeConfig?.observedCreatorId) await collectCatalogPages();
+    const creatorId = runtimeConfig?.observedCreatorId;
+    if (!creatorId) return;
     const state = await queueState();
     for (const item of state.catalogItems || []) {
       if (onlyDueObservationWindows && !observationWindow(item.published_at_epoch_seconds)) continue;
       for (const analysisType of [1, 7]) {
       if (paused) return;
-      const url = new URL(learnedCurveRequest, location.origin);
-      url.searchParams.set('item_id', item.video_id); url.searchParams.set('analysis_type', String(analysisType));
+      const url = fixedCurveUrl(item.video_id, creatorId, analysisType);
       let response;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try { response = await scheduledPageFetch(url.toString()); } catch (_) { response = null; }
@@ -301,18 +310,21 @@
         if (response?.status === 401 || response?.status === 403) { paused = true; return; }
         if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, Math.min(60000, 1000 * (2 ** attempt) + Math.floor(Math.random() * 501))));
       }
-      if (!response?.ok) {
-        await mutateQueue((current) => {
-          current.curveFailures = current.curveFailures || [];
-          current.curveFailures.push({ video_id: item.video_id, analysis_type: analysisType, attempts: 5, http_status: Number(response?.status || 0) });
-        });
+      if (response?.ok) {
+        try {
+          const record = recordFromAnalysis(await response.clone().json(), analysisType, item.video_id);
+          if (record) { await enqueue(record); continue; }
+        } catch (_) { /* invalid curve response is recorded below */ }
       }
+      await mutateQueue((current) => {
+        current.curveFailures = current.curveFailures || [];
+        current.curveFailures.push({ video_id: item.video_id, analysis_type: analysisType, attempts: 5, http_status: Number(response?.status || 0) });
+      });
       }
     }
   }
   async function collectCatalogPages() {
-    if (!learnedCatalogRequest) return;
-    let url = new URL(learnedCatalogRequest, location.origin);
+    let url = fixedCatalogUrl();
     const seenCursors = new Set();
     for (let page = 0; page < 200 && !paused; page += 1) {
       const response = await scheduledPageFetch(url.toString());
@@ -323,6 +335,20 @@
       if (!payload?.has_more || !cursor || seenCursors.has(cursor)) return;
       seenCursors.add(cursor); url.searchParams.set('max_cursor', cursor);
     }
+  }
+  async function startFixedCollection() {
+    if (fixedCollectionInFlight || paused || !runtimeConfig?.uploadToken) return;
+    fixedCollectionInFlight = true;
+    try {
+      await collectCatalogPages();
+      await collectCatalogCurves();
+      await uploadPending();
+    } finally {
+      fixedCollectionInFlight = false;
+    }
+  }
+  async function runScheduledCollection() {
+    await startFixedCollection();
   }
   async function heartbeat(status) {
     const settings = await config(); if (!settings?.uploadToken) return;
@@ -392,7 +418,7 @@
       if (document.visibilityState !== 'visible') return;
       paused = false;
       void heartbeat('online_active');
-      void uploadPending();
+      void runScheduledCollection();
     }, 5000);
   }
   function observePageRequests() {
@@ -403,10 +429,9 @@
       try {
         const rawUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
         const url = new URL(rawUrl, location.origin);
-        if (url.pathname === '/janus/douyin/creator/pc/work_list' || url.pathname === '/web/api/creator/item/list') { observerState.observed += 1; void captureCatalog(await result.clone().json(), rawUrl); }
-        if (url.pathname.endsWith('/janus/douyin/creator/data/realtime/analysis/data_center')) {
+        if (url.pathname === '/janus/douyin/creator/pc/work_list' || url.pathname === CATALOG_ENDPOINT) { observerState.observed += 1; void captureCatalog(await result.clone().json()); }
+        if (url.pathname === CURVE_ENDPOINT) {
           observerState.observed += 1;
-          learnedCurveRequest = rawUrl;
           const record = recordFromAnalysis(await result.clone().json(), Number(url.searchParams.get('analysis_type')), url.searchParams.get('item_id'));
           if (record) void enqueue(record);
         }
@@ -419,10 +444,9 @@
       this.addEventListener('load', () => {
         try {
           const url = new URL(this.__huabangDouyinColorRawUrl, location.origin);
-          if (url.pathname === '/janus/douyin/creator/pc/work_list' || url.pathname === '/web/api/creator/item/list') { observerState.observed += 1; void captureCatalog(JSON.parse(this.responseText), this.__huabangDouyinColorRawUrl); }
-          if (url.pathname.endsWith('/janus/douyin/creator/data/realtime/analysis/data_center')) {
+          if (url.pathname === '/janus/douyin/creator/pc/work_list' || url.pathname === CATALOG_ENDPOINT) { observerState.observed += 1; void captureCatalog(JSON.parse(this.responseText)); }
+          if (url.pathname === CURVE_ENDPOINT) {
             observerState.observed += 1;
-            learnedCurveRequest = this.__huabangDouyinColorRawUrl;
             const record = recordFromAnalysis(JSON.parse(this.responseText), Number(url.searchParams.get('analysis_type')), url.searchParams.get('item_id'));
             if (record) void enqueue(record);
           }
@@ -445,6 +469,7 @@
         console.warn('[douyin-color] 创作者 ID 将在您浏览作品或数据中心时自动识别,无需手动输入');
       }
       console.info('[douyin-color] 令牌已保存,采集器就绪');
+      void startFixedCollection();
       alert('令牌已保存成功！采集器已就绪。\n刷新页面或重启浏览器后无需重新配置。\n创作者 ID 将在浏览作品时自动识别。');
     });
         GM_registerMenuCommand('立即上传已采集批次', () => void uploadPending());
@@ -457,9 +482,9 @@
     });
   }
   observePageRequests(); registerMenus(); void loadSavedConfig();
-  document.addEventListener('visibilitychange', () => { paused = document.visibilityState !== 'visible'; if (!paused) void uploadPending(); });
+  document.addEventListener('visibilitychange', () => { paused = document.visibilityState !== 'visible'; if (!paused) void runScheduledCollection(); });
   window.addEventListener('pagehide', () => { paused = true; });
-  window.addEventListener('online', () => void uploadPending());
+  window.addEventListener('online', () => void runScheduledCollection());
   setInterval(() => void detectTimerDrift(), 60 * 1000);
-  setInterval(() => void uploadPending(), 5 * 60 * 1000);
+  setInterval(() => void runScheduledCollection(), 5 * 60 * 1000);
 }());
