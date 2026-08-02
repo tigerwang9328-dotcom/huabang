@@ -925,3 +925,12 @@ test('固定资产编辑按月保留后端折旧年限，不能四舍五入为�
   assert.doesNotMatch(page, /Math\.round\(Number\(row\.useful_life_months/)
   assert.doesNotMatch(page, /Number\(form\.useful_life \|\| 0\) \* 12/)
 })
+
+test('voucher toolbar keeps actions left and totals independently right responsive', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherCreate.vue')
+
+  assert.match(page, /<div class="voucher-actions">[\s\S]*添加分录[\s\S]*自动找平[\s\S]*<\/div>/)
+  assert.match(page, /<div class="totals">[\s\S]*借方[\s\S]*贷方[\s\S]*差额[\s\S]*<\/div>/)
+  assert.match(page, /\.voucher-actions\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:/)
+  assert.match(page, /@media \(max-width: 640px\)[\s\S]*\.dialog-toolbar\s*\{[^}]*align-items:\s*flex-start/)
+})
