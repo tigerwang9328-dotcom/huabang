@@ -58,11 +58,12 @@ git commit -m "fix(finance): clarify unavailable Kingdee history sources"
 ### Task 2: 补齐可由历史凭证和余额快照支持的只读页面
 
 **Files:**
-- Modify: `backend/app/api/v1/mumaren_finance_center.py`
-- Modify: `frontend/src/api/mumarenFinanceCenter.ts`
 - Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceLedgers.vue`
 - Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue`
 - Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue`
+- Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceReportBalanceSheet.vue`
+- Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceReportProfit.vue`
+- Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceReportCashFlow.vue`
 - Test: `backend/tests/test_mumaren_finance_center_reports.py`
 - Test: `frontend/tests/mumaren-finance-center.test.cjs`
 
@@ -81,9 +82,9 @@ Expected: 缺少历史账簿报表覆盖。
 - [ ] **Step 3: 实现只读查询**
 
 ```python
-statement = statement.where(FinanceCenterMumarenVoucher.book_id == book_id)
-if book.is_readonly:
-    statement = statement.where(FinanceCenterMumarenVoucher.is_readonly.is_(True))
+const isHistoricalBook = computed(() => Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly));
+if (!bookId.value) return;
+await mumarenFinanceCenterApi.getTrialBalance({ book_id: bookId.value });
 ```
 
 - [ ] **Step 4: 运行后端与前端测试**
@@ -94,7 +95,7 @@ Expected: PASS。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add backend/app/api/v1/mumaren_finance_center.py backend/tests/test_mumaren_finance_center_reports.py frontend/src/api/mumarenFinanceCenter.ts frontend/src/views/mumaren-finance-center/MumarenFinanceLedgers.vue frontend/src/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue frontend/tests/mumaren-finance-center.test.cjs
+git add backend/tests/test_mumaren_finance_center_reports.py frontend/src/views/mumaren-finance-center/MumarenFinanceLedgers.vue frontend/src/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportBalanceSheet.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportProfit.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportCashFlow.vue frontend/tests/mumaren-finance-center.test.cjs
 git commit -m "feat(finance): adapt historical ledger pages"
 ```
 
