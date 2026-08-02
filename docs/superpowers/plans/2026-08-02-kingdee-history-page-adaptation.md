@@ -59,7 +59,6 @@ git commit -m "fix(finance): clarify unavailable Kingdee history sources"
 
 **Files:**
 - Modify: `backend/app/api/v1/mumaren_finance_center.py`
-- Modify: `backend/app/services/mumaren_finance_center/reports.py`
 - Modify: `frontend/src/api/mumarenFinanceCenter.ts`
 - Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceLedgers.vue`
 - Modify: `frontend/src/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue`
@@ -95,7 +94,7 @@ Expected: PASS。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add backend/app/api/v1/mumaren_finance_center.py backend/app/services/mumaren_finance_center/reports.py backend/tests/test_mumaren_finance_center_reports.py frontend/src/api/mumarenFinanceCenter.ts frontend/src/views/mumaren-finance-center/MumarenFinanceLedgers.vue frontend/src/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue frontend/tests/mumaren-finance-center.test.cjs
+git add backend/app/api/v1/mumaren_finance_center.py backend/tests/test_mumaren_finance_center_reports.py frontend/src/api/mumarenFinanceCenter.ts frontend/src/views/mumaren-finance-center/MumarenFinanceLedgers.vue frontend/src/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue frontend/src/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue frontend/tests/mumaren-finance-center.test.cjs
 git commit -m "feat(finance): adapt historical ledger pages"
 ```
 
@@ -166,4 +165,3 @@ Expected: 两项成功。
 
 Run: `curl -fsS http://127.0.0.1:8000/health`
 Expected: `status=ok`，数据库和 Redis 均连接。
-
