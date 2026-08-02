@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">固定资产</p>
         <h2>资产</h2>
-        <p>资产卡片、折旧与净值管理;按独立账簿隔离,数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入固定资产卡片与折旧明细；请通过原始凭证、明细账和余额快照核对。" : "资产卡片、折旧与净值管理;按独立账簿隔离,数据持久化。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -19,9 +19,9 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，仅可查询资产卡片与折旧记录。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入固定资产卡片与折旧明细；当前页面不以空表表示历史资产为零。" :closable="false" show-icon />
 
-    <el-table v-loading="loading" :data="assets" empty-text="暂无资产卡片" stripe show-summary :summary-method="summary">
+    <el-table v-if="!isReadonly" v-loading="loading" :data="assets" empty-text="暂无资产卡片" stripe show-summary :summary-method="summary">
       <el-table-column prop="asset_code" label="编码" width="140" />
       <el-table-column prop="asset_name" label="名称" min-width="180" />
       <el-table-column prop="asset_category" label="分类" width="120" />
@@ -108,6 +108,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+let loadRequestVersion = 0;
 const dialogVisible = ref(false);
 const editingId = ref<number>();
 
@@ -124,15 +125,19 @@ const form = reactive({
 });
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId || isReadonly.value) { assets.value = []; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
-    assets.value = (await fixedAssetsApi.list({ book_id: bookId.value })).data.data;
+    const response = await fixedAssetsApi.list({ book_id: requestedBookId });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    assets.value = response.data.data;
   } catch {
-    error.value = "无法加载资产卡片。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载资产卡片。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 

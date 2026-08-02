@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">出纳管理</p>
         <h2>账户与流水</h2>
-        <p>资金账户与日记账流水;按独立账簿隔离,数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入出纳账户与资金流水；请通过原始凭证、明细账和余额快照核对。" : "资金账户与日记账流水;按独立账簿隔离,数据持久化。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -20,10 +20,10 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能维护资金账户或录入流水。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入出纳账户与资金流水，当前页面不以空表表示历史出纳数据为零。" :closable="false" show-icon />
 
-    <h3 class="block-title">资金账户</h3>
-    <el-table v-loading="loading" :data="accounts" empty-text="暂无账户" stripe show-summary :summary-method="accountSummary">
+    <h3 v-if="!isReadonly" class="block-title">资金账户</h3>
+    <el-table v-if="!isReadonly" v-loading="loading" :data="accounts" empty-text="暂无账户" stripe show-summary :summary-method="accountSummary">
       <el-table-column prop="account_code" label="账户编码" width="140" />
       <el-table-column prop="account_name" label="账户名称" min-width="180" />
       <el-table-column label="类型" width="120">
@@ -41,8 +41,8 @@
       </el-table-column>
     </el-table>
 
-    <h3 class="block-title">日记账流水</h3>
-    <el-table v-loading="loading" :data="transactions" empty-text="暂无流水" stripe show-summary :summary-method="txnSummary">
+    <h3 v-if="!isReadonly" class="block-title">日记账流水</h3>
+    <el-table v-if="!isReadonly" v-loading="loading" :data="transactions" empty-text="暂无流水" stripe show-summary :summary-method="txnSummary">
       <el-table-column prop="flow_date" label="日期" width="130" />
       <el-table-column label="账户" min-width="160">
         <template #default="{ row }">{{ accountName(row.cash_account_id) }}</template>
@@ -131,6 +131,7 @@ const transactions = ref<MumarenCashFlow[]>([]);
 const loading = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+let loadRequestVersion = 0;
 const accountDialogVisible = ref(false);
 const txnDialogVisible = ref(false);
 const savingAccount = ref(false);
@@ -160,20 +161,23 @@ const accountName = (id: number) => {
 };
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId || isReadonly.value) { accounts.value = []; transactions.value = []; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
     const [accRes, flowRes] = await Promise.all([
-      cashAccountsApi.list({ book_id: bookId.value }),
-      cashFlowsApi.list({ book_id: bookId.value }),
+      cashAccountsApi.list({ book_id: requestedBookId }),
+      cashFlowsApi.list({ book_id: requestedBookId }),
     ]);
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
     accounts.value = accRes.data.data;
     transactions.value = flowRes.data.data;
   } catch {
-    error.value = "无法加载出纳账户与流水。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载出纳账户与流水。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 

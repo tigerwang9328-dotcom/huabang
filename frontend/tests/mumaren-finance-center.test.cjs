@@ -130,6 +130,11 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   const voucherList = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
   const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
   const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
+  const assets = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceAssets.vue')
+  const invoices = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceInvoices.vue')
+  const cashier = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCashierAccounts.vue')
+  const payroll = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePayroll.vue')
+  const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
 
   assert.match(compass, /v-else-if="isReadonly"/)
   assert.match(compass, /余额快照核对/)
@@ -143,6 +148,11 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   assert.match(arAp, /if \(isReadonly\.value\)/)
   assert.match(aging, /金蝶迁移账簿未导入应收应付业务单据/)
   assert.match(aging, /if \(isReadonly\.value\)/)
+  for (const page of [assets, invoices, cashier, payroll, tax]) {
+    assert.match(page, /金蝶迁移账簿未导入/)
+    assert.match(page, /if \(isReadonly\.value\)/)
+    assert.match(page, /loadRequestVersion/)
+  }
 })
 
 test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {
@@ -693,8 +703,9 @@ test('税务页面必须先选择独立账簿,无账簿时不请求后端并提�
   assert.match(tax, /useMumarenFinanceBook/)
   assert.match(tax, /bookId/)
   assert.match(tax, /请选择独立账簿/)
-  assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*bookId/)
-  assert.match(tax, /listTaxRecords\(\s*\{\s*book_id:\s*bookId/)
+  assert.match(tax, /getTaxAlerts\(\s*\{\s*book_id:\s*requestedBookId/)
+  assert.match(tax, /listTaxRecords\(\s*\{\s*book_id:\s*requestedBookId/)
+  assert.match(tax, /onBookChange[\s\S]*loadRequestVersion \+= 1;[\s\S]*loading\.value = false/)
   // 不允许在未选账簿时 onMounted 直接调用税务接口
   assert.doesNotMatch(tax, /onMounted\(load\)/)
   assert.doesNotMatch(tax, /books\.value\[0\]\?\.id/)
