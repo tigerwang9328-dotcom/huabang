@@ -272,3 +272,56 @@ def test_profit_statement_uses_income_credit_minus_debit_and_expense_debit_minus
     assert statement["net_profit"] == Decimal("92")
     assert statement["income_rows"][0]["amount"] == Decimal("180")
     assert [row["amount"] for row in statement["expense_rows"]] == [Decimal("80"), Decimal("8")]
+
+
+@pytest.mark.asyncio
+async def test_report_response_marks_unclassified_kingdee_accounts_without_inventing_mappings():
+    from app.api.v1 import mumaren_finance_center
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.database import Base
+    from app.models.mumaren_finance_center import (
+        MUMAREN_FINANCE_SCHEMA,
+        FinanceCenterMumarenAccount,
+        FinanceCenterMumarenBook,
+    )
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        execution_options={"schema_translate_map": {MUMAREN_FINANCE_SCHEMA: None}},
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(
+                lambda sync_connection: Base.metadata.create_all(
+                    sync_connection,
+                    tables=[
+                        FinanceCenterMumarenBook.__table__,
+                        FinanceCenterMumarenAccount.__table__,
+                    ],
+                )
+            )
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            db.add_all([
+                FinanceCenterMumarenBook(id=1, book_code="K3-A", book_name="金蝶A", status="active", is_readonly=True),
+                FinanceCenterMumarenBook(id=2, book_code="K3-B", book_name="金蝶B", status="active", is_readonly=True),
+                FinanceCenterMumarenAccount(id=11, book_id=1, account_code="1001", account_name="待映射A", account_type="unclassified", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=12, book_id=1, account_code="6001", account_name="收入A", account_type="income", direction="credit", is_active=True),
+                FinanceCenterMumarenAccount(id=21, book_id=2, account_code="1002", account_name="待映射B", account_type="unclassified", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=22, book_id=2, account_code="6601", account_name="费用B", account_type="expense", direction="debit", is_active=True),
+            ])
+            await db.commit()
+
+            first_payload = await mumaren_finance_center.append_report_mapping_status(
+                db, book_id=1, report={"total_income": Decimal("0")},
+            )
+            second_payload = await mumaren_finance_center.append_report_mapping_status(
+                db, book_id=2, report={"total_income": Decimal("0")},
+            )
+
+        assert first_payload == {"total_income": Decimal("0"), "unclassified_account_count": 1}
+        assert second_payload == {"total_income": Decimal("0"), "unclassified_account_count": 1}
+    finally:
+        await engine.dispose()

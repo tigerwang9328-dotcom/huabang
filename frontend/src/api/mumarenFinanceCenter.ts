@@ -227,10 +227,17 @@ export interface MumarenTrialBalanceRow {
   closing_credit: number;
 }
 
+export interface MumarenTrialBalanceReport {
+  rows?: MumarenTrialBalanceRow[];
+  /** 金蝶来源未提供会计报表分类时，由后端返回的待映射科目数。 */
+  unclassified_account_count?: number;
+}
+
 export interface MumarenProfitStatement {
   total_income: number;
   total_expense: number;
   net_profit: number;
+  unclassified_account_count?: number;
 }
 
 export interface MumarenCashFlowSection {
@@ -245,6 +252,7 @@ export interface MumarenCashFlowStatement {
   total_outflow: number;
   total_net: number;
   cash_net_increase: number;
+  unclassified_account_count?: number;
 }
 
 export interface MumarenArApAging {
@@ -303,7 +311,7 @@ export const mumarenFinanceCenterApi = {
   getLedgerLines: (params: { book_id: number; account_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceLedgerLinePage>>(requestPath("/ledger/lines"), { params }),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getHistoryBalanceSnapshots: (params: { book_id: number; period?: string; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceBalanceSnapshot[]>>(requestPath("/history/balance-snapshots"), { params }),
-  getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
+  getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenTrialBalanceReport>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
   getCashFlowStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenCashFlowStatement>>(requestPath("/reports/cash-flow-statement"), { params }),
   getArApAging: (params: { book_id: number; order_type: "receivable" | "payable"; as_of?: string }) => request.get<ApiResponse<MumarenArApAging>>(requestPath("/ar-ap/aging"), { params }),

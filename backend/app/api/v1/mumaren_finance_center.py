@@ -224,6 +224,21 @@ def _account_data(account: FinanceCenterMumarenAccount) -> dict:
     }
 
 
+async def append_report_mapping_status(
+    db: AsyncSession, *, book_id: int, report: dict,
+) -> dict:
+    """Expose source accounts that remain intentionally unclassified for reports."""
+    unclassified_count = await db.scalar(
+        select(func.count())
+        .select_from(FinanceCenterMumarenAccount)
+        .where(
+            FinanceCenterMumarenAccount.book_id == book_id,
+            FinanceCenterMumarenAccount.account_type == "unclassified",
+        )
+    )
+    return {**report, "unclassified_account_count": int(unclassified_count or 0)}
+
+
 @router.post("/books/{book_id}/accounts", response_model=ApiResponse)
 async def create_account_endpoint(
     book_id: int, body: AccountCreateInput,
@@ -470,7 +485,8 @@ async def get_trial_balance_report(
 ):
     """当前账已过账凭证的科目余额与试算平衡；历史区不参与计算。"""
     try:
-        return ApiResponse.ok(data=await get_trial_balance(db, book_id=book_id, period=period))
+        report = await get_trial_balance(db, book_id=book_id, period=period)
+        return ApiResponse.ok(data=await append_report_mapping_status(db, book_id=book_id, report=report))
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -484,7 +500,8 @@ async def get_profit_statement_report(
 ):
     """当前账已过账凭证的利润表；空账返回零值而非模拟经营数据。"""
     try:
-        return ApiResponse.ok(data=await get_profit_statement(db, book_id=book_id, period=period))
+        report = await get_profit_statement(db, book_id=book_id, period=period)
+        return ApiResponse.ok(data=await append_report_mapping_status(db, book_id=book_id, report=report))
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -498,6 +515,7 @@ async def get_cash_flow_statement_report(
 ):
     """现金流量表：联动已过账 cash_flows 表的经营活动/投资/筹资现金流。"""
     try:
-        return ApiResponse.ok(data=await get_cash_flow_statement(db, book_id=book_id, period=period))
+        report = await get_cash_flow_statement(db, book_id=book_id, period=period)
+        return ApiResponse.ok(data=await append_report_mapping_status(db, book_id=book_id, report=report))
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

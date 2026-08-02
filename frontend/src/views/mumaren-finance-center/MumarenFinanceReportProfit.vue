@@ -22,6 +22,7 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
     <el-alert v-if="isHistoricalBook" type="info" :closable="false" show-icon title="金蝶迁移账簿只读；以下数据按该账簿已过账凭证汇总。" />
+    <el-alert v-if="hasPendingHistoricalMapping" type="warning" :closable="false" show-icon :title="mappingWarning" />
 
     <el-descriptions v-if="bookId" title="利润表" :column="3" border>
       <el-descriptions-item label="收入">{{ money(profit.total_income) }}</el-descriptions-item>
@@ -49,6 +50,12 @@ const loading = ref(false);
 let loadRequestVersion = 0;
 const isHistoricalBook = computed(() =>
   isReadonly.value || Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly),
+);
+const hasPendingHistoricalMapping = computed(() =>
+  isHistoricalBook.value && Number(profit.value.unclassified_account_count || 0) > 0,
+);
+const mappingWarning = computed(() =>
+  `该金蝶历史账簿有 ${profit.value.unclassified_account_count} 个科目待会计分类映射；利润表暂不汇总，0.00 不代表历史业务为零。请以科目余额表与余额快照核对。`,
 );
 
 const money = (value?: number) =>

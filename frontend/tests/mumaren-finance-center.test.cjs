@@ -1195,6 +1195,22 @@ test('利润表与现金流量表说明准确覆盖所选历史或当前账簿',
   assert.doesNotMatch(`${profit}\n${cashFlow}`, /独立当前账|不混入历史归档/)
 })
 
+test('金蝶未分类科目不伪造三表映射，并向用户说明零值含义', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const balanceSheet = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportBalanceSheet.vue')
+  const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
+  const cashFlow = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportCashFlow.vue')
+  const trial = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportTrialBalance.vue')
+
+  assert.match(api, /unclassified_account_count\??:\s*number/)
+  for (const source of [balanceSheet, profit, cashFlow, trial]) {
+    assert.match(source, /待会计分类映射/)
+    assert.match(source, /不代表历史业务为零/)
+  }
+  assert.match(balanceSheet, /hasPendingHistoricalMapping/)
+  assert.match(balanceSheet, /if \(hasPendingHistoricalMapping\.value\) return "other"/)
+})
+
 test('税务草稿仅在当前账簿可删除，金蝶历史账簿不提供删除入口', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')

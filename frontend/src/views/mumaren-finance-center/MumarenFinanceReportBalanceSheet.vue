@@ -21,6 +21,7 @@
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
     <el-alert v-if="isHistoricalBook" type="info" :closable="false" show-icon title="金蝶迁移账簿只读；以下数据按该账簿已过账凭证汇总。" />
+    <el-alert v-if="hasPendingHistoricalMapping" type="warning" :closable="false" show-icon :title="mappingWarning" />
 
     <template v-if="bookId">
       <div class="bs-section">
@@ -94,17 +95,25 @@ const { bookId, initializeBook, isReadonly } = useMumarenFinanceBook();
 const rows = ref<TrialRowWithType[]>([]);
 const error = ref("");
 const loading = ref(false);
+const unclassifiedAccountCount = ref(0);
 let loadRequestVersion = 0;
 const isHistoricalBook = computed(() =>
   isReadonly.value || Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly),
+);
+const hasPendingHistoricalMapping = computed(() =>
+  isHistoricalBook.value && unclassifiedAccountCount.value > 0,
+);
+const mappingWarning = computed(() =>
+  `该金蝶历史账簿有 ${unclassifiedAccountCount.value} 个科目待会计分类映射；资产负债表不会按科目编码推断分类，0.00 不代表历史业务为零。请以科目余额表与余额快照核对。`,
 );
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 const printReport = () => window.print();
 
-// 科目分类:优先用 account_type(包含关键字),缺失时回退到科目编码首位(中国会计准则 1资产/2负债/4权益)。
+// 当前账按明确分类展示；金蝶历史账簿若来源未提供分类，则不能用科目编码猜测三表映射。
 const classify = (row: TrialRowWithType): "asset" | "liability" | "equity" | "other" => {
+  if (hasPendingHistoricalMapping.value) return "other";
   const t = row.account_type || "";
   if (t.includes("资产")) return "asset";
   if (t.includes("负债")) return "liability";
@@ -138,6 +147,7 @@ const load = async () => {
   const requestVersion = ++loadRequestVersion;
   if (!requestedBookId) {
     rows.value = [];
+    unclassifiedAccountCount.value = 0;
     loading.value = false;
     return;
   }
@@ -147,10 +157,12 @@ const load = async () => {
     const result = await mumarenFinanceCenterApi.getTrialBalance({ book_id: requestedBookId });
     if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value) return;
     rows.value = (result.data.data.rows || []) as TrialRowWithType[];
+    unclassifiedAccountCount.value = Number(result.data.data.unclassified_account_count || 0);
   } catch {
     if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
       error.value = "无法加载资产负债表数据。";
       rows.value = [];
+      unclassifiedAccountCount.value = 0;
     }
   } finally {
     if (requestVersion === loadRequestVersion) loading.value = false;
