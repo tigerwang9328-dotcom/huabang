@@ -18,6 +18,8 @@ from app.services.mumaren_finance_center.workflow import (
     create_book as create_mumaren_book,
     create_account as create_mumaren_account,
     update_account as update_mumaren_account,
+    replenish_starter_accounts,
+    update_book as update_mumaren_book,
     create_voucher as create_mumaren_voucher,
     list_accounts,
     list_books,
@@ -76,6 +78,12 @@ class BookCreateInput(BaseModel):
     book_name: str = Field(min_length=1, max_length=128)
     company_name: str | None = Field(default=None, max_length=255)
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
+
+
+class BookUpdateInput(BaseModel):
+    book_name: str | None = Field(default=None, min_length=1, max_length=128)
+    # The client always sends this field so null explicitly clears an optional company name.
+    company_name: str | None
 
 
 class AccountCreateInput(BaseModel):
@@ -161,6 +169,40 @@ async def create_book_endpoint(
     }, message="账簿已创建并完成基础数据初始化")
 
 
+@router.put("/books/{book_id}", response_model=ApiResponse)
+async def update_book_endpoint(
+    book_id: int, body: BookUpdateInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    try:
+        book = await update_mumaren_book(
+            db, book_id=book_id, book_name=body.book_name, company_name=body.company_name,
+            operator_id=_actor_id(current_user),
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data={
+        "id": book.id, "book_code": book.book_code, "book_name": book.book_name,
+        "company_name": book.company_name, "status": book.status, "is_readonly": book.is_readonly,
+    }, message="账簿已更新")
+
+
+@router.post("/books/{book_id}/starter-accounts", response_model=ApiResponse)
+async def replenish_starter_accounts_endpoint(
+    book_id: int,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    try:
+        added = await replenish_starter_accounts(db, book_id=book_id, operator_id=_actor_id(current_user))
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(data={"added": added}, message=f"已补齐 {added} 个基础科目")
+
+
 @router.get("/books/{book_id}/accounts", response_model=ApiResponse)
 async def get_accounts(
     book_id: int,
@@ -220,13 +262,15 @@ async def update_account_endpoint(
 @router.get("/vouchers", response_model=ApiResponse)
 async def get_vouchers(
     book_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     _: SysUser = Depends(require_mumaren_voucher_view),
     db: AsyncSession = Depends(get_db),
 ):
     statement = select(FinanceCenterMumarenVoucher).order_by(FinanceCenterMumarenVoucher.id.desc())
     if book_id is not None:
         statement = statement.where(FinanceCenterMumarenVoucher.book_id == book_id)
-    result = await db.execute(statement.limit(200))
+    result = await db.execute(statement.offset(offset).limit(limit))
     return ApiResponse.ok(data=[_voucher_data(voucher) for voucher in result.scalars()])
 
 
@@ -386,6 +430,7 @@ async def get_history_balance_snapshots(
     book_id: int = Query(ge=1),
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     limit: int = Query(default=500, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     _: SysUser = Depends(require_mumaren_history_view),
     db: AsyncSession = Depends(get_db),
 ):
@@ -403,10 +448,10 @@ async def get_history_balance_snapshots(
         ))
         .where(FinanceCenterMumarenBalanceSnapshot.book_id == book_id)
         .order_by(FinanceCenterMumarenBalanceSnapshot.period_code.desc(), FinanceCenterMumarenAccount.account_code)
-        .limit(limit)
     )
     if period:
         statement = statement.where(FinanceCenterMumarenBalanceSnapshot.period_code == period)
+    statement = statement.offset(offset).limit(limit)
     return ApiResponse.ok(data=[{
         "id": row.id, "period_code": row.period_code, "account_code": account.account_code,
         "account_name": account.account_name, "opening_amount": row.opening_amount,

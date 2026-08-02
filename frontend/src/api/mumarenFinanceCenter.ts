@@ -295,14 +295,14 @@ export interface MumarenTaxRecord {
 
 export const mumarenFinanceCenterApi = {
   getCatalog: () => request.get<ApiResponse<FinanceCenterCatalog>>(requestPath("/catalog")),
-  listVouchers: (params?: { book_id?: number }) => request.get<ApiResponse<MumarenFinanceVoucher[]>>(requestPath("/vouchers"), { params }),
+  listVouchers: (params?: { book_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceVoucher[]>>(requestPath("/vouchers"), { params }),
   listBooks: () => request.get<ApiResponse<MumarenFinanceBook[]>>(requestPath("/books")),
   createBook: (data: MumarenFinanceBookCreatePayload) => request.post<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status">>>(requestPath("/books"), data),
   updateBook: (bookId: number, data: MumarenFinanceBookUpdatePayload) => request.put<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status" | "is_readonly">>>(requestPath(`/books/${bookId}`), data),
   replenishStarterAccounts: (bookId: number) => request.post<ApiResponse<{ added: number }>>(requestPath(`/books/${bookId}/starter-accounts`)),
   getLedgerLines: (params: { book_id: number; account_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceLedgerLinePage>>(requestPath("/ledger/lines"), { params }),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
-  getHistoryBalanceSnapshots: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceBalanceSnapshot[]>>(requestPath("/history/balance-snapshots"), { params }),
+  getHistoryBalanceSnapshots: (params: { book_id: number; period?: string; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceBalanceSnapshot[]>>(requestPath("/history/balance-snapshots"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
   getCashFlowStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenCashFlowStatement>>(requestPath("/reports/cash-flow-statement"), { params }),
