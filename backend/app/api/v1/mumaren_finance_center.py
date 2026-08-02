@@ -4,12 +4,12 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission, require_roles
 from app.core.database import get_db
-from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog, FinanceCenterMumarenVoucher
+from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog, FinanceCenterMumarenBalanceSnapshot, FinanceCenterMumarenBook, FinanceCenterMumarenVoucher
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.mumaren_finance_center.workflow import (
@@ -359,6 +359,41 @@ async def get_history_vouchers(
         "record_type": voucher.record_type, "is_readonly": voucher.is_readonly,
         "voucher_no": voucher.voucher_no, "voucher_date": voucher.voucher_date, "summary": voucher.summary,
     } for voucher in vouchers])
+
+
+@router.get("/history/balance-snapshots", response_model=ApiResponse)
+async def get_history_balance_snapshots(
+    book_id: int = Query(ge=1),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    limit: int = Query(default=500, ge=1, le=500),
+    _: SysUser = Depends(require_mumaren_history_view),
+    db: AsyncSession = Depends(get_db),
+):
+    """Readonly Kingdee source balances for reconciliation, never reporting."""
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="账簿不存在")
+    if not book.is_readonly:
+        raise HTTPException(status_code=409, detail="余额快照仅适用于金蝶迁移只读账簿")
+    statement = (
+        select(FinanceCenterMumarenBalanceSnapshot, FinanceCenterMumarenAccount)
+        .join(FinanceCenterMumarenAccount, and_(
+            FinanceCenterMumarenAccount.id == FinanceCenterMumarenBalanceSnapshot.account_id,
+            FinanceCenterMumarenAccount.book_id == FinanceCenterMumarenBalanceSnapshot.book_id,
+        ))
+        .where(FinanceCenterMumarenBalanceSnapshot.book_id == book_id)
+        .order_by(FinanceCenterMumarenBalanceSnapshot.period_code.desc(), FinanceCenterMumarenAccount.account_code)
+        .limit(limit)
+    )
+    if period:
+        statement = statement.where(FinanceCenterMumarenBalanceSnapshot.period_code == period)
+    return ApiResponse.ok(data=[{
+        "id": row.id, "period_code": row.period_code, "account_code": account.account_code,
+        "account_name": account.account_name, "opening_amount": row.opening_amount,
+        "period_debit": row.period_debit, "period_credit": row.period_credit,
+        "closing_amount": row.closing_amount, "source_database": row.source_database,
+        "is_readonly": row.is_readonly,
+    } for row, account in (await db.execute(statement)).all()])
 
 
 @router.get("/reports/trial-balance", response_model=ApiResponse)

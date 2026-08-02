@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 import os
 from types import SimpleNamespace
@@ -21,6 +22,37 @@ def test_new_router_exposes_isolated_trial_balance_and_profit_statement_endpoint
 
     assert "/finance-center/mumaren/reports/trial-balance" in paths
     assert "/finance-center/mumaren/reports/profit-statement" in paths
+
+
+def test_new_router_exposes_readonly_kingdee_balance_snapshot_endpoint():
+    from app.api.v1.mumaren_finance_center import router
+
+    paths = {route.path for route in router.routes}
+
+    assert "/finance-center/mumaren/history/balance-snapshots" in paths
+
+
+def test_balance_snapshot_query_joins_account_within_the_same_book():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_history_balance_snapshots)
+
+    assert "FinanceCenterMumarenAccount.book_id == FinanceCenterMumarenBalanceSnapshot.book_id" in source
+    assert "余额快照仅适用于金蝶迁移只读账簿" in source
+
+
+def test_balance_snapshot_endpoint_rejects_a_current_book():
+    from fastapi import HTTPException
+    from app.api.v1.mumaren_finance_center import get_history_balance_snapshots
+
+    class CurrentBookDb:
+        async def get(self, _model, _book_id):
+            return SimpleNamespace(is_readonly=False)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(get_history_balance_snapshots(book_id=1, period=None, limit=500, _=None, db=CurrentBookDb()))
+
+    assert error.value.status_code == 409
 
 
 def _account(account_id: int, code: str, name: str, account_type: str, direction: str = "debit"):

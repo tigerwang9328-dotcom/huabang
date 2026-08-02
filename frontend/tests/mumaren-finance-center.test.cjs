@@ -80,6 +80,20 @@ test('金蝶迁移账簿在历史查询页和核心汇总页初始化后会自�
   }
 })
 
+test('金蝶余额快照有独立只读查询页，不混入当前账报表', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
+  const router = read('src', 'router', 'index.ts')
+
+  assert.match(api, /getHistoryBalanceSnapshots/)
+  assert.match(history, /余额快照核对/)
+  assert.match(router, /history\/balance-snapshots/)
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistoryBalanceSnapshots.vue')
+  assert.match(page, /filter\(\(book\) => book\.is_readonly\)/)
+  assert.match(page, /getHistoryBalanceSnapshots/)
+  assert.doesNotMatch(page, /request\.post\(|request\.put\(|request\.delete\(/)
+})
+
 test('未确认报表映射的金蝶迁移账簿不会把三张正式报表伪装为可用', () => {
   for (const filename of [
     'MumarenFinanceReportBalanceSheet.vue',

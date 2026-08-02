@@ -301,6 +301,7 @@ export const mumarenFinanceCenterApi = {
   updateBook: (bookId: number, data: MumarenFinanceBookUpdatePayload) => request.put<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status" | "is_readonly">>>(requestPath(`/books/${bookId}`), data),
   replenishStarterAccounts: (bookId: number) => request.post<ApiResponse<{ added: number }>>(requestPath(`/books/${bookId}/starter-accounts`)),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
+  getHistoryBalanceSnapshots: (params: { book_id: number; period?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceBalanceSnapshot[]>>(requestPath("/history/balance-snapshots"), { params }),
   getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<{ rows?: MumarenTrialBalanceRow[] }>>(requestPath("/reports/trial-balance"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
   getCashFlowStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenCashFlowStatement>>(requestPath("/reports/cash-flow-statement"), { params }),
@@ -367,6 +368,19 @@ export interface FixedAssetUpdate {
   residual_value?: number;
   useful_life_months?: number;
   status?: "disposed";
+}
+
+export interface MumarenFinanceBalanceSnapshot {
+  id: number;
+  period_code: string;
+  account_code: string;
+  account_name: string;
+  opening_amount: number;
+  period_debit: number;
+  period_credit: number;
+  closing_amount: number;
+  source_database: string;
+  is_readonly: boolean;
 }
 export const fixedAssetsApi = {
   list: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenFixedAsset[]>>(requestPath("/fixed-assets"), { params }),
