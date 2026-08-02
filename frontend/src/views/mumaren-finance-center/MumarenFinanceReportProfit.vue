@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">报表</p>
         <h2>利润表</h2>
-        <p>按独立当前账已过账凭证计算损益;不混入历史归档。</p>
+      <p>按所选账簿的已过账凭证汇总收入、费用与净利润。</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>

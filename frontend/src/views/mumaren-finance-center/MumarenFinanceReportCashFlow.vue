@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">财务报表</p>
         <h2>现金流量表</h2>
-        <p>按现金类科目派生经营/投资/筹资活动现金流。</p>
+      <p>按所选账簿的已过账凭证及已过账资金流水汇总经营、投资与筹资活动现金流。</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>

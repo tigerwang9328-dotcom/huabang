@@ -1185,3 +1185,12 @@ test('金蝶历史账簿报表仍查询同一账簿数据，且不允许旧响�
   assert.match(profit, /const onBookChange = async \(\) => \{\s*await load\(\);\s*\};/)
   assert.match(trial, /const onBookChange = async \(\) => \{\s*await load\(\);\s*\};/)
 })
+
+test('利润表与现金流量表说明准确覆盖所选历史或当前账簿', () => {
+  const profit = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportProfit.vue')
+  const cashFlow = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportCashFlow.vue')
+
+  assert.match(profit, /所选账簿.*已过账凭证/)
+  assert.match(cashFlow, /所选账簿.*已过账凭证.*已过账资金流水/)
+  assert.doesNotMatch(`${profit}\n${cashFlow}`, /独立当前账|不混入历史归档/)
+})
