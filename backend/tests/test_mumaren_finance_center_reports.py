@@ -32,6 +32,42 @@ def test_new_router_exposes_readonly_kingdee_balance_snapshot_endpoint():
     assert "/finance-center/mumaren/history/balance-snapshots" in paths
 
 
+def test_new_router_exposes_posted_voucher_line_ledger_endpoint():
+    from app.api.v1.mumaren_finance_center import router
+
+    paths = {route.path for route in router.routes}
+
+    assert "/finance-center/mumaren/ledger/lines" in paths
+
+
+def test_ledger_line_endpoint_rejects_an_account_from_another_book():
+    from fastapi import HTTPException
+    from app.api.v1.mumaren_finance_center import get_ledger_lines
+
+    class CrossBookDb:
+        def __init__(self):
+            self.values = [SimpleNamespace(id=1), SimpleNamespace(book_id=2)]
+
+        async def get(self, _model, _id):
+            return self.values.pop(0)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(get_ledger_lines(book_id=1, account_id=99, limit=500, _=None, db=CrossBookDb()))
+
+    assert error.value.status_code == 404
+
+
+def test_ledger_line_endpoint_calculates_directional_running_balance_with_pagination():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_ledger_lines)
+
+    assert "offset: int = Query(default=0, ge=0)" in source
+    assert "FinanceCenterMumarenAccount.direction == \"credit\"" in source
+    assert "func.sum" in source
+    assert '"has_more"' in source
+
+
 def test_balance_snapshot_query_joins_account_within_the_same_book():
     from app.api.v1 import mumaren_finance_center
 

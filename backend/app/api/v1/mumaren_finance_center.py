@@ -4,12 +4,12 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission, require_roles
 from app.core.database import get_db
-from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog, FinanceCenterMumarenBalanceSnapshot, FinanceCenterMumarenBook, FinanceCenterMumarenVoucher
+from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog, FinanceCenterMumarenBalanceSnapshot, FinanceCenterMumarenBook, FinanceCenterMumarenVoucher, FinanceCenterMumarenVoucherLine
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.mumaren_finance_center.workflow import (
@@ -270,6 +270,68 @@ async def get_vouchers(
         statement = statement.where(FinanceCenterMumarenVoucher.book_id == book_id)
     result = await db.execute(statement.limit(200))
     return ApiResponse.ok(data=[_voucher_data(voucher) for voucher in result.scalars()])
+
+
+@router.get("/ledger/lines", response_model=ApiResponse)
+async def get_ledger_lines(
+    book_id: int = Query(ge=1),
+    account_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=500, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    """Posted voucher lines for a single book; suitable for current and readonly history books."""
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="账簿不存在")
+    if account_id is not None:
+        account = await db.get(FinanceCenterMumarenAccount, account_id)
+        if account is None or account.book_id != book_id:
+            raise HTTPException(status_code=404, detail="科目不属于所选账簿")
+    order_columns = (
+        FinanceCenterMumarenVoucher.voucher_date,
+        FinanceCenterMumarenVoucher.id,
+        FinanceCenterMumarenVoucherLine.line_no,
+    )
+    signed_amount = case(
+        (FinanceCenterMumarenAccount.direction == "credit", FinanceCenterMumarenVoucherLine.credit_amount - FinanceCenterMumarenVoucherLine.debit_amount),
+        else_=FinanceCenterMumarenVoucherLine.debit_amount - FinanceCenterMumarenVoucherLine.credit_amount,
+    )
+    running_balance = func.sum(signed_amount).over(
+        partition_by=FinanceCenterMumarenVoucherLine.account_id,
+        order_by=order_columns,
+    ).label("running_balance")
+    statement = (
+        select(FinanceCenterMumarenVoucherLine, FinanceCenterMumarenVoucher, FinanceCenterMumarenAccount, running_balance)
+        .join(FinanceCenterMumarenVoucher, FinanceCenterMumarenVoucher.id == FinanceCenterMumarenVoucherLine.voucher_id)
+        .join(FinanceCenterMumarenAccount, and_(
+            FinanceCenterMumarenAccount.id == FinanceCenterMumarenVoucherLine.account_id,
+            FinanceCenterMumarenAccount.book_id == FinanceCenterMumarenVoucher.book_id,
+        ))
+        .where(
+            FinanceCenterMumarenVoucher.book_id == book_id,
+            FinanceCenterMumarenVoucher.status == "posted",
+        )
+        .order_by(*order_columns)
+        .limit(limit + 1)
+        .offset(offset)
+    )
+    if account_id is not None:
+        statement = statement.where(FinanceCenterMumarenVoucherLine.account_id == account_id)
+    result_rows = (await db.execute(statement)).all()
+    has_more = len(result_rows) > limit
+    rows = result_rows[:limit]
+    return ApiResponse.ok(data={"rows": [{
+        "id": line.id, "voucher_id": voucher.id, "line_no": line.line_no,
+        "voucher_no": voucher.voucher_no, "voucher_type": voucher.voucher_type,
+        "voucher_date": voucher.voucher_date, "voucher_summary": voucher.summary,
+        "line_summary": line.summary, "account_id": account.id,
+        "account_code": account.account_code, "account_name": account.account_name,
+        "debit_amount": line.debit_amount, "credit_amount": line.credit_amount,
+        "running_balance": balance, "balance_direction": account.direction,
+        "is_readonly": voucher.is_readonly,
+    } for line, voucher, account, balance in rows], "has_more": has_more, "next_offset": offset + len(rows)})
 
 
 @router.post("/vouchers", response_model=ApiResponse)

@@ -75,9 +75,11 @@ test('金蝶迁移账簿在历史查询页和核心汇总页初始化后会自�
 
   assert.match(history, /listVouchers\(\{ book_id: bookId\.value \}\)/)
   assert.match(history, /金蝶迁移凭证/)
-  for (const page of [voucherSummary, ledgerDetail, balanceSheet, cashFlow]) {
+  for (const page of [voucherSummary, balanceSheet, cashFlow]) {
     assert.match(page, /initializeBook\(books\.value\)[\s\S]*await load\(\)/)
   }
+  assert.match(ledgerDetail, /initializeBook\(books\.value\)[\s\S]*await onBookChange\(\)/)
+  assert.match(ledgerDetail, /listAccounts\(requestedBookId\)[\s\S]*await load\(\)/)
 })
 
 test('金蝶余额快照有独立只读查询页，不混入当前账报表', () => {
@@ -92,6 +94,22 @@ test('金蝶余额快照有独立只读查询页，不混入当前账报表', ()
   assert.match(page, /filter\(\(book\) => book\.is_readonly\)/)
   assert.match(page, /getHistoryBalanceSnapshots/)
   assert.doesNotMatch(page, /request\.post\(|request\.put\(|request\.delete\(/)
+})
+
+test('明细账查询真实已过账分录，不再按凭证头摘要模糊匹配', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceLedgerDetail.vue')
+
+  assert.match(api, /getLedgerLines/)
+  assert.match(page, /getLedgerLines/)
+  assert.match(page, /loadMore/)
+  assert.match(page, /running_balance/)
+  assert.match(page, /has_more/)
+  assert.match(page, /loadRequestVersion/)
+  assert.match(page, /requestedAccountId !== accountId\.value/)
+  assert.match(page, /onBookChange[\s\S]*loading\.value = true[\s\S]*finally[\s\S]*loading\.value = false/)
+  assert.doesNotMatch(page, /凭证分录明细接口待后端补/)
+  assert.doesNotMatch(page, /summary\.includes\(keyword\)/)
 })
 
 test('未确认报表映射的金蝶迁移账簿不会把三张正式报表伪装为可用', () => {
@@ -352,11 +370,11 @@ test('付款台账在独立财务中心可访问，并遵循草稿审核人工�
   assert.match(page, /fixed-order-type="payable"/)
 })
 
-test('派生展示类页面调用已有 API,不新增后端接口', () => {
+test('展示类页面调用明确的独立财务接口', () => {
   const derivedPages = [
     { file: 'MumarenFinanceCompass.vue', apis: ['loadBooks', 'getTrialBalance', 'getProfitStatement'] },
     { file: 'MumarenFinanceVoucherSummary.vue', apis: ['listBooks', 'listVouchers'] },
-    { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'listVouchers'] },
+    { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'getLedgerLines'] },
     { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },
     { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getCashFlowStatement'] },
     { file: 'MumarenFinanceReportReceivable.vue', apis: ['listBooks', 'getArApAging'] },
