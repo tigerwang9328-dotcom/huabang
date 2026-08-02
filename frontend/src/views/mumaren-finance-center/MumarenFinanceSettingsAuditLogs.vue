@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">系统设置</p>
         <h2>操作日志</h2>
-        <p>财务中心操作审计日志;按账簿与时间范围查询,只读展示。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入操作审计日志；当前仅保留已迁入业务数据的只读查询。" : "财务中心操作审计日志;按账簿与时间范围查询,只读展示。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" @click="load">刷新</el-button>
@@ -12,7 +12,7 @@
     </div>
 
     <div class="filters">
-      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="load">
+      <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="onBookChange">
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
       <el-select v-model="filterModule" placeholder="按模块过滤" clearable style="width: 180px" @change="load">
@@ -30,8 +30,15 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert
+      v-else-if="isReadonly"
+      type="info"
+      title="金蝶迁移账簿未导入操作审计日志"
+      :closable="false"
+      show-icon
+    />
 
-    <el-table v-loading="loading" :data="filteredLogs" empty-text="暂无日志" stripe>
+    <el-table v-if="!isReadonly" v-loading="loading" :data="filteredLogs" empty-text="暂无日志" stripe>
       <el-table-column prop="operation_time" label="操作时间" width="180" />
       <el-table-column prop="module" label="模块" width="100" />
       <el-table-column prop="action" label="操作" width="100" />
@@ -49,12 +56,13 @@ import {
 } from "@/api/mumarenFinanceCenter";
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 
-const { books, bookId, loadBooks } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const logs = ref<MumarenAuditLog[]>([]);
 const loading = ref(false);
 const error = ref("");
 const filterModule = ref("");
 const filterRange = ref<[string, string] | null>(null);
+let loadRequestVersion = 0;
 
 const moduleOptions = ["凭证", "AR-AP", "税务", "资产", "发票", "出纳", "工资", "结账"];
 
@@ -64,21 +72,42 @@ const filteredLogs = computed(() => {
 });
 
 const load = async () => {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (isReadonly.value) {
+    logs.value = [];
+    loading.value = false;
+    error.value = "";
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
     const params: Parameters<typeof auditLogsApi.list>[0] = {};
-    if (bookId.value) params.book_id = bookId.value;
+    if (requestedBookId) params.book_id = requestedBookId;
     if (filterRange.value && filterRange.value.length === 2) {
       params.start_date = filterRange.value[0];
       params.end_date = filterRange.value[1];
     }
-    logs.value = (await auditLogsApi.list(params)).data.data;
+    const response = await auditLogsApi.list(params);
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
+      logs.value = response.data.data;
+    }
   } catch {
-    error.value = "无法加载操作日志。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
+      error.value = "无法加载操作日志。";
+    }
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
+};
+
+const onBookChange = () => {
+  loadRequestVersion += 1;
+  logs.value = [];
+  loading.value = false;
+  error.value = "";
+  void load();
 };
 
 onMounted(async () => {

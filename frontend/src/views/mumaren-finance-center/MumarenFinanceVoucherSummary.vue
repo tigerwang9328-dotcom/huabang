@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">凭证分析</p>
         <h2>凭证汇总</h2>
-        <p>按凭证字/月份聚合凭证发生额;前端派生展示。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿已导入的已过账凭证按凭证字/月份聚合，只读查询。" : "按凭证字/月份聚合当前账凭证发生额;前端派生展示。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button>
@@ -71,16 +71,15 @@ import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, ref } from "vue";
 import {
   mumarenFinanceCenterApi,
-  type MumarenFinanceBook,
   type MumarenFinanceVoucher,
 } from "@/api/mumarenFinanceCenter";
 
-const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const vouchers = ref<MumarenFinanceVoucher[]>([]);
 const monthFilter = ref("");
 const error = ref("");
 const loading = ref(false);
+let loadRequestVersion = 0;
 
 const money = (value?: number | string) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
@@ -148,25 +147,31 @@ const summaryMethod = ({ columns }: { columns: Array<Record<string, unknown>> })
 };
 
 const load = async () => {
-  if (!bookId.value) {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
     vouchers.value = [];
     return;
   }
   loading.value = true;
   error.value = "";
   try {
-    vouchers.value = (await mumarenFinanceCenterApi.listVouchers({ book_id: bookId.value })).data.data;
+    const response = await mumarenFinanceCenterApi.listVouchers({ book_id: requestedBookId });
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
+      vouchers.value = response.data.data;
+    }
   } catch {
-    error.value = "无法加载独立当前账凭证。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
+      error.value = "无法加载独立账簿凭证。";
+    }
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 onMounted(async () => {
   try {
-    books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
+    await loadBooks();
     await load();
   } catch {
     error.value = "无法加载独立账簿。";
