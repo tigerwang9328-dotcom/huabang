@@ -328,6 +328,7 @@ export const mumarenFinanceCenterApi = {
 
   // ── 税务写入:草稿 → 财务审核 → 人工缴税(不产生凭证分录) ──
   createTaxRecord: (payload: TaxRecordCreatePayload) => request.post<ApiResponse<MumarenTaxRecord>>(requestPath("/tax/records"), payload),
+  deleteTaxRecord: (recordId: number, bookId: number) => request.delete<ApiResponse<null>>(requestPath(`/tax/records/${recordId}`), { params: { book_id: bookId } }),
   reviewTaxRecord: (recordId: number) => request.post<ApiResponse<MumarenTaxRecord>>(requestPath(`/tax/records/${recordId}/review`)),
   payTaxRecord: (recordId: number, payload: TaxPayPayload) => request.post<ApiResponse<MumarenTaxRecord>>(requestPath(`/tax/records/${recordId}/pay`), payload),
 };

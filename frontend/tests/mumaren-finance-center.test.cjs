@@ -1194,3 +1194,14 @@ test('利润表与现金流量表说明准确覆盖所选历史或当前账簿',
   assert.match(cashFlow, /所选账簿.*已过账凭证.*已过账资金流水/)
   assert.doesNotMatch(`${profit}\n${cashFlow}`, /独立当前账|不混入历史归档/)
 })
+
+test('税务草稿仅在当前账簿可删除，金蝶历史账簿不提供删除入口', () => {
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+
+  assert.match(api, /deleteTaxRecord: \(recordId: number, bookId: number\) => request\.delete[\s\S]*params: \{ book_id: bookId \}/)
+  assert.match(page, /<el-popconfirm v-if="scope\.row\.workflow_status === 'draft'"[\s\S]*@confirm="remove\(scope\.row\)"/)
+  assert.match(page, /:disabled="isReadonly"[\s\S]*>删除<\/el-button>/)
+  assert.match(page, /if \(isReadonly\.value \|\| !bookId\.value \|\| row\.workflow_status !== "draft"\) return;/)
+  assert.match(page, /await mumarenFinanceCenterApi\.deleteTaxRecord\(row\.id, bookId\.value\)/)
+})

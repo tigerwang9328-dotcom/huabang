@@ -52,6 +52,9 @@
         <el-table-column label="操作" width="170">
           <template #default="scope">
             <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+            <el-popconfirm v-if="scope.row.workflow_status === 'draft'" title="确定删除该税务草稿?" @confirm="remove(scope.row)">
+              <template #reference><el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === scope.row.id">删除</el-button></template>
+            </el-popconfirm>
             <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
             <span v-if="scope.row.status === 'paid'" class="done-text">已缴税</span>
           </template>
@@ -234,6 +237,20 @@ const review = async (row: MumarenTaxRecord) => {
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "审核失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+const remove = async (row: MumarenTaxRecord) => {
+  if (isReadonly.value || !bookId.value || row.workflow_status !== "draft") return;
+  actingId.value = row.id;
+  try {
+    await mumarenFinanceCenterApi.deleteTaxRecord(row.id, bookId.value);
+    ElMessage.success("税务草稿已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
   } finally {
     actingId.value = undefined;
   }
