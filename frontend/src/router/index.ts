@@ -122,8 +122,6 @@ const routes = [
           { path: "settings/books", name: "MumarenFinanceSettingsBooks", component: () => import("@/views/mumaren-finance-center/MumarenFinanceBooks.vue"), meta: { title: "账套管理" } },
           { path: "settings/auxiliary", name: "MumarenFinanceSettingsAuxiliary", component: () => import("@/views/mumaren-finance-center/MumarenFinanceSettingsAuxiliary.vue"), meta: { title: "辅助核算" } },
           { path: "settings/audit-logs", name: "MumarenFinanceSettingsAuditLogs", component: () => import("@/views/mumaren-finance-center/MumarenFinanceSettingsAuditLogs.vue"), meta: { title: "操作日志" } },
-          { path: "settings/daily-parameters", name: "MumarenFinanceDailyParameters", component: () => import("@/views/mumaren-finance-center/MumarenFinanceDailyParameters.vue"), meta: { title: "每日经营参数" } },
-          { path: "settings/daily-ad-costs", name: "MumarenFinanceDailyAdCosts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceDailyAdCosts.vue"), meta: { title: "每日广告费" } },
         ],
       },
       { path: "finance-center", redirect: "/app/finance-center/core-workspace" },

@@ -53,6 +53,19 @@ test('所有导航项 availability 全部为 available,无 planned_backend 占�
   assert.doesNotMatch(config, /badge:\s*['"]待适配['"]/)
 })
 
+test('每日经营参数和每日广告费仅撤销前端入口，保留数据接口代码', () => {
+  const config = read('src', 'config', 'mumarenFinanceCenter.ts')
+  const router = read('src', 'router', 'index.ts')
+  const api = read('src', 'api', 'mumarenFinanceCenter.ts')
+
+  assert.doesNotMatch(config, /title:\s*['"]每日经营参数['"]/)
+  assert.doesNotMatch(config, /title:\s*['"]每日广告费['"]/)
+  assert.doesNotMatch(router, /MumarenFinanceDailyParameters/)
+  assert.doesNotMatch(router, /MumarenFinanceDailyAdCosts/)
+  assert.match(api, /daily-parameters/)
+  assert.match(api, /daily-ad-costs/)
+})
+
 test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {
   const router = read('src', 'router', 'index.ts')
 

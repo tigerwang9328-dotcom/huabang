@@ -114,8 +114,6 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
       { key: "settings-books", title: "账套管理", path: `${R}/settings/books`, routeName: "MumarenFinanceSettingsBooks", availability: "available" },
       { key: "settings-auxiliary", title: "辅助核算", path: `${R}/settings/auxiliary`, routeName: "MumarenFinanceSettingsAuxiliary", availability: "available" },
       { key: "settings-audit-logs", title: "操作日志", path: `${R}/settings/audit-logs`, routeName: "MumarenFinanceSettingsAuditLogs", availability: "available" },
-      { key: "settings-daily-parameters", title: "每日经营参数", path: `${R}/settings/daily-parameters`, routeName: "MumarenFinanceDailyParameters", availability: "available" },
-      { key: "settings-daily-ad-costs", title: "每日广告费", path: `${R}/settings/daily-ad-costs`, routeName: "MumarenFinanceDailyAdCosts", availability: "available" },
     ],
   },
 ];
@@ -206,8 +204,6 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
         { path: `${R}/settings/books`, label: "账套管理" },
         { path: `${R}/settings/auxiliary`, label: "辅助核算" },
         { path: `${R}/settings/audit-logs`, label: "操作日志" },
-        { path: `${R}/settings/daily-parameters`, label: "每日经营参数" },
-        { path: `${R}/settings/daily-ad-costs`, label: "每日广告费" },
       ],
     },
   ],
