@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">系统设置</p>
         <h2>辅助核算</h2>
-        <p>客户、供应商、部门、项目等辅助核算维度管理;按独立账簿隔离,数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入可维护的辅助核算项；请通过原始凭证、明细账和余额快照核对来源证据。" : "客户、供应商、部门、项目等辅助核算维度管理;按独立账簿隔离,数据持久化。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -25,9 +25,9 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能维护辅助核算项。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入可维护的辅助核算项，当前页面不以空表表示历史辅助核算为零。" :closable="false" show-icon />
 
-    <el-table v-loading="loading" :data="items" empty-text="暂无核算项" stripe>
+    <el-table v-if="!isReadonly" v-loading="loading" :data="items" empty-text="暂无核算项" stripe>
       <el-table-column prop="aux_type" label="维度" width="120" />
       <el-table-column prop="code" label="编码" width="140" />
       <el-table-column prop="name" label="名称" min-width="180" />
@@ -101,6 +101,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+let loadRequestVersion = 0;
 const dialogVisible = ref(false);
 const editingId = ref<number>();
 const filterDimension = ref("");
@@ -116,24 +117,31 @@ const form = reactive({
 });
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId || isReadonly.value) { items.value = []; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
-    items.value = (await auxiliaryAccountingsApi.list({
-      book_id: bookId.value,
+    const response = await auxiliaryAccountingsApi.list({
+      book_id: requestedBookId,
       aux_type: filterDimension.value ? auxTypeValue(filterDimension.value) : undefined,
-    })).data.data;
+    });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    items.value = response.data.data;
   } catch {
-    error.value = "无法加载辅助核算项。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载辅助核算项。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 const onBookChange = () => {
+  loadRequestVersion += 1;
   items.value = [];
-  load();
+  loading.value = false;
+  error.value = "";
+  void load();
 };
 
 onMounted(async () => {

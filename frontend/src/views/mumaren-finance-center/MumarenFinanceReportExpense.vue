@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">财务报表</p>
         <h2>费用明细表</h2>
-        <p>按期间、科目展示费用发生明细;按独立账簿隔离,数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入费用业务明细；请通过原始凭证、明细账和余额快照核对。" : "按期间、科目展示费用发生明细;按独立账簿隔离,数据持久化。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -19,9 +19,9 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能登记、审核或过账费用。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入费用业务明细，当前页面不以空表表示历史费用为零。" :closable="false" show-icon />
 
-    <el-table v-loading="loading" :data="records" empty-text="暂无费用明细" stripe show-summary :summary-method="getSummaries">
+    <el-table v-if="!isReadonly" v-loading="loading" :data="records" empty-text="暂无费用明细" stripe show-summary :summary-method="getSummaries">
       <el-table-column prop="period" label="期间" width="120" />
       <el-table-column prop="account_code" label="科目编码" width="140" />
       <el-table-column prop="account_name" label="科目名称" min-width="180" show-overflow-tooltip />
@@ -93,6 +93,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+let loadRequestVersion = 0;
 
 const dialogVisible = ref(false);
 const formRef = ref<FormInstance>();
@@ -135,21 +136,28 @@ const resetForm = () => {
 };
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId || isReadonly.value) { records.value = []; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
-    records.value = (await expenseEntriesApi.list({ book_id: bookId.value })).data.data;
+    const response = await expenseEntriesApi.list({ book_id: requestedBookId });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    records.value = response.data.data;
   } catch {
-    error.value = "无法加载费用明细。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载费用明细。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 const onBookChange = () => {
+  loadRequestVersion += 1;
   records.value = [];
-  load();
+  loading.value = false;
+  error.value = "";
+  void load();
 };
 
 onMounted(async () => {

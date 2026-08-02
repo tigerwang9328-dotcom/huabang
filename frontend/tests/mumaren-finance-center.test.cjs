@@ -135,6 +135,10 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   const cashier = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCashierAccounts.vue')
   const payroll = read('src', 'views', 'mumaren-finance-center', 'MumarenFinancePayroll.vue')
   const tax = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceTax.vue')
+  const reconciliation = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCashierReconciliation.vue')
+  const expense = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportExpense.vue')
+  const salesMonthly = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceReportSalesMonthly.vue')
+  const auxiliary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceSettingsAuxiliary.vue')
 
   assert.match(compass, /v-else-if="isReadonly"/)
   assert.match(compass, /余额快照核对/)
@@ -149,6 +153,11 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   assert.match(aging, /金蝶迁移账簿未导入应收应付业务单据/)
   assert.match(aging, /if \(isReadonly\.value\)/)
   for (const page of [assets, invoices, cashier, payroll, tax]) {
+    assert.match(page, /金蝶迁移账簿未导入/)
+    assert.match(page, /if \(isReadonly\.value\)/)
+    assert.match(page, /loadRequestVersion/)
+  }
+  for (const page of [reconciliation, expense, salesMonthly, auxiliary]) {
     assert.match(page, /金蝶迁移账簿未导入/)
     assert.match(page, /if \(isReadonly\.value\)/)
     assert.match(page, /loadRequestVersion/)
