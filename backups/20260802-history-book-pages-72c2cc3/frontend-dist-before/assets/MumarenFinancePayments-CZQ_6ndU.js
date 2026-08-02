@@ -1,0 +1,1 @@
+import e from"./MumarenFinanceArAp-m7Dle6Uy.js";import{d as r,Q as o,o as a}from"./index-B5zBAe8x.js";import"./useMumarenFinanceBook-CJEUUceK.js";import"./mumarenFinanceBook-dujyHBLQ.js";import"./mumarenFinanceCenter-DewyRJhX.js";const f=r({__name:"MumarenFinancePayments",setup(n){return(t,p)=>(a(),o(e,{"fixed-order-type":"payable"}))}});export{f as default};

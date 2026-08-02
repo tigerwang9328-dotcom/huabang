@@ -1,0 +1,1 @@
+import{_ as o,o as t,c,g as a,m as s}from"./index-C2a0Ng-j.js";const r={},n={class:"auth-layout"};function _(u,d){const e=s("router-view");return t(),c("div",n,[a(e)])}const i=o(r,[["render",_],["__scopeId","data-v-f8c2a42a"]]);export{i as default};

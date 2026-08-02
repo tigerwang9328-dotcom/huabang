@@ -1,0 +1,1 @@
+import{aw as a}from"./index-BL2a0c8p.js";import{u as r}from"./mumarenFinanceBook-OnINPq4M.js";const k=()=>{const s=r(),{bookId:o,isReadonly:t}=a(s);return{bookId:o,isReadonly:t,initializeBook:e=>{var i;e.some(n=>n.id===o.value)||(o.value=(i=e[0])==null?void 0:i.id)},selectBook:e=>{o.value=e}}};export{k as u};

@@ -1,0 +1,1 @@
+import{aw as u}from"./index-hhXiUpnT.js";import{u as c}from"./mumarenFinanceBook-DiwEyvuG.js";const d=()=>{const e=c(),{books:n,bookId:o,isReadonly:a}=u(e),{loadBooks:t}=e;return{books:n,bookId:o,isReadonly:a,loadBooks:t,initializeBook:i=>{var s;i.some(r=>r.id===o.value)||(o.value=(s=i[0])==null?void 0:s.id)}}};export{d as u};

@@ -1,0 +1,1 @@
+import e from"./BossAiChat-Dyxk9xWh.js";import{d as o,c as t,g as a,o as s,_ as c}from"./index-Bu7dEs8J.js";import"./ai-CB8ZFR0K.js";const _={class:"ai-page"},n=o({__name:"Index",setup(r){return(p,d)=>(s(),t("div",_,[a(e,{mode:"page"})]))}}),l=c(n,[["__scopeId","data-v-9930422c"]]);export{l as default};

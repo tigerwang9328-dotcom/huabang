@@ -1,0 +1,1 @@
+import{N as c}from"./index-02aQxj1S.js";import{u as m}from"./mumarenFinanceBook-C_5RLD7E.js";const B=()=>{const e=m(),{books:n,bookId:o,isReadonly:r,error:t}=c(e),{loadBooks:a}=e;return{books:n,bookId:o,isReadonly:r,error:t,loadBooks:a,initializeBook:i=>{var s;i.some(u=>u.id===o.value)||(o.value=(s=i[0])==null?void 0:s.id)}}};export{B as u};
