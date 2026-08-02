@@ -7,6 +7,7 @@ import re
 from typing import Mapping, Sequence
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.mumaren_finance_center import (
@@ -339,3 +340,34 @@ async def list_history_vouchers(
         query = query.where(FinanceCenterMumarenHistoryVoucher.source_system == source_system)
     result = await db.execute(query.limit(min(max(limit, 1), 500)))
     return list(result.scalars())
+
+
+async def replenish_starter_accounts(
+    db: AsyncSession, *, book_id: int, operator_id: int,
+) -> int:
+    """Idempotently add only missing starter accounts to a writable current book."""
+    await assert_book_writable(db, book_id=book_id)
+    existing_rows = list((await db.execute(
+        select(FinanceCenterMumarenAccount).where(FinanceCenterMumarenAccount.book_id == book_id)
+    )).scalars().all())
+    existing_codes = {row.account_code for row in existing_rows}
+    added = 0
+    for account_code, account_name, account_type, direction in _STARTER_ACCOUNTS:
+        if account_code in existing_codes:
+            continue
+        result = await db.execute(
+            pg_insert(FinanceCenterMumarenAccount)
+            .values(
+                book_id=book_id, account_code=account_code, account_name=account_name,
+                account_type=account_type, direction=direction, level=1, is_active=True,
+            )
+            .on_conflict_do_nothing(index_elements=["book_id", "account_code"])
+            .returning(FinanceCenterMumarenAccount.id)
+        )
+        added += int(result.scalar_one_or_none() is not None)
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=book_id, action="replenish_starter_accounts", operator_id=operator_id,
+        detail=f"added={added}",
+    ))
+    await db.flush()
+    return added
