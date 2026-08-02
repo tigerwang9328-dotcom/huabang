@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.3
+// @version      3.5.5
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.3';
+  const SCRIPT_VERSION = '3.5.5';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -48,7 +48,7 @@
       if (!control) { console.warn('[douyin-color] 已保存的令牌已失效,请重新配置'); GM_setValue(CONFIG_STORAGE_KEY, ''); return; }
       runtimeConfig = { ...parsed, max_part_uncompressed_bytes: control.max_part_uncompressed_bytes, max_part_records: control.max_part_records, max_local_batches: control.max_local_batches, max_local_bytes: control.max_local_bytes };
       console.info('[douyin-color] 已自动加载保存的令牌,采集器就绪');
-      void startFixedCollection();
+      void runScheduledCollection();
     } catch (e) { console.warn('[douyin-color] 加载保存的令牌失败:', e.message); }
   }
   function openQueueDb() {
@@ -340,6 +340,10 @@
     if (fixedCollectionInFlight || paused || !runtimeConfig?.uploadToken) return;
     fixedCollectionInFlight = true;
     try {
+      // 先上报并清空已有队列。完整目录回填可能持续数分钟，不能让旧批次
+      // 因为回填尚未完成而一直没有心跳或无法上传。
+      await heartbeat('online_active');
+      await uploadPending();
       await collectCatalogPages();
       await collectCatalogCurves();
       await uploadPending();
@@ -347,8 +351,15 @@
       fixedCollectionInFlight = false;
     }
   }
+  async function recoverPending() {
+    if (paused || !runtimeConfig?.uploadToken) return;
+    await heartbeat('online_active');
+    await uploadPending();
+  }
   async function runScheduledCollection() {
-    await startFixedCollection();
+    // 页面恢复、定时器和网络恢复只负责可靠上传；全量目录/曲线回填
+    // 只能由首次明确配置或菜单主动触发，避免重复请求全部历史作品。
+    await recoverPending();
   }
   async function heartbeat(status) {
     const settings = await config(); if (!settings?.uploadToken) return;

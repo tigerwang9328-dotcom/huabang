@@ -7,10 +7,9 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
 
-const script = fs.readFileSync(
-  path.resolve(__dirname, "..", "..", "tools", "douyin-color-analytics-collector.user.js"),
-  "utf8",
-);
+const localCollector = path.resolve(__dirname, "douyin-color-analytics-collector.user.js");
+const canonicalCollector = path.resolve(__dirname, "..", "..", "tools", "douyin-color-analytics-collector.user.js");
+const script = fs.readFileSync(fs.existsSync(localCollector) ? localCollector : canonicalCollector, "utf8");
 
 test("collector has fixed catalog and semantic curve endpoints", () => {
   assert.ok(script.includes("const CATALOG_ENDPOINT = '/web/api/creator/item/list';"));
@@ -35,6 +34,29 @@ test("fixed collection does not require learned requests or relabel metrics tren
   assert.match(script, /if \(record\) \{ await enqueue\(record\); continue; \}/);
   assert.ok(script.includes("async function startFixedCollection()"));
   assert.ok(script.includes("void startFixedCollection();"));
+});
+
+test("saved collector configuration reports and flushes pending work before a long backfill", () => {
+  const start = script.indexOf("async function startFixedCollection()");
+  const end = script.indexOf("async function runScheduledCollection()", start);
+  const body = script.slice(start, end);
+  assert.match(body, /await heartbeat\('online_active'\);/);
+  assert.match(body, /await uploadPending\(\);/);
+  assert.ok(
+    body.indexOf("await uploadPending();") < body.indexOf("await collectCatalogPages();"),
+    "existing queued batches must upload before the catalog/curve backfill begins",
+  );
+});
+
+test("visibility and periodic recovery only heartbeat and upload, never repeat a full backfill", () => {
+  const heartbeatStart = script.indexOf("async function heartbeat(status)");
+  const recovery = script.slice(script.indexOf("async function recoverPending()"), heartbeatStart);
+  const scheduled = script.slice(script.indexOf("async function runScheduledCollection()"), heartbeatStart);
+  assert.match(recovery, /await heartbeat\('online_active'\);/);
+  assert.match(recovery, /await uploadPending\(\);/);
+  assert.doesNotMatch(recovery, /collectCatalogPages|collectCatalogCurves/);
+  assert.match(scheduled, /await recoverPending\(\);/);
+  assert.doesNotMatch(scheduled, /startFixedCollection/);
 });
 
 function response(body, status = 200) {
@@ -113,6 +135,9 @@ function createHarness(options = {}) {
       getRuntimeConfig: () => structuredClone(runtimeConfig),
       getSavedRuntimeConfig: () => GM_getValue(CONFIG_STORAGE_KEY),
     };
+    // 启动路径会先发送心跳；该单元测试不连接管理后台，因此两种
+    // 网络副作用都由桩替代，保留目录与曲线采集行为供断言。
+    heartbeat = async () => {};
     uploadPending = async () => {};
   `);
   assert.notEqual(testScript, script, "test injection marker must remain in the userscript");
@@ -148,13 +173,12 @@ test("trend map data is never relabeled as a curve", () => {
   assert.equal(api.recordFromAnalysis({ trend_map: { metric: { 0: [{ date_time: "00:00", value: 1 }] } } }, 1, "video"), null);
 });
 
-test("periodic collector retry recovers after initial catalog failures", async () => {
+test("periodic collector recovery does not repeat a failed full catalog backfill", async () => {
   const { api, intervals } = createHarness({ catalogFailures: 1 });
   api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
   await api.startFixedCollection();
   assert.equal((await api.queueState()).batches.length, 0);
   assert.ok(intervals.some((entry) => entry.delay === 5 * 60 * 1000), "collector retry interval must be registered");
   await api.runScheduledCollection();
-  const records = (await api.queueState()).batches.flatMap((batch) => batch.records.map((item) => item.record));
-  assert.deepEqual(records.map((item) => item.analysis_type).sort(), [1, 7]);
+  assert.equal((await api.queueState()).batches.length, 0);
 });
