@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">独立往来账</p>
         <h2>{{ pageTitle }}</h2>
-        <p>独立{{ typeText }}单台账：草稿录入 → 财务审核 → {{ settlementAction }}；不自动生成凭证。按独立账簿隔离，数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入应收应付业务单据；请通过原始凭证、明细账和余额快照核对。" : `独立${typeText}单台账：草稿录入 → 财务审核 → ${settlementAction}；不自动生成凭证。按独立账簿隔离，数据持久化。` }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -32,9 +32,10 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="summary && summary.total_count > orders.length" type="warning" :closable="false" show-icon title="明细最多显示最近 500 条；上方汇总已按当前筛选条件统计全部单据。" />
+    <el-alert v-else-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入应收应付业务单据；当前页面不以空台账表示历史业务为零。" />
+    <el-alert v-else-if="summary && summary.total_count > orders.length" type="warning" :closable="false" show-icon title="明细最多显示最近 500 条；上方汇总已按当前筛选条件统计全部单据。" />
 
-    <el-row :gutter="12" class="metric-grid">
+    <el-row v-if="!isReadonly" :gutter="12" class="metric-grid">
       <el-col v-for="metric in metrics" :key="metric.label" :xs="12" :sm="6">
         <el-card shadow="never" class="metric-card">
           <div class="metric-label">{{ metric.label }}</div>
@@ -43,7 +44,7 @@
       </el-col>
     </el-row>
 
-    <el-card class="created-card" shadow="never">
+    <el-card v-if="!isReadonly" class="created-card" shadow="never">
       <template #header>
         <div class="card-header"><span>{{ pageTitle }}列表</span><span class="muted">{{ summary?.total_count || 0 }} 条</span></div>
       </template>
@@ -77,8 +78,6 @@
         </el-table-column>
       </el-table>
     </el-card>
-
-    <el-alert v-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿只读：可查询台账，不能录入、审核、回款、付款或删除。" />
 
     <el-dialog v-model="showCreate" :title="editingId ? `编辑${typeText}草稿` : `录入${typeText}草稿`" width="820px" destroy-on-close :close-on-click-modal="false">
       <el-form :model="form" label-width="90px">
@@ -201,6 +200,7 @@ const load = async () => {
   const requestedOrderType = orderType.value;
   const requestVersion = ++loadRequestVersion;
   if (!requestedBookId) { orders.value = []; summary.value = undefined; loading.value = false; error.value = ""; return; }
+  if (isReadonly.value) { orders.value = []; summary.value = undefined; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
