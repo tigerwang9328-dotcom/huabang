@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">独立税务台账</p>
         <h2>税务</h2>
-        <p>独立税务记录：草稿录入 → 财务审核 → 人工缴税；不自动生成凭证，不反审核。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入税务业务台账；请通过原始凭证、明细账和余额快照核对。" : "独立税务记录：草稿录入 → 财务审核 → 人工缴税；不自动生成凭证，不反审核。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
@@ -18,6 +18,7 @@
       </el-select>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-else-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入税务业务台账，当前页面不以空表或无预警表示历史税务为零。" />
     <template v-else-if="loaded">
       <el-alert v-if="alerts.length" type="warning" :closable="false" show-icon title="存在待处理税务预警">
         <template #default>
@@ -147,6 +148,7 @@ const error = ref("");
 const loading = ref(false);
 const loaded = ref(false);
 const actingId = ref<number>(); // 当前正在审核/缴税的记录 id
+let loadRequestVersion = 0;
 
 const money = (value: number | undefined) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -165,30 +167,46 @@ const statusTagType = (row: MumarenTaxRecord): "" | "warning" | "success" => {
 };
 
 const load = async () => {
-  if (!bookId.value) {
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
     loaded.value = false;
+    return;
+  }
+  if (isReadonly.value) {
+    alerts.value = [];
+    records.value = [];
+    loaded.value = false;
+    loading.value = false;
+    error.value = "";
     return;
   }
   loading.value = true;
   error.value = "";
   try {
     const [alertResult, recordResult] = await Promise.all([
-      mumarenFinanceCenterApi.getTaxAlerts({ book_id: bookId.value }),
-      mumarenFinanceCenterApi.listTaxRecords({ book_id: bookId.value }),
+      mumarenFinanceCenterApi.getTaxAlerts({ book_id: requestedBookId }),
+      mumarenFinanceCenterApi.listTaxRecords({ book_id: requestedBookId }),
     ]);
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
     alerts.value = alertResult.data.data.alerts || [];
     records.value = recordResult.data.data;
     loaded.value = true;
   } catch {
-    error.value = "无法加载独立税务台账。";
-    loaded.value = false;
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) {
+      error.value = "无法加载独立税务台账。";
+      loaded.value = false;
+    }
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 const onBookChange = () => {
   // 切换账簿时清空已加载数据,必须由用户主动点击"查询税务"
+  loadRequestVersion += 1;
+  loading.value = false;
+  error.value = "";
   loaded.value = false;
   alerts.value = [];
   records.value = [];

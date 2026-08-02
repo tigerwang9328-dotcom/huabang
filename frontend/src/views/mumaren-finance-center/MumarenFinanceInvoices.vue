@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">发票管理</p>
         <h2>发票</h2>
-        <p>发票登记、认证与台账;按独立账簿隔离,数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入发票业务台账；请通过原始凭证、明细账和余额快照核对。" : "发票登记、认证与台账;按独立账簿隔离,数据持久化。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -19,8 +19,9 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-else-if="isReadonly" type="warning" title="金蝶迁移账簿未导入发票业务台账，当前页面不以空表表示历史发票为零。" :closable="false" show-icon />
 
-    <el-table v-loading="loading" :data="invoices" empty-text="暂无发票记录" stripe show-summary :summary-method="summary">
+    <el-table v-if="!isReadonly" v-loading="loading" :data="invoices" empty-text="暂无发票记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="invoice_no" label="号码" width="130" />
       <el-table-column prop="invoice_type" label="类型" width="90">
         <template #default="{ row }">
@@ -106,6 +107,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+let loadRequestVersion = 0;
 const dialogVisible = ref(false);
 
 const money = (value: number) =>
@@ -123,15 +125,19 @@ const form = reactive({
 const totalAmount = computed(() => Number(form.amount || 0) + Number(form.tax_amount || 0));
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId || isReadonly.value) { invoices.value = []; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
-    invoices.value = (await invoicesApi.list({ book_id: bookId.value })).data.data;
+    const response = await invoicesApi.list({ book_id: requestedBookId });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    invoices.value = response.data.data;
   } catch {
-    error.value = "无法加载发票记录。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载发票记录。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 

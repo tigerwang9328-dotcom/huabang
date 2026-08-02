@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">薪资管理</p>
         <h2>工资</h2>
-        <p>工资草稿、扣除额与实发额核对;按独立账簿隔离,数据持久化。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿未导入工资业务明细；请通过原始凭证、明细账和余额快照核对。" : "工资草稿、扣除额与实发额核对;按独立账簿隔离,数据持久化。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
@@ -19,9 +19,9 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿只读，不能录入或发放工资。" :closable="false" show-icon />
+    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入工资业务明细，当前页面不以空表表示历史工资为零。" :closable="false" show-icon />
 
-    <el-table v-loading="loading" :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
+    <el-table v-if="!isReadonly" v-loading="loading" :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="employee_no" label="员工编号" width="120" />
       <el-table-column prop="employee_name" label="员工" min-width="120" />
       <el-table-column prop="period" label="期间" width="110" />
@@ -106,6 +106,7 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const actingId = ref<number>();
+let loadRequestVersion = 0;
 const dialogVisible = ref(false);
 const editingId = ref<number>();
 
@@ -122,15 +123,19 @@ const form = reactive({
 const netAmount = computed(() => Math.max(0, Number(form.gross_amount || 0) - Number(form.deduction_amount || 0)));
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId || isReadonly.value) { records.value = []; loading.value = false; error.value = ""; return; }
   loading.value = true;
   error.value = "";
   try {
-    records.value = (await payrollsApi.list({ book_id: bookId.value })).data.data;
+    const response = await payrollsApi.list({ book_id: requestedBookId });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || isReadonly.value) return;
+    records.value = response.data.data;
   } catch {
-    error.value = "无法加载工资记录。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && !isReadonly.value) error.value = "无法加载工资记录。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
