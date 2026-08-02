@@ -134,6 +134,8 @@ onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
     initializeBook(books.value);
+    await onBookChange();
+    await load();
   } catch {
     error.value = "无法加载独立账簿。";
   }
