@@ -128,6 +128,8 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   const compass = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCompass.vue')
   const closing = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceClosing.vue')
   const voucherList = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+  const arAp = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArAp.vue')
+  const aging = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceArApAging.vue')
 
   assert.match(compass, /v-else-if="isReadonly"/)
   assert.match(compass, /余额快照核对/)
@@ -137,6 +139,10 @@ test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属�
   assert.match(closing, /if \(\s*isReadonly\.value \|\| !bookId\.value \|\| !isPeriodCode\.value\) return/)
   assert.match(voucherList, /金蝶迁移账簿凭证；永久只读/)
   assert.match(voucherList, /金蝶迁移/)
+  assert.match(arAp, /金蝶迁移账簿未导入应收应付业务单据/)
+  assert.match(arAp, /if \(isReadonly\.value\)/)
+  assert.match(aging, /金蝶迁移账簿未导入应收应付业务单据/)
+  assert.match(aging, /if \(isReadonly\.value\)/)
 })
 
 test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {

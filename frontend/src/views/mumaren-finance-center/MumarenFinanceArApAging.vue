@@ -13,6 +13,13 @@
       <el-date-picker v-model="asOf" type="date" value-format="YYYY-MM-DD" placeholder="截止日" clearable />
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <template v-else-if="isReadonly">
+      <el-alert type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入应收应付业务单据，不能据此生成账龄；请通过原始凭证、明细账和余额快照核对。" />
+      <div class="history-actions">
+        <router-link to="/app/finance-center/mumaren/ledgers/detail"><el-button>查看明细账</el-button></router-link>
+        <router-link to="/app/finance-center/mumaren/history/balance-snapshots"><el-button type="primary">余额快照核对</el-button></router-link>
+      </div>
+    </template>
     <template v-else-if="aging">
       <el-descriptions :column="2" border><el-descriptions-item label="截止日">{{ aging.as_of }}</el-descriptions-item><el-descriptions-item label="未结余额">{{ money(aging.total_balance) }}</el-descriptions-item></el-descriptions>
       <el-row :gutter="12"><el-col v-for="bucket in buckets" :key="bucket" :xs="12" :sm="4"><el-card shadow="never" class="bucket"><span>{{ bucket }}</span><strong>{{ money(aging.buckets[bucket] || 0) }}</strong></el-card></el-col></el-row>
@@ -38,7 +45,7 @@ import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { mumarenFinanceCenterApi, type MumarenArApAging } from "@/api/mumarenFinanceCenter";
 
 const buckets = ["0-30天", "31-60天", "61-90天", "91-120天", "120天以上"];
-const { books, bookId, loadBooks } = useMumarenFinanceBook();
+const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const orderType = ref<"receivable" | "payable">("receivable");
 const asOf = ref("");
 const aging = ref<MumarenArApAging>();
@@ -52,6 +59,7 @@ const load = async () => {
   const requestedOrderType = orderType.value;
   const requestVersion = ++loadRequestVersion;
   if (!requestedBookId) { aging.value = undefined; loading.value = false; error.value = ""; return; }
+  if (isReadonly.value) { aging.value = undefined; loading.value = false; error.value = ""; return; }
   loading.value = true; error.value = "";
   try {
     const response = await mumarenFinanceCenterApi.getArApAging({ book_id: requestedBookId, order_type: requestedOrderType, as_of: asOf.value || undefined });
@@ -88,5 +96,5 @@ onMounted(async () => { try { await loadBooks(); await load(); } catch { error.v
 </script>
 
 <style scoped>
-.panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }.heading, .heading-actions, .filters { display: flex; gap: 12px; align-items: center; }.heading { justify-content: space-between; align-items: flex-start; }.filters { flex-wrap: wrap; }.bucket { text-align: center; color: #5d6b7e; }.bucket strong { display: block; margin-top: 6px; color: #172033; font-size: 17px; }.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }h2 { margin: 8px 0; }p { color: #5d6b7e; }@media (max-width: 640px) { .filters, .heading { align-items: stretch; flex-direction: column; } }
+.panel { padding: 30px; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; display: grid; gap: 16px; }.heading, .heading-actions, .filters, .history-actions { display: flex; gap: 12px; align-items: center; }.heading { justify-content: space-between; align-items: flex-start; }.filters, .history-actions { flex-wrap: wrap; }.bucket { text-align: center; color: #5d6b7e; }.bucket strong { display: block; margin-top: 6px; color: #172033; font-size: 17px; }.panel-kicker { margin: 0; color: #176b97; font-size: 12px; font-weight: 700; letter-spacing: .08em; }h2 { margin: 8px 0; }p { color: #5d6b7e; }@media (max-width: 640px) { .filters, .heading { align-items: stretch; flex-direction: column; } }
 </style>
