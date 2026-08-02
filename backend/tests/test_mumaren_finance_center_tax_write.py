@@ -7,6 +7,7 @@
 import os
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -215,3 +216,102 @@ async def test_tax_full_write_flow_never_creates_voucher_or_voucher_line():
     )
 
     assert db.voucher_entries == []
+
+
+@pytest.mark.asyncio
+async def test_delete_tax_draft_uses_real_database_and_preserves_book_and_workflow_guards(monkeypatch):
+    """Only a current-book draft can be deleted, with an in-transaction audit record."""
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.api.v1 import mumaren_finance_center_domains
+    from app.core.database import Base
+    from app.models.mumaren_finance_center import (
+        MUMAREN_FINANCE_SCHEMA,
+        FinanceCenterMumarenAuditLog,
+        FinanceCenterMumarenBook,
+    )
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        execution_options={"schema_translate_map": {MUMAREN_FINANCE_SCHEMA: None}},
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(
+                lambda sync_connection: Base.metadata.create_all(
+                    sync_connection,
+                    tables=[
+                        FinanceCenterMumarenBook.__table__,
+                        FinanceCenterMumarenTaxType.__table__,
+                        FinanceCenterMumarenTaxRecord.__table__,
+                        FinanceCenterMumarenAuditLog.__table__,
+                    ],
+                )
+            )
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            original_add_audit_log = mumaren_finance_center_domains._add_audit_log
+
+            def add_sqlite_compatible_audit_log(*args, **kwargs):
+                original_add_audit_log(*args, **kwargs)
+                audit_log = next(
+                    row for row in reversed(list(db.new))
+                    if isinstance(row, FinanceCenterMumarenAuditLog)
+                )
+                audit_log.id = 1
+
+            monkeypatch.setattr(
+                mumaren_finance_center_domains,
+                "_add_audit_log",
+                add_sqlite_compatible_audit_log,
+            )
+            current = FinanceCenterMumarenBook(id=1, book_code="CURRENT", book_name="当前账", status="active", is_readonly=False)
+            other = FinanceCenterMumarenBook(id=2, book_code="OTHER", book_name="另一账", status="active", is_readonly=False)
+            history = FinanceCenterMumarenBook(id=3, book_code="K3", book_name="金蝶账", status="active", is_readonly=True, source_system="kingdee_history")
+            db.add_all([current, other, history])
+            db.add_all([
+                _tax_type(book_id=1, tt_id=11),
+                _tax_type(book_id=2, tt_id=22),
+                _tax_type(book_id=3, tt_id=33),
+            ])
+            db.add_all([
+                FinanceCenterMumarenTaxRecord(id=101, book_id=1, tax_type_id=11, period="2026-07", tax_amount=Decimal("100"), paid_amount=Decimal("0"), status="pending", workflow_status="draft"),
+                FinanceCenterMumarenTaxRecord(id=102, book_id=1, tax_type_id=11, period="2026-08", tax_amount=Decimal("100"), paid_amount=Decimal("0"), status="pending", workflow_status="reviewed"),
+                FinanceCenterMumarenTaxRecord(id=201, book_id=2, tax_type_id=22, period="2026-07", tax_amount=Decimal("100"), paid_amount=Decimal("0"), status="pending", workflow_status="draft"),
+                FinanceCenterMumarenTaxRecord(id=301, book_id=3, tax_type_id=33, period="2026-07", tax_amount=Decimal("100"), paid_amount=Decimal("0"), status="pending", workflow_status="draft"),
+            ])
+            await db.commit()
+
+            response = await mumaren_finance_center_domains.delete_tax_record_endpoint(
+                record_id=101, book_id=1, current_user=SimpleNamespace(id=42), db=db,
+            )
+            assert response.message == "税务草稿已删除"
+            assert await db.get(FinanceCenterMumarenTaxRecord, 101) is None
+            audit_logs = list((await db.execute(select(FinanceCenterMumarenAuditLog))).scalars())
+            assert [(log.book_id, log.action, log.operator_id, log.detail) for log in audit_logs] == [
+                (1, "delete_tax_record", 42, "删除税务草稿 101"),
+            ]
+
+            with pytest.raises(HTTPException) as cross_book:
+                await mumaren_finance_center_domains.delete_tax_record_endpoint(record_id=201, book_id=1, current_user=SimpleNamespace(id=42), db=db)
+            assert cross_book.value.status_code == 400
+            assert await db.get(FinanceCenterMumarenTaxRecord, 201) is not None
+
+            with pytest.raises(HTTPException) as reviewed:
+                await mumaren_finance_center_domains.delete_tax_record_endpoint(record_id=102, book_id=1, current_user=SimpleNamespace(id=42), db=db)
+            assert reviewed.value.status_code == 409
+            assert await db.get(FinanceCenterMumarenTaxRecord, 102) is not None
+
+            with pytest.raises(HTTPException) as readonly:
+                await mumaren_finance_center_domains.delete_tax_record_endpoint(record_id=301, book_id=3, current_user=SimpleNamespace(id=42), db=db)
+            assert readonly.value.status_code == 409
+            assert await db.get(FinanceCenterMumarenTaxRecord, 301) is not None
+
+            with pytest.raises(HTTPException) as missing:
+                await mumaren_finance_center_domains.delete_tax_record_endpoint(record_id=999, book_id=1, current_user=SimpleNamespace(id=42), db=db)
+            assert missing.value.status_code == 404
+    finally:
+        await engine.dispose()
