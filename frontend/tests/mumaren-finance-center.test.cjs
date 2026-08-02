@@ -124,6 +124,21 @@ test('未确认报表映射的金蝶迁移账簿不会把三张正式报表伪�
   }
 })
 
+test('金蝶迁移账簿不会在数据罗盘或结账页运行当前账专属计算和操作', () => {
+  const compass = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceCompass.vue')
+  const closing = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceClosing.vue')
+  const voucherList = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
+
+  assert.match(compass, /v-else-if="isReadonly"/)
+  assert.match(compass, /余额快照核对/)
+  assert.match(compass, /if \(isReadonly\.value\)/)
+  assert.match(closing, /金蝶迁移账簿的期间仅供查询/)
+  assert.match(closing, /:disabled="!bookId \|\| isReadonly \|\| !isPeriodCode"/)
+  assert.match(closing, /if \(\s*isReadonly\.value \|\| !bookId\.value \|\| !isPeriodCode\.value\) return/)
+  assert.match(voucherList, /金蝶迁移账簿凭证；永久只读/)
+  assert.match(voucherList, /金蝶迁移/)
+})
+
 test('19 个原占位页路由全部指向新组件,不再指向 Placeholder', () => {
   const router = read('src', 'router', 'index.ts')
 

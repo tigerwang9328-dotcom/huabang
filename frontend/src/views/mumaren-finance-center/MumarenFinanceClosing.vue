@@ -17,10 +17,11 @@
       </el-select>
       <el-input v-model="periodInput" placeholder="YYYY-MM" maxlength="7" />
       <el-button :disabled="!bookId || isReadonly || !isPeriodCode" :loading="initializing" @click="initializePeriod">初始化期间</el-button>
-      <el-button :disabled="!bookId || !isPeriodCode" :loading="prechecking" @click="precheck">结账预检</el-button>
+      <el-button :disabled="!bookId || isReadonly || !isPeriodCode" :loading="prechecking" @click="precheck">结账预检</el-button>
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-else-if="isReadonly" type="warning" title="金蝶迁移账簿的期间仅供查询；不允许初始化、预检、结账或重新开启。" :closable="false" show-icon />
     <el-alert v-if="precheckResult" :type="precheckResult.can_close ? 'success' : 'warning'" :closable="false" show-icon :title="precheckResult.can_close ? `${precheckResult.period} 可结账` : `${precheckResult.period} 存在 ${precheckResult.blocking_count} 项结账阻塞`" />
     <el-table v-if="precheckResult" :data="precheckResult.checks" size="small" stripe>
       <el-table-column prop="title" label="检查项" min-width="150" />
@@ -146,7 +147,7 @@ const initializePeriod = async () => {
 };
 
 const precheck = async () => {
-  if (!bookId.value || !isPeriodCode.value) return;
+  if (isReadonly.value || !bookId.value || !isPeriodCode.value) return;
   prechecking.value = true;
   try {
     precheckResult.value = (await periodsApi.precheck(bookId.value, periodInput.value)).data.data;
