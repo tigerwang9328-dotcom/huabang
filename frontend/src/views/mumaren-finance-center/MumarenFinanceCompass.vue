@@ -23,6 +23,19 @@
 
     <el-empty v-else-if="!bookId" description="请先选择独立账簿" />
 
+    <template v-else-if="isReadonly">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="金蝶迁移账簿只提供原始凭证、明细账与余额快照核对；未确认科目映射前，不展示收入、费用或利润指标。"
+      />
+      <div class="history-actions">
+        <router-link to="/app/finance-center/mumaren/ledgers/detail"><el-button>查看明细账</el-button></router-link>
+        <router-link to="/app/finance-center/mumaren/history/balance-snapshots"><el-button type="primary">余额快照核对</el-button></router-link>
+      </div>
+    </template>
+
     <template v-else>
       <el-row :gutter="16">
         <el-col v-for="card in metricCards" :key="card.label" :xs="12" :sm="12" :md="6">
@@ -102,6 +115,13 @@ const load = async () => {
     profit.value = {};
     return;
   }
+  if (isReadonly.value) {
+    loading.value = false;
+    error.value = "";
+    trialRows.value = [];
+    profit.value = {};
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
@@ -149,5 +169,6 @@ p { color: #5d6b7e; }
 .metric-success { border-left-color: #67c23a; }
 .metric-danger { border-left-color: #f56c6c; }
 .metric-count { border-left-color: #909399; }
+.history-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 @media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } }
 </style>

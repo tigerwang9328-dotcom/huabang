@@ -4,7 +4,7 @@
       <div>
         <p class="panel-kicker">凭证流程</p>
         <h2>查凭证</h2>
-        <p>独立当前账凭证列表:草稿 → 审核 → 人工过账。</p>
+        <p>{{ isReadonly ? "金蝶迁移账簿凭证；永久只读，仅供核对。" : "独立当前账凭证列表:草稿 → 审核 → 人工过账。" }}</p>
       </div>
       <div class="heading-actions">
         <el-button :loading="loading" @click="load">刷新</el-button>
@@ -23,13 +23,14 @@
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
 
-    <el-table v-else :data="vouchers" empty-text="暂无独立当前账凭证" stripe>
+    <el-table v-else :data="vouchers" :empty-text="isReadonly ? '该金蝶迁移账簿暂无凭证' : '暂无独立当前账凭证'" stripe>
       <el-table-column prop="voucher_no" label="凭证号" min-width="130" />
       <el-table-column prop="voucher_date" label="日期" width="120" />
       <el-table-column prop="summary" label="摘要" min-width="180" show-overflow-tooltip />
       <el-table-column label="状态" width="110">
         <template #default="scope">
-          <el-tag :type="statusTagType(scope.row.status)" size="small">{{ statusLabel(scope.row.status) }}</el-tag>
+          <el-tag v-if="isReadonly" type="info" size="small">金蝶迁移</el-tag>
+          <el-tag v-else :type="statusTagType(scope.row.status)" size="small">{{ statusLabel(scope.row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="借方" width="140" align="right">
