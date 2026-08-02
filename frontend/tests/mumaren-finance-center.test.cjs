@@ -151,6 +151,16 @@ test('余额快照页不应覆盖全局账簿选择，当前账只提示无金�
   assert.match(page, /当前账簿没有金蝶迁移余额快照/)
 })
 
+test('金蝶迁移凭证页不应覆盖全局账簿选择，当前账只提示需选择历史账簿', () => {
+  const page = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
+
+  assert.match(page, /initializeBook\(books\.value\)/)
+  assert.doesNotMatch(page, /initializeBook\(readonlyBooks\.value\)/)
+  assert.doesNotMatch(page, /bookId\.value = readonlyBooks\.value\[0\]/)
+  assert.match(page, /isHistoricalBook/)
+  assert.match(page, /当前账簿没有金蝶迁移凭证/)
+})
+
 test('金蝶迁移凭证与汇总查询至少覆盖单账簿 339 张凭证', () => {
   const api = read('src', 'api', 'mumarenFinanceCenter.ts')
   const list = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
