@@ -24,64 +24,82 @@ def test_new_router_exposes_isolated_trial_balance_and_profit_statement_endpoint
     assert "/finance-center/mumaren/reports/profit-statement" in paths
 
 
-def test_history_book_report_reads_only_its_own_posted_voucher_lines():
+@pytest.mark.asyncio
+async def test_history_book_report_reads_only_its_own_persisted_posted_voucher_lines(monkeypatch):
+    """Run the report against a real async SQLite datastore, not canned query rows."""
+    from datetime import date
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.database import Base
     from app.models.mumaren_finance_center import (
+        MUMAREN_FINANCE_SCHEMA,
         FinanceCenterMumarenAccount,
+        FinanceCenterMumarenBook,
+        FinanceCenterMumarenVoucher,
         FinanceCenterMumarenVoucherLine,
     )
-    from app.services.mumaren_finance_center.reports import get_trial_balance
+    from app.services.mumaren_finance_center import reports
 
-    readonly_kingdee_books = [
-        SimpleNamespace(id=101, is_readonly=True, source_system="kingdee_history"),
-        SimpleNamespace(id=202, is_readonly=True, source_system="kingdee_history"),
-    ]
-    assert all(book.is_readonly and book.source_system == "kingdee_history" for book in readonly_kingdee_books)
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        execution_options={"schema_translate_map": {MUMAREN_FINANCE_SCHEMA: None}},
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(
+                lambda sync_connection: Base.metadata.create_all(
+                    sync_connection,
+                    tables=[
+                        FinanceCenterMumarenBook.__table__,
+                        FinanceCenterMumarenAccount.__table__,
+                        FinanceCenterMumarenVoucher.__table__,
+                        FinanceCenterMumarenVoucherLine.__table__,
+                    ],
+                )
+            )
 
-    accounts_by_book = {
-        101: [_account(1, "1001", "金蝶A现金", "asset"), _account(2, "6001", "金蝶A收入", "income", "credit")],
-        202: [_account(3, "1002", "金蝶B现金", "asset"), _account(4, "6002", "金蝶B收入", "income", "credit")],
-    }
-    posted_lines_by_book = {
-        101: [
-            SimpleNamespace(account_id=1, debit_amount=Decimal("10"), credit_amount=Decimal("0")),
-            SimpleNamespace(account_id=2, debit_amount=Decimal("0"), credit_amount=Decimal("10")),
-        ],
-        202: [
-            SimpleNamespace(account_id=3, debit_amount=Decimal("99"), credit_amount=Decimal("0")),
-            SimpleNamespace(account_id=4, debit_amount=Decimal("0"), credit_amount=Decimal("99")),
-        ],
-    }
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            db.add_all([
+                FinanceCenterMumarenBook(id=101, book_code="K3-A", book_name="金蝶A", status="active", is_readonly=True, source_system="kingdee_history"),
+                FinanceCenterMumarenBook(id=202, book_code="K3-B", book_name="金蝶B", status="active", is_readonly=True, source_system="kingdee_history"),
+                FinanceCenterMumarenAccount(id=1, book_id=101, account_code="1001", account_name="金蝶A现金", account_type="asset", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=2, book_id=101, account_code="6001", account_name="金蝶A收入", account_type="income", direction="credit", is_active=True),
+                FinanceCenterMumarenAccount(id=3, book_id=202, account_code="1002", account_name="金蝶B现金", account_type="asset", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=4, book_id=202, account_code="6002", account_name="金蝶B收入", account_type="income", direction="credit", is_active=True),
+                FinanceCenterMumarenVoucher(id=1001, book_id=101, voucher_no="A-1", voucher_date=date(2026, 1, 1), status="posted", total_debit=10, total_credit=10, is_readonly=True),
+                FinanceCenterMumarenVoucher(id=2001, book_id=202, voucher_no="B-1", voucher_date=date(2026, 1, 1), status="posted", total_debit=99, total_credit=99, is_readonly=True),
+                FinanceCenterMumarenVoucherLine(id=10011, voucher_id=1001, line_no=1, account_id=1, debit_amount=10, credit_amount=0),
+                FinanceCenterMumarenVoucherLine(id=10012, voucher_id=1001, line_no=2, account_id=2, debit_amount=0, credit_amount=10),
+                FinanceCenterMumarenVoucherLine(id=20011, voucher_id=2001, line_no=1, account_id=3, debit_amount=99, credit_amount=0),
+                FinanceCenterMumarenVoucherLine(id=20012, voucher_id=2001, line_no=2, account_id=4, debit_amount=0, credit_amount=99),
+            ])
+            await db.commit()
 
-    class Result:
-        def __init__(self, rows):
-            self.rows = rows
+            persisted_books = list((await db.execute(select(FinanceCenterMumarenBook))).scalars())
+            assert {(book.id, book.is_readonly, book.source_system) for book in persisted_books} == {
+                (101, True, "kingdee_history"),
+                (202, True, "kingdee_history"),
+            }
 
-        def scalars(self):
-            return self.rows
+            async def no_balance_adjustments(*_args, **_kwargs):
+                return []
 
-        def all(self):
-            return self.rows
+            monkeypatch.setattr(reports, "_collect_balance_adjustments", no_balance_adjustments)
+            first_report = await reports.get_trial_balance(db, book_id=101)
+            second_report = await reports.get_trial_balance(db, book_id=202)
 
-    class TwoBookReadOnlyDb:
-        async def execute(self, statement):
-            entity = statement.column_descriptions[0].get("entity")
-            book_id = next(value for key, value in statement.compile().params.items() if key.startswith("book_id"))
-            if entity is FinanceCenterMumarenAccount:
-                return Result(accounts_by_book[book_id])
-            if entity is FinanceCenterMumarenVoucherLine:
-                return Result(posted_lines_by_book[book_id])
-            return Result([])
-
-    first_report = asyncio.run(get_trial_balance(TwoBookReadOnlyDb(), book_id=readonly_kingdee_books[0].id))
-    second_report = asyncio.run(get_trial_balance(TwoBookReadOnlyDb(), book_id=readonly_kingdee_books[1].id))
-
-    assert first_report["total_debit"] == Decimal("10")
-    assert first_report["total_credit"] == Decimal("10")
-    assert {row["account_name"] for row in first_report["rows"]} == {"金蝶A现金", "金蝶A收入"}
-    assert all("金蝶B" not in row["account_name"] for row in first_report["rows"])
-    assert second_report["total_debit"] == Decimal("99")
-    assert {row["account_name"] for row in second_report["rows"]} == {"金蝶B现金", "金蝶B收入"}
-    assert all("金蝶A" not in row["account_name"] for row in second_report["rows"])
+        assert first_report["total_debit"] == Decimal("10.00")
+        assert first_report["total_credit"] == Decimal("10.00")
+        assert {row["account_name"] for row in first_report["rows"]} == {"金蝶A现金", "金蝶A收入"}
+        assert all("金蝶B" not in row["account_name"] for row in first_report["rows"])
+        assert second_report["total_debit"] == Decimal("99.00")
+        assert {row["account_name"] for row in second_report["rows"]} == {"金蝶B现金", "金蝶B收入"}
+        assert all("金蝶A" not in row["account_name"] for row in second_report["rows"])
+    finally:
+        await engine.dispose()
 
 
 def test_new_router_exposes_readonly_kingdee_balance_snapshot_endpoint():
