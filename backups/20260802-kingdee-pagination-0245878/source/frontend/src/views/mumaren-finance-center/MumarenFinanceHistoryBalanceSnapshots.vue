@@ -1,0 +1,16 @@
+<template>
+  <section class="panel">
+    <div class="heading"><div><p class="panel-kicker">金蝶迁移数据</p><h2>余额快照核对</h2><p>只读来源证据，不计入当前账报表，供与金蝶期末余额核对。</p></div><el-button :loading="loading" :disabled="!bookId" @click="load">刷新</el-button></div>
+    <div class="filters"><el-select v-model="bookId" placeholder="选择金蝶迁移账簿" clearable @change="load"><el-option v-for="book in readonlyBooks" :key="book.id" :label="book.book_name" :value="book.id" /></el-select><el-input v-model="period" placeholder="期间，如 2026-07" @change="load" /></div>
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-empty v-else-if="!bookId" description="请选择金蝶迁移账簿" />
+    <el-table v-else :data="rows" empty-text="该账簿暂无余额快照" stripe><el-table-column prop="period_code" label="期间" width="110"/><el-table-column prop="account_code" label="科目编码" width="130"/><el-table-column prop="account_name" label="科目名称" min-width="180"/><el-table-column label="期初" align="right"><template #default="s">{{ money(s.row.opening_amount) }}</template></el-table-column><el-table-column label="本期借方" align="right"><template #default="s">{{ money(s.row.period_debit) }}</template></el-table-column><el-table-column label="本期贷方" align="right"><template #default="s">{{ money(s.row.period_credit) }}</template></el-table-column><el-table-column label="期末" align="right"><template #default="s">{{ money(s.row.closing_amount) }}</template></el-table-column></el-table>
+  </section>
+</template>
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
+import { mumarenFinanceCenterApi, type MumarenFinanceBalanceSnapshot, type MumarenFinanceBook } from "@/api/mumarenFinanceCenter";
+const books = ref<MumarenFinanceBook[]>([]); const { bookId, initializeBook } = useMumarenFinanceBook(); const rows = ref<MumarenFinanceBalanceSnapshot[]>([]); const period = ref(""); const loading = ref(false); const error = ref(""); const readonlyBooks = computed(() => books.value.filter((book) => book.is_readonly)); const money = (value: number) => new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0); const load = async () => { if (!bookId.value) { rows.value = []; return; } loading.value = true; error.value = ""; try { rows.value = (await mumarenFinanceCenterApi.getHistoryBalanceSnapshots({ book_id: bookId.value, period: period.value || undefined })).data.data; } catch { error.value = "无法加载金蝶余额快照。"; } finally { loading.value = false; } }; onMounted(async () => { try { books.value = (await mumarenFinanceCenterApi.listBooks()).data.data; initializeBook(readonlyBooks.value); if (!readonlyBooks.value.some((book) => book.id === bookId.value)) bookId.value = readonlyBooks.value[0]?.id; await load(); } catch { error.value = "无法加载金蝶迁移账簿。"; } });
+</script>
+<style scoped>.panel{padding:30px;border:1px solid #e1e7ef;border-radius:14px;background:#fff;display:grid;gap:16px}.heading{display:flex;justify-content:space-between;gap:16px}.filters{display:flex;gap:12px}.filters>*{max-width:280px}.panel-kicker{margin:0;color:#176b97;font-size:12px;font-weight:700}h2{margin:8px 0}p{color:#5d6b7e}@media(max-width:640px){.heading,.filters{flex-direction:column}.filters>*{max-width:none}}</style>

@@ -12,6 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.mumaren_finance_center import (
@@ -62,6 +63,7 @@ from app.services.mumaren_finance_center.tax import (
     InvalidTaxTransition,
     build_tax_alerts,
     create_tax_record,
+    delete_tax_record,
     pay_tax_record,
     review_tax_record,
     tax_record_balance,
@@ -966,6 +968,9 @@ async def create_tax_record_endpoint(
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="该账簿、税种和所属期间已存在税务记录") from error
     _add_audit_log(
         db, book_id=body.book_id, action="create_tax_record",
         operator_id=_actor_id(current_user),
@@ -973,6 +978,30 @@ async def create_tax_record_endpoint(
     )
     await db.flush()
     return ApiResponse.ok(data=_tax_record_data(record), message="税务草稿已创建")
+
+
+@router.delete("/tax/records/{record_id}", response_model=ApiResponse)
+async def delete_tax_record_endpoint(
+    record_id: int,
+    book_id: int = Query(ge=1),
+    current_user: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    """仅删除当前账簿中的未审核税务草稿。"""
+    try:
+        record = await delete_tax_record(db, record_id=record_id, book_id=book_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except CrossBookTaxViolationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except InvalidTaxTransition as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    _add_audit_log(
+        db, book_id=record.book_id, action="delete_tax_record",
+        operator_id=_actor_id(current_user), detail=f"删除税务草稿 {record_id}",
+    )
+    await db.flush()
+    return ApiResponse.ok(message="税务草稿已删除")
 
 
 @router.post("/tax/records/{record_id}/review", response_model=ApiResponse)
@@ -1460,7 +1489,10 @@ async def list_cash_accounts(
     """列出出纳账户,支持 book_id 过滤,默认 limit 100,最大 500。"""
     rows = list((await db.execute(
         select(FinanceCenterMumarenCashAccount)
-        .where(FinanceCenterMumarenCashAccount.book_id == book_id)
+        .where(
+            FinanceCenterMumarenCashAccount.book_id == book_id,
+            FinanceCenterMumarenCashAccount.is_active.is_(True),
+        )
         .order_by(FinanceCenterMumarenCashAccount.id.desc())
         .limit(limit)
     )).scalars())

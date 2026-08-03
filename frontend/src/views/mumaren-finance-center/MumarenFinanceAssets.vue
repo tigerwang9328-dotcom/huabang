@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openCreate">新增资产</el-button>
+        <el-button v-if="!isReadonly" type="primary" :disabled="!bookId" @click="openCreate">新增资产</el-button>
       </div>
     </div>
 
@@ -19,7 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入固定资产卡片与折旧明细；当前页面不以空表表示历史资产为零。" :closable="false" show-icon />
+    <MumarenFinanceHistoricalSourceNotice :readonly="isReadonly" module-key="assets" />
 
     <el-table v-if="!isReadonly" v-loading="loading" :data="assets" empty-text="暂无资产卡片" stripe show-summary :summary-method="summary">
       <el-table-column prop="asset_code" label="编码" width="140" />
@@ -49,9 +49,9 @@
               <el-button link type="warning" size="small" :disabled="isReadonly || row.status === 'disposed'" :loading="actingId === row.id">处置</el-button>
             </template>
           </el-popconfirm>
-          <el-popconfirm title="确定删除该资产?" @confirm="remove(row)">
+          <el-popconfirm v-if="row.status === 'draft'" title="确定删除该资产?" @confirm="remove(row)">
             <template #reference>
-              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
+              <el-button v-if="row.status !== 'disposed'" link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -96,6 +96,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   fixedAssetsApi,
   type MumarenFixedAsset,

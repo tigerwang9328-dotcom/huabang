@@ -8,14 +8,15 @@
       </div>
       <div>
         <router-link to="/app/finance-center/mumaren/history/balance-snapshots"><el-button>余额快照核对</el-button></router-link>
-        <el-button :loading="loading" :disabled="!bookId" @click="load">刷新</el-button>
+        <el-button :loading="loading" :disabled="!bookId || !isHistoricalBook" @click="load">刷新</el-button>
       </div>
     </div>
-    <el-select v-model="bookId" placeholder="选择金蝶迁移账簿" clearable @change="load">
-      <el-option v-for="book in readonlyBooks" :key="book.id" :label="book.book_name" :value="book.id" />
+    <el-select v-model="bookId" placeholder="选择独立账簿" clearable @change="load">
+      <el-option v-for="book in books" :key="book.id" :label="bookLabel(book)" :value="book.id" />
     </el-select>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <el-empty v-else-if="!bookId" description="请选择金蝶迁移账簿" />
+    <el-empty v-else-if="!isHistoricalBook" description="当前账簿没有金蝶迁移凭证；请选择金蝶迁移账簿查看历史凭证。" />
     <el-table v-else :data="rows" empty-text="该金蝶迁移账簿暂无凭证" stripe>
       <el-table-column label="标记" width="150"><template #default="scope"><el-tag type="info">金蝶迁移</el-tag><el-tag v-if="scope.row.is_normalized" type="warning" class="readonly">已规范化</el-tag></template></el-table-column>
       <el-table-column prop="source_system" label="来源" width="130" />
@@ -39,12 +40,15 @@ const error = ref("");
 const loading = ref(false);
 let loadRequestVersion = 0;
 
-const readonlyBooks = computed(() => books.value.filter((book) => book.is_readonly));
+const selectedBook = computed(() => books.value.find((book) => book.id === bookId.value));
+const isHistoricalBook = computed(() => Boolean(selectedBook.value?.is_readonly));
+const bookLabel = (book: MumarenFinanceBook) =>
+  book.is_readonly ? book.book_name : `${book.book_name}（非金蝶账簿）`;
 
 const load = async () => {
   const requestedBookId = bookId.value;
   const requestVersion = ++loadRequestVersion;
-  if (!requestedBookId) {
+  if (!requestedBookId || !isHistoricalBook.value) {
     rows.value = [];
     loading.value = false;
     return;
@@ -64,8 +68,7 @@ const load = async () => {
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(readonlyBooks.value);
-    if (!readonlyBooks.value.some((book) => book.id === bookId.value)) bookId.value = readonlyBooks.value[0]?.id;
+    initializeBook(books.value);
     await load();
   } catch {
     error.value = "无法加载金蝶迁移账簿。";

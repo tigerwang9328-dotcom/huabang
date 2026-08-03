@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openDialog">录入工资</el-button>
+        <el-button v-if="!isReadonly" type="primary" :disabled="!bookId" @click="openDialog">录入工资</el-button>
       </div>
     </div>
 
@@ -19,7 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入工资业务明细，当前页面不以空表表示历史工资为零。" :closable="false" show-icon />
+    <MumarenFinanceHistoricalSourceNotice :readonly="isReadonly" module-key="payroll" />
 
     <el-table v-if="!isReadonly" v-loading="loading" :data="records" empty-text="暂无工资记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="employee_no" label="员工编号" width="120" />
@@ -53,7 +53,7 @@
             :loading="actingId === row.id"
             @click="pay(row)"
           >发放</el-button>
-          <el-popconfirm title="确定删除该工资记录?" @confirm="remove(row)">
+          <el-popconfirm v-if="row.workflow_status === 'draft'" title="确定删除该工资记录?" @confirm="remove(row)">
             <template #reference>
               <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
@@ -94,6 +94,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   payrollsApi,
   type MumarenPayroll,

@@ -8,8 +8,8 @@
       </div>
       <div class="heading-actions">
         <el-button type="primary" :disabled="!bookId" :loading="loading" @click="load">查询税务</el-button>
-        <el-button :disabled="isReadonly || !bookId" @click="openCreate">录入草稿</el-button>
-        <el-button :disabled="isReadonly || !bookId" @click="openTaxTypes">管理税种</el-button>
+        <el-button v-if="!isReadonly" :disabled="!bookId" @click="openCreate">录入草稿</el-button>
+        <el-button v-if="!isReadonly" :disabled="!bookId" @click="openTaxTypes">管理税种</el-button>
       </div>
     </div>
     <div class="filters">
@@ -18,7 +18,7 @@
       </el-select>
     </div>
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-else-if="isReadonly" type="warning" :closable="false" show-icon title="金蝶迁移账簿未导入税务业务台账，当前页面不以空表或无预警表示历史税务为零。" />
+    <MumarenFinanceHistoricalSourceNotice v-else-if="isReadonly" :readonly="isReadonly" module-key="tax" />
     <template v-else-if="loaded">
       <el-alert v-if="alerts.length" type="warning" :closable="false" show-icon title="存在待处理税务预警">
         <template #default>
@@ -52,6 +52,9 @@
         <el-table-column label="操作" width="170">
           <template #default="scope">
             <el-button v-if="scope.row.workflow_status === 'draft'" size="small" link type="primary" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="review(scope.row)">审核</el-button>
+            <el-popconfirm v-if="scope.row.workflow_status === 'draft'" title="确定删除该税务草稿?" @confirm="remove(scope.row)">
+              <template #reference><el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === scope.row.id">删除</el-button></template>
+            </el-popconfirm>
             <el-button v-if="scope.row.workflow_status === 'reviewed' && scope.row.status !== 'paid' && Number(scope.row.unpaid_amount) > 0" size="small" link type="success" :disabled="isReadonly" :loading="actingId === scope.row.id" @click="openPay(scope.row)">人工缴税</el-button>
             <span v-if="scope.row.status === 'paid'" class="done-text">已缴税</span>
           </template>
@@ -130,6 +133,7 @@
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   mumarenFinanceCenterApi,
   taxTypesApi,
@@ -233,6 +237,20 @@ const review = async (row: MumarenTaxRecord) => {
     await load();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "审核失败");
+  } finally {
+    actingId.value = undefined;
+  }
+};
+
+const remove = async (row: MumarenTaxRecord) => {
+  if (isReadonly.value || !bookId.value || row.workflow_status !== "draft") return;
+  actingId.value = row.id;
+  try {
+    await mumarenFinanceCenterApi.deleteTaxRecord(row.id, bookId.value);
+    ElMessage.success("税务草稿已删除");
+    await load();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || "删除失败");
   } finally {
     actingId.value = undefined;
   }

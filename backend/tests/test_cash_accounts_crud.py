@@ -50,6 +50,14 @@ async def test_list_cash_accounts_returns_rows():
 
 
 @pytest.mark.asyncio
+async def test_list_cash_accounts_excludes_soft_deleted_rows():
+    db = _MockDb(execute_results=[_MockResult(scalars=[_account(acc_id=1)])])
+    await list_cash_accounts(book_id=1, limit=100, _=_FakeUser(), db=db)
+    statement = db.executed[0]
+    assert "is_active" in str(statement)
+
+
+@pytest.mark.asyncio
 async def test_update_cash_account_rejects_cross_book():
     acc = _account(acc_id=1, book_id=1)
     db = _MockDb(get_map={FinanceCenterMumarenCashAccount: {1: acc}})

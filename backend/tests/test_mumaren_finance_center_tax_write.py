@@ -36,6 +36,7 @@ class _Result:
 class _MockDb:
     def __init__(self, *, tax_type=None, record=None):
         self.added = []
+        self.deleted = []
         self.tax_type = tax_type
         self.record = record
         self._next_id = 100
@@ -50,6 +51,9 @@ class _MockDb:
 
     def add(self, item):
         self.added.append(item)
+
+    async def delete(self, item):
+        self.deleted.append(item)
 
     async def flush(self):
         for item in self.added:
@@ -101,6 +105,28 @@ async def test_create_tax_draft_persists_record_in_draft_status_without_voucher_
     assert record.tax_amount == Decimal("500.00")
     assert record.voucher_id is None
     assert db.voucher_entries == []
+
+
+@pytest.mark.asyncio
+async def test_delete_tax_draft_deletes_only_draft_record():
+    from app.services.mumaren_finance_center.tax import InvalidTaxTransition, delete_tax_record
+
+    draft = FinanceCenterMumarenTaxRecord(
+        id=1, book_id=1, tax_type_id=10, period="2026-07",
+        tax_amount=Decimal("100.00"), paid_amount=Decimal("0"),
+        status="pending", workflow_status="draft",
+    )
+    db = _MockDb(record=draft)
+    await delete_tax_record(db, record_id=1, book_id=1)
+    assert draft in db.deleted
+
+    reviewed = FinanceCenterMumarenTaxRecord(
+        id=2, book_id=1, tax_type_id=10, period="2026-07",
+        tax_amount=Decimal("100.00"), paid_amount=Decimal("0"),
+        status="pending", workflow_status="reviewed",
+    )
+    with pytest.raises(InvalidTaxTransition):
+        await delete_tax_record(_MockDb(record=reviewed), record_id=2, book_id=1)
 
 
 # ---------------------------------------------------------------------------

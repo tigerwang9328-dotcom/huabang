@@ -178,6 +178,25 @@ async def review_tax_record(
     return record
 
 
+async def delete_tax_record(
+    db: AsyncSession,
+    *,
+    record_id: int,
+    book_id: int,
+) -> FinanceCenterMumarenTaxRecord:
+    """删除未审核税务草稿；审核后的记录属于不可逆流程。"""
+    record = await db.get(FinanceCenterMumarenTaxRecord, record_id)
+    if record is None:
+        raise LookupError(f"税务单据 {record_id} 不存在")
+    if record.book_id != book_id:
+        raise CrossBookTaxViolationError("账簿不一致，禁止跨账簿删除税务记录")
+    if record.workflow_status != "draft":
+        raise InvalidTaxTransition("仅草稿状态的税务记录可以删除")
+    await db.delete(record)
+    await db.flush()
+    return record
+
+
 async def pay_tax_record(
     db: AsyncSession,
     *,

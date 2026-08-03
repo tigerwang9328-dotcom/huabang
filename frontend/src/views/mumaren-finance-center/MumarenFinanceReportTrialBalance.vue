@@ -19,8 +19,9 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <el-alert v-if="hasPendingHistoricalMapping" type="warning" :closable="false" show-icon :title="mappingWarning" />
 
-    <el-table v-else :data="trialRows" empty-text="暂无已过账数据" stripe>
+    <el-table v-if="!error" :data="trialRows" empty-text="暂无已过账数据" stripe>
       <el-table-column prop="account_code" label="科目编码" />
       <el-table-column prop="account_name" label="科目名称" min-width="180" />
       <el-table-column label="借方" align="right">
@@ -35,7 +36,7 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceBook,
@@ -43,46 +44,60 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const books = ref<MumarenFinanceBook[]>([]);
-const { bookId, initializeBook } = useMumarenFinanceBook();
+const { bookId, initializeBook, isReadonly } = useMumarenFinanceBook();
 const period = ref("");
 const trialRows = ref<MumarenTrialBalanceRow[]>([]);
 const error = ref("");
 const loading = ref(false);
+const unclassifiedAccountCount = ref(0);
+let loadRequestVersion = 0;
+const isHistoricalBook = computed(() =>
+  isReadonly.value || Boolean(books.value.find((book) => book.id === bookId.value)?.is_readonly),
+);
+const hasPendingHistoricalMapping = computed(() =>
+  isHistoricalBook.value && unclassifiedAccountCount.value > 0,
+);
+const mappingWarning = computed(() =>
+  `该金蝶历史账簿有 ${unclassifiedAccountCount.value} 个科目待会计分类映射；科目余额可继续核对，但正式三表的 0.00 不代表历史业务为零。`,
+);
 
 const money = (value?: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const load = async () => {
-  if (!bookId.value) return;
+  const requestedBookId = bookId.value;
+  const requestedPeriod = period.value || undefined;
+  const requestVersion = ++loadRequestVersion;
+  if (!requestedBookId) {
+    trialRows.value = [];
+    unclassifiedAccountCount.value = 0;
+    loading.value = false;
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
     const result = await mumarenFinanceCenterApi.getTrialBalance({
-      book_id: bookId.value,
-      period: period.value || undefined,
+      book_id: requestedBookId,
+      period: requestedPeriod,
     });
+    if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedPeriod !== (period.value || undefined)) return;
     trialRows.value = result.data.data.rows || [];
+    unclassifiedAccountCount.value = Number(result.data.data.unclassified_account_count || 0);
   } catch {
-    error.value = "无法加载独立当前账科目余额表。";
+    if (requestVersion === loadRequestVersion && requestedBookId === bookId.value && requestedPeriod === (period.value || undefined)) error.value = "无法加载独立账簿科目余额表。";
   } finally {
-    loading.value = false;
+    if (requestVersion === loadRequestVersion) loading.value = false;
   }
 };
 
 const onBookChange = async () => {
-  // 选择账簿后自动加载第一个账簿
-  if (bookId.value) {
-    await load();
-  } else {
-    trialRows.value = [];
-  }
+  await load();
 };
 
 onMounted(async () => {
   try {
     books.value = (await mumarenFinanceCenterApi.listBooks()).data.data;
-    initializeBook(books.value);
-    // 自动加载第一个账簿
     initializeBook(books.value);
     if (bookId.value) await load();
   } catch {

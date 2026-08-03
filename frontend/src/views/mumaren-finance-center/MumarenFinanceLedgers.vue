@@ -50,15 +50,15 @@
 import { onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
-import { mumarenFinanceCenterApi, type CreateMumarenFinanceBookPayload } from "@/api/mumarenFinanceCenter";
+import { mumarenFinanceCenterApi, type MumarenFinanceBookCreatePayload } from "@/api/mumarenFinanceCenter";
 import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
 const bookStore = useMumarenFinanceBookStore();
 const { books, bookId, error, loading } = storeToRefs(bookStore);
 const saving = ref(false);
 const createVisible = ref(false);
-const emptyForm = (): CreateMumarenFinanceBookPayload => ({ book_code: "", book_name: "", company_name: "", status: "active" });
-const form = ref<CreateMumarenFinanceBookPayload>(emptyForm());
+const emptyForm = (): MumarenFinanceBookCreatePayload => ({ book_code: "", book_name: "", company_name: "", status: "active" });
+const form = ref<MumarenFinanceBookCreatePayload>(emptyForm());
 
 const load = async () => {
   await bookStore.loadBooks();

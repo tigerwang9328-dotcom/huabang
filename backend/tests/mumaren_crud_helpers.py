@@ -69,8 +69,10 @@ class _MockDb:
         self._execute_results = list(execute_results or [])
         self._exec_index = 0
         self._next_id = 1000
+        self.executed = []
 
     async def execute(self, stmt):
+        self.executed.append(stmt)
         if self._exec_index < len(self._execute_results):
             result = self._execute_results[self._exec_index]
             self._exec_index += 1

@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button :disabled="!bookId" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :disabled="!bookId || isReadonly" @click="openDialog">新增对账记录</el-button>
+        <el-button v-if="!isReadonly" type="primary" :disabled="!bookId" @click="openDialog">新增对账记录</el-button>
       </div>
     </div>
 
@@ -19,7 +19,7 @@
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert v-if="isReadonly" type="warning" title="金蝶迁移账簿未导入银行流水与余额调节记录，当前页面不以空表表示历史对账数据为零。" :closable="false" show-icon />
+    <MumarenFinanceHistoricalSourceNotice :readonly="isReadonly" module-key="cashier-reconciliation" />
 
     <el-table v-if="!isReadonly" v-loading="loading" :data="records" empty-text="暂无对账记录" stripe show-summary :summary-method="summary">
       <el-table-column prop="account_name" label="账户" min-width="180" />
@@ -56,7 +56,7 @@
             :loading="actingId === row.id"
             @click="reconcile(row)"
           >调节</el-button>
-          <el-popconfirm title="确定删除该对账记录?" @confirm="remove(row)">
+          <el-popconfirm v-if="row.workflow_status === 'draft'" title="确定删除该对账记录?" @confirm="remove(row)">
             <template #reference>
               <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
@@ -95,6 +95,7 @@
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import MumarenFinanceHistoricalSourceNotice from "./MumarenFinanceHistoricalSourceNotice.vue";
 import {
   bankReconciliationsApi,
   type MumarenBankReconciliation,
