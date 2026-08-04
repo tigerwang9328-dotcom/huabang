@@ -4,8 +4,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_permission, require_roles
@@ -240,6 +239,96 @@ async def append_report_mapping_status(
     return {**report, "unclassified_account_count": int(unclassified_count or 0)}
 
 
+@router.get("/dingtalk-expenses", response_model=ApiResponse)
+async def list_dingtalk_expenses(
+    category: str | None = Query(default=None, pattern=r"^(reimbursement|payment)$"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    approval_status: str | None = Query(default=None, max_length=32),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only DingTalk reimbursement/payment evidence for the new finance centre."""
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+
+    predicates: list[str] = []
+    params: dict[str, object] = {
+        "limit": page_size,
+        "offset": (page - 1) * page_size,
+    }
+    if category:
+        predicates.append("category = :category")
+        params["category"] = category
+    if start_date:
+        predicates.append("expense_date >= :start_date")
+        params["start_date"] = start_date
+    if end_date:
+        predicates.append("expense_date <= :end_date")
+        params["end_date"] = end_date
+    if approval_status:
+        predicates.append("approval_status = :approval_status")
+        params["approval_status"] = approval_status
+    where = f" WHERE {' AND '.join(predicates)}" if predicates else ""
+
+    total = (await db.execute(text(f"SELECT count(*) FROM finance_expense_records{where}"), params)).scalar_one()
+    rows = (await db.execute(text(f"""
+        SELECT id, applicant_name, department_name, expense_type, amount, category,
+               approval_status, payment_status, expense_date, created_at, updated_at
+        FROM finance_expense_records{where}
+        ORDER BY expense_date DESC NULLS LAST, id DESC
+        LIMIT :limit OFFSET :offset
+    """), params)).mappings().all()
+    return ApiResponse.ok(data={
+        "items": [
+            {
+                "id": row["id"], "applicant_name": row["applicant_name"],
+                "department_name": row["department_name"], "expense_type": row["expense_type"],
+                "amount": float(row["amount"] or 0), "category": row["category"],
+                "approval_status": row["approval_status"], "payment_status": row["payment_status"],
+                "expense_date": str(row["expense_date"]) if row["expense_date"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+            for row in rows
+        ],
+        "total": total, "page": page, "page_size": page_size,
+        "source": "dingtalk:finance_expense_records", "readonly": True,
+    })
+
+
+@router.get("/cash-safety", response_model=ApiResponse)
+async def get_cash_safety(
+    _: SysUser = Depends(require_mumaren_finance_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Operating cash warning only; it never changes accounting-book reports."""
+    cash = (await db.execute(text("""
+        SELECT max(record_date) AS record_date, coalesce(sum(balance), 0) AS total_balance
+        FROM dwd.dwd_finance_cash
+        WHERE record_date = (SELECT max(record_date) FROM dwd.dwd_finance_cash)
+    """))).mappings().one()
+    expense = (await db.execute(text("""
+        SELECT count(*) AS record_count, coalesce(sum(expense_amount), 0) AS total_expense
+        FROM dwd.dwd_finance_expense
+        WHERE expense_date >= current_date - interval '30 days'
+          AND expense_date < current_date
+    """))).mappings().one()
+    daily_average = float(expense["total_expense"] or 0) / 30 if expense["record_count"] else None
+    total_balance = float(cash["total_balance"] or 0)
+    days = int(total_balance / daily_average) if daily_average and daily_average > 0 and cash["record_date"] else None
+    risk_level = "unknown" if days is None else "critical" if days < 15 else "warning" if days < 30 else "normal"
+    return ApiResponse.ok(data={
+        "total_cash_balance": total_balance,
+        "cash_record_date": str(cash["record_date"]) if cash["record_date"] else None,
+        "daily_avg_expense_30d": daily_average,
+        "expense_record_count_30d": expense["record_count"],
+        "cash_safety_days": days,
+        "risk_level": risk_level,
+        "status": "ready" if days is not None else "pending_data",
+        "note": "经营预警指标，不替代银行对账或会计报表；来源不完整时仅供参考。",
+    })
 @router.post("/books/{book_id}/accounts", response_model=ApiResponse)
 async def create_account_endpoint(
     book_id: int, body: AccountCreateInput,
@@ -371,13 +460,6 @@ async def create_voucher(
         )
     except (UnbalancedVoucherError, ValueError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    except IntegrityError as error:
-        await db.rollback()
-        if "uq_mumaren_finance_voucher_no" in str(error):
-            detail = "当前账簿已存在相同凭证号，请更换凭证号后再保存"
-        else:
-            detail = "凭证保存失败，数据存在冲突，请检查后重试"
-        raise HTTPException(status_code=409, detail=detail) from error
     return ApiResponse.ok(data=_voucher_data(voucher), message="凭证草稿已创建")
 
 

@@ -32,6 +32,20 @@ def test_api_root_includes_the_new_mumaren_finance_center_router_only_once():
     assert "/api/v1/finance-center/mumaren/history/vouchers" in paths
 
 
+def test_api_root_registers_readonly_dingtalk_expenses_and_cash_safety_adapters():
+    from app.api.v1 import mumaren_finance_center
+    from app.api.v1.router import api_router
+
+    paths = {route.path for route in api_router.routes}
+    source = open(mumaren_finance_center.__file__, encoding="utf-8").read()
+
+    assert "/api/v1/finance-center/mumaren/dingtalk-expenses" in paths
+    assert "/api/v1/finance-center/mumaren/cash-safety" in paths
+    assert 'FROM finance_expense_records' in source
+    assert 'DwdFinanceCash' not in source
+    assert '@router.post("/dingtalk-expenses"' not in source
+
+
 def test_api_root_registers_independent_ar_ap_and_tax_routes():
     from app.api.v1.router import api_router
 
@@ -79,6 +93,19 @@ def test_books_can_create_a_new_writable_ledger_and_only_drafts_can_be_deleted()
     assert 'voucher.is_readonly' in source
     assert "/finance-center/mumaren/books" in paths
     assert "/finance-center/mumaren/vouchers/{voucher_id}" in paths
+
+
+def test_books_expose_current_book_only_metadata_update_and_idempotent_starter_account_replenish():
+    from app.api.v1 import mumaren_finance_center
+
+    paths = {route.path for route in mumaren_finance_center.router.routes}
+    source = open(mumaren_finance_center.__file__, encoding="utf-8").read()
+    assert '@router.put("/books/{book_id}"' in source
+    assert '@router.post("/books/{book_id}/starter-accounts"' in source
+    assert "update_mumaren_book" in source
+    assert "replenish_starter_accounts" in source
+    assert "/finance-center/mumaren/books/{book_id}" in paths
+    assert "/finance-center/mumaren/books/{book_id}/starter-accounts" in paths
 
 
 def test_domain_read_routes_apply_a_bounded_response_limit():

@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 import os
 from types import SimpleNamespace
@@ -21,6 +22,170 @@ def test_new_router_exposes_isolated_trial_balance_and_profit_statement_endpoint
 
     assert "/finance-center/mumaren/reports/trial-balance" in paths
     assert "/finance-center/mumaren/reports/profit-statement" in paths
+
+
+@pytest.mark.asyncio
+async def test_history_book_report_reads_only_its_own_persisted_posted_voucher_lines(monkeypatch):
+    """Run the report against a real async SQLite datastore, not canned query rows."""
+    from datetime import date
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.database import Base
+    from app.models.mumaren_finance_center import (
+        MUMAREN_FINANCE_SCHEMA,
+        FinanceCenterMumarenAccount,
+        FinanceCenterMumarenBook,
+        FinanceCenterMumarenVoucher,
+        FinanceCenterMumarenVoucherLine,
+    )
+    from app.services.mumaren_finance_center import reports
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        execution_options={"schema_translate_map": {MUMAREN_FINANCE_SCHEMA: None}},
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(
+                lambda sync_connection: Base.metadata.create_all(
+                    sync_connection,
+                    tables=[
+                        FinanceCenterMumarenBook.__table__,
+                        FinanceCenterMumarenAccount.__table__,
+                        FinanceCenterMumarenVoucher.__table__,
+                        FinanceCenterMumarenVoucherLine.__table__,
+                    ],
+                )
+            )
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            db.add_all([
+                FinanceCenterMumarenBook(id=101, book_code="K3-A", book_name="金蝶A", status="active", is_readonly=True, source_system="kingdee_history"),
+                FinanceCenterMumarenBook(id=202, book_code="K3-B", book_name="金蝶B", status="active", is_readonly=True, source_system="kingdee_history"),
+                FinanceCenterMumarenAccount(id=1, book_id=101, account_code="1001", account_name="金蝶A现金", account_type="asset", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=2, book_id=101, account_code="6001", account_name="金蝶A收入", account_type="income", direction="credit", is_active=True),
+                FinanceCenterMumarenAccount(id=3, book_id=202, account_code="1002", account_name="金蝶B现金", account_type="asset", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=4, book_id=202, account_code="6002", account_name="金蝶B收入", account_type="income", direction="credit", is_active=True),
+                FinanceCenterMumarenVoucher(id=1001, book_id=101, voucher_no="A-1", voucher_date=date(2026, 1, 1), status="posted", total_debit=10, total_credit=10, is_readonly=True),
+                FinanceCenterMumarenVoucher(id=2001, book_id=202, voucher_no="B-1", voucher_date=date(2026, 1, 1), status="posted", total_debit=99, total_credit=99, is_readonly=True),
+                FinanceCenterMumarenVoucherLine(id=10011, voucher_id=1001, line_no=1, account_id=1, debit_amount=10, credit_amount=0),
+                FinanceCenterMumarenVoucherLine(id=10012, voucher_id=1001, line_no=2, account_id=2, debit_amount=0, credit_amount=10),
+                FinanceCenterMumarenVoucherLine(id=20011, voucher_id=2001, line_no=1, account_id=3, debit_amount=99, credit_amount=0),
+                FinanceCenterMumarenVoucherLine(id=20012, voucher_id=2001, line_no=2, account_id=4, debit_amount=0, credit_amount=99),
+            ])
+            await db.commit()
+
+            persisted_books = list((await db.execute(select(FinanceCenterMumarenBook))).scalars())
+            assert {(book.id, book.is_readonly, book.source_system) for book in persisted_books} == {
+                (101, True, "kingdee_history"),
+                (202, True, "kingdee_history"),
+            }
+
+            async def no_balance_adjustments(*_args, **_kwargs):
+                return []
+
+            monkeypatch.setattr(reports, "_collect_balance_adjustments", no_balance_adjustments)
+            first_report = await reports.get_trial_balance(db, book_id=101)
+            second_report = await reports.get_trial_balance(db, book_id=202)
+
+        assert first_report["total_debit"] == Decimal("10.00")
+        assert first_report["total_credit"] == Decimal("10.00")
+        assert {row["account_name"] for row in first_report["rows"]} == {"金蝶A现金", "金蝶A收入"}
+        assert all("金蝶B" not in row["account_name"] for row in first_report["rows"])
+        assert second_report["total_debit"] == Decimal("99.00")
+        assert {row["account_name"] for row in second_report["rows"]} == {"金蝶B现金", "金蝶B收入"}
+        assert all("金蝶A" not in row["account_name"] for row in second_report["rows"])
+    finally:
+        await engine.dispose()
+
+
+def test_new_router_exposes_readonly_kingdee_balance_snapshot_endpoint():
+    from app.api.v1.mumaren_finance_center import router
+
+    paths = {route.path for route in router.routes}
+
+    assert "/finance-center/mumaren/history/balance-snapshots" in paths
+
+
+def test_new_router_exposes_posted_voucher_line_ledger_endpoint():
+    from app.api.v1.mumaren_finance_center import router
+
+    paths = {route.path for route in router.routes}
+
+    assert "/finance-center/mumaren/ledger/lines" in paths
+
+
+def test_ledger_line_endpoint_rejects_an_account_from_another_book():
+    from fastapi import HTTPException
+    from app.api.v1.mumaren_finance_center import get_ledger_lines
+
+    class CrossBookDb:
+        def __init__(self):
+            self.values = [SimpleNamespace(id=1), SimpleNamespace(book_id=2)]
+
+        async def get(self, _model, _id):
+            return self.values.pop(0)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(get_ledger_lines(book_id=1, account_id=99, limit=500, _=None, db=CrossBookDb()))
+
+    assert error.value.status_code == 404
+
+
+def test_ledger_line_endpoint_calculates_directional_running_balance_with_pagination():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_ledger_lines)
+
+    assert "offset: int = Query(default=0, ge=0)" in source
+    assert "FinanceCenterMumarenAccount.direction == \"credit\"" in source
+    assert "func.sum" in source
+    assert '"has_more"' in source
+
+
+def test_history_snapshot_endpoint_supports_offset_pagination():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_history_balance_snapshots)
+
+    assert "offset: int = Query(default=0, ge=0)" in source
+    assert ".offset(offset)" in source
+
+
+def test_voucher_list_endpoint_supports_bounded_pagination():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_vouchers)
+
+    assert "limit: int = Query(default=200, ge=1, le=500)" in source
+    assert "offset: int = Query(default=0, ge=0)" in source
+    assert ".offset(offset).limit(limit)" in source
+
+
+def test_balance_snapshot_query_joins_account_within_the_same_book():
+    from app.api.v1 import mumaren_finance_center
+
+    source = __import__("inspect").getsource(mumaren_finance_center.get_history_balance_snapshots)
+
+    assert "FinanceCenterMumarenAccount.book_id == FinanceCenterMumarenBalanceSnapshot.book_id" in source
+    assert "余额快照仅适用于金蝶迁移只读账簿" in source
+
+
+def test_balance_snapshot_endpoint_rejects_a_current_book():
+    from fastapi import HTTPException
+    from app.api.v1.mumaren_finance_center import get_history_balance_snapshots
+
+    class CurrentBookDb:
+        async def get(self, _model, _book_id):
+            return SimpleNamespace(is_readonly=False)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(get_history_balance_snapshots(book_id=1, period=None, limit=500, _=None, db=CurrentBookDb()))
+
+    assert error.value.status_code == 409
 
 
 def _account(account_id: int, code: str, name: str, account_type: str, direction: str = "debit"):
@@ -107,3 +272,56 @@ def test_profit_statement_uses_income_credit_minus_debit_and_expense_debit_minus
     assert statement["net_profit"] == Decimal("92")
     assert statement["income_rows"][0]["amount"] == Decimal("180")
     assert [row["amount"] for row in statement["expense_rows"]] == [Decimal("80"), Decimal("8")]
+
+
+@pytest.mark.asyncio
+async def test_report_response_marks_unclassified_kingdee_accounts_without_inventing_mappings():
+    from app.api.v1 import mumaren_finance_center
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.database import Base
+    from app.models.mumaren_finance_center import (
+        MUMAREN_FINANCE_SCHEMA,
+        FinanceCenterMumarenAccount,
+        FinanceCenterMumarenBook,
+    )
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        execution_options={"schema_translate_map": {MUMAREN_FINANCE_SCHEMA: None}},
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(
+                lambda sync_connection: Base.metadata.create_all(
+                    sync_connection,
+                    tables=[
+                        FinanceCenterMumarenBook.__table__,
+                        FinanceCenterMumarenAccount.__table__,
+                    ],
+                )
+            )
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            db.add_all([
+                FinanceCenterMumarenBook(id=1, book_code="K3-A", book_name="金蝶A", status="active", is_readonly=True),
+                FinanceCenterMumarenBook(id=2, book_code="K3-B", book_name="金蝶B", status="active", is_readonly=True),
+                FinanceCenterMumarenAccount(id=11, book_id=1, account_code="1001", account_name="待映射A", account_type="unclassified", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=12, book_id=1, account_code="6001", account_name="收入A", account_type="income", direction="credit", is_active=True),
+                FinanceCenterMumarenAccount(id=21, book_id=2, account_code="1002", account_name="待映射B", account_type="unclassified", direction="debit", is_active=True),
+                FinanceCenterMumarenAccount(id=22, book_id=2, account_code="6601", account_name="费用B", account_type="expense", direction="debit", is_active=True),
+            ])
+            await db.commit()
+
+            first_payload = await mumaren_finance_center.append_report_mapping_status(
+                db, book_id=1, report={"total_income": Decimal("0")},
+            )
+            second_payload = await mumaren_finance_center.append_report_mapping_status(
+                db, book_id=2, report={"total_income": Decimal("0")},
+            )
+
+        assert first_payload == {"total_income": Decimal("0"), "unclassified_account_count": 1}
+        assert second_payload == {"total_income": Decimal("0"), "unclassified_account_count": 1}
+    finally:
+        await engine.dispose()

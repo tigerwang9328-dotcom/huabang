@@ -16,6 +16,7 @@ from app.api.v1.mumaren_finance_center_domains import (
 )
 from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenPayableOrder,
+    FinanceCenterMumarenReceivableOrderLine,
     FinanceCenterMumarenReceivableOrder,
 )
 
@@ -105,6 +106,56 @@ async def test_update_receivable_order_rejects_total_below_settled():
             order_type="receivable", current_user=_FakeUser(), db=db,
         )
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_receivable_draft_replaces_lines_only_after_total_validation():
+    order = _receivable(oid=1, status="draft")
+    old_line = FinanceCenterMumarenReceivableOrderLine(
+        id=101, order_id=1, line_no=1, item_name="旧货品", quantity=Decimal("1"),
+        unit_price=Decimal("100"), amount=Decimal("100"), tax_rate=Decimal("0"), tax_amount=Decimal("0"),
+    )
+    db = _MockDb(
+        get_map={FinanceCenterMumarenReceivableOrder: {1: order}},
+        execute_results=[_MockResult(scalars=[old_line])],
+    )
+
+    res = await update_ar_ap_order(
+        order_id=1,
+        body=ArApOrderUpdate(
+            book_id=1, contact="李会计", total_amount=Decimal("150"),
+            lines=[
+                {"item_name": "货品 A", "quantity": "1", "unit_price": "100", "amount": "100"},
+                {"item_name": "货品 B", "quantity": "1", "unit_price": "50", "amount": "50"},
+            ],
+        ),
+        order_type="receivable", current_user=_FakeUser(), db=db,
+    )
+
+    assert res.data["contact"] == "李会计"
+    assert order.contact == "李会计"
+    assert db.deleted == [old_line]
+    new_lines = [row for row in db.added if isinstance(row, FinanceCenterMumarenReceivableOrderLine)]
+    assert [(row.line_no, row.item_name, row.amount) for row in new_lines] == [
+        (1, "货品 A", Decimal("100")), (2, "货品 B", Decimal("50")),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_receivable_draft_can_clear_contact_snapshot():
+    order = _receivable(oid=1, status="draft")
+    order.contact = "旧联系人"
+    order.remark = "保留原备注"
+    db = _MockDb(get_map={FinanceCenterMumarenReceivableOrder: {1: order}})
+
+    await update_ar_ap_order(
+        order_id=1,
+        body=ArApOrderUpdate(book_id=1, contact=None, remark=None),
+        order_type="receivable", current_user=_FakeUser(), db=db,
+    )
+
+    assert order.contact is None
+    assert order.remark is None
 
 
 @pytest.mark.asyncio

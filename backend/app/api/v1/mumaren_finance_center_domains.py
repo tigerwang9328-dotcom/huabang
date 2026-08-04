@@ -12,7 +12,6 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.mumaren_finance_center import (
@@ -60,6 +59,7 @@ from app.services.mumaren_finance_center.ar_ap import (
 )
 from app.services.mumaren_finance_center.tax import (
     CrossBookTaxViolationError,
+    HistoricalRecordReadonlyError,
     InvalidTaxTransition,
     build_tax_alerts,
     create_tax_record,
@@ -968,9 +968,6 @@ async def create_tax_record_endpoint(
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    except IntegrityError as error:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="该账簿、税种和所属期间已存在税务记录") from error
     _add_audit_log(
         db, book_id=body.book_id, action="create_tax_record",
         operator_id=_actor_id(current_user),
@@ -994,7 +991,7 @@ async def delete_tax_record_endpoint(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except CrossBookTaxViolationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    except InvalidTaxTransition as error:
+    except (HistoricalRecordReadonlyError, InvalidTaxTransition) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     _add_audit_log(
         db, book_id=record.book_id, action="delete_tax_record",
@@ -1489,10 +1486,7 @@ async def list_cash_accounts(
     """列出出纳账户,支持 book_id 过滤,默认 limit 100,最大 500。"""
     rows = list((await db.execute(
         select(FinanceCenterMumarenCashAccount)
-        .where(
-            FinanceCenterMumarenCashAccount.book_id == book_id,
-            FinanceCenterMumarenCashAccount.is_active.is_(True),
-        )
+        .where(FinanceCenterMumarenCashAccount.book_id == book_id)
         .order_by(FinanceCenterMumarenCashAccount.id.desc())
         .limit(limit)
     )).scalars())

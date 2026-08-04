@@ -17,7 +17,10 @@ from app.models.mumaren_finance_center_domains import (
     FinanceCenterMumarenTaxRecord,
     FinanceCenterMumarenTaxType,
 )
-from app.services.mumaren_finance_center.workflow import assert_book_writable
+from app.services.mumaren_finance_center.workflow import (
+    HistoricalRecordReadonlyError,
+    assert_book_writable,
+)
 
 
 class InvalidTaxTransition(ValueError):
@@ -184,7 +187,8 @@ async def delete_tax_record(
     record_id: int,
     book_id: int,
 ) -> FinanceCenterMumarenTaxRecord:
-    """删除未审核税务草稿；审核后的记录属于不可逆流程。"""
+    """Delete only a draft record from a writable current book."""
+    await assert_book_writable(db, book_id=book_id)
     record = await db.get(FinanceCenterMumarenTaxRecord, record_id)
     if record is None:
         raise LookupError(f"税务单据 {record_id} 不存在")

@@ -51,19 +51,12 @@ const routes = [
       { path: "inventory/warehouses", name: "Warehouses", component: () => import("@/views/inventory/Warehouses.vue"), meta: { title: "仓库档案" } },
       { path: "inventory/balance", name: "InventoryBalance", component: () => import("@/views/inventory/InventoryBalance.vue"), meta: { title: "库存余额" } },
       { path: "member", name: "Member", component: () => import("@/views/member/Index.vue"), meta: { title: "会员运营" } },
-      { path: "finance", name: "Finance", component: () => import("@/views/finance/Index.vue"), meta: { title: "利润分析" } },
       { path: "task", name: "Task", component: () => import("@/views/task/Index.vue"), meta: { title: "任务管理" } },
       { path: "task/:id", name: "TaskDetail", component: () => import("@/views/task/Detail.vue"), meta: { title: "任务详情" } },
       { path: "warning", name: "Warning", component: () => import("@/views/warning/Index.vue"), meta: { title: "异常稽核" } },
       { path: "ai", name: "AI", component: () => import("@/views/ai/Index.vue"), meta: { title: "AI助手" } },
       { path: "dingtalk", name: "DingTalk", component: () => import("@/views/dingtalk/Index.vue"), meta: { title: "钉钉通知" } },
       { path: "baison/shops", name: "BaisonShops", component: () => import("@/views/baison/Shops.vue"), meta: { title: "百胜门店档案" } },
-      { path: "fin", redirect: "/app/fin/overview" },
-      { path: "fin/overview", name: "FinanceOverview", component: () => import("@/views/finance/FinanceOverview.vue"), meta: { title: "财务首页" } },
-      { path: "fin/reimbursements", name: "Reimbursements", component: () => import("@/views/finance/Reimbursements.vue"), meta: { title: "报销管理" } },
-      { path: "fin/payments", name: "Payments", component: () => import("@/views/finance/Payments.vue"), meta: { title: "付款申请" } },
-      { path: "fin/expense-analysis", name: "ExpenseAnalysis", component: () => import("@/views/finance/ExpenseAnalysis.vue"), meta: { title: "费用分析" } },
-      { path: "fin/formal-ledger", name: "FormalLedger", component: () => import("@/views/finance/FormalLedger.vue"), meta: { title: "正式账簿" } },
       {
         path: "finance-center/mumaren",
         component: () => import("@/views/mumaren-finance-center/MumarenFinanceCenterShell.vue"),
@@ -72,8 +65,9 @@ const routes = [
           { path: "", redirect: "/app/finance-center/mumaren/history" },
           // 数据罗盘
           { path: "compass", name: "MumarenFinanceCompass", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCompass.vue"), meta: { title: "数据罗盘" } },
-          // 历史数据存档
-          { path: "history", name: "MumarenFinanceHistory", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistory.vue"), meta: { title: "历史数据存档" } },
+          // 金蝶历史数据
+          { path: "history", name: "MumarenFinanceHistory", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistory.vue"), meta: { title: "金蝶历史数据" } },
+          { path: "dingtalk-expenses", name: "MumarenFinanceDingtalkExpenses", component: () => import("@/views/mumaren-finance-center/MumarenFinanceDingtalkExpenses.vue"), meta: { title: "费用分析（钉钉只读）" } },
           { path: "history/balance-snapshots", name: "MumarenFinanceHistoryBalanceSnapshots", component: () => import("@/views/mumaren-finance-center/MumarenFinanceHistoryBalanceSnapshots.vue"), meta: { title: "余额快照核对" } },
           // 凭证(5 子项)
           { path: "vouchers", redirect: "/app/finance-center/mumaren/vouchers/list" },
@@ -84,7 +78,7 @@ const routes = [
           { path: "vouchers/auto", name: "MumarenFinanceVoucherAuto", component: () => import("@/views/mumaren-finance-center/MumarenFinanceVoucherAuto.vue"), meta: { title: "自动凭证" } },
           // 账簿(3 子项)
           { path: "ledgers", redirect: "/app/finance-center/mumaren/ledgers/general" },
-          { path: "ledgers/general", name: "MumarenFinanceGeneralLedger", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgers.vue"), meta: { title: "总账" } },
+          { path: "ledgers/general", name: "MumarenFinanceGeneralLedger", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgers.vue"), meta: { title: "账套总览" } },
           { path: "ledgers/trial-balance", name: "MumarenFinanceTrialBalance", component: () => import("@/views/mumaren-finance-center/MumarenFinanceReportTrialBalance.vue"), meta: { title: "科目余额表" } },
           { path: "ledgers/detail", name: "MumarenFinanceLedgerDetail", component: () => import("@/views/mumaren-finance-center/MumarenFinanceLedgerDetail.vue"), meta: { title: "明细账" } },
           // 报表(8 子项)
@@ -108,7 +102,6 @@ const routes = [
           { path: "assets", name: "MumarenFinanceAssets", component: () => import("@/views/mumaren-finance-center/MumarenFinanceAssets.vue"), meta: { title: "资产" } },
           // 发票
             { path: "invoices", name: "MumarenFinanceInvoices", component: () => import("@/views/mumaren-finance-center/MumarenFinanceInvoices.vue"), meta: { title: "发票" } },
-            { path: "payments", name: "MumarenFinancePayments", component: () => import("@/views/mumaren-finance-center/MumarenFinancePayments.vue"), meta: { title: "付款" } },
           // 出纳(2 子项)
           { path: "cashier", redirect: "/app/finance-center/mumaren/cashier/accounts" },
           { path: "cashier/accounts", name: "MumarenFinanceCashierAccounts", component: () => import("@/views/mumaren-finance-center/MumarenFinanceCashierAccounts.vue"), meta: { title: "账户与流水" } },
@@ -134,11 +127,6 @@ const routes = [
           : () => import("@/views/finance/FinanceCenterModule.vue"),
         meta: { title: item.label, financeModuleKey: item.key },
       })),
-      { path: "fin/history/account-sets", name: "FinanceAccountSets", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "历史账套", financeTab: "account-sets" } },
-      { path: "fin/history/statements", name: "FinanceStatements", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "财务报表", financeTab: "statements" } },
-      { path: "fin/history/account-balances", name: "FinanceAccountBalances", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "科目余额", financeTab: "account-balances" } },
-      { path: "fin/history/vouchers", name: "FinanceVouchers", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "凭证查询", financeTab: "vouchers" } },
-      { path: "fin/history/data-quality", name: "FinanceDataQuality", component: () => import("@/views/finance/HistoricalFinance.vue"), meta: { title: "数据质量", financeTab: "data-quality" } },
       { path: "hr", redirect: "/app/hr/overview" },
       { path: "hr/overview", name: "HrOverview", component: () => import("@/views/hr/HrOverview.vue"), meta: { title: "人事首页" } },
       { path: "hr/employees", name: "HrEmployees", component: () => import("@/views/hr/Employees.vue"), meta: { title: "员工档案" } },
@@ -196,14 +184,7 @@ const routePermissionRules: Array<[string, string]> = [
   ["/app/inventory/warehouses", "inventory:warehouse:view"],
   ["/app/inventory/balance", "inventory:balance:view"],
   ["/app/inventory", "inventory:overview:view"],
-  ["/app/finance", "finance:profit:view"],
   ["/app/task", "task:view"],
-  ["/app/fin/overview", "finance:overview:view"],
-  ["/app/fin/reimbursements", "finance:reimbursement:view"],
-  ["/app/fin/payments", "finance:payment:view"],
-  ["/app/fin/expense-analysis", "finance:expense:view"],
-  ["/app/fin/formal-ledger", "finance:voucher:write"],
-  ["/app/fin/history", "finance:profit:view"],
   ["/app/finance-center", "finance:center:view"],
   ["/app/finance-center/mumaren", "mumaren_finance_center:access"],
   ["/app/hr/overview", "hr:overview:view"],
@@ -240,7 +221,6 @@ const getPermissionHomePath = (authStore: ReturnType<typeof useAuthStore>) => {
     ["/app/store", "sales:store:view"],
     ["/app/product", "product:overview:view"],
     ["/app/inventory", "inventory:overview:view"],
-    ["/app/fin/overview", "finance:overview:view"],
     ["/app/finance-center/core-workspace", "finance:center:view"],
     ["/app/finance-center/mumaren", "mumaren_finance_center:access"],
     ["/app/hr/overview", "hr:overview:view"],

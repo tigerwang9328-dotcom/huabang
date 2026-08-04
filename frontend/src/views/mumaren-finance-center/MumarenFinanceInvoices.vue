@@ -47,7 +47,7 @@
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
           <el-button link type="primary" size="small" :disabled="isReadonly || !canVerify(row)" :loading="actingId === row.id" @click="verify(row)">认证</el-button>
-          <el-popconfirm v-if="row.verification_status === 'draft'" title="确定删除该发票?" @confirm="remove(row)">
+          <el-popconfirm title="确定删除该发票?" @confirm="remove(row)">
             <template #reference>
               <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>

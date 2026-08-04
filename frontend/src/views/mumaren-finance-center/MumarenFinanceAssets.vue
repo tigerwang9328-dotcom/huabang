@@ -49,9 +49,9 @@
               <el-button link type="warning" size="small" :disabled="isReadonly || row.status === 'disposed'" :loading="actingId === row.id">处置</el-button>
             </template>
           </el-popconfirm>
-          <el-popconfirm v-if="row.status === 'draft'" title="确定删除该资产?" @confirm="remove(row)">
+          <el-popconfirm title="确定删除该资产?" @confirm="remove(row)">
             <template #reference>
-              <el-button v-if="row.status !== 'disposed'" link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
+              <el-button link type="danger" size="small" :disabled="isReadonly" :loading="actingId === row.id">删除</el-button>
             </template>
           </el-popconfirm>
         </template>

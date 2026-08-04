@@ -440,7 +440,7 @@ const getPermissionHomePath = () => {
     ["/app/store", "sales:store:view"],
     ["/app/product", "product:overview:view"],
     ["/app/inventory", "inventory:overview:view"],
-    ["/app/fin/overview", "finance:overview:view"],
+    ["/app/finance-center/mumaren", "mumaren_finance_center:access"],
     ["/app/hr/overview", "hr:overview:view"],
     ["/app/ai", "knowledge:ai:view"],
     ["/app/system/admin", "system:dashboard:view"],
