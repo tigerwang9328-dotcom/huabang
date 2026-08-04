@@ -70,11 +70,6 @@ class _MockDb:
                 self._next_id += 1
                 item.id = self._next_id
 
-    async def get(self, model, primary_id):
-        if model is FinanceCenterMumarenTaxRecord and self.record is not None:
-            return self.record
-        return None
-
     @property
     def voucher_entries(self):
         return [item for item in self.added if isinstance(item, (FinanceCenterMumarenVoucher, FinanceCenterMumarenVoucherLine))]
