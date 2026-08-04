@@ -9,16 +9,16 @@
       </div>
       <div class="head-actions">
         <el-select v-model="filters.observation_window" placeholder="观察窗口" style="width: 150px" @change="loadActiveTab">
-          <el-option label="0-3秒" value="0-3s" />
-          <el-option label="0-5秒" value="0-5s" />
-          <el-option label="0-10秒" value="0-10s" />
-          <el-option label="0-15秒" value="0-15s" />
+          <el-option label="T+2（前天发布）" value="t2" />
+          <el-option label="T+7（7天前发布）" value="t7" />
+          <el-option label="T+30（30天前发布）" value="t30" />
+          <el-option label="临时采集" value="ad_hoc" />
         </el-select>
         <el-select v-model="filters.position_segment" placeholder="位置段" style="width: 150px" @change="loadActiveTab">
-          <el-option label="全位置" value="all" />
-          <el-option label="开场" value="opening" />
+          <el-option label="全部位置" value="all" />
+          <el-option label="前段" value="front" />
           <el-option label="中段" value="middle" />
-          <el-option label="结尾" value="closing" />
+          <el-option label="后段" value="rear" />
         </el-select>
         <el-button :loading="loading" @click="loadActiveTab">刷新</el-button>
         <el-dropdown split-button type="primary" @click="handleExport('xlsx')" @command="handleExport">
@@ -131,7 +131,7 @@ const loading = ref(false);
 const loadError = ref("");
 const context = ref<DouyinAnnotationContext | null>(null);
 const activeTab = ref<DouyinColorReportTab>("outfit");
-const filters = ref({ observation_window: "0-5s", position_segment: "all" });
+const filters = ref({ observation_window: "t2", position_segment: "all" });
 
 const outfitRows = ref<DouyinColorRankingRow[]>([]);
 const topRows = ref<DouyinColorRankingRow[]>([]);

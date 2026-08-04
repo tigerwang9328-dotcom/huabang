@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import secrets
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update, func
@@ -26,9 +26,14 @@ from app.models.douyin_color_analytics import (
     CollectorInstance,
     DouyinCreatorAccount,
     DouyinUploadToken,
+    GarmentStyle,
+    OutfitColorMetric,
+    OutfitCombination,
     ReleaseStageConfiguration,
     Video,
     VideoAnalysisSnapshot,
+    VideoClip,
+    VideoColorMetric,
 )
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
@@ -65,6 +70,23 @@ from app.services.douyin_color_annotation_service import (
     AnnotationConflictError,
     AnnotationPermissionError,
     resolve_single_active_account,
+)
+from app.services.douyin_color_report_query_service import (
+    export_rankings,
+    query_outfit_rankings,
+    query_single_garment_rankings,
+)
+from app.services.douyin_color_release_service import (
+    advance_stage,
+    can_enable_bounce_report,
+    disable_bounce_report,
+    enable_bounce_report,
+)
+from app.services.douyin_color_metrics_service import (
+    compute_outfit_metric,
+    compute_video_color_metric,
+    select_bounce_snapshot,
+    select_retention_snapshot,
 )
 from app.services.operation_audit_service import write_operation_audit
 
@@ -818,6 +840,371 @@ async def rotate_upload_tokens(
         "expires_at": new_token.expires_at,
         "revoked_count": len(revoked_prefixes),
     })
+
+
+# ---------------------------------------------------------------------------
+# v4.0 report query / export / release-stage / compute-metrics routes
+# ---------------------------------------------------------------------------
+
+class AdvanceStageRequest(BaseModel):
+    target_stage: str = Field(pattern="^(A|B|C|D)$")
+
+
+class ToggleBounceReportRequest(BaseModel):
+    enabled: bool
+
+
+class ExportReportRequest(BaseModel):
+    format: str = Field(pattern="^(csv|xlsx)$")
+    tab: str = Field(pattern="^(outfit|top|bottom)$")
+    observation_window: str = Field(pattern="^(t2|t7|t30|ad_hoc)$")
+    position_segment: str = Field(default="all", pattern="^(all|front|middle|rear)$")
+
+
+@router.get("/accounts/{account_id}/report/outfit", response_model=ApiResponse)
+async def get_outfit_report(
+    account_id: int,
+    observation_window: str = Query(..., pattern="^(t2|t7|t30|ad_hoc)$"),
+    position_segment: str = Query("all", pattern="^(all|front|middle|rear)$"),
+    as_of_date: date | None = Query(None),
+    current_user: SysUser = Depends(require_any_permission("douyin.analyst", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """整套穿搭排名报告（主要排名）。"""
+    await _active_account_for_dashboard(db, account_id)
+    result = await db.run_sync(lambda sync_session: query_outfit_rankings(
+        session=sync_session,
+        account_id=account_id,
+        observation_window=observation_window,
+        position_segment=position_segment,
+        as_of_date=as_of_date,
+    ))
+    return ApiResponse.ok(result)
+
+
+@router.get("/accounts/{account_id}/report/top", response_model=ApiResponse)
+async def get_top_report(
+    account_id: int,
+    observation_window: str = Query(..., pattern="^(t2|t7|t30|ad_hoc)$"),
+    position_segment: str = Query("all", pattern="^(all|front|middle|rear)$"),
+    as_of_date: date | None = Query(None),
+    current_user: SysUser = Depends(require_any_permission("douyin.analyst", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """单件分榜——上装排名（outer + top）。"""
+    await _active_account_for_dashboard(db, account_id)
+    result = await db.run_sync(lambda sync_session: query_single_garment_rankings(
+        session=sync_session,
+        account_id=account_id,
+        ranking_bucket="top",
+        observation_window=observation_window,
+        position_segment=position_segment,
+        as_of_date=as_of_date,
+    ))
+    return ApiResponse.ok(result)
+
+
+@router.get("/accounts/{account_id}/report/bottom", response_model=ApiResponse)
+async def get_bottom_report(
+    account_id: int,
+    observation_window: str = Query(..., pattern="^(t2|t7|t30|ad_hoc)$"),
+    position_segment: str = Query("all", pattern="^(all|front|middle|rear)$"),
+    as_of_date: date | None = Query(None),
+    current_user: SysUser = Depends(require_any_permission("douyin.analyst", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """单件分榜——下装排名（bottom）。"""
+    await _active_account_for_dashboard(db, account_id)
+    result = await db.run_sync(lambda sync_session: query_single_garment_rankings(
+        session=sync_session,
+        account_id=account_id,
+        ranking_bucket="bottom",
+        observation_window=observation_window,
+        position_segment=position_segment,
+        as_of_date=as_of_date,
+    ))
+    return ApiResponse.ok(result)
+
+
+@router.post("/accounts/{account_id}/report/export", response_model=ApiResponse)
+async def export_report(
+    account_id: int,
+    payload: ExportReportRequest,
+    request: Request,
+    current_user: SysUser = Depends(require_any_permission("douyin.analyst", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出排名报告为 CSV/XLSX（含公式注入防护）。"""
+    await _active_account_for_dashboard(db, account_id)
+
+    def _query(sync_session):
+        if payload.tab == "outfit":
+            return query_outfit_rankings(
+                session=sync_session, account_id=account_id,
+                observation_window=payload.observation_window,
+                position_segment=payload.position_segment,
+            )
+        return query_single_garment_rankings(
+            session=sync_session, account_id=account_id,
+            ranking_bucket=payload.tab,
+            observation_window=payload.observation_window,
+            position_segment=payload.position_segment,
+        )
+
+    rankings = await db.run_sync(_query)
+    export_result = export_rankings(rankings=rankings, format=payload.format, tab=payload.tab)
+    await write_operation_audit(
+        db, actor=current_user, module="douyin_color_analytics", action="export_report",
+        target_type="douyin_color_report", target_id=account_id,
+        after_data={"format": payload.format, "tab": payload.tab,
+                    "observation_window": payload.observation_window,
+                    "filename": export_result["filename"]},
+        request=request,
+    )
+    return ApiResponse.ok({
+        "content": export_result["content"],
+        "filename": export_result["filename"],
+        "metadata": export_result["metadata"],
+    })
+
+
+@router.post("/accounts/{account_id}/release-stage/advance", response_model=ApiResponse)
+async def advance_release_stage(
+    account_id: int,
+    payload: AdvanceStageRequest,
+    request: Request,
+    current_user: SysUser = Depends(require_permission("douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """推进发布阶段（A→B→C→D，只能向前）。"""
+    await _active_account_for_dashboard(db, account_id)
+    config = (await db.execute(select(ReleaseStageConfiguration).where(
+        ReleaseStageConfiguration.account_id == account_id,
+    ))).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="release_stage_not_configured")
+    before = {"current_stage": config.current_stage, "bounce_report_enabled": config.bounce_report_enabled,
+              "bounce_semantics_status": config.bounce_semantics_status}
+    try:
+        updated = advance_stage(
+            config={
+                "current_stage": config.current_stage,
+                "bounce_report_enabled": config.bounce_report_enabled,
+                "bounce_semantics_status": config.bounce_semantics_status,
+            },
+            target_stage=payload.target_stage,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+    config.current_stage = updated["current_stage"]
+    await db.flush()
+    await write_operation_audit(
+        db, actor=current_user, module="douyin_color_analytics", action="advance_release_stage",
+        target_type="release_stage_configuration", target_id=config.id,
+        before_data=before, after_data={"current_stage": config.current_stage}, request=request,
+    )
+    return ApiResponse.ok(await _release_stage_payload(db, account_id))
+
+
+@router.post("/accounts/{account_id}/release-stage/bounce-report", response_model=ApiResponse)
+async def toggle_bounce_report(
+    account_id: int,
+    payload: ToggleBounceReportRequest,
+    request: Request,
+    current_user: SysUser = Depends(require_permission("douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """开启/关闭跳出率报告（开启需 bounce_semantics_status 已验证）。"""
+    await _active_account_for_dashboard(db, account_id)
+    config = (await db.execute(select(ReleaseStageConfiguration).where(
+        ReleaseStageConfiguration.account_id == account_id,
+    ))).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="release_stage_not_configured")
+    before = {"bounce_report_enabled": config.bounce_report_enabled,
+              "bounce_semantics_status": config.bounce_semantics_status}
+    config_snapshot = {
+        "current_stage": config.current_stage,
+        "bounce_report_enabled": config.bounce_report_enabled,
+        "bounce_semantics_status": config.bounce_semantics_status,
+    }
+    try:
+        if payload.enabled:
+            updated = enable_bounce_report(
+                config=config_snapshot,
+                bounce_semantics_status=config.bounce_semantics_status,
+            )
+        else:
+            updated = disable_bounce_report(config=config_snapshot)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+    config.bounce_report_enabled = updated["bounce_report_enabled"]
+    if payload.enabled:
+        config.bounce_semantics_status = updated["bounce_semantics_status"]
+    await db.flush()
+    await write_operation_audit(
+        db, actor=current_user, module="douyin_color_analytics", action="toggle_bounce_report",
+        target_type="release_stage_configuration", target_id=config.id,
+        before_data=before,
+        after_data={"bounce_report_enabled": config.bounce_report_enabled,
+                    "bounce_semantics_status": config.bounce_semantics_status},
+        request=request,
+    )
+    return ApiResponse.ok(await _release_stage_payload(db, account_id))
+
+
+@router.post("/accounts/{account_id}/compute-metrics", response_model=ApiResponse)
+async def compute_metrics(
+    account_id: int,
+    request: Request,
+    current_user: SysUser = Depends(require_permission("douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """触发指标计算：为该账号所有 approved 片段计算 outfit 和 per-garment 指标。"""
+    await _active_account_for_dashboard(db, account_id)
+
+    config = (await db.execute(select(ReleaseStageConfiguration).where(
+        ReleaseStageConfiguration.account_id == account_id,
+    ))).scalar_one_or_none()
+    bounce_semantics_status = config.bounce_semantics_status if config else "unverified"
+
+    clips = (await db.execute(select(VideoClip).where(
+        VideoClip.account_id == account_id,
+        VideoClip.annotation_status == "approved",
+        VideoClip.deleted_at.is_(None),
+    ))).scalars().all()
+
+    video_ids = sorted({clip.video_id for clip in clips})
+    outfit_count = 0
+    video_metric_count = 0
+
+    for video_id in video_ids:
+        video_clips = [c for c in clips if c.video_id == video_id]
+        video = (await db.execute(select(Video).where(
+            Video.account_id == account_id, Video.id == video_id,
+        ))).scalar_one_or_none()
+        if video is None:
+            continue
+        snapshots = (await db.execute(select(VideoAnalysisSnapshot).where(
+            VideoAnalysisSnapshot.account_id == account_id,
+            VideoAnalysisSnapshot.video_id == video_id,
+        ))).scalars().all()
+        snapshot_dicts = [{
+            "id": s.id, "analysis_type": s.analysis_type,
+            "curve_quality_status": s.curve_quality_status,
+            "item_status": s.curve_quality_status,
+            "collected_at": s.collected_at,
+            "normalized_curve_json": s.normalized_curve_json,
+            "source_snapshot_hash": s.source_snapshot_hash,
+        } for s in snapshots]
+        retention_snap = select_retention_snapshot(snapshot_dicts, source_data_cutoff_at=None)
+        bounce_snap = select_bounce_snapshot(snapshot_dicts, source_data_cutoff_at=None)
+        clip_dicts = [{
+            "id": c.id, "version": c.version,
+            "start_ms": c.start_ms, "end_ms": c.end_ms,
+            "input_start_ms": c.input_start_ms, "input_end_ms": c.input_end_ms,
+            "curve_resolution_ms": c.curve_resolution_ms,
+            "focus_status": c.focus_status,
+            "annotation_status": c.annotation_status,
+            "overlap_status": c.overlap_status,
+            "outfit_parts_json": c.outfit_parts_json,
+        } for c in video_clips]
+
+        outfit_metric = compute_outfit_metric(
+            clips=clip_dicts,
+            retention_snapshot=retention_snap,
+            bounce_snapshot=bounce_snap,
+            video_duration_ms=video.duration_ms or 0,
+            observation_window="ad_hoc",
+            metric_version="v4.0",
+            bounce_semantics_status=bounce_semantics_status,
+        )
+        if outfit_metric is not None:
+            db.add(OutfitColorMetric(
+                account_id=account_id,
+                combination_key=outfit_metric["combination_key"],
+                observation_window="ad_hoc",
+                metric_version=outfit_metric["metric_version"],
+                metric_input_hash=outfit_metric["metric_input_hash"],
+                average_retention=outfit_metric.get("average_retention"),
+                retention_drop=outfit_metric.get("retention_drop"),
+                average_platform_bounce_curve_value=outfit_metric.get("average_platform_bounce_curve_value"),
+                max_platform_bounce_curve_value=outfit_metric.get("max_platform_bounce_curve_value"),
+                participant_count=outfit_metric["participant_count"],
+                total_clip_duration_ms=outfit_metric.get("total_clip_duration_ms", 0),
+                video_duration_ms=outfit_metric.get("video_duration_ms", 0),
+                dominant_position_segment=outfit_metric.get("dominant_position_segment"),
+                retention_calculation_status=outfit_metric.get("retention_calculation_status", "pending"),
+                bounce_calculation_status=outfit_metric.get("bounce_calculation_status", "pending"),
+                calculated_at=outfit_metric.get("calculated_at"),
+            ))
+            outfit_count += 1
+
+        outfit_parts = []
+        for clip in video_clips:
+            for part in (clip.outfit_parts_json or []):
+                outfit_parts.append({
+                    "position": part.get("position") or part.get("garment_position"),
+                    "style_id": part.get("style_id"),
+                    "sku_code": part.get("sku_code"),
+                })
+        garment_metrics = compute_video_color_metric(
+            clips=clip_dicts,
+            outfit_parts=outfit_parts,
+            retention_snapshot=retention_snap,
+            bounce_snapshot=bounce_snap,
+            video_duration_ms=video.duration_ms or 0,
+            observation_window="ad_hoc",
+            metric_version="v4.0",
+            bounce_semantics_status=bounce_semantics_status,
+        )
+        for gm in garment_metrics:
+            db.add(VideoColorMetric(
+                account_id=account_id,
+                video_id=video_id,
+                style_id=gm.get("style_id") or 0,
+                color_id=0,
+                observation_window="ad_hoc",
+                retention_snapshot_id=gm.get("retention_snapshot_id") or 0,
+                bounce_snapshot_id=gm.get("bounce_snapshot_id"),
+                retention_source_hash=gm.get("retention_source_hash") or "",
+                bounce_source_hash=gm.get("bounce_source_hash"),
+                annotation_set_hash=gm.get("annotation_set_hash") or "",
+                metric_input_hash=gm.get("metric_input_hash") or "",
+                metric_version=gm.get("metric_version") or "v4.0",
+                garment_position=gm.get("garment_position") or "none",
+                sku_code=gm.get("sku_code"),
+                average_retention=gm.get("average_retention"),
+                retention_drop=gm.get("retention_drop"),
+                average_platform_bounce_curve_value=gm.get("average_platform_bounce_curve_value"),
+                max_platform_bounce_curve_value=gm.get("max_platform_bounce_curve_value"),
+                clip_count=gm.get("clip_count", 0),
+                total_clip_duration_ms=gm.get("total_clip_duration_ms", 0),
+                average_relative_position=gm.get("average_relative_position"),
+                earliest_relative_position=gm.get("earliest_relative_position"),
+                latest_relative_position=gm.get("latest_relative_position"),
+                average_clip_duration_ms=gm.get("average_clip_duration_ms"),
+                video_duration_ms=gm.get("video_duration_ms", 0),
+                dominant_position_segment=gm.get("dominant_position_segment"),
+                retention_calculation_status=gm.get("retention_calculation_status", "pending"),
+                bounce_calculation_status=gm.get("bounce_calculation_status", "pending"),
+                calculated_at=gm.get("calculated_at"),
+            ))
+            video_metric_count += 1
+
+    await db.flush()
+    await write_operation_audit(
+        db, actor=current_user, module="douyin_color_analytics", action="compute_metrics",
+        target_type="douyin_creator_account", target_id=account_id,
+        after_data={"outfit_metrics_count": outfit_count,
+                    "video_color_metrics_count": video_metric_count},
+        request=request,
+    )
+    return ApiResponse.ok({
+        "outfit_metrics_count": outfit_count,
+        "video_color_metrics_count": video_metric_count,
+    })
+
 
 from app.api.v1.douyin_color_annotation_routes import annotation_router
 router.include_router(annotation_router)
