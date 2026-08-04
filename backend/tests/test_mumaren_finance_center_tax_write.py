@@ -41,6 +41,7 @@ class _MockDb:
         self.tax_type = tax_type
         self.record = record
         self._next_id = 100
+        self.book = SimpleNamespace(is_readonly=False)
 
     async def execute(self, statement):
         text = str(statement)
@@ -49,6 +50,13 @@ class _MockDb:
         if "finance_center_mumaren_tax_records" in text:
             return _Result(self.record)
         return _Result(None)
+
+    async def get(self, model, primary_id):
+        if model.__name__ == "FinanceCenterMumarenBook":
+            return self.book
+        if model is FinanceCenterMumarenTaxRecord and self.record is not None:
+            return self.record
+        return None
 
     def add(self, item):
         self.added.append(item)
