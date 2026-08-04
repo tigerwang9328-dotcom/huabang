@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.11
+// @version      3.5.12
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.11';
+  const SCRIPT_VERSION = '3.5.12';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -383,7 +383,7 @@
       await captureCatalog(payload);
       const cursor = String(payload?.max_cursor ?? '');
       if (!payload?.has_more || !cursor || seenCursors.has(cursor)) return;
-      seenCursors.add(cursor); url.searchParams.set('max_cursor', cursor);
+      seenCursors.add(cursor); url.searchParams.set('cursor', cursor);
     }
   }
   async function startFixedCollection() {

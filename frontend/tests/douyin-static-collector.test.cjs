@@ -85,6 +85,11 @@ function createHarness(options = {}) {
     fetch: async (rawUrl) => {
       const url = new URL(rawUrl);
       if (url.pathname === "/web/api/creator/item/list") {
+        if (options.catalogPages) {
+          const pagePayload = options.catalogPages[url.searchParams.get("cursor") || "0"];
+          if (!pagePayload) throw new Error(`unexpected catalog cursor ${url.searchParams.get("cursor")}`);
+          return response(pagePayload);
+        }
         if (catalogFailures > 0) { catalogFailures -= 1; return response({}, 503); }
         return response({ items: [{ item_id: "video", author_user_id: "creator", statistics: { play_count: 2000 }, type: 0 }], has_more: false });
       }
@@ -259,6 +264,21 @@ test("catalog refresh backfills metadata missing from a previously cached video"
   assert.equal(item.sanitized_title, "补全后的标题");
   assert.equal(item.published_at_epoch_seconds, 1_700_000_000);
   assert.equal(item.duration_ms, 12_345);
+});
+
+test("catalog pagination sends the returned cursor to collect metadata from every page", async () => {
+  const item = (videoId) => ({ item_id: videoId, author_user_id: "creator", desc: videoId, create_time: 1_700_000_000, duration: 12_345, statistics: { play_count: 2_000 }, type: 0 });
+  const { api } = createHarness({
+    catalogPages: {
+      "0": { items: [item("first")], has_more: true, max_cursor: "next" },
+      next: { items: [item("second")], has_more: false },
+    },
+  });
+  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", observedAccountName: "华邦", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
+
+  await api.collectCatalogPages();
+
+  assert.deepEqual([...new Set((await api.queueState()).catalogItems.map((entry) => entry.video_id))].sort(), ["first", "second"]);
 });
 
 test("observed retention and bounce responses are paired before upload", async () => {
