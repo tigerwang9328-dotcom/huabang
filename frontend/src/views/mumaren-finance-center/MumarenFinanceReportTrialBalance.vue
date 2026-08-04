@@ -16,6 +16,7 @@
         <el-option v-for="book in books" :key="book.id" :label="book.book_name" :value="book.id" />
       </el-select>
       <el-input v-model="period" placeholder="2026-07(可选)" />
+      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" clearable />
     </div>
 
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
@@ -46,6 +47,7 @@ import {
 const books = ref<MumarenFinanceBook[]>([]);
 const { bookId, initializeBook, isReadonly } = useMumarenFinanceBook();
 const period = ref("");
+const dateRange = ref<[string, string] | undefined>();
 const trialRows = ref<MumarenTrialBalanceRow[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -80,6 +82,8 @@ const load = async () => {
     const result = await mumarenFinanceCenterApi.getTrialBalance({
       book_id: requestedBookId,
       period: requestedPeriod,
+      start_date: dateRange.value?.[0],
+      end_date: dateRange.value?.[1],
     });
     if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedPeriod !== (period.value || undefined)) return;
     trialRows.value = result.data.data.rows || [];

@@ -37,8 +37,8 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="9">
-            <el-form-item label="凭证号">
-              <el-input v-model="form.voucher_no" placeholder="如 2026-07-001" />
+            <el-form-item label="凭证号（自动）">
+              <el-input v-model="form.voucher_no" readonly placeholder="选择账簿后自动生成" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="9">
@@ -70,15 +70,15 @@
 
       <el-table :data="form.lines" border size="small" row-key="key" :max-height="360" :class="{ 'is-readonly': isReadonly }">
         <el-table-column type="index" label="#" width="42" />
+        <el-table-column label="摘要" min-width="160">
+          <template #default="{ row }"><el-input v-model="row.summary" :disabled="isReadonly" size="small" placeholder="行摘要" /></template>
+        </el-table-column>
         <el-table-column label="会计科目" min-width="240">
           <template #default="{ row }">
             <el-select v-model="row.account_id" :disabled="isReadonly" filterable clearable size="small" placeholder="选择科目" style="width:100%">
               <el-option v-for="a in accounts" :key="a.id" :label="`${a.account_code} ${a.account_name}`" :value="a.id" />
             </el-select>
           </template>
-        </el-table-column>
-        <el-table-column label="摘要" min-width="160">
-          <template #default="{ row }"><el-input v-model="row.summary" :disabled="isReadonly" size="small" placeholder="行摘要" /></template>
         </el-table-column>
         <el-table-column label="借方金额" width="130" align="right">
           <template #default="{ row }">
@@ -137,6 +137,7 @@ const error = ref("");
 const saving = ref(false);
 const created = ref(false);
 let templateApplyVersion = 0;
+let voucherNumberRequestVersion = 0;
 
 const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
@@ -188,6 +189,29 @@ const form = reactive({
   lines: [newLine(), newLine()],
 });
 
+const refreshVoucherNo = async () => {
+  const requestedBookId = bookId.value;
+  const requestedDate = form.voucher_date;
+  const requestedType = form.voucher_type;
+  const version = ++voucherNumberRequestVersion;
+  if (!requestedBookId || !requestedDate || !requestedType || isReadonly.value) {
+    form.voucher_no = "";
+    return;
+  }
+  try {
+    const result = await mumarenFinanceCenterApi.getNextVoucherNumber({
+      book_id: requestedBookId,
+      voucher_date: requestedDate,
+      voucher_type: requestedType,
+    });
+    if (version === voucherNumberRequestVersion && requestedBookId === bookId.value && requestedDate === form.voucher_date && requestedType === form.voucher_type) {
+      form.voucher_no = result.data.data.voucher_no;
+    }
+  } catch {
+    if (version === voucherNumberRequestVersion) form.voucher_no = "";
+  }
+};
+
 const applyTemplateFromRoute = async () => {
   const templateId = Number(route.query.template_id);
   const requestedBookId = bookId.value;
@@ -212,7 +236,7 @@ const applyTemplateFromRoute = async () => {
       debit_amount: Number(line.debit_amount),
       credit_amount: Number(line.credit_amount),
     }));
-    ElMessage.success(`已套用模板“${template.template_name}”，请填写凭证号后保存草稿。`);
+    ElMessage.success(`已套用模板“${template.template_name}”，凭证号已自动生成。`);
   } catch {
     if (version === templateApplyVersion && requestedBookId === bookId.value && requestedTemplateId === String(route.query.template_id || "")) {
       resetTemplateDraft();
@@ -229,6 +253,7 @@ const resetTemplateDraft = () => {
 
 watch(() => route.query.template_id, () => { resetTemplateDraft(); void applyTemplateFromRoute(); });
 watch(bookId, () => { if (route.query.template_id) resetTemplateDraft(); void applyTemplateFromRoute(); });
+watch([bookId, () => form.voucher_date, () => form.voucher_type], () => void refreshVoucherNo(), { immediate: true });
 
 const validLines = computed(() =>
   form.lines.filter((l) => l.account_id && (Number(l.debit_amount) > 0 || Number(l.credit_amount) > 0)),
@@ -313,10 +338,10 @@ const save = async () => {
     ElMessage.success("凭证草稿已创建");
     created.value = true;
     // 重置表单
-    form.voucher_no = "";
     form.voucher_date = new Date().toISOString().slice(0, 10);
     form.summary = "";
     form.lines = [newLine(), newLine()];
+    await refreshVoucherNo();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "保存失败");
   } finally {

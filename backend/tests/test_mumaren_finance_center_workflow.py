@@ -18,11 +18,23 @@ from app.services.mumaren_finance_center.workflow import (
     UnbalancedVoucherError,
     assert_history_readonly,
     create_voucher,
+    next_voucher_number,
     post_voucher,
     review_voucher,
     validate_voucher_lines,
 )
 from mumaren_crud_helpers import _MockDb, _MockResult
+
+
+@pytest.mark.asyncio
+async def test_next_voucher_number_fills_first_gap_for_book_date_and_type():
+    db = _MockDb(execute_results=[_MockResult(scalars=[
+        "记-202608-001", "记-202608-003", "记-202607-099",
+    ])])
+
+    number = await next_voucher_number(db, book_id=7, voucher_date=real_date(2026, 8, 2), voucher_type="记")
+
+    assert number == "记-202608-002"
 
 
 def test_draft_voucher_must_be_reviewed_before_manual_posting():

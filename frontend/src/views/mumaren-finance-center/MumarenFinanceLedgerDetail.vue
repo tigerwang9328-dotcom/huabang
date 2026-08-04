@@ -16,6 +16,7 @@
       <el-select v-model="accountId" placeholder="全部科目" clearable @change="load">
         <el-option v-for="account in accounts" :key="account.id" :label="`${account.account_code} ${account.account_name}`" :value="account.id" />
       </el-select>
+      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" clearable @change="load" />
     </div>
 
     <el-alert type="info" :closable="false" show-icon title="仅展示已过账分录；历史金蝶账簿不会出现录入、审核或过账操作。" />
@@ -46,6 +47,7 @@ const books = ref<MumarenFinanceBook[]>([]);
 const { bookId, initializeBook } = useMumarenFinanceBook();
 const accounts = ref<MumarenFinanceAccount[]>([]);
 const accountId = ref<number>();
+const dateRange = ref<[string, string] | undefined>();
 const rows = ref<LedgerRow[]>([]);
 const offset = ref(0);
 const hasMore = ref(false);
@@ -65,7 +67,7 @@ const load = async (reset = true) => {
   loading.value = true;
   error.value = "";
   try {
-    const response = await mumarenFinanceCenterApi.getLedgerLines({ book_id: requestedBookId, account_id: requestedAccountId, offset: requestedOffset });
+    const response = await mumarenFinanceCenterApi.getLedgerLines({ book_id: requestedBookId, account_id: requestedAccountId, start_date: dateRange.value?.[0], end_date: dateRange.value?.[1], offset: requestedOffset });
     if (requestVersion !== loadRequestVersion || requestedBookId !== bookId.value || requestedAccountId !== accountId.value || requestedOffset !== offset.value) return;
     const page = response.data.data;
     const mapped = page.rows.map((line) => ({ ...line, summary: line.line_summary || line.voucher_summary || "" }));

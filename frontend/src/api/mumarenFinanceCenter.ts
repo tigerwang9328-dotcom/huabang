@@ -69,7 +69,7 @@ export interface VoucherLineInput {
 // 凭证草稿创建载荷(对应后端 VoucherCreateInput)
 export interface VoucherCreatePayload {
   book_id: number;
-  voucher_no: string;
+  voucher_no?: string | null;
   voucher_date: string;
   summary?: string | null;
   voucher_type?: string;
@@ -343,10 +343,11 @@ export const mumarenFinanceCenterApi = {
   createBook: (data: MumarenFinanceBookCreatePayload) => request.post<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status">>>(requestPath("/books"), data),
   updateBook: (bookId: number, data: MumarenFinanceBookUpdatePayload) => request.put<ApiResponse<Pick<MumarenFinanceBook, "id" | "book_code" | "book_name" | "company_name" | "status" | "is_readonly">>>(requestPath(`/books/${bookId}`), data),
   replenishStarterAccounts: (bookId: number) => request.post<ApiResponse<{ added: number }>>(requestPath(`/books/${bookId}/starter-accounts`)),
-  getLedgerLines: (params: { book_id: number; account_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceLedgerLinePage>>(requestPath("/ledger/lines"), { params }),
+  getLedgerLines: (params: { book_id: number; account_id?: number; start_date?: string; end_date?: string; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceLedgerLinePage>>(requestPath("/ledger/lines"), { params }),
   listHistory: (params?: { source_system?: string; limit?: number }) => request.get<ApiResponse<MumarenFinanceHistoryVoucher[]>>(requestPath("/history/vouchers"), { params }),
   getHistoryBalanceSnapshots: (params: { book_id: number; period?: string; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceBalanceSnapshot[]>>(requestPath("/history/balance-snapshots"), { params }),
-  getTrialBalance: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenTrialBalanceReport>>(requestPath("/reports/trial-balance"), { params }),
+  getTrialBalance: (params: { book_id: number; period?: string; start_date?: string; end_date?: string }) => request.get<ApiResponse<MumarenTrialBalanceReport>>(requestPath("/reports/trial-balance"), { params }),
+  getNextVoucherNumber: (params: { book_id: number; voucher_date: string; voucher_type?: string }) => request.get<ApiResponse<{ voucher_no: string }>>(requestPath("/vouchers/next-number"), { params }),
   getProfitStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenProfitStatement>>(requestPath("/reports/profit-statement"), { params }),
   getCashFlowStatement: (params: { book_id: number; period?: string }) => request.get<ApiResponse<MumarenCashFlowStatement>>(requestPath("/reports/cash-flow-statement"), { params }),
   getArApAging: (params: { book_id: number; order_type: "receivable" | "payable"; as_of?: string }) => request.get<ApiResponse<MumarenArApAging>>(requestPath("/ar-ap/aging"), { params }),
