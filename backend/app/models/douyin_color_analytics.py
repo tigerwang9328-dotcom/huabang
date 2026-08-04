@@ -411,9 +411,8 @@ class VideoColorMetric(DouyinColorModel):
         CheckConstraint("observation_window IN ('t2','t7','t30','ad_hoc')", name="ck_douyin_metric_observation_window"),
         CheckConstraint("retention_calculation_status IN ('pending','computed','insufficient_data','stale','failed')", name="ck_douyin_metric_retention_status"),
         CheckConstraint("bounce_calculation_status IN ('pending','computed','insufficient_data','stale','failed')", name="ck_douyin_metric_bounce_status"),
-        UniqueConstraint("account_id", "video_id", "style_id", "color_id", "observation_window", "metric_version", "metric_input_hash", name="uq_douyin_video_color_metric"),
+        UniqueConstraint("account_id", "video_id", "style_id", "observation_window", "metric_version", "metric_input_hash", name="uq_douyin_video_color_metric"),
         ForeignKeyConstraint(["account_id", "video_id"], ["douyin.videos.account_id", "douyin.videos.id"], name="fk_douyin_metric_account_video", ondelete="RESTRICT"),
-        ForeignKeyConstraint(["account_id", "style_id", "color_id"], ["douyin.garment_colors.account_id", "douyin.garment_colors.style_id", "douyin.garment_colors.id"], name="fk_douyin_metric_account_style_color", ondelete="RESTRICT"),
         ForeignKeyConstraint(["account_id", "retention_snapshot_id"], ["douyin.video_analysis_snapshots.account_id", "douyin.video_analysis_snapshots.id"], name="fk_douyin_metric_account_retention_snapshot", ondelete="RESTRICT"),
         ForeignKeyConstraint(["account_id", "bounce_snapshot_id"], ["douyin.video_analysis_snapshots.account_id", "douyin.video_analysis_snapshots.id"], name="fk_douyin_metric_account_bounce_snapshot", ondelete="RESTRICT"),
         {"schema": "douyin"},
@@ -422,9 +421,9 @@ class VideoColorMetric(DouyinColorModel):
     account_id = Column(BigInteger, nullable=False)
     video_id = Column(BigInteger, nullable=False)
     style_id = Column(BigInteger, nullable=False)
-    color_id = Column(BigInteger, nullable=False)
+    color_id = Column(BigInteger, nullable=True)
     observation_window = Column(String(16), nullable=False)
-    retention_snapshot_id = Column(BigInteger, nullable=False)
+    retention_snapshot_id = Column(BigInteger, nullable=True)
     bounce_snapshot_id = Column(BigInteger)
     retention_source_hash = Column(String(64), nullable=False)
     bounce_source_hash = Column(String(64))
@@ -552,7 +551,7 @@ class OutfitCombination(DouyinColorModel):
     combination_key = Column(String(512), nullable=False)
     participant_count = Column(Integer, nullable=False)
     annotation_set_hash = Column(String(64), nullable=False)
-    retention_snapshot_id = Column(BigInteger, nullable=False)
+    retention_snapshot_id = Column(BigInteger, nullable=True)
     bounce_snapshot_id = Column(BigInteger)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
