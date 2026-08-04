@@ -256,6 +256,16 @@ async def _materialize_record(
     if video is None:
         raise RuntimeError("video_insert_conflict_unresolved")
     video.last_collected_at = now
+    # Backfill NULL fields when re-collecting an existing video
+    # (on_conflict_do_nothing prevents INSERT update, so we patch here)
+    if video.duration_ms is None and record.get("duration_ms") is not None:
+        video.duration_ms = record.get("duration_ms")
+    if video.published_at is None and published_at is not None:
+        video.published_at = published_at
+    if not video.title and record.get("sanitized_title"):
+        sanitized = record.get("sanitized_title")
+        if isinstance(sanitized, str):
+            video.title = sanitize_douyin_text(sanitized)
     normalized = normalize_analysis_response(record)
     item_status = str(normalized["item_status"])
     snapshot_id = None
