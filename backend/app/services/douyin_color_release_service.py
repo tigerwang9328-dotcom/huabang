@@ -49,7 +49,7 @@ def can_advance_stage(*, current_stage: Any, target_stage: Any) -> bool:
     tgt = STAGE_ORDER.get(target_stage)
     if cur is None or tgt is None:
         return False
-    return tgt > cur
+    return tgt == cur + 1
 
 
 def advance_stage(*, config: Mapping[str, Any], target_stage: str) -> dict[str, Any]:

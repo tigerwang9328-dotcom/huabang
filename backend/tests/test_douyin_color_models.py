@@ -63,7 +63,9 @@ def test_v31_model_uses_composite_account_foreign_keys_and_focus_constraints():
         tuple(constraint.columns.keys()) for constraint in GarmentColor.__table__.constraints if constraint.name == "uq_douyin_color_account_style_id"
     }
     assert ("account_id", "style_id", "color_id") in clip_fks
-    assert ("account_id", "style_id", "color_id") in metric_fks
+    # color_id FK was dropped (spec complete-douyin-color-v4-launch Phase 1):
+    # color_id is now nullable for ad_hoc metrics without color assignment.
+    # assert ("account_id", "style_id", "color_id") in metric_fks
     assert ("account_id", "style_id", "color_id") in report_fks
     assert ("account_id", "batch_id", "id") in {
         tuple(constraint.columns.keys()) for constraint in CollectionBatchPart.__table__.constraints if constraint.name == "uq_douyin_batch_part_account_batch_id"

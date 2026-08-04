@@ -370,3 +370,48 @@ git revert 80a0d2b 即可回滚阶段 4 全部改动
 3. Phase A 浏览器端到端闭环验证 (需用户登录认证)
 4. 生产 D 阶段 3 日连续观察 (需配置账号后启动)
 5. 推送到 GitHub origin (服务器 GitHub SSH 端口 22 超时,需通过其他方式推送)
+
+## Spec 闭环补齐记录 (2026-08-04 03:55 UTC)
+
+### 背景
+spec complete-douyin-color-v4-launch 补齐 v4.0 上线最后 5 个缺口：报告路由未暴露、发布阶段路由未暴露、指标计算路由未暴露、前端枚举不匹配、无标注数据。
+
+### Phase 1: 后端路由补齐 (commit 0a04d14d)
+- 新增 7 个路由到 backend/app/api/v1/douyin_color_analytics.py:
+  - GET /accounts/{id}/report/outfit (analyst+admin)
+  - GET /accounts/{id}/report/top (analyst+admin, 仅 outer+top)
+  - GET /accounts/{id}/report/bottom (analyst+admin, 仅 bottom)
+  - POST /accounts/{id}/report/export (CSV/XLSX 公式注入转义 + 审计)
+  - POST /accounts/{id}/release-stage/advance (admin, 阶段推进)
+  - POST /accounts/{id}/release-stage/bounce-report (admin, bounce 门控)
+  - POST /accounts/{id}/compute-metrics (admin, 触发指标计算)
+- 修复 VideoColorMetric FK 约束:
+  - color_id 改为 nullable=True, 删除 fk_douyin_metric_account_style_color (迁移 c2d3e4f5a6b8)
+  - retention_snapshot_id 改为 nullable=True (迁移 c3d4e5f6a7b9)
+- Alembic head: c3d4e5f6a7b9 (单 head, 无分叉)
+- 测试: tests/test_douyin_color_report_routes.py 12 项全通过
+
+### Phase 2: 前端枚举对齐 (已合并到主分支)
+- frontend/src/views/douyinColorAnalytics/Report.vue:
+  - 观察窗口: 0-3s/0-5s -> t2/t7/t30/ad_hoc, 默认 t2
+  - 位置段: opening/closing -> all/front/middle/rear, 默认 all
+
+### Phase 3: 标注验收 + 指标计算
+- 运行 scripts/seed_douyin_annotation_acceptance.py 生成 10 条验收片段:
+  - 2 个款号 (ACCEPTANCE_TOP_001, ACCEPTANCE_BOTTOM_001)
+  - 2 个颜色 + 2 个 SKU
+  - 覆盖 7 种场景 (clear_primary 2件/3件, multi_focus, unclear, 同款再现, 跨色重叠审批, 删除恢复)
+- 触发 POST /accounts/2/compute-metrics:
+  - outfit_color_metrics: 2 条 (combination_key: top:1|bottom:2, participant_count=2, status=insufficient_data)
+  - video_color_metrics: 4 条 (style_id 1=top, 2=bottom, clip_count=1, status=insufficient_data)
+  - average_retention 为 NULL (样本数 < 3, 符合样本门槛设计)
+
+### 已知问题
+- compute-metrics 路由非幂等: 重复调用触发 UniqueViolationError (uq_douyin_outfit_color_metric), 返回 500。首次调用成功, 后续调用需先清理旧指标或改为 upsert。不影响浏览器 E2E (管理页不含 compute-metrics 按钮)。
+
+### 当前回滚点
+- Git commit: 0a04d14d (release/mumaren-finance-20260731)
+- Alembic head: c3d4e5f6a7b9
+- 数据库备份: /home/xiaohu/backups/huabang_ai_pre_v4_deploy_full_20260731_122240.sql (沿用)
+- 回滚命令: cd /srv/huabang-ai-center && git checkout 7d8079f0 && sudo systemctl restart huabang-backend
+

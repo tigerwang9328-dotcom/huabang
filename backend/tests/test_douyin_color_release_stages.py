@@ -19,8 +19,9 @@ def test_can_advance_stage_allows_forward_progress():
     assert can_advance_stage(current_stage="A", target_stage="B") is True
     assert can_advance_stage(current_stage="B", target_stage="C") is True
     assert can_advance_stage(current_stage="C", target_stage="D") is True
-    # multi-step forward is still forward
-    assert can_advance_stage(current_stage="A", target_stage="D") is True
+    # multi-step forward is NOT allowed; only adjacent stages are valid
+    assert can_advance_stage(current_stage="A", target_stage="D") is False
+    assert can_advance_stage(current_stage="A", target_stage="C") is False
 
 
 def test_can_advance_stage_rejects_backward_or_same_stage():
