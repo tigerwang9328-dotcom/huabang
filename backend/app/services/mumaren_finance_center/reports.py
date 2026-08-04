@@ -351,7 +351,8 @@ def _period_bounds(period: str | None) -> tuple[date | None, date | None]:
 
 
 async def _load_posted_book_data(
-    db: AsyncSession, *, book_id: int, period: str | None = None
+    db: AsyncSession, *, book_id: int, period: str | None = None,
+    start_date: date | None = None, end_date: date | None = None,
 ) -> tuple[list[FinanceCenterMumarenAccount], list[FinanceCenterMumarenVoucherLine]]:
     """读取新 schema 当前账：仅已过账凭证，绝不触碰历史或旧财务对象。"""
     accounts_result = await db.execute(
@@ -362,7 +363,13 @@ async def _load_posted_book_data(
         )
         .order_by(FinanceCenterMumarenAccount.account_code)
     )
-    start_date, end_date = _period_bounds(period)
+    period_start, period_end = _period_bounds(period)
+    if start_date is None:
+        start_date = period_start
+    if end_date is None:
+        end_date = period_end
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise ValueError("开始日期不能晚于结束日期")
     statement = (
         select(FinanceCenterMumarenVoucherLine)
         .join(
@@ -630,9 +637,12 @@ async def _collect_balance_adjustments(
 
 
 async def get_trial_balance(
-    db: AsyncSession, *, book_id: int, period: str | None = None
+    db: AsyncSession, *, book_id: int, period: str | None = None,
+    start_date: date | None = None, end_date: date | None = None,
 ) -> dict:
-    accounts, posted_lines = await _load_posted_book_data(db, book_id=book_id, period=period)
+    accounts, posted_lines = await _load_posted_book_data(
+        db, book_id=book_id, period=period, start_date=start_date, end_date=end_date,
+    )
     adjustments = await _collect_balance_adjustments(db, book_id=book_id)
     return build_trial_balance(accounts, posted_lines, extra_adjustments=adjustments)
 

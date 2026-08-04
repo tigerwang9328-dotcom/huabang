@@ -298,7 +298,7 @@ async def create_voucher(
     db: AsyncSession,
     *,
     book_id: int,
-    voucher_no: str,
+    voucher_no: str | None,
     voucher_date: str | date,
     lines: Sequence[Mapping[str, object]],
     operator_id: int,
@@ -321,6 +321,9 @@ async def create_voucher(
         if account is None:
             raise ValueError(f"第{line_no}行会计科目不存在、不属于账簿或已停用")
     effective_date = date.fromisoformat(voucher_date) if isinstance(voucher_date, str) else voucher_date
+    voucher_no = (voucher_no or "").strip() or await next_voucher_number(
+        db, book_id=book_id, voucher_date=effective_date, voucher_type=voucher_type,
+    )
     voucher = FinanceCenterMumarenVoucher(
         book_id=book_id,
         voucher_no=voucher_no,
@@ -356,6 +359,29 @@ async def create_voucher(
         )
     )
     return voucher
+
+
+async def next_voucher_number(
+    db: AsyncSession, *, book_id: int, voucher_date: date, voucher_type: str = "记",
+) -> str:
+    """Generate the next number for one book/date/type; this only reserves a display value."""
+    prefix = f"{voucher_type}-{voucher_date:%Y%m}-"
+    rows = (await db.execute(
+        select(FinanceCenterMumarenVoucher.voucher_no).where(
+            FinanceCenterMumarenVoucher.book_id == book_id,
+            FinanceCenterMumarenVoucher.voucher_date == voucher_date,
+            FinanceCenterMumarenVoucher.voucher_no.like(f"{prefix}%"),
+        )
+    )).scalars().all()
+    used = set()
+    for value in rows:
+        match = re.fullmatch(re.escape(prefix) + r"(\d{3,})", str(value or ""))
+        if match:
+            used.add(int(match.group(1)))
+    sequence = 1
+    while sequence in used:
+        sequence += 1
+    return f"{prefix}{sequence:03d}"
 
 
 async def review_voucher_by_id(

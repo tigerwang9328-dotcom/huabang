@@ -24,6 +24,7 @@ from app.services.mumaren_finance_center.workflow import (
     list_accounts,
     list_books,
     list_history_vouchers,
+    next_voucher_number,
     post_voucher_by_id,
     review_voucher_by_id,
 )
@@ -66,7 +67,7 @@ class VoucherLineInput(BaseModel):
 
 class VoucherCreateInput(BaseModel):
     book_id: int = Field(ge=1)
-    voucher_no: str = Field(min_length=1, max_length=64)
+    voucher_no: str | None = Field(default=None, max_length=64)
     voucher_date: date
     summary: str | None = Field(default=None, max_length=500)
     voucher_type: str = Field(default="记", min_length=1, max_length=16)
@@ -379,10 +380,28 @@ async def get_vouchers(
     return ApiResponse.ok(data=[_voucher_data(voucher) for voucher in result.scalars()])
 
 
+@router.get("/vouchers/next-number", response_model=ApiResponse)
+async def get_next_voucher_number(
+    book_id: int = Query(ge=1),
+    voucher_date: date = Query(...),
+    voucher_type: str = Query(default="记", min_length=1, max_length=16),
+    _: SysUser = Depends(require_mumaren_voucher_write),
+    db: AsyncSession = Depends(get_db),
+):
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="账簿不存在")
+    return ApiResponse.ok(data={"voucher_no": await next_voucher_number(
+        db, book_id=book_id, voucher_date=voucher_date, voucher_type=voucher_type,
+    )})
+
+
 @router.get("/ledger/lines", response_model=ApiResponse)
 async def get_ledger_lines(
     book_id: int = Query(ge=1),
     account_id: int | None = Query(default=None, ge=1),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     limit: int = Query(default=500, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     _: SysUser = Depends(require_mumaren_voucher_view),
@@ -426,19 +445,42 @@ async def get_ledger_lines(
     )
     if account_id is not None:
         statement = statement.where(FinanceCenterMumarenVoucherLine.account_id == account_id)
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    if start_date:
+        statement = statement.where(FinanceCenterMumarenVoucher.voucher_date >= start_date)
+    if end_date:
+        statement = statement.where(FinanceCenterMumarenVoucher.voucher_date <= end_date)
     result_rows = (await db.execute(statement)).all()
     has_more = len(result_rows) > limit
     rows = result_rows[:limit]
-    return ApiResponse.ok(data={"rows": [{
-        "id": line.id, "voucher_id": voucher.id, "line_no": line.line_no,
-        "voucher_no": voucher.voucher_no, "voucher_type": voucher.voucher_type,
-        "voucher_date": voucher.voucher_date, "voucher_summary": voucher.summary,
-        "line_summary": line.summary, "account_id": account.id,
-        "account_code": account.account_code, "account_name": account.account_name,
-        "debit_amount": line.debit_amount, "credit_amount": line.credit_amount,
-        "running_balance": balance, "balance_direction": account.direction,
-        "is_readonly": voucher.is_readonly,
-    } for line, voucher, account, balance in rows], "has_more": has_more, "next_offset": offset + len(rows)})
+    voucher_ids = {voucher.id for _, voucher, _, _ in rows}
+    inherited_summary_by_line: dict[int, str] = {}
+    if voucher_ids:
+        all_lines = (await db.execute(
+            select(FinanceCenterMumarenVoucherLine)
+            .where(FinanceCenterMumarenVoucherLine.voucher_id.in_(voucher_ids))
+            .order_by(FinanceCenterMumarenVoucherLine.voucher_id, FinanceCenterMumarenVoucherLine.line_no)
+        )).scalars().all()
+        last_summary_by_voucher: dict[int, str] = {}
+        for summary_line in all_lines:
+            if summary_line.summary:
+                last_summary_by_voucher[summary_line.voucher_id] = summary_line.summary
+            if summary_line.id is not None:
+                inherited_summary_by_line[summary_line.id] = last_summary_by_voucher.get(summary_line.voucher_id, "")
+    output_rows = []
+    for line, voucher, account, balance in rows:
+        output_rows.append({
+            "id": line.id, "voucher_id": voucher.id, "line_no": line.line_no,
+            "voucher_no": voucher.voucher_no, "voucher_type": voucher.voucher_type,
+            "voucher_date": voucher.voucher_date, "voucher_summary": voucher.summary,
+            "line_summary": line.summary or inherited_summary_by_line.get(line.id) or voucher.summary,
+            "account_id": account.id, "account_code": account.account_code,
+            "account_name": account.account_name, "debit_amount": line.debit_amount,
+            "credit_amount": line.credit_amount, "running_balance": balance,
+            "balance_direction": account.direction, "is_readonly": voucher.is_readonly,
+        })
+    return ApiResponse.ok(data={"rows": output_rows, "has_more": has_more, "next_offset": offset + len(rows)})
 
 
 @router.post("/vouchers", response_model=ApiResponse)
@@ -570,12 +612,18 @@ async def get_history_balance_snapshots(
 async def get_trial_balance_report(
     book_id: int = Query(ge=1),
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     _: SysUser = Depends(require_mumaren_voucher_view),
     db: AsyncSession = Depends(get_db),
 ):
     """当前账已过账凭证的科目余额与试算平衡；历史区不参与计算。"""
     try:
-        report = await get_trial_balance(db, book_id=book_id, period=period)
+        if start_date and end_date and start_date > end_date:
+            raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+        report = await get_trial_balance(
+            db, book_id=book_id, period=period, start_date=start_date, end_date=end_date,
+        )
         return ApiResponse.ok(data=await append_report_mapping_status(db, book_id=book_id, report=report))
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
