@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         华邦抖音颜色分析采集器 v3.1
 // @namespace    https://hbreare.com/
-// @version      3.5.10
+// @version      3.5.11
 // @description  仅采集目录和留存/平台跳出曲线的白名单字段；不保存浏览器会话或签名参数。
 // @match        https://creator.douyin.com/creator-micro/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,7 @@
   'use strict';
   const API_ORIGIN = 'https://hbreare.com';
   const API_PREFIX = '/api/v1/douyin-color-analytics';
-  const SCRIPT_VERSION = '3.5.10';
+  const SCRIPT_VERSION = '3.5.11';
   const SCHEMA_VERSION = 1;
   const DEFAULT_MAX_QUEUE_BYTES = 500 * 1024 * 1024;
   const DEFAULT_MAX_LOCAL_BATCHES = 100;
@@ -255,7 +255,13 @@
     const items = catalogItemsFromResponse(response); if (!items.length) return;
     await mutateQueue((state) => {
       state.catalogItems = state.catalogItems || [];
-      for (const item of items) if (!state.catalogItems.some((saved) => saved.video_id === item.video_id)) state.catalogItems.push(item);
+      for (const item of items) {
+        const saved = state.catalogItems.find((existing) => existing.video_id === item.video_id);
+        // 旧版可能只缓存了 video_id；目录刷新时必须用完整目录字段回填，
+        // 才能让后端补齐发布时间和视频时长。
+        if (saved) Object.assign(saved, item);
+        else state.catalogItems.push(item);
+      }
     });
   }
   async function config() { return runtimeConfig; }

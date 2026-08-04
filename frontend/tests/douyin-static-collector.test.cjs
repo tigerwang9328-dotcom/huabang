@@ -239,6 +239,28 @@ test("catalog-based creator discovery persists the id before collection retries"
   assert.equal(JSON.parse(api.getSavedRuntimeConfig()).observedCreatorId, "creator");
 });
 
+test("catalog refresh backfills metadata missing from a previously cached video", async () => {
+  const { api } = createHarness();
+  api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", observedAccountName: "华邦", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
+  await api.setQueueState({
+    batches: [],
+    catalogItems: [{ video_id: "video", item_status: "pending" }],
+  });
+
+  await api.captureCatalog({
+    items: [{
+      item_id: "video", author_user_id: "creator", desc: "补全后的标题", create_time: 1_700_000_000,
+      duration: 12_345, statistics: { play_count: 2_000 }, type: 0,
+    }],
+    has_more: false,
+  });
+
+  const item = (await api.queueState()).catalogItems.find((entry) => entry.video_id === "video");
+  assert.equal(item.sanitized_title, "补全后的标题");
+  assert.equal(item.published_at_epoch_seconds, 1_700_000_000);
+  assert.equal(item.duration_ms, 12_345);
+});
+
 test("observed retention and bounce responses are paired before upload", async () => {
   const { api } = createHarness();
   api.setRuntimeConfig({ uploadToken: "test", observedCreatorId: "creator", max_local_bytes: 1024 * 1024, max_local_batches: 10 });
