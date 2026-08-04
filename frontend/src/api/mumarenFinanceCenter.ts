@@ -301,6 +301,41 @@ export interface MumarenTaxRecord {
   workflow_status?: "draft" | "reviewed";
 }
 
+export type DingtalkExpenseCategory = "reimbursement" | "payment";
+
+export interface MumarenDingtalkExpense {
+  id: number;
+  applicant_name: string | null;
+  department_name: string | null;
+  expense_type: string | null;
+  amount: number;
+  category: DingtalkExpenseCategory | null;
+  approval_status: string | null;
+  payment_status: string | null;
+  expense_date: string | null;
+  updated_at: string | null;
+}
+
+export interface MumarenDingtalkExpensePage {
+  items: MumarenDingtalkExpense[];
+  total: number;
+  page: number;
+  page_size: number;
+  source: "dingtalk:finance_expense_records";
+  readonly: true;
+}
+
+export interface MumarenCashSafety {
+  total_cash_balance: number;
+  cash_record_date: string | null;
+  daily_avg_expense_30d: number | null;
+  expense_record_count_30d: number;
+  cash_safety_days: number | null;
+  risk_level: "critical" | "warning" | "normal" | "unknown";
+  status: "ready" | "pending_data";
+  note: string;
+}
+
 export const mumarenFinanceCenterApi = {
   getCatalog: () => request.get<ApiResponse<FinanceCenterCatalog>>(requestPath("/catalog")),
   listVouchers: (params?: { book_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceVoucher[]>>(requestPath("/vouchers"), { params }),
@@ -317,6 +352,8 @@ export const mumarenFinanceCenterApi = {
   getArApAging: (params: { book_id: number; order_type: "receivable" | "payable"; as_of?: string }) => request.get<ApiResponse<MumarenArApAging>>(requestPath("/ar-ap/aging"), { params }),
   getTaxAlerts: (params: { book_id: number; today?: string }) => request.get<ApiResponse<{ alerts: MumarenTaxAlert[]; record_count: number }>>(requestPath("/tax/alerts"), { params }),
   listTaxRecords: (params: { book_id: number; limit?: number }) => request.get<ApiResponse<MumarenTaxRecord[]>>(requestPath("/tax/records"), { params }),
+  listDingtalkExpenses: (params: { category?: DingtalkExpenseCategory; start_date?: string; end_date?: string; approval_status?: string; page?: number; page_size?: number }) => request.get<ApiResponse<MumarenDingtalkExpensePage>>(requestPath("/dingtalk-expenses"), { params }),
+  getCashSafety: () => request.get<ApiResponse<MumarenCashSafety>>(requestPath("/cash-safety")),
 
   // ── 科目查询(只读,按账簿隔离) ──
   listAccounts: (bookId: number) => request.get<ApiResponse<MumarenFinanceAccount[]>>(requestPath(`/books/${bookId}/accounts`)),

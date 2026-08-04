@@ -33,7 +33,8 @@ const R = MUMAREN_FINANCE_CENTER_ROOT;
 
 export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
   { key: "compass", title: "数据罗盘", path: `${R}/compass`, routeName: "MumarenFinanceCompass", availability: "available" },
-  { key: "history", title: "历史数据存档", path: `${R}/history`, routeName: "MumarenFinanceHistory", availability: "available" },
+  { key: "history", title: "金蝶历史数据", path: `${R}/history`, routeName: "MumarenFinanceHistory", availability: "available" },
+  { key: "dingtalk-expenses", title: "费用分析（钉钉只读）", path: `${R}/dingtalk-expenses`, routeName: "MumarenFinanceDingtalkExpenses", availability: "available" },
   {
     key: "vouchers",
     title: "凭证",
@@ -55,7 +56,7 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
     routeName: "MumarenFinanceLedgers",
     availability: "available",
     children: [
-      { key: "general-ledger", title: "总账", path: `${R}/ledgers/general`, routeName: "MumarenFinanceGeneralLedger", availability: "available" },
+      { key: "general-ledger", title: "账套总览", path: `${R}/ledgers/general`, routeName: "MumarenFinanceGeneralLedger", availability: "available" },
       { key: "trial-balance", title: "科目余额表", path: `${R}/ledgers/trial-balance`, routeName: "MumarenFinanceTrialBalance", availability: "available" },
       { key: "ledger-detail", title: "明细账", path: `${R}/ledgers/detail`, routeName: "MumarenFinanceLedgerDetail", availability: "available" },
     ],
@@ -92,7 +93,6 @@ export const mumarenFinanceNavigation: MumarenFinanceNavItem[] = [
   { key: "closing", title: "结账", path: `${R}/closing`, routeName: "MumarenFinanceClosing", availability: "available" },
   { key: "assets", title: "资产", path: `${R}/assets`, routeName: "MumarenFinanceAssets", availability: "historical_source_unavailable" },
   { key: "invoices", title: "发票", path: `${R}/invoices`, routeName: "MumarenFinanceInvoices", availability: "historical_source_unavailable" },
-  { key: "payments", title: "付款", path: `${R}/payments`, routeName: "MumarenFinancePayments", availability: "historical_source_unavailable" },
   {
     key: "cashier",
     title: "出纳",
@@ -139,14 +139,15 @@ export const isMumarenHistoricalSourceUnavailable = (key: string): boolean =>
     (item) => item.key === key && item.availability === "historical_source_unavailable",
   );
 
-// 主侧边栏"财务中心"菜单项:可展开,children 为 13 个一级条目(其中有子项的再展开)。
+// 主侧边栏财务中心的一级菜单项;由 MainLayout 直接作为顶级菜单内容渲染。
 export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
   label: "财务中心",
   key: "mumaren-finance-center",
   permission: "mumaren_finance_center:access",
   children: [
     { path: `${R}/compass`, label: "数据罗盘" },
-    { path: `${R}/history`, label: "历史数据存档" },
+    { path: `${R}/history`, label: "金蝶历史数据" },
+    { path: `${R}/dingtalk-expenses`, label: "费用分析（钉钉只读）" },
     {
       label: "凭证",
       key: "mumaren-vouchers",
@@ -162,7 +163,7 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
       label: "账簿",
       key: "mumaren-ledgers",
       children: [
-        { path: `${R}/ledgers/general`, label: "总账" },
+        { path: `${R}/ledgers/general`, label: "账套总览" },
         { path: `${R}/ledgers/trial-balance`, label: "科目余额表" },
         { path: `${R}/ledgers/detail`, label: "明细账" },
       ],
@@ -193,7 +194,6 @@ export const mumarenFinanceCenterMenuItem: FinanceNavigationItem = {
     { path: `${R}/closing`, label: "结账" },
     { path: `${R}/assets`, label: "资产" },
     { path: `${R}/invoices`, label: "发票" },
-    { path: `${R}/payments`, label: "付款" },
     {
       label: "出纳",
       key: "mumaren-cashier",

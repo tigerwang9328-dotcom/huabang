@@ -32,6 +32,20 @@ def test_api_root_includes_the_new_mumaren_finance_center_router_only_once():
     assert "/api/v1/finance-center/mumaren/history/vouchers" in paths
 
 
+def test_api_root_registers_readonly_dingtalk_expenses_and_cash_safety_adapters():
+    from app.api.v1 import mumaren_finance_center
+    from app.api.v1.router import api_router
+
+    paths = {route.path for route in api_router.routes}
+    source = open(mumaren_finance_center.__file__, encoding="utf-8").read()
+
+    assert "/api/v1/finance-center/mumaren/dingtalk-expenses" in paths
+    assert "/api/v1/finance-center/mumaren/cash-safety" in paths
+    assert 'FROM finance_expense_records' in source
+    assert 'DwdFinanceCash' not in source
+    assert '@router.post("/dingtalk-expenses"' not in source
+
+
 def test_api_root_registers_independent_ar_ap_and_tax_routes():
     from app.api.v1.router import api_router
 

@@ -207,7 +207,6 @@ import { storeToRefs } from "pinia";
 import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 import { authApi } from "@/api/auth";
 import BossAiFloatingAssistant from "@/components/ai/BossAiFloatingAssistant.vue";
-import { financeProfitNavigation } from "@/config/financeCenterModules";
 import { mumarenFinanceCenterMenuItem } from "@/config/mumarenFinanceCenter";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -375,9 +374,9 @@ const menuGroups = computed<MenuGroup[]>(() => [
     ],
   },
   {
-    label: "财务利润",
+    label: "财务中心",
     icon: Money,
-    items: [mumarenFinanceCenterMenuItem, ...financeProfitNavigation],
+    items: mumarenFinanceCenterMenuItem.children,
   },
   {
     label: "人力资源",

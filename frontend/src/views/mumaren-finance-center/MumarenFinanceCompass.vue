@@ -59,6 +59,21 @@
         </el-table-column>
       </el-table>
     </template>
+
+    <section class="cash-safety" aria-label="现金安全经营预警">
+      <div class="cash-safety-heading">
+        <div><h3>现金安全</h3><p>经营预警，不替代银行对账或会计报表。</p></div>
+        <el-button text :loading="cashSafetyLoading" @click="loadCashSafety">刷新预警</el-button>
+      </div>
+      <el-alert v-if="cashSafetyError" type="warning" :title="cashSafetyError" :closable="false" show-icon />
+      <el-alert v-else-if="cashSafety?.status === 'pending_data'" type="info" :title="cashSafety.note" :closable="false" show-icon />
+      <el-row v-else-if="cashSafety" :gutter="16">
+        <el-col :xs="12" :sm="12" :md="6"><el-card shadow="never"><div class="metric-label">现金余额</div><div class="metric-value">{{ money(cashSafety.total_cash_balance) }}</div></el-card></el-col>
+        <el-col :xs="12" :sm="12" :md="6"><el-card shadow="never"><div class="metric-label">近30天日均支出</div><div class="metric-value">{{ money(cashSafety.daily_avg_expense_30d) }}</div></el-card></el-col>
+        <el-col :xs="12" :sm="12" :md="6"><el-card shadow="never"><div class="metric-label">现金安全天数</div><div class="metric-value">{{ cashSafety.cash_safety_days }} 天</div></el-card></el-col>
+        <el-col :xs="12" :sm="12" :md="6"><el-card shadow="never"><div class="metric-label">风险等级</div><el-tag :type="cashRiskType">{{ cashRiskLabel }}</el-tag></el-card></el-col>
+      </el-row>
+    </section>
   </section>
 </template>
 
@@ -67,6 +82,7 @@ import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, ref, watch } from "vue";
 import {
   mumarenFinanceCenterApi,
+  type MumarenCashSafety,
   type MumarenProfitStatement,
   type MumarenTrialBalanceRow,
 } from "@/api/mumarenFinanceCenter";
@@ -78,8 +94,11 @@ const error = ref("");
 const loading = ref(false);
 const booksLoaded = ref(false);
 const requestVersion = ref(0);
+const cashSafety = ref<MumarenCashSafety | null>(null);
+const cashSafetyLoading = ref(false);
+const cashSafetyError = ref("");
 
-const money = (value?: number) =>
+const money = (value?: number | null) =>
   new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 
 const metricCards = computed(() => {
@@ -91,6 +110,8 @@ const metricCards = computed(() => {
     { label: "科目数量", value: String(trialRows.value.length), cls: "metric-count" },
   ];
 });
+const cashRiskLabel = computed(() => ({ critical: "危险", warning: "预警", normal: "安全", unknown: "待接入" }[cashSafety.value?.risk_level || "unknown"]));
+const cashRiskType = computed(() => cashSafety.value?.risk_level === "critical" ? "danger" : cashSafety.value?.risk_level === "warning" ? "warning" : cashSafety.value?.risk_level === "normal" ? "success" : "info");
 
 const balanceSummary = computed(() => {
   const assets = trialRows.value
@@ -141,10 +162,22 @@ const load = async () => {
   }
 };
 
+const loadCashSafety = async () => {
+  cashSafetyLoading.value = true;
+  cashSafetyError.value = "";
+  try {
+    cashSafety.value = (await mumarenFinanceCenterApi.getCashSafety()).data.data;
+  } catch {
+    cashSafetyError.value = "现金安全数据暂不可用；请检查现金与费用数据接入。";
+  } finally {
+    cashSafetyLoading.value = false;
+  }
+};
+
 onMounted(async () => {
   await loadBooks();
   booksLoaded.value = true;
-  await load();
+  await Promise.all([load(), loadCashSafety()]);
 });
 
 watch(bookId, () => {
@@ -170,5 +203,6 @@ p { color: #5d6b7e; }
 .metric-danger { border-left-color: #f56c6c; }
 .metric-count { border-left-color: #909399; }
 .history-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.cash-safety { display: grid; gap: 12px; border-top: 1px solid #e1e7ef; padding-top: 16px; }.cash-safety-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }.cash-safety h3 { margin: 0; }.cash-safety p { margin: 4px 0 0; font-size: 13px; }
 @media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } }
 </style>
