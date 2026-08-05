@@ -121,3 +121,11 @@ test("annotation product selection searches the real archive and resolves only t
   assert.ok(api.includes("searchProductArchiveStyles"));
   assert.ok(api.includes("listProductArchiveSkus"));
 });
+
+test("changing a product while its resolver is in flight cannot save the previous product mapping", () => {
+  const editor = read("src/views/douyinColorAnalytics/Annotate.vue");
+
+  assert.ok(editor.includes("selectionRequest"));
+  assert.ok(editor.includes("part.product_code !== productCode"));
+  assert.ok(editor.includes("part.resolving"));
+});

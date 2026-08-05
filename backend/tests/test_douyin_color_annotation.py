@@ -169,6 +169,8 @@ def test_annotation_clip_response_and_routes_preserve_whole_outfit_and_real_prod
     assert 'product-archive/styles' in route_source
     assert 'dim.dim_sku' in route_source
     assert 'dwd.v_apparel_inventory_balance' in route_source
+    assert 'IntegrityError' in route_source
+    assert 'style_disabled' in route_source
 def test_annotation_mutations_lock_clip_versions_and_return_explicit_product_conflicts():
     from pathlib import Path
 

@@ -67,7 +67,7 @@
                 <el-select v-model="part.product_code" placeholder="搜索真实款号或款名" filterable remote :remote-method="searchArchiveStyles" class="style-select" @change="() => selectArchiveStyle(index)">
                   <el-option v-for="style in archiveStyles" :key="style.product_code" :label="`${style.product_code} · ${style.product_name}`" :value="style.product_code" />
                 </el-select>
-                <el-select v-model="part.sku_code" placeholder="SKU（可选）" :disabled="!part.product_code" filterable clearable class="sku-select">
+                <el-select v-model="part.sku_code" placeholder="SKU（可选）" :disabled="!part.product_code || part.resolving" filterable clearable class="sku-select">
                   <el-option v-for="sku in skusByProductCode[part.product_code] || []" :key="sku.sku_code" :label="`${sku.sku_code} · ${sku.color_name || '未标色'} · ${sku.size_name || '均码'} · 库存 ${sku.available_quantity}`" :value="sku.sku_code" />
                 </el-select>
                 <el-button text type="danger" @click="removePart(index)">删除</el-button>
@@ -136,8 +136,9 @@ interface ProductArchiveSku { sku_code: string; color_code: string | null; color
 const archiveStyles = ref<ProductArchiveStyle[]>([]);
 const skusByProductCode = ref<Record<string, ProductArchiveSku[]>>({});
 
-interface OutfitPartEditor { position: GarmentPosition; style_id: number | null; product_code: string; sku_code: string | null }
+interface OutfitPartEditor { position: GarmentPosition; style_id: number | null; product_code: string; sku_code: string | null; resolving: boolean; selectionRequest: number }
 const outfitParts = ref<OutfitPartEditor[]>([]);
+let nextSelectionRequest = 0;
 
 const newEditor = () => ({ id: null as number | null, version: 0, input_start_ms: 0, input_end_ms: 1_000, focus_status: "clear_primary" as DouyinFocusStatus, focus_note: "" });
 const editor = ref(newEditor());
@@ -185,7 +186,7 @@ async function load() {
 }
 
 function clearNonPrimaryOutfit() { outfitParts.value = []; }
-function addPart() { outfitParts.value.push({ position: "none", style_id: null, product_code: "", sku_code: null }); }
+function addPart() { outfitParts.value.push({ position: "none", style_id: null, product_code: "", sku_code: null, resolving: false, selectionRequest: 0 }); }
 function removePart(index: number) { outfitParts.value.splice(index, 1); }
 async function loadProductSkus(productCode: string) {
   if (!context.value || !productCode || skusByProductCode.value[productCode]) return;
@@ -195,14 +196,23 @@ async function loadProductSkus(productCode: string) {
 async function selectArchiveStyle(index: number) {
   const part = outfitParts.value[index];
   if (!part) return;
+  const productCode = part.product_code;
+  const selectionRequest = ++nextSelectionRequest;
+  part.selectionRequest = selectionRequest;
   part.style_id = null;
   part.sku_code = null;
-  if (!part.product_code || !context.value) return;
+  part.resolving = Boolean(productCode);
+  if (!productCode || !context.value) { part.resolving = false; return; }
   try {
-    const resolved = await douyinColorAnalyticsApi.resolveProductArchiveStyle(context.value.account.id, part.product_code);
+    const resolved = await douyinColorAnalyticsApi.resolveProductArchiveStyle(context.value.account.id, productCode);
+    if (part.selectionRequest !== selectionRequest || part.product_code !== productCode) return;
     part.style_id = resolved.data.id;
-    await loadProductSkus(part.product_code);
-  } catch (error) { ElMessage.error(describeError(error)); }
+    await loadProductSkus(productCode);
+  } catch (error) {
+    if (part.selectionRequest === selectionRequest && part.product_code === productCode) ElMessage.error(describeError(error));
+  } finally {
+    if (part.selectionRequest === selectionRequest && part.product_code === productCode) part.resolving = false;
+  }
 }
 async function searchArchiveStyles(query: string) {
   if (!context.value || query.trim().length < 2) return;
@@ -212,14 +222,17 @@ async function searchArchiveStyles(query: string) {
 function startNew() { validationErrors.value = []; editor.value = newEditor(); outfitParts.value = []; }
 async function editClip(clip: DouyinVideoClip) {
   editor.value = { id: clip.id, version: clip.version, input_start_ms: clip.input_start_ms, input_end_ms: clip.input_end_ms, focus_status: clip.focus_status, focus_note: clip.focus_note || "" };
-  outfitParts.value = (clip.outfit_parts_json || []).map((p) => ({ position: p.position, style_id: p.style_id, product_code: p.product_code || "", sku_code: p.sku_code }));
+  outfitParts.value = (clip.outfit_parts_json || []).map((p) => ({ position: p.position, style_id: p.style_id, product_code: p.product_code || "", sku_code: p.sku_code, resolving: false, selectionRequest: 0 }));
   if (context.value) {
     for (const part of outfitParts.value) {
       const snapshot = (clip.outfit_parts_json || []).find((p) => p.style_id === part.style_id && p.sku_code === part.sku_code);
       if (part.product_code && snapshot && !archiveStyles.value.some((item) => item.product_code === part.product_code)) {
         archiveStyles.value.push({ product_code: part.product_code, product_name: snapshot.product_name || part.product_code });
       }
-      if (part.product_code) { try { await loadProductSkus(part.product_code); } catch { /* SKU availability is non-blocking during edit */ } }
+      if (part.product_code) {
+        try { await loadProductSkus(part.product_code); }
+        catch (error) { ElMessage.warning(`SKU 库存读取失败：${describeError(error)}`); }
+      }
     }
   }
 }
@@ -235,6 +248,7 @@ function validate() {
     outfitParts.value.forEach((part, index) => {
       if (!part.position) errors.push(`第 ${index + 1} 件衣物未选择衣物位`);
       if (!part.style_id || !part.product_code) errors.push(`第 ${index + 1} 件衣物未选择款号`);
+      if (part.resolving) errors.push(`第 ${index + 1} 件衣物仍在确认款号`);
     });
   }
   if (editor.value.focus_status !== "clear_primary" && outfitParts.value.length > 0) errors.push("非整套穿搭标注不得携带衣物信息");

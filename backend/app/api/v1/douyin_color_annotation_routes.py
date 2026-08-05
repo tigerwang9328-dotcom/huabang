@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_any_permission, require_permission
@@ -96,9 +97,20 @@ async def resolve_product_archive_style(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_archive_style_not_found")
     style = (await db.execute(select(GarmentStyle).where(GarmentStyle.account_id == account_id, GarmentStyle.style_code == product_code))).scalar_one_or_none()
     if style is None:
-        style = GarmentStyle(account_id=account_id, style_code=product_code, style_name=archive["product_name"] or product_code, status="active")
-        db.add(style); await db.flush()
+        try:
+            async with db.begin_nested():
+                style = GarmentStyle(account_id=account_id, style_code=product_code, style_name=archive["product_name"] or product_code, status="active")
+                db.add(style)
+                await db.flush()
+        except IntegrityError:
+            style = (await db.execute(select(GarmentStyle).where(
+                GarmentStyle.account_id == account_id, GarmentStyle.style_code == product_code,
+            ))).scalar_one_or_none()
+            if style is None:
+                raise
         await write_operation_audit(db, actor=current_user, module="douyin_color_analytics", action="resolve_product_archive_style", target_type="garment_style", target_id=style.id, after_data={"style_code": style.style_code}, request=request)
+    if style.status != "active":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="style_disabled")
     return ApiResponse.ok({"id": style.id, "style_code": style.style_code, "style_name": style.style_name})
 
 
@@ -183,6 +195,8 @@ async def _materialize_outfit_parts(*, db: AsyncSession, account_id: int, payloa
     seen: set[tuple[str, int, str | None]] = set()
     for part in payload_parts:
         style = await _scoped_record(db, GarmentStyle, account_id=account_id, record_id=part.style_id, error_code="style_not_found")
+        if style.status != "active":
+            raise AnnotationValidationError("style_disabled")
         archive = (await db.execute(text("""
             SELECT product_code, max(product_name) AS product_name
             FROM dim.dim_sku
