@@ -169,15 +169,14 @@ async function load() {
     context.value = contextResponse.data;
     const accountId = context.value.account.id;
     const videoResponse = await douyinColorAnalyticsApi.getVideo(videoId, accountId);
-    const [snapshotResponse, clipResponse, styleResponse] = await Promise.all([
+    const [snapshotResponse, clipResponse] = await Promise.all([
       douyinColorAnalyticsApi.listVideoAnalysisSnapshots(videoId, accountId),
       douyinColorAnalyticsApi.listVideoClips({ account_id: accountId, video_id: videoResponse.data.id, include_deleted: true }),
-      douyinColorAnalyticsApi.listStyles(accountId),
     ]);
     video.value = videoResponse.data;
     snapshots.value = snapshotResponse.data || [];
     clips.value = clipResponse.data.items || [];
-    styles.value = styleResponse.data.items || [];
+    styles.value = [];
   } catch (error) {
     loadError.value = describeError(error);
   } finally {
