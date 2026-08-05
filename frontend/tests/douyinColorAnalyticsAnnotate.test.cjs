@@ -100,7 +100,7 @@ test("annotation action payloads and catalog creates match the minimal backend c
   assert.ok(!editor.includes("row.review_note"), "the UI must not display a rejection note as persisted");
   assert.ok(styles.includes("await load();"), "style create must reload the ID-only create response");
   assert.ok(styles.includes("await showColors(selectedStyle.value);"), "color create must reload the ID-only create response");
-  assert.equal((api.match(/const \{ account_id, \.\.\.body \} = payload/g) || []).length, 2, "style/color patch requests must move account_id out of JSON");
+  assert.equal((api.match(/const \{ account_id, \.\.\.body \} = payload/g) || []).length, 7, "all action requests must move account_id out of JSON");
 });
 
 test("catalog create responses are treated as ID acknowledgements", () => {

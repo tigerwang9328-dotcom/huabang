@@ -167,19 +167,24 @@ export const douyinColorAnalyticsApi = {
     return unwrapDouyinColorAnalytics(request.patch<DouyinVideoClip>(`${basePath}/video-clips/${clipId}`, payload, { params: { account_id: payload.account_id } }));
   },
   deleteVideoClip(clipId: number, payload: Pick<DouyinClipActionInput, "account_id" | "expected_version">) {
-    return unwrapDouyinColorAnalytics(request.delete<DouyinVideoClip>(`${basePath}/video-clips/${clipId}`, { params: { account_id: payload.account_id }, data: payload }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.delete<DouyinVideoClip>(`${basePath}/video-clips/${clipId}`, { params: { account_id }, data: body }));
   },
   submitVideoClip(clipId: number, payload: DouyinClipActionInput) {
-    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/submit`, payload, { params: { account_id: payload.account_id } }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/submit`, body, { params: { account_id } }));
   },
   approveVideoClip(clipId: number, payload: DouyinClipActionInput) {
-    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/approve`, payload, { params: { account_id: payload.account_id } }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/approve`, body, { params: { account_id } }));
   },
   rejectVideoClip(clipId: number, payload: DouyinClipActionInput) {
-    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/reject`, payload, { params: { account_id: payload.account_id } }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/reject`, body, { params: { account_id } }));
   },
   restoreVideoClip(clipId: number, payload: DouyinClipActionInput) {
-    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/restore`, payload, { params: { account_id: payload.account_id } }));
+    const { account_id, ...body } = payload;
+    return unwrapDouyinColorAnalytics(request.post<DouyinVideoClip>(`${basePath}/video-clips/${clipId}/restore`, body, { params: { account_id } }));
   },
   listStyles(accountId: number) {
     return unwrapDouyinColorAnalytics(request.get<DouyinPagedResult<DouyinGarmentStyle>>(`${basePath}/styles`, { params: { account_id: accountId } }));
