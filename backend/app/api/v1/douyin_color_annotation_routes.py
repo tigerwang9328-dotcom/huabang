@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_any_permission, require_permission
@@ -46,6 +46,43 @@ from app.services.operation_audit_service import write_operation_audit
 
 
 annotation_router = APIRouter()
+
+
+@annotation_router.get("/product-archive/styles", response_model=ApiResponse)
+async def list_product_archive_styles(
+    account_id: int, q: str = Query("", max_length=100),
+    _: SysUser = Depends(require_any_permission("douyin.annotation.edit", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search the authoritative Baison SKU archive; never expose acceptance fixtures."""
+    await _request_account(db, query_account_id=account_id)
+    term = f"%{q.strip()}%"
+    rows = (await db.execute(text("""
+        SELECT product_code, max(product_name) AS product_name
+        FROM dim.dim_sku
+        WHERE status = 'active' AND (:q = '%%' OR product_code ILIKE :q OR product_name ILIKE :q)
+        GROUP BY product_code ORDER BY product_code LIMIT 50
+    """), {"q": term})).mappings().all()
+    return ApiResponse.ok({"items": [dict(row) for row in rows]})
+
+
+@annotation_router.get("/product-archive/styles/{product_code}/skus", response_model=ApiResponse)
+async def list_product_archive_skus(
+    product_code: str, account_id: int,
+    _: SysUser = Depends(require_any_permission("douyin.annotation.edit", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    await _request_account(db, query_account_id=account_id)
+    rows = (await db.execute(text("""
+        SELECT s.sku_code, s.color_code, s.color_name, s.size_code, s.size_name,
+               COALESCE(SUM(i.available_qty), 0) AS available_quantity
+        FROM dim.dim_sku s
+        LEFT JOIN dwd.v_apparel_inventory_balance i ON i.sku_code = s.sku_code
+        WHERE s.status = 'active' AND s.product_code = :product_code
+        GROUP BY s.sku_code, s.color_code, s.color_name, s.size_code, s.size_name
+        ORDER BY s.color_name, s.size_name, s.sku_code
+    """), {"product_code": product_code})).mappings().all()
+    return ApiResponse.ok({"items": [dict(row) for row in rows]})
 
 
 def _annotation_http_error(error: AnnotationValidationError) -> HTTPException:
