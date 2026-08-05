@@ -36,10 +36,8 @@ from app.services.douyin_color_annotation_service import (
     AnnotationConflictError,
     AnnotationValidationError,
     assert_expected_version,
-    overlap_requirement,
     snap_clip_bounds,
     validate_annotation_transition,
-    validate_primary_assignment,
 )
 from app.services.douyin_color_security_service import sanitize_douyin_text
 from app.services.operation_audit_service import write_operation_audit
@@ -163,6 +161,7 @@ def _clip_response(clip: VideoClip) -> dict[str, object]:
     return {
         "id": clip.id, "account_id": clip.account_id, "video_id": clip.video_id,
         "style_id": clip.style_id, "color_id": clip.color_id,
+        "outfit_parts_json": clip.outfit_parts_json,
         "start_ms": clip.start_ms, "end_ms": clip.end_ms,
         "input_start_ms": clip.input_start_ms, "input_end_ms": clip.input_end_ms,
         "curve_resolution_ms": clip.curve_resolution_ms, "focus_status": clip.focus_status,
@@ -177,12 +176,58 @@ def _clip_response(clip: VideoClip) -> dict[str, object]:
     }
 
 
+async def _materialize_outfit_parts(*, db: AsyncSession, account_id: int, payload_parts: list) -> list[dict[str, object]]:
+    """Resolve selected IDs to immutable product/SKU snapshots from the real archive."""
+
+    parts: list[dict[str, object]] = []
+    seen: set[tuple[str, int, str | None]] = set()
+    for part in payload_parts:
+        style = await _scoped_record(db, GarmentStyle, account_id=account_id, record_id=part.style_id, error_code="style_not_found")
+        archive = (await db.execute(text("""
+            SELECT product_code, max(product_name) AS product_name
+            FROM dim.dim_sku
+            WHERE status = 'active' AND product_code = :product_code
+            GROUP BY product_code
+        """), {"product_code": style.style_code})).mappings().first()
+        if archive is None:
+            raise AnnotationValidationError("product_archive_style_not_found")
+        snapshot: dict[str, object] = {
+            "position": part.position,
+            "style_id": style.id,
+            "product_code": archive["product_code"],
+            "product_name": archive["product_name"] or archive["product_code"],
+            "sku_code": None,
+            "color_code": None,
+            "color_name": None,
+            "size_name": None,
+        }
+        if part.sku_code:
+            sku = (await db.execute(text("""
+                SELECT sku_code, color_code, color_name, size_name
+                FROM dim.dim_sku
+                WHERE status = 'active' AND product_code = :product_code AND sku_code = :sku_code
+                LIMIT 1
+            """), {"product_code": archive["product_code"], "sku_code": part.sku_code})).mappings().first()
+            if sku is None:
+                raise AnnotationValidationError("sku_not_found_for_product")
+            snapshot.update(dict(sku))
+        key = (part.position, style.id, part.sku_code)
+        if key in seen:
+            raise AnnotationValidationError("outfit_part_duplicate")
+        seen.add(key)
+        parts.append(snapshot)
+    return parts
+
+
+def _outfit_signature(parts: list[dict[str, object]]) -> frozenset[tuple[int | None, str | None]]:
+    return frozenset((part.get("style_id"), part.get("sku_code")) for part in parts)
+
+
 async def _validate_clip_payload(
     *, db: AsyncSession, account_id: int, payload: VideoClipCreateRequest, exclude_clip_id: int | None = None,
-) -> tuple[int, int, str]:
+) -> tuple[int, int, str, list[dict[str, object]]]:
     if payload.account_id != account_id:
         raise AnnotationValidationError("account_scope_mismatch")
-    validate_primary_assignment(payload.focus_status.value, style_id=payload.style_id, color_id=payload.color_id)
     video = (await db.execute(
         select(Video).where(Video.account_id == account_id, Video.id == payload.video_id).with_for_update()
     )).scalar_one_or_none()
@@ -193,11 +238,8 @@ async def _validate_clip_payload(
         curve_resolution_ms=payload.curve_resolution_ms, video_duration_ms=video.duration_ms,
     )
     if payload.focus_status.value != "clear_primary":
-        return start_ms, end_ms, "not_required"
-    style = await _scoped_record(db, GarmentStyle, account_id=account_id, record_id=payload.style_id, error_code="style_not_found")
-    color = await _scoped_record(db, GarmentColor, account_id=account_id, record_id=payload.color_id, error_code="color_not_found")
-    if color.style_id != style.id:
-        raise AnnotationValidationError("color_style_mismatch")
+        return start_ms, end_ms, "not_required", []
+    outfit_parts = await _materialize_outfit_parts(db=db, account_id=account_id, payload_parts=payload.outfit_parts_json)
     query = select(VideoClip).where(
         VideoClip.account_id == account_id, VideoClip.video_id == video.id, VideoClip.deleted_at.is_(None),
     )
@@ -205,13 +247,10 @@ async def _validate_clip_payload(
         query = query.where(VideoClip.id != exclude_clip_id)
     overlap_status = "not_required"
     for other in (await db.execute(query)).scalars().all():
-        if overlap_requirement(
-            start_ms=start_ms, end_ms=end_ms, color_id=color.id,
-            other_start_ms=other.start_ms, other_end_ms=other.end_ms, other_color_id=other.color_id,
-        ) == "pending_approval":
+        if start_ms < other.end_ms and other.start_ms < end_ms and _outfit_signature(outfit_parts) != _outfit_signature(other.outfit_parts_json or []):
             overlap_status = "pending_approval"
             break
-    return start_ms, end_ms, overlap_status
+    return start_ms, end_ms, overlap_status, outfit_parts
 
 
 @annotation_router.get("/annotation-context", response_model=ApiResponse)
@@ -387,11 +426,11 @@ async def list_video_clips(account_id: int, video_id: int | None = None, _: SysU
 async def create_video_clip(payload: VideoClipCreateRequest, request: Request, current_user: SysUser = Depends(require_permission("douyin.annotation.edit")), db: AsyncSession = Depends(get_db)):
     account_id = (await _request_account(db, payload_account_id=payload.account_id)).id
     try:
-        start_ms, end_ms, overlap_status = await _validate_clip_payload(db=db, account_id=payload.account_id, payload=payload)
+        start_ms, end_ms, overlap_status, outfit_parts = await _validate_clip_payload(db=db, account_id=payload.account_id, payload=payload)
     except AnnotationValidationError as error:
         raise _annotation_http_error(error) from None
     clip = VideoClip(
-        account_id=payload.account_id, video_id=payload.video_id, style_id=payload.style_id, color_id=payload.color_id,
+        account_id=payload.account_id, video_id=payload.video_id, style_id=None, color_id=None, outfit_parts_json=outfit_parts,
         start_ms=start_ms, end_ms=end_ms, input_start_ms=payload.input_start_ms, input_end_ms=payload.input_end_ms,
         curve_resolution_ms=payload.curve_resolution_ms, focus_status=payload.focus_status.value,
         focus_note=sanitize_douyin_text(payload.focus_note), annotation_status="draft",
@@ -411,12 +450,13 @@ async def update_video_clip(clip_id: int, account_id: int, payload: VideoClipUpd
         assert_expected_version(current_version=clip.version, expected_version=payload.expected_version)
         if clip.annotation_status not in {"draft", "rejected"}:
             raise AnnotationValidationError("annotation_not_editable")
-        start_ms, end_ms, overlap_status = await _validate_clip_payload(db=db, account_id=account_id, payload=payload, exclude_clip_id=clip.id)
+        start_ms, end_ms, overlap_status, outfit_parts = await _validate_clip_payload(db=db, account_id=account_id, payload=payload, exclude_clip_id=clip.id)
     except AnnotationValidationError as error:
         raise _annotation_http_error(error) from None
     before = _clip_response(clip)
-    for field in ("video_id", "style_id", "color_id", "input_start_ms", "input_end_ms", "curve_resolution_ms"):
+    for field in ("video_id", "input_start_ms", "input_end_ms", "curve_resolution_ms"):
         setattr(clip, field, getattr(payload, field))
+    clip.style_id, clip.color_id, clip.outfit_parts_json = None, None, outfit_parts
     clip.start_ms, clip.end_ms, clip.focus_status = start_ms, end_ms, payload.focus_status.value
     clip.focus_note, clip.overlap_reason, clip.overlap_status = sanitize_douyin_text(payload.focus_note), sanitize_douyin_text(payload.overlap_reason), overlap_status
     clip.annotation_status, clip.updated_by, clip.version = "draft", current_user.id, clip.version + 1

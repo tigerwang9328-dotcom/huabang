@@ -21,6 +21,11 @@ export interface OutfitPart {
   position: GarmentPosition;
   style_id: number;
   sku_code: string | null;
+  product_code?: string;
+  product_name?: string;
+  color_code?: string | null;
+  color_name?: string | null;
+  size_name?: string | null;
 }
 
 export interface DouyinAnnotationContext {

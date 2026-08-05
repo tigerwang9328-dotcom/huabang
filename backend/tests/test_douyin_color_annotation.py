@@ -118,7 +118,7 @@ def test_annotation_routes_have_account_scoped_crud_workflow_and_permission_boun
     assert ("/douyin-color-analytics/video-clips/{clip_id}", frozenset({"DELETE"})) in routes
 
 
-def test_annotation_request_schemas_do_not_allow_outfits_or_multi_product_assignments():
+def test_annotation_request_schema_accepts_a_whole_outfit_and_rejects_invalid_parts():
     from pydantic import ValidationError
 
     from app.schemas.douyin_color_analytics import VideoClipCreateRequest
@@ -130,10 +130,13 @@ def test_annotation_request_schemas_do_not_allow_outfits_or_multi_product_assign
         input_end_ms=1100,
         curve_resolution_ms=1000,
         focus_status="clear_primary",
-        style_id=3,
-        color_id=4,
+        outfit_parts_json=[
+            {"position": "top", "style_id": 3, "sku_code": "TOP-RED-M"},
+            {"position": "bottom", "style_id": 5, "sku_code": "PANTS-BLACK-L"},
+        ],
     )
     assert accepted.focus_status.value == "clear_primary"
+    assert len(accepted.outfit_parts_json) == 2
     with pytest.raises(ValidationError):
         VideoClipCreateRequest(
             account_id=1,
@@ -142,8 +145,7 @@ def test_annotation_request_schemas_do_not_allow_outfits_or_multi_product_assign
             input_end_ms=1100,
             curve_resolution_ms=1000,
             focus_status="multi_focus",
-            style_id=3,
-            color_id=4,
+            outfit_parts_json=[{"position": "top", "style_id": 3}],
         )
     with pytest.raises(ValidationError):
         VideoClipCreateRequest(
@@ -153,10 +155,20 @@ def test_annotation_request_schemas_do_not_allow_outfits_or_multi_product_assign
             input_end_ms=1100,
             curve_resolution_ms=1000,
             focus_status="clear_primary",
-            style_id=3,
-            color_id=4,
-            garment_ids=[3, 5],
+            outfit_parts_json=[{"position": "top", "style_id": 3}],
         )
+
+
+def test_annotation_clip_response_and_routes_preserve_whole_outfit_and_real_product_archive_contract():
+    from pathlib import Path
+
+    route_source = (Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "douyin_color_annotation_routes.py").read_text(encoding="utf-8")
+
+    assert '"outfit_parts_json": clip.outfit_parts_json' in route_source
+    assert 'payload.outfit_parts_json' in route_source
+    assert 'product-archive/styles' in route_source
+    assert 'dim.dim_sku' in route_source
+    assert 'dwd.v_apparel_inventory_balance' in route_source
 def test_annotation_mutations_lock_clip_versions_and_return_explicit_product_conflicts():
     from pathlib import Path
 

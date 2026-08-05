@@ -107,3 +107,17 @@ test("catalog create responses are treated as ID acknowledgements", () => {
   assert.ok(api.includes("export interface DouyinCreateResult"));
   assert.equal((api.match(/request\.post<DouyinCreateResult>/g) || []).length, 2);
 });
+
+test("annotation product selection searches the real archive and resolves only the selected product", () => {
+  const editor = read("src/views/douyinColorAnalytics/Annotate.vue");
+  const api = read("src/api/douyinColorAnalytics.ts");
+
+  assert.ok(editor.includes("v-model=\"part.product_code\""));
+  assert.ok(editor.includes("searchArchiveStyles"));
+  assert.ok(editor.includes("selectArchiveStyle"));
+  assert.ok(editor.includes("loadProductSkus"));
+  assert.ok(editor.includes("product_name"), "saved clip parts must retain the archive snapshot label");
+  assert.ok(!/async function searchArchiveStyles[\s\S]*resolveProductArchiveStyle/.test(editor), "search must not create a local mapping for every result");
+  assert.ok(api.includes("searchProductArchiveStyles"));
+  assert.ok(api.includes("listProductArchiveSkus"));
+});

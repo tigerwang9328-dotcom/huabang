@@ -198,6 +198,20 @@ class GarmentSkuUpdateRequest(BaseModel):
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
 
 
+class OutfitPartRequest(BaseModel):
+    """One selected product in a whole-outfit clip.
+
+    Product and SKU labels are never accepted from the browser: the route
+    resolves them from the product archive before storing the snapshot.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    position: str = Field(pattern="^(outer|top|bottom|none)$")
+    style_id: int = Field(gt=0)
+    sku_code: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class VideoClipCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -207,20 +221,19 @@ class VideoClipCreateRequest(BaseModel):
     input_end_ms: int = Field(gt=0)
     curve_resolution_ms: int = Field(gt=0)
     focus_status: FocusStatus
-    style_id: int | None = Field(default=None, gt=0)
-    color_id: int | None = Field(default=None, gt=0)
+    outfit_parts_json: list[OutfitPartRequest] = Field(default_factory=list, max_length=8)
     focus_note: str | None = Field(default=None, max_length=1000)
     overlap_reason: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
-    def validate_single_primary_garment(self):
+    def validate_whole_outfit_assignment(self):
         if self.input_end_ms <= self.input_start_ms:
             raise ValueError("clip_bounds_invalid")
         if self.focus_status is FocusStatus.clear_primary:
-            if self.style_id is None or self.color_id is None:
-                raise ValueError("clear_primary_requires_style_and_color")
-        elif self.style_id is not None or self.color_id is not None:
-            raise ValueError("non_primary_forbids_style_and_color")
+            if len(self.outfit_parts_json) < 2:
+                raise ValueError("clear_primary_requires_at_least_two_outfit_parts")
+        elif self.outfit_parts_json:
+            raise ValueError("non_primary_forbids_outfit_parts")
         return self
 
 
