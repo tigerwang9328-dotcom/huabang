@@ -68,7 +68,7 @@
                   <el-option v-for="style in styles" :key="style.id" :label="`${style.style_code} · ${style.style_name}`" :value="style.id" />
                 </el-select>
                 <el-select v-model="part.sku_code" placeholder="SKU（可选）" :disabled="!part.style_id" filterable clearable class="sku-select">
-                  <el-option v-for="color in colorsByStyle[part.style_id || 0] || []" :key="color.id" :label="`${color.color_code} · ${color.color_name}`" :value="color.color_code" />
+                  <el-option v-for="color in colorsByStyle[part.style_id || 0] || []" :key="color.id" :label="`${color.color_name} · ${color.size_name || ''} · 库存 ${color.available_quantity ?? 0}`" :value="color.sku_code || color.color_code" />
                 </el-select>
                 <el-button text type="danger" @click="removePart(index)">删除</el-button>
               </div>
@@ -134,7 +134,7 @@ const video = ref<DouyinVideo | null>(null);
 const snapshots = ref<DouyinVideoAnalysisSnapshot[]>([]);
 const clips = ref<DouyinVideoClip[]>([]);
 const styles = ref<DouyinGarmentStyle[]>([]);
-const colorsByStyle = ref<Record<number, DouyinGarmentColor[]>>({});
+const colorsByStyle = ref<Record<number, Array<DouyinGarmentColor & { sku_code?: string; size_name?: string; available_quantity?: number }>>>({});
 
 interface OutfitPartEditor { position: GarmentPosition; style_id: number | null; sku_code: string | null }
 const outfitParts = ref<OutfitPartEditor[]>([]);
@@ -193,7 +193,7 @@ async function onStyleChange(index: number) {
   part.sku_code = null;
   if (!part.style_id || !context.value) return;
   if (!colorsByStyle.value[part.style_id]) {
-    try { colorsByStyle.value[part.style_id] = (await douyinColorAnalyticsApi.listColors(part.style_id, context.value.account.id)).data.items || []; } catch (error) { ElMessage.error(describeError(error)); }
+    try { const style = styles.value.find((item) => item.id === part.style_id); const rows = style ? (await douyinColorAnalyticsApi.listProductArchiveSkus(context.value.account.id, style.style_code)).data.items || [] : []; colorsByStyle.value[part.style_id] = rows.map((row, itemIndex) => ({ id: itemIndex, color_code: row.color_code, color_name: row.color_name, sku_code: row.sku_code, size_name: row.size_name, available_quantity: row.available_quantity })) as DouyinGarmentColor[]; } catch (error) { ElMessage.error(describeError(error)); }
   }
 }
 async function searchArchiveStyles(query: string) { if (!context.value || query.trim().length < 2) return; try { const result = await douyinColorAnalyticsApi.searchProductArchiveStyles(context.value.account.id, query); for (const item of result.data.items || []) { const resolved = await douyinColorAnalyticsApi.resolveProductArchiveStyle(context.value.account.id, item.product_code); if (!styles.value.some((style) => style.id === resolved.data.id)) styles.value.push({ id: resolved.data.id, style_code: resolved.data.style_code, style_name: resolved.data.style_name, garment_position: "none", status: "active" } as DouyinGarmentStyle); } } catch (error) { ElMessage.error(describeError(error)); } }
