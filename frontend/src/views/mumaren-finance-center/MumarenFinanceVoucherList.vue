@@ -55,7 +55,8 @@
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
@@ -63,6 +64,7 @@ import {
 } from "@/api/mumarenFinanceCenter";
 
 const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
+const route = useRoute();
 const vouchers = ref<MumarenFinanceVoucher[]>([]);
 const error = ref("");
 const loading = ref(false);
@@ -74,6 +76,10 @@ const money = (value: number) =>
 
 const statusLabel = (s: string) => ({ draft: "草稿", reviewed: "已审核", posted: "已过账" }[s] || s);
 const statusTagType = (s: string): "" | "warning" | "success" => (s === "draft" ? "" : s === "reviewed" ? "warning" : "success");
+const focusedVoucherId = computed(() => {
+  const raw = Number(route.query.voucher_id);
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
+});
 
 const load = async () => {
   const requestedBookId = bookId.value;
@@ -81,7 +87,7 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const response = await mumarenFinanceCenterApi.listVouchers(requestedBookId ? { book_id: requestedBookId, limit: 500 } : { limit: 500 });
+    const response = await mumarenFinanceCenterApi.listVouchers(requestedBookId ? { book_id: requestedBookId, voucher_id: focusedVoucherId.value, limit: 500 } : { voucher_id: focusedVoucherId.value, limit: 500 });
     if (requestVersion === loadRequestVersion && requestedBookId === bookId.value) {
       vouchers.value = response.data.data;
     }
@@ -130,6 +136,8 @@ onMounted(async () => {
   } catch {
     error.value = "无法加载独立账簿。";
   }
+  const routeBookId = Number(route.query.book_id);
+  if (Number.isSafeInteger(routeBookId) && books.value.some((book) => book.id === routeBookId)) bookId.value = routeBookId;
   await load();
 });
 
