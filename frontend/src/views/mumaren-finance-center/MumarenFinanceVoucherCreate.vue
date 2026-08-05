@@ -37,7 +37,7 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="9">
-            <el-form-item label="凭证号（自动）">
+            <el-form-item label="凭证号">
               <el-input v-model="form.voucher_no" readonly placeholder="选择账簿后自动生成" />
             </el-form-item>
           </el-col>
@@ -78,6 +78,14 @@
             <el-select v-model="row.account_id" :disabled="isReadonly" filterable clearable size="small" placeholder="选择科目" style="width:100%">
               <el-option v-for="a in accounts" :key="a.id" :label="`${a.account_code} ${a.account_name}`" :value="a.id" />
             </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="供应商" min-width="180">
+          <template #default="{ row }">
+            <el-select v-if="requiresSupplier(row.account_id)" v-model="row.supplier_id" :disabled="isReadonly" filterable clearable size="small" placeholder="必须选择供应商" style="width:100%">
+              <el-option v-for="supplier in suppliers" :key="supplier.id" :label="`${supplier.code} ${supplier.name}`" :value="supplier.id" />
+            </el-select>
+            <span v-else class="muted">—</span>
           </template>
         </el-table-column>
         <el-table-column label="借方金额" width="130" align="right">
@@ -122,9 +130,11 @@ import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import {
   mumarenFinanceCenterApi,
+  auxiliaryAccountingsApi,
   voucherTemplatesApi,
   type MumarenFinanceAccount,
   type MumarenFinanceBook,
+  type MumarenAuxiliaryAccounting,
 } from "@/api/mumarenFinanceCenter";
 import { useMumarenFinanceBookStore } from "@/stores/mumarenFinanceBook";
 
@@ -132,6 +142,7 @@ const bookStore = useMumarenFinanceBookStore();
 const route = useRoute();
 const { books, bookId, isReadonly } = storeToRefs(bookStore);
 const accounts = ref<MumarenFinanceAccount[]>([]);
+const suppliers = ref<MumarenAuxiliaryAccounting[]>([]);
 const accountRequestVersion = ref(0);
 const error = ref("");
 const saving = ref(false);
@@ -149,15 +160,20 @@ const onBookChange = async () => {
   const requestVersion = ++accountRequestVersion.value;
   if (requestedBookId) {
     try {
-      const result = await mumarenFinanceCenterApi.listAccounts(requestedBookId);
+      const [result, supplierResult] = await Promise.all([
+        mumarenFinanceCenterApi.listAccounts(requestedBookId),
+        auxiliaryAccountingsApi.list({ book_id: requestedBookId, aux_type: "supplier", limit: 500 }),
+      ]);
       if (requestVersion === accountRequestVersion.value && requestedBookId === bookId.value) {
         accounts.value = result.data.data;
+        suppliers.value = supplierResult.data.data.filter((item) => item.is_active);
       }
     } catch {
       if (requestVersion === accountRequestVersion.value) accounts.value = [];
     }
   } else {
     accounts.value = [];
+    suppliers.value = [];
   }
 };
 
@@ -180,7 +196,7 @@ watch(bookId, () => void onBookChange());
 
 // ── 录入表单 ──
 let lineSeed = 1;
-const newLine = () => ({ key: `line-${lineSeed++}`, account_id: undefined as number | undefined, summary: "", debit_amount: 0, credit_amount: 0 });
+const newLine = () => ({ key: `line-${lineSeed++}`, account_id: undefined as number | undefined, supplier_id: undefined as number | undefined, summary: "", debit_amount: 0, credit_amount: 0 });
 const form = reactive({
   voucher_type: "记",
   voucher_no: "",
@@ -232,6 +248,7 @@ const applyTemplateFromRoute = async () => {
     form.lines = template.lines_json.lines.map((line) => ({
       key: `line-${lineSeed++}`,
       account_id: line.account_id,
+      supplier_id: undefined as number | undefined,
       summary: line.summary || "",
       debit_amount: Number(line.debit_amount),
       credit_amount: Number(line.credit_amount),
@@ -258,11 +275,14 @@ watch([bookId, () => form.voucher_date, () => form.voucher_type], () => void ref
 const validLines = computed(() =>
   form.lines.filter((l) => l.account_id && (Number(l.debit_amount) > 0 || Number(l.credit_amount) > 0)),
 );
+const requiresSupplier = (accountId: number | undefined) =>
+  !!accounts.value.find((account) => account.id === accountId)?.required_auxiliary_types?.includes("supplier");
 const totalDebit = computed(() => validLines.value.reduce((s, l) => s + Number(l.debit_amount || 0), 0));
 const totalCredit = computed(() => validLines.value.reduce((s, l) => s + Number(l.credit_amount || 0), 0));
 const balanceDiff = computed(() => totalDebit.value - totalCredit.value);
 const balanced = computed(() => Math.abs(balanceDiff.value) < 0.005 && totalDebit.value > 0);
-const canSave = computed(() => balanced.value && validLines.value.length >= 2 && !!form.voucher_no && !!form.voucher_date);
+const canSave = computed(() => balanced.value && validLines.value.length >= 2 && !!form.voucher_no && !!form.voucher_date
+  && validLines.value.every((line) => !requiresSupplier(line.account_id) || !!line.supplier_id));
 
 const addLine = () => {
   if (isReadonly.value) return;
@@ -279,6 +299,7 @@ const copyLastLine = () => {
   form.lines.push({
     key: `line-${lineSeed++}`,
     account_id: line.account_id,
+    supplier_id: line.supplier_id,
     summary: line.summary,
     debit_amount: Number(line.debit_amount || 0),
     credit_amount: Number(line.credit_amount || 0),
@@ -333,6 +354,7 @@ const save = async () => {
         summary: l.summary || form.summary || null,
         debit_amount: Number(l.debit_amount || 0),
         credit_amount: Number(l.credit_amount || 0),
+        auxiliaries: l.supplier_id ? [{ aux_type: "supplier" as const, auxiliary_id: l.supplier_id }] : [],
       })),
     });
     ElMessage.success("凭证草稿已创建");
@@ -364,6 +386,7 @@ p { color: #5d6b7e; }
 .totals { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; color: #4b5563; }
 .totals b { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #111827; }
 .totals .danger { color: #dc2626; }
+.muted { color: #9ca3af; }
 .form-actions { display: flex; justify-content: flex-end; }
 .success-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 @media (max-width: 640px) { .filters { flex-direction: column; } .filters > * { max-width: none; } .heading { flex-direction: column; } .dialog-toolbar { align-items: flex-start; } .totals { margin-left: 0; flex-wrap: wrap; } }

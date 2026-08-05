@@ -39,6 +39,7 @@ export interface MumarenFinanceAccount {
   direction: string;
   level: number;
   is_active?: boolean;
+  required_auxiliary_types?: string[];
 }
 
 export interface AccountCreatePayload {
@@ -58,12 +59,18 @@ export interface AccountUpdatePayload {
   is_active?: boolean;
 }
 
+export interface AccountAuxiliaryDimensionsPayload {
+  book_id: number;
+  auxiliary_types: Array<"customer" | "supplier" | "employee" | "project" | "department">;
+}
+
 // 凭证分录录入(对应后端 VoucherLineInput)
 export interface VoucherLineInput {
   account_id: number;
   summary?: string | null;
   debit_amount: number;
   credit_amount: number;
+  auxiliaries?: Array<{ aux_type: "customer" | "supplier" | "employee" | "project" | "department"; auxiliary_id: number }>;
 }
 
 // 凭证草稿创建载荷(对应后端 VoucherCreateInput)
@@ -360,6 +367,8 @@ export const mumarenFinanceCenterApi = {
   listAccounts: (bookId: number) => request.get<ApiResponse<MumarenFinanceAccount[]>>(requestPath(`/books/${bookId}/accounts`)),
   createAccount: (bookId: number, data: AccountCreatePayload) => request.post<ApiResponse<MumarenFinanceAccount>>(requestPath(`/books/${bookId}/accounts`), data),
   updateAccount: (bookId: number, accountId: number, data: AccountUpdatePayload) => request.put<ApiResponse<MumarenFinanceAccount>>(requestPath(`/books/${bookId}/accounts/${accountId}`), data),
+  replaceAccountAuxiliaryDimensions: (bookId: number, accountId: number, data: AccountAuxiliaryDimensionsPayload) =>
+    request.put<ApiResponse<{ account_id: number; required_auxiliary_types: string[] }>>(requestPath(`/books/${bookId}/accounts/${accountId}/auxiliary-dimensions`), data),
 
   // ── 凭证写入:草稿 → 财务审核 → 人工过账(禁止自动过账) ──
   createVoucher: (payload: VoucherCreatePayload) => request.post<ApiResponse<MumarenFinanceVoucher>>(requestPath("/vouchers"), payload),

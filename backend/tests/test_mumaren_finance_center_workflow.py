@@ -27,14 +27,14 @@ from mumaren_crud_helpers import _MockDb, _MockResult
 
 
 @pytest.mark.asyncio
-async def test_next_voucher_number_fills_first_gap_for_book_date_and_type():
+async def test_next_voucher_number_fills_first_gap_for_book_and_date():
     db = _MockDb(execute_results=[_MockResult(scalars=[
-        "记-202608-001", "记-202608-003", "记-202607-099",
+        "V-20260802-001", "V-20260802-003", "V-20260731-099",
     ])])
 
     number = await next_voucher_number(db, book_id=7, voucher_date=real_date(2026, 8, 2), voucher_type="记")
 
-    assert number == "记-202608-002"
+    assert number == "V-20260802-002"
 
 
 def test_draft_voucher_must_be_reviewed_before_manual_posting():

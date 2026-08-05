@@ -19,6 +19,11 @@ from app.models.mumaren_finance_center import (
     FinanceCenterMumarenVoucher,
     FinanceCenterMumarenVoucherLine,
 )
+from app.models.mumaren_finance_center_auxiliary import (
+    FinanceCenterMumarenAccountAuxiliaryDimension,
+    FinanceCenterMumarenVoucherLineAuxiliary,
+)
+from app.models.mumaren_finance_center_domains import FinanceCenterMumarenAuxiliaryAccounting
 
 
 _BOOK_CODE_PATTERN = re.compile(r"^[A-Z0-9_-]{1,64}$")
@@ -294,6 +299,54 @@ async def update_account(
     return account
 
 
+async def list_account_auxiliary_dimensions(
+    db: AsyncSession, *, book_id: int,
+) -> dict[int, list[FinanceCenterMumarenAccountAuxiliaryDimension]]:
+    rows = list((await db.execute(
+        select(FinanceCenterMumarenAccountAuxiliaryDimension).where(
+            FinanceCenterMumarenAccountAuxiliaryDimension.book_id == book_id,
+        )
+    )).scalars().all())
+    grouped: dict[int, list[FinanceCenterMumarenAccountAuxiliaryDimension]] = {}
+    for row in rows:
+        grouped.setdefault(row.account_id, []).append(row)
+    return grouped
+
+
+async def replace_account_auxiliary_dimensions(
+    db: AsyncSession, *, book_id: int, account_id: int, aux_types: Sequence[str], operator_id: int,
+) -> list[FinanceCenterMumarenAccountAuxiliaryDimension]:
+    await assert_book_writable(db, book_id=book_id)
+    account = await db.get(FinanceCenterMumarenAccount, account_id)
+    if account is None or account.book_id != book_id:
+        raise LookupError("科目不存在")
+    if account.is_readonly:
+        raise HistoricalRecordReadonlyError("历史迁移科目只读，不能维护")
+    normalized = sorted({value.strip() for value in aux_types if value and value.strip()})
+    allowed = {"customer", "supplier", "employee", "project", "department"}
+    if any(value not in allowed for value in normalized):
+        raise ValueError("辅助核算类型无效")
+    existing = list((await db.execute(
+        select(FinanceCenterMumarenAccountAuxiliaryDimension).where(
+            FinanceCenterMumarenAccountAuxiliaryDimension.book_id == book_id,
+            FinanceCenterMumarenAccountAuxiliaryDimension.account_id == account_id,
+        )
+    )).scalars().all())
+    for row in existing:
+        await db.delete(row)
+    rows = [FinanceCenterMumarenAccountAuxiliaryDimension(
+        book_id=book_id, account_id=account_id, aux_type=value, is_required=True,
+    ) for value in normalized]
+    for row in rows:
+        db.add(row)
+    db.add(FinanceCenterMumarenAuditLog(
+        book_id=book_id, action="replace_account_auxiliary_dimensions", operator_id=operator_id,
+        detail=f"{account.account_code}:{','.join(normalized) or 'none'}",
+    ))
+    await db.flush()
+    return rows
+
+
 async def create_voucher(
     db: AsyncSession,
     *,
@@ -320,6 +373,27 @@ async def create_voucher(
         )).scalar_one_or_none()
         if account is None:
             raise ValueError(f"第{line_no}行会计科目不存在、不属于账簿或已停用")
+    required_dimensions = await list_account_auxiliary_dimensions(db, book_id=book_id)
+    for line_no, line in enumerate(lines, start=1):
+        account_id = line.get("account_id")
+        auxiliary_items = line.get("auxiliaries") or []
+        supplied = {str(item.get("aux_type")) for item in auxiliary_items if isinstance(item, Mapping)}
+        if len(supplied) != len(auxiliary_items):
+            raise ValueError(f"第{line_no}行同一辅助核算类型只能选择一次")
+        for dimension in required_dimensions.get(account_id, []):
+            if dimension.is_required and dimension.aux_type not in supplied:
+                raise ValueError(f"第{line_no}行科目必须填写{dimension.aux_type}辅助核算")
+        for item in auxiliary_items:
+            if not isinstance(item, Mapping) or not isinstance(item.get("auxiliary_id"), int):
+                raise ValueError(f"第{line_no}行辅助核算项无效")
+            auxiliary = (await db.execute(select(FinanceCenterMumarenAuxiliaryAccounting).where(
+                FinanceCenterMumarenAuxiliaryAccounting.id == item["auxiliary_id"],
+                FinanceCenterMumarenAuxiliaryAccounting.book_id == book_id,
+                FinanceCenterMumarenAuxiliaryAccounting.aux_type == item.get("aux_type"),
+                FinanceCenterMumarenAuxiliaryAccounting.is_active.is_(True),
+            ))).scalar_one_or_none()
+            if auxiliary is None:
+                raise ValueError(f"第{line_no}行辅助核算项不存在、不属于账簿或已停用")
     effective_date = date.fromisoformat(voucher_date) if isinstance(voucher_date, str) else voucher_date
     voucher_no = (voucher_no or "").strip() or await next_voucher_number(
         db, book_id=book_id, voucher_date=effective_date, voucher_type=voucher_type,
@@ -337,18 +411,30 @@ async def create_voucher(
     )
     db.add(voucher)
     await db.flush()
+    created_lines: list[tuple[FinanceCenterMumarenVoucherLine, Mapping[str, object]]] = []
     for line_no, line in enumerate(lines, start=1):
         account_id = line.get("account_id")
-        db.add(
-            FinanceCenterMumarenVoucherLine(
-                voucher_id=voucher.id,
-                line_no=line_no,
-                account_id=account_id,
-                summary=str(line["summary"]) if line.get("summary") is not None else None,
-                debit_amount=_amount(line, "debit_amount"),
-                credit_amount=_amount(line, "credit_amount"),
-            )
+        voucher_line = FinanceCenterMumarenVoucherLine(
+            voucher_id=voucher.id,
+            line_no=line_no,
+            account_id=account_id,
+            summary=str(line["summary"]) if line.get("summary") is not None else None,
+            debit_amount=_amount(line, "debit_amount"),
+            credit_amount=_amount(line, "credit_amount"),
         )
+        db.add(voucher_line)
+        created_lines.append((voucher_line, line))
+    await db.flush()
+    for voucher_line, line in created_lines:
+        for item in line.get("auxiliaries") or []:
+            auxiliary = await db.get(FinanceCenterMumarenAuxiliaryAccounting, item["auxiliary_id"])
+            if auxiliary is None:
+                raise ValueError("辅助核算项已被删除，请刷新后重新录入")
+            db.add(FinanceCenterMumarenVoucherLineAuxiliary(
+                book_id=book_id, voucher_line_id=voucher_line.id, aux_type=str(item["aux_type"]),
+                auxiliary_id=auxiliary.id, auxiliary_code_snapshot=auxiliary.code,
+                auxiliary_name_snapshot=auxiliary.name,
+            ))
     db.add(
         FinanceCenterMumarenAuditLog(
             book_id=book_id,
@@ -364,8 +450,8 @@ async def create_voucher(
 async def next_voucher_number(
     db: AsyncSession, *, book_id: int, voucher_date: date, voucher_type: str = "记",
 ) -> str:
-    """Generate the next number for one book/date/type; this only reserves a display value."""
-    prefix = f"{voucher_type}-{voucher_date:%Y%m}-"
+    """Generate an ASCII-only, per-book/per-day sequence without posting anything."""
+    prefix = f"V-{voucher_date:%Y%m%d}-"
     rows = (await db.execute(
         select(FinanceCenterMumarenVoucher.voucher_no).where(
             FinanceCenterMumarenVoucher.book_id == book_id,

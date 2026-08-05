@@ -19,8 +19,10 @@ from app.services.mumaren_finance_center.workflow import (
     create_account as create_mumaren_account,
     update_account as update_mumaren_account,
     replenish_starter_accounts,
+    replace_account_auxiliary_dimensions,
     update_book as update_mumaren_book,
     create_voucher as create_mumaren_voucher,
+    list_account_auxiliary_dimensions,
     list_accounts,
     list_books,
     list_history_vouchers,
@@ -58,11 +60,17 @@ require_mumaren_voucher_post = require_mumaren_finance_permission("mumaren_finan
 require_mumaren_history_view = require_mumaren_finance_permission("mumaren_finance_center:history:view")
 
 
+class VoucherLineAuxiliaryInput(BaseModel):
+    aux_type: str = Field(pattern=r"^(customer|supplier|employee|project|department)$")
+    auxiliary_id: int = Field(ge=1)
+
+
 class VoucherLineInput(BaseModel):
     account_id: int = Field(ge=1)
     summary: str | None = Field(default=None, max_length=500)
     debit_amount: Decimal = Field(default=Decimal("0"), ge=0)
     credit_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    auxiliaries: list[VoucherLineAuxiliaryInput] = Field(default_factory=list)
 
 
 class VoucherCreateInput(BaseModel):
@@ -102,6 +110,11 @@ class AccountUpdateInput(BaseModel):
     direction: str | None = Field(default=None, pattern=r"^(debit|credit)$")
     level: int | None = Field(default=None, ge=1, le=10)
     is_active: bool | None = None
+
+
+class AccountAuxiliaryDimensionsInput(BaseModel):
+    book_id: int = Field(ge=1)
+    auxiliary_types: list[str] = Field(default_factory=list, max_length=5)
 
 
 def _actor_id(user: SysUser) -> int:
@@ -211,9 +224,11 @@ async def get_accounts(
     db: AsyncSession = Depends(get_db),
 ):
     accounts = await list_accounts(db, book_id=book_id)
+    dimensions = await list_account_auxiliary_dimensions(db, book_id=book_id)
     return ApiResponse.ok(data=[{
         "id": account.id, "account_code": account.account_code, "account_name": account.account_name,
         "account_type": account.account_type, "direction": account.direction, "level": account.level,
+        "required_auxiliary_types": [row.aux_type for row in dimensions.get(account.id, []) if row.is_required],
     } for account in accounts])
 
 
@@ -222,6 +237,7 @@ def _account_data(account: FinanceCenterMumarenAccount) -> dict:
         "id": account.id, "book_id": account.book_id, "account_code": account.account_code,
         "account_name": account.account_name, "account_type": account.account_type,
         "direction": account.direction, "level": account.level, "is_active": account.is_active,
+        "required_auxiliary_types": [],
     }
 
 
@@ -363,6 +379,28 @@ async def update_account_endpoint(
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return ApiResponse.ok(data=_account_data(account), message="科目已更新")
+
+
+@router.put("/books/{book_id}/accounts/{account_id}/auxiliary-dimensions", response_model=ApiResponse)
+async def replace_account_auxiliary_dimensions_endpoint(
+    book_id: int, account_id: int, body: AccountAuxiliaryDimensionsInput,
+    current_user: SysUser = Depends(require_mumaren_voucher_write), db: AsyncSession = Depends(get_db),
+):
+    if body.book_id != book_id:
+        raise HTTPException(status_code=400, detail="账簿标识不一致")
+    try:
+        rows = await replace_account_auxiliary_dimensions(
+            db, book_id=book_id, account_id=account_id,
+            aux_types=body.auxiliary_types, operator_id=_actor_id(current_user),
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ApiResponse.ok(
+        data={"account_id": account_id, "required_auxiliary_types": [row.aux_type for row in rows]},
+        message="科目辅助核算设置已更新",
+    )
 
 
 @router.get("/vouchers", response_model=ApiResponse)
