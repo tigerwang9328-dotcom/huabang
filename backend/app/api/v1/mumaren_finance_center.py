@@ -78,6 +78,7 @@ class VoucherLineAuxiliaryInput(BaseModel):
 class VoucherLineInput(BaseModel):
     account_id: int = Field(ge=1)
     summary: str | None = Field(default=None, max_length=500)
+    summary_explicitly_cleared: bool = False
     debit_amount: Decimal = Field(default=Decimal("0"), ge=0)
     credit_amount: Decimal = Field(default=Decimal("0"), ge=0)
     auxiliaries: list[VoucherLineAuxiliaryInput] = Field(default_factory=list)
@@ -576,13 +577,24 @@ async def get_ledger_lines(
             "id": line.id, "voucher_id": voucher.id, "line_no": line.line_no,
             "voucher_no": voucher.voucher_no, "voucher_type": voucher.voucher_type,
             "voucher_date": voucher.voucher_date, "voucher_summary": voucher.summary,
-            "line_summary": line.summary or inherited_summary_by_line.get(line.id) or voucher.summary,
+            "line_summary": resolve_ledger_line_summary(
+                line,
+                inherited_summary=inherited_summary_by_line.get(line.id, ""),
+                voucher_summary=voucher.summary,
+            ),
             "account_id": account.id, "account_code": account.account_code,
             "account_name": account.account_name, "debit_amount": line.debit_amount,
             "credit_amount": line.credit_amount, "running_balance": balance,
             "balance_direction": account.direction, "is_readonly": voucher.is_readonly,
         })
     return ApiResponse.ok(data={"rows": output_rows, "has_more": has_more, "next_offset": offset + len(rows)})
+
+
+def resolve_ledger_line_summary(line: FinanceCenterMumarenVoucherLine, *, inherited_summary: str, voucher_summary: str | None) -> str:
+    """Keep an explicitly blank saved line blank; legacy blanks retain prior compatibility."""
+    if line.summary_explicitly_cleared:
+        return ""
+    return line.summary or inherited_summary or voucher_summary or ""
 
 
 @router.post("/vouchers", response_model=ApiResponse)

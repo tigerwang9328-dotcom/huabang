@@ -151,6 +151,7 @@ class FinanceCenterMumarenVoucherLine(Base):
     line_no: Mapped[int] = mapped_column(Integer, nullable=False)
     account_id: Mapped[int] = mapped_column(ForeignKey(f"{MUMAREN_FINANCE_SCHEMA}.finance_center_mumaren_accounts.id"), nullable=False)
     summary: Mapped[str | None] = mapped_column(String(500))
+    summary_explicitly_cleared: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     debit_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     credit_amount: Mapped[object] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     source_system: Mapped[str | None] = mapped_column(String(32))

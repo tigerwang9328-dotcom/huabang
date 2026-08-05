@@ -71,7 +71,18 @@
       <el-table :data="form.lines" border size="small" row-key="key" :max-height="360" :class="{ 'is-readonly': isReadonly }">
         <el-table-column type="index" label="#" width="42" />
         <el-table-column label="摘要" min-width="160">
-          <template #default="{ row }"><el-input v-model="row.summary" :disabled="isReadonly" size="small" placeholder="行摘要" /></template>
+          <template #default="{ row }">
+            <div class="summary-cell">
+              <el-input
+                :model-value="row.summary"
+                :disabled="isReadonly"
+                size="small"
+                :placeholder="summaryPreview(row) || '行摘要'"
+                @update:model-value="updateLineSummary(row, $event)"
+              />
+              <el-button class="summary-clear" link :disabled="isReadonly" aria-label="清空本行摘要" @click="clearLineSummary(row)">×</el-button>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="会计科目" min-width="240">
           <template #default="{ row }">
@@ -128,6 +139,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
+import { resolveVoucherLineSummaries } from "@/utils/mumarenVoucherLineSummary.mjs";
 import {
   mumarenFinanceCenterApi,
   auxiliaryAccountingsApi,
@@ -147,6 +159,7 @@ const accountRequestVersion = ref(0);
 const error = ref("");
 const saving = ref(false);
 const created = ref(false);
+const clearedSummaryKeys = ref(new Set<string>());
 let templateApplyVersion = 0;
 let voucherNumberRequestVersion = 0;
 
@@ -205,6 +218,23 @@ const form = reactive({
   lines: [newLine(), newLine()],
 });
 
+const resolvedLineSummaries = computed(() =>
+  resolveVoucherLineSummaries(form.lines, clearedSummaryKeys.value),
+);
+const summaryPreview = (line: { key: string }) => resolvedLineSummaries.value.previewByKey[line.key] || "";
+const updateLineSummary = (line: { key: string; summary: string }, value: string) => {
+  line.summary = value;
+  const next = new Set(clearedSummaryKeys.value);
+  next.delete(line.key);
+  clearedSummaryKeys.value = next;
+};
+const clearLineSummary = (line: { key: string; summary: string }) => {
+  line.summary = "";
+  const next = new Set(clearedSummaryKeys.value);
+  next.add(line.key);
+  clearedSummaryKeys.value = next;
+};
+
 const refreshVoucherNo = async () => {
   const requestedBookId = bookId.value;
   const requestedDate = form.voucher_date;
@@ -245,6 +275,7 @@ const applyTemplateFromRoute = async () => {
     }
     form.voucher_type = template.voucher_type;
     form.summary = template.summary || "";
+    clearedSummaryKeys.value = new Set();
     form.lines = template.lines_json.lines.map((line) => ({
       key: `line-${lineSeed++}`,
       account_id: line.account_id,
@@ -266,6 +297,7 @@ const resetTemplateDraft = () => {
   form.voucher_type = "记";
   form.summary = "";
   form.lines = [newLine(), newLine()];
+  clearedSummaryKeys.value = new Set();
 };
 
 watch(() => route.query.template_id, () => { resetTemplateDraft(); void applyTemplateFromRoute(); });
@@ -290,7 +322,12 @@ const addLine = () => {
 };
 const removeLine = (index: number) => {
   if (isReadonly.value) return;
-  if (form.lines.length > 1) form.lines.splice(index, 1);
+  if (form.lines.length > 1) {
+    const [removed] = form.lines.splice(index, 1);
+    const next = new Set(clearedSummaryKeys.value);
+    next.delete(removed.key);
+    clearedSummaryKeys.value = next;
+  }
 };
 
 const copyLastLine = () => {
@@ -351,7 +388,8 @@ const save = async () => {
       voucher_type: form.voucher_type,
       lines: validLines.value.map((l) => ({
         account_id: l.account_id as number,
-        summary: l.summary || form.summary || null,
+        summary: resolvedLineSummaries.value.savedByKey[l.key] || null,
+        summary_explicitly_cleared: clearedSummaryKeys.value.has(l.key),
         debit_amount: Number(l.debit_amount || 0),
         credit_amount: Number(l.credit_amount || 0),
         auxiliaries: l.supplier_id ? [{ aux_type: "supplier" as const, auxiliary_id: l.supplier_id }] : [],
@@ -363,6 +401,7 @@ const save = async () => {
     form.voucher_date = new Date().toISOString().slice(0, 10);
     form.summary = "";
     form.lines = [newLine(), newLine()];
+    clearedSummaryKeys.value = new Set();
     await refreshVoucherNo();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || "保存失败");
@@ -386,6 +425,10 @@ p { color: #5d6b7e; }
 .totals { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 13px; color: #4b5563; }
 .totals b { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #111827; }
 .totals .danger { color: #dc2626; }
+.summary-cell { position: relative; }
+.summary-cell :deep(.el-input__wrapper) { padding-right: 28px; }
+.summary-clear { position: absolute; top: 50%; right: 6px; z-index: 1; min-width: 18px; height: 18px; padding: 0; color: #9ca3af; font-size: 17px; line-height: 1; transform: translateY(-50%); }
+.summary-clear:hover { color: #6b7280; }
 .muted { color: #9ca3af; }
 .form-actions { display: flex; justify-content: flex-end; }
 .success-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
