@@ -8,6 +8,13 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
+test("video annotation list sorts published videos newest first and keeps unknown dates last", () => {
+  const source = read("src/views/douyinColorAnalytics/VideoList.vue");
+  assert.ok(source.includes("sortVideosForAnnotation"));
+  assert.ok(source.includes("published_at == null"));
+  assert.ok(source.includes("Date.parse"));
+});
+
 test("annotation routes are available to internal signed-in users without a new frontend permission gate", () => {
   const router = read("src/router/index.ts");
   const layout = read("src/layouts/MainLayout.vue");

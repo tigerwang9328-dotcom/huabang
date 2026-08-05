@@ -67,6 +67,12 @@ const context = ref<DouyinAnnotationContext | null>(null);
 const videos = ref<DouyinVideo[]>([]);
 
 const formatTime = (value: string | null) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
+const sortVideosForAnnotation = (items: DouyinVideo[]) => [...items].sort((left, right) => {
+  if (left.published_at == null && right.published_at == null) return 0;
+  if (left.published_at == null) return 1;
+  if (right.published_at == null) return -1;
+  return Date.parse(right.published_at) - Date.parse(left.published_at);
+});
 const formatDuration = (milliseconds: number) => {
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -79,7 +85,7 @@ async function load() {
     const contextResponse = await douyinColorAnalyticsApi.getAnnotationContext();
     context.value = contextResponse.data;
     const response = await douyinColorAnalyticsApi.listVideos({ account_id: context.value.account.id, limit: 200 });
-    videos.value = response.data.items || [];
+    videos.value = sortVideosForAnnotation(response.data.items || []);
   } catch (error) {
     videos.value = [];
     loadError.value = describeError(error);
