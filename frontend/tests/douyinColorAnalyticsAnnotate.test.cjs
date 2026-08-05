@@ -13,7 +13,7 @@ test("video annotation list sorts published videos newest first and keeps unknow
   assert.ok(source.includes("sortVideosForAnnotation"));
   assert.ok(source.includes("published_at == null"));
   assert.ok(source.includes("Date.parse"));
-  assert.ok(source.includes("整套穿搭"));
+  assert.ok(source.includes("一套清晰可见的穿搭"));
   assert.ok(!source.includes("每个片段只标注一件主要分析衣物"));
 });
 
