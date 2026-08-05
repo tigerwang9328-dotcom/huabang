@@ -382,3 +382,39 @@ def compute_outfit_metric(
     base.pop("sku_code", None)
 
     return base
+
+
+def compute_video_outfit_metrics(
+    *,
+    clips: list[dict],
+    retention_snapshot: dict | None,
+    bounce_snapshot: dict | None,
+    video_duration_ms: int,
+    observation_window: str,
+    metric_version: str,
+    bounce_semantics_status: str,
+) -> list[dict]:
+    """Return one independent outfit metric for each qualifying clip in a video.
+
+    A video may switch outfits over time.  Each clip is therefore the atomic
+    outfit sample: its curve window, participant set, position and input hash
+    must never be combined with another clip's outfit.
+    """
+
+    metrics: list[dict] = []
+    for clip in sorted(clips, key=lambda item: (item["start_ms"], item["id"])):
+        if not _is_qualifying_clip(clip):
+            continue
+        metric = compute_outfit_metric(
+            clips=[clip],
+            retention_snapshot=retention_snapshot,
+            bounce_snapshot=bounce_snapshot,
+            video_duration_ms=video_duration_ms,
+            observation_window=observation_window,
+            metric_version=metric_version,
+            bounce_semantics_status=bounce_semantics_status,
+        )
+        if metric is not None:
+            metric["clip_id"] = clip["id"]
+            metrics.append(metric)
+    return metrics

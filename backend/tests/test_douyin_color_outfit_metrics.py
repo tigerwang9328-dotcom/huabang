@@ -16,7 +16,7 @@ import pytest
 from decimal import Decimal
 from datetime import datetime, timezone
 
-from app.services.douyin_color_metrics_service import compute_outfit_metric
+from app.services.douyin_color_metrics_service import compute_outfit_metric, compute_video_outfit_metrics
 from app.services.douyin_color_outfit_service import build_combination_key
 
 
@@ -177,3 +177,30 @@ def test_compute_outfit_metric_combination_key_is_color_free():
         for p in participants
     ])
     assert key == "outer:100|top:300|bottom:500"
+
+
+def test_compute_video_outfit_metrics_keeps_sequential_outfits_separate():
+    """One video may contain several outfits; their curve windows must never mix."""
+
+    curve = [
+        {"second": 0, "value": 0.90}, {"second": 1, "value": 0.80},
+        {"second": 2, "value": 0.20}, {"second": 3, "value": 0.10},
+        {"second": 4, "value": 0.05},
+    ]
+    clips = [
+        _clip(11, 0, 2000, _parts(("top", 10, "TOP-RED"), ("bottom", 20, "PANTS-BLACK"))),
+        _clip(12, 2000, 4000, _parts(("top", 30, "TOP-BLUE"), ("bottom", 40, "PANTS-WHITE"))),
+    ]
+
+    metrics = compute_video_outfit_metrics(
+        clips=clips, retention_snapshot=_retention(curve), bounce_snapshot=None,
+        video_duration_ms=4000, observation_window="t7", metric_version="v4.1",
+        bounce_semantics_status="unverified",
+    )
+
+    assert [metric["clip_id"] for metric in metrics] == [11, 12]
+    assert [metric["combination_key"] for metric in metrics] == [
+        "top:10|bottom:20", "top:30|bottom:40",
+    ]
+    assert metrics[0]["average_retention"] > metrics[1]["average_retention"]
+    assert metrics[0]["annotation_set_hash"] != metrics[1]["annotation_set_hash"]

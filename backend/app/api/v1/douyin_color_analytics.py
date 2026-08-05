@@ -84,6 +84,7 @@ from app.services.douyin_color_release_service import (
 )
 from app.services.douyin_color_metrics_service import (
     compute_outfit_metric,
+    compute_video_outfit_metrics,
     compute_video_color_metric,
     select_bounce_snapshot,
     select_retention_snapshot,
@@ -1120,16 +1121,16 @@ async def compute_metrics(
             "outfit_parts_json": c.outfit_parts_json,
         } for c in video_clips]
 
-        outfit_metric = compute_outfit_metric(
+        outfit_metrics = compute_video_outfit_metrics(
             clips=clip_dicts,
             retention_snapshot=retention_snap,
             bounce_snapshot=bounce_snap,
             video_duration_ms=video.duration_ms or 0,
             observation_window="ad_hoc",
-            metric_version="v4.0",
+            metric_version="v4.1",
             bounce_semantics_status=bounce_semantics_status,
         )
-        if outfit_metric is not None:
+        for outfit_metric in outfit_metrics:
             db.add(OutfitColorMetric(
                 account_id=account_id,
                 combination_key=outfit_metric["combination_key"],
@@ -1150,26 +1151,24 @@ async def compute_metrics(
             ))
             outfit_count += 1
 
-        outfit_parts = []
-        for clip in video_clips:
-            for part in (clip.outfit_parts_json or []):
-                outfit_parts.append({
+        for clip, clip_dict in zip(video_clips, clip_dicts):
+            outfit_parts = [{
                     "position": part.get("position") or part.get("garment_position"),
                     "style_id": part.get("style_id"),
                     "sku_code": part.get("sku_code"),
-                })
-        garment_metrics = compute_video_color_metric(
-            clips=clip_dicts,
-            outfit_parts=outfit_parts,
-            retention_snapshot=retention_snap,
-            bounce_snapshot=bounce_snap,
-            video_duration_ms=video.duration_ms or 0,
-            observation_window="ad_hoc",
-            metric_version="v4.0",
-            bounce_semantics_status=bounce_semantics_status,
-        )
-        for gm in garment_metrics:
-            db.add(VideoColorMetric(
+                } for part in (clip.outfit_parts_json or [])]
+            garment_metrics = compute_video_color_metric(
+                clips=[clip_dict],
+                outfit_parts=outfit_parts,
+                retention_snapshot=retention_snap,
+                bounce_snapshot=bounce_snap,
+                video_duration_ms=video.duration_ms or 0,
+                observation_window="ad_hoc",
+                metric_version="v4.1",
+                bounce_semantics_status=bounce_semantics_status,
+            )
+            for gm in garment_metrics:
+                db.add(VideoColorMetric(
                 account_id=account_id,
                 video_id=video_id,
                 style_id=gm.get("style_id") or 0,
@@ -1199,8 +1198,8 @@ async def compute_metrics(
                 retention_calculation_status=gm.get("retention_calculation_status", "pending"),
                 bounce_calculation_status=gm.get("bounce_calculation_status", "pending"),
                 calculated_at=gm.get("calculated_at"),
-            ))
-            video_metric_count += 1
+                ))
+                video_metric_count += 1
 
     await db.flush()
     await write_operation_audit(
