@@ -85,6 +85,25 @@ async def list_product_archive_skus(
     return ApiResponse.ok({"items": [dict(row) for row in rows]})
 
 
+@annotation_router.post("/product-archive/styles/{product_code}/resolve", response_model=ApiResponse)
+async def resolve_product_archive_style(
+    product_code: str, account_id: int, request: Request,
+    current_user: SysUser = Depends(require_any_permission("douyin.annotation.edit", "douyin.admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create the stable local FK mapping only when a real archive style is selected."""
+    await _request_account(db, query_account_id=account_id)
+    archive = (await db.execute(text("SELECT product_code, max(product_name) AS product_name FROM dim.dim_sku WHERE status='active' AND product_code=:code GROUP BY product_code"), {"code": product_code})).mappings().first()
+    if archive is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="product_archive_style_not_found")
+    style = (await db.execute(select(GarmentStyle).where(GarmentStyle.account_id == account_id, GarmentStyle.style_code == product_code))).scalar_one_or_none()
+    if style is None:
+        style = GarmentStyle(account_id=account_id, style_code=product_code, style_name=archive["product_name"] or product_code, status="active")
+        db.add(style); await db.flush()
+        await write_operation_audit(db, actor=current_user, module="douyin_color_analytics", action="resolve_product_archive_style", target_type="garment_style", target_id=style.id, after_data={"style_code": style.style_code}, request=request)
+    return ApiResponse.ok({"id": style.id, "style_code": style.style_code, "style_name": style.style_name})
+
+
 def _annotation_http_error(error: AnnotationValidationError) -> HTTPException:
     status_code = status.HTTP_409_CONFLICT if isinstance(error, AnnotationConflictError) else status.HTTP_422_UNPROCESSABLE_ENTITY
     return HTTPException(status_code=status_code, detail=str(error))
