@@ -179,6 +179,12 @@ export const douyinColorAnalyticsApi = {
   listStyles(accountId: number) {
     return unwrapDouyinColorAnalytics(request.get<DouyinPagedResult<DouyinGarmentStyle>>(`${basePath}/styles`, { params: { account_id: accountId } }));
   },
+  searchProductArchiveStyles(accountId: number, q: string) {
+    return unwrapDouyinColorAnalytics(request.get<DouyinPagedResult<{ product_code: string; product_name: string }>>(`${basePath}/product-archive/styles`, { params: { account_id: accountId, q } }));
+  },
+  resolveProductArchiveStyle(accountId: number, productCode: string) {
+    return unwrapDouyinColorAnalytics(request.post<{ id: number; style_code: string; style_name: string }>(`${basePath}/product-archive/styles/${encodeURIComponent(productCode)}/resolve`, null, { params: { account_id: accountId } }));
+  },
   createStyle(payload: DouyinStyleInput) {
     return unwrapDouyinColorAnalytics(request.post<DouyinCreateResult>(`${basePath}/styles`, payload));
   },

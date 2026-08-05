@@ -64,7 +64,7 @@
                   <el-option label="裤子 bottom" value="bottom" />
                   <el-option label="其他 none" value="none" />
                 </el-select>
-                <el-select v-model="part.style_id" placeholder="选择款号" filterable class="style-select" @change="() => onStyleChange(index)">
+                <el-select v-model="part.style_id" placeholder="搜索真实款号或款名" filterable remote :remote-method="searchArchiveStyles" class="style-select" @change="() => onStyleChange(index)">
                   <el-option v-for="style in styles" :key="style.id" :label="`${style.style_code} · ${style.style_name}`" :value="style.id" />
                 </el-select>
                 <el-select v-model="part.sku_code" placeholder="SKU（可选）" :disabled="!part.style_id" filterable clearable class="sku-select">
@@ -197,6 +197,7 @@ async function onStyleChange(index: number) {
     try { colorsByStyle.value[part.style_id] = (await douyinColorAnalyticsApi.listColors(part.style_id, context.value.account.id)).data.items || []; } catch (error) { ElMessage.error(describeError(error)); }
   }
 }
+async function searchArchiveStyles(query: string) { if (!context.value || query.trim().length < 2) return; try { const result = await douyinColorAnalyticsApi.searchProductArchiveStyles(context.value.account.id, query); for (const item of result.data.items || []) { const resolved = await douyinColorAnalyticsApi.resolveProductArchiveStyle(context.value.account.id, item.product_code); if (!styles.value.some((style) => style.id === resolved.data.id)) styles.value.push({ id: resolved.data.id, style_code: resolved.data.style_code, style_name: resolved.data.style_name, garment_position: "none", status: "active" } as DouyinGarmentStyle); } } catch (error) { ElMessage.error(describeError(error)); } }
 function startNew() { validationErrors.value = []; editor.value = newEditor(); outfitParts.value = []; }
 async function editClip(clip: DouyinVideoClip) {
   editor.value = { id: clip.id, version: clip.version, input_start_ms: clip.input_start_ms, input_end_ms: clip.input_end_ms, focus_status: clip.focus_status, focus_note: clip.focus_note || "" };
