@@ -13,6 +13,10 @@ test("voucher query exposes header and line views with server pagination and for
   for (const token of ["queryVouchers", "queryVoucherLines", "viewMode", "dateFrom", "dateTo", "period", "accountId", "loadRequestVersion", "exportCsv", "^[=+@-]"]) assert.ok(list.includes(token));
   assert.doesNotMatch(list, /limit:\s*500/);
   assert.match(list, /@change="\(\) => load\(\)"/);
+  assert.match(list, /@click="\(\) => load\(\)"/);
+  assert.match(list, /@keyup\.enter="\(\) => load\(\)"/);
+  assert.doesNotMatch(list, /@click="load"/);
+  assert.doesNotMatch(list, /@keyup\.enter="load"/);
   assert.match(list, /accountRequestVersion/);
   assert.match(list, /selectedBook === bookId\.value/);
 });

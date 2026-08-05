@@ -2,7 +2,7 @@
   <section class="panel">
     <div class="heading">
       <div><p class="panel-kicker">凭证流程</p><h2>查凭证</h2><p>{{ isReadonly ? "金蝶迁移账簿凭证；永久只读，仅供核对。" : "按凭证或分录检索；写入、审核和人工过账仍沿用原有流程。" }}</p></div>
-      <div class="heading-actions"><el-button :loading="loading" :disabled="!bookId" @click="load">查询</el-button><el-button :disabled="!currentItems.length" @click="exportCsv">导出当前筛选</el-button><router-link to="/app/finance-center/mumaren/vouchers/create"><el-button type="primary" :disabled="isReadonly">录入新凭证</el-button></router-link></div>
+      <div class="heading-actions"><el-button :loading="loading" :disabled="!bookId" @click="() => load()">查询</el-button><el-button :disabled="!currentItems.length" @click="exportCsv">导出当前筛选</el-button><router-link to="/app/finance-center/mumaren/vouchers/create"><el-button type="primary" :disabled="isReadonly">录入新凭证</el-button></router-link></div>
     </div>
     <el-radio-group v-model="viewMode" @change="() => load()"><el-radio-button label="voucher">按凭证</el-radio-button><el-radio-button label="line">按分录</el-radio-button></el-radio-group>
     <div class="filters">
@@ -12,7 +12,7 @@
       <el-input v-model="period" clearable placeholder="会计期间（YYYY-MM）" @change="onPeriodChange" />
       <el-select v-model="status" clearable placeholder="全部状态"><el-option label="草稿" value="draft" /><el-option label="已审核" value="reviewed" /><el-option label="已过账" value="posted" /></el-select>
       <el-input v-model="voucherType" clearable placeholder="凭证字" />
-      <el-input v-model="keyword" clearable placeholder="凭证号或总摘要" @keyup.enter="load" />
+      <el-input v-model="keyword" clearable placeholder="凭证号或总摘要" @keyup.enter="() => load()" />
       <el-select v-model="accountId" clearable placeholder="会计科目"><el-option v-for="account in accounts" :key="account.id" :label="`${account.account_code} ${account.account_name}`" :value="account.id" /></el-select>
       <el-button @click="resetFilters">重置</el-button>
     </div>
