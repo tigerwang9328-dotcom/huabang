@@ -405,3 +405,13 @@ def test_compute_metrics_route_requires_admin_permission():
     fn_start = source.index("def compute_metrics")
     section = source[fn_start : fn_start + 800]
     assert 'require_permission("douyin.admin")' in section or 'require_any_permission' in section and '"douyin.admin"' in section
+
+
+def test_compute_metrics_route_replaces_prior_v41_results_before_inserting():
+    """Repeated multi-outfit recomputation must not hit metric unique constraints."""
+    source = _source()
+    fn_start = source.index("def compute_metrics")
+    section = source[fn_start : fn_start + 1800]
+    assert 'delete(OutfitColorMetric)' in section
+    assert 'delete(VideoColorMetric)' in section
+    assert section.index('delete(OutfitColorMetric)') < section.index('clips = (await db.execute')
