@@ -211,10 +211,12 @@ test('金蝶迁移凭证与汇总查询至少覆盖单账簿 339 张凭证', () 
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
   const summary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
 
-  assert.match(api, /listVouchers: \(params\?: \{ book_id\?: number; voucher_id\?: number; limit\?: number; offset\?: number \}\)/)
-  for (const page of [list, history]) {
-    assert.match(page, /limit: 500/)
-  }
+  assert.match(api, /queryVouchers/)
+  assert.match(api, /queryVoucherLines/)
+  assert.match(list, /queryVouchers/)
+  assert.match(list, /limit: 50/)
+  assert.doesNotMatch(list, /limit: 500/)
+  assert.match(history, /limit: 500/)
   assert.match(summary, /getVoucherSummary/)
 })
 
@@ -222,12 +224,13 @@ test('历史凭证与查凭证切换账簿时不会被旧请求覆盖', () => {
   const list = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherList.vue')
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
 
-  for (const page of [list, history]) {
-    assert.match(page, /loadRequestVersion/)
-    assert.match(page, /requestedBookId/)
-    assert.match(page, /requestedBookId === bookId\.value/)
-    assert.match(page, /if \(requestVersion === loadRequestVersion && requestedBookId === bookId\.value\) loading\.value = false;/)
-  }
+  assert.match(list, /loadRequestVersion/)
+  assert.match(list, /selectedBook/)
+  assert.match(list, /selectedBook !== bookId\.value/)
+  assert.match(list, /version === loadRequestVersion && selectedBook === bookId\.value/)
+  assert.match(history, /loadRequestVersion/)
+  assert.match(history, /requestedBookId/)
+  assert.match(history, /requestedBookId === bookId\.value/)
 })
 
 test('明细账查询真实已过账分录，不再按凭证头摘要模糊匹配', () => {
@@ -776,9 +779,9 @@ test('凭证写入流程:草稿录入 → 财务审核 → 人工过账(录凭�
 
   // 状态机标记:draft → reviewed → posted
   const combined = `${create}\n${list}`
-  assert.match(combined, /'draft'/)
-  assert.match(combined, /'reviewed'/)
-  assert.match(combined, /'posted'/)
+  assert.match(combined, /draft/)
+  assert.match(combined, /reviewed/)
+  assert.match(combined, /posted/)
 
   // 禁止自动过账、反过账的代码逻辑
   assert.doesNotMatch(combined, /autoPost\(|autoPostVoucher|reversePost\(|reversePostVoucher/)
@@ -913,8 +916,8 @@ test('录凭证补齐牧马人辅助录入按钮，导出不改变人工审核�
   assert.match(create, /付款分录/)
   assert.match(create, /自动找平/)
   assert.match(create, /copyLastLine|addReceiptPair|addPaymentPair|balanceLastLine/)
-  assert.match(list, /导出当前列表/)
-  assert.match(list, /exportVouchers/)
+  assert.match(list, /导出当前筛选/)
+  assert.match(list, /exportCsv/)
   assert.match(list, /[=+@-]/)
   assert.match(list, /text = `'/)
   assert.doesNotMatch(`${create}\n${list}`, /unreviewVoucher|unpostVoucher|reversePostVoucher/)

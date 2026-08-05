@@ -94,13 +94,14 @@
         <el-table-column label="操作" width="100"><template #default="scope"><el-button link type="primary" @click="showDetails(scope.row)">展开</el-button></template></el-table-column>
       </el-table>
     </template>
+    <MumarenVoucherDetailDrawer v-model="detailVisible" :book-id="bookId" :voucher-id="detailVoucherId" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { useMumarenFinanceBook } from "@/composables/useMumarenFinanceBook";
 import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import MumarenVoucherDetailDrawer from "./MumarenVoucherDetailDrawer.vue";
 import {
   mumarenFinanceCenterApi,
   type MumarenFinanceVoucher,
@@ -109,7 +110,6 @@ import {
   type MumarenVoucherSummaryRow,
 } from "@/api/mumarenFinanceCenter";
 
-const router = useRouter();
 const { books, bookId, isReadonly, loadBooks } = useMumarenFinanceBook();
 const status = ref<MumarenFinanceVoucher["status"]>("posted");
 const monthFilter = ref("");
@@ -123,6 +123,8 @@ const detailLoading = ref<Record<string, boolean>>({});
 const summaryTable = ref<{ toggleRowExpansion: (row: MumarenVoucherSummaryRow, expanded: boolean) => void } | null>(null);
 const loadRequestVersion = ref(0);
 const detailRequestVersion = ref<Record<string, number>>({});
+const detailVisible = ref(false);
+const detailVoucherId = ref<number>();
 
 const money = (value?: number) => new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
 const summaryRowKey = (row: MumarenVoucherSummaryRow) => `${row.period}|${row.voucher_type}`;
@@ -179,7 +181,7 @@ const showDetails = (row: MumarenVoucherSummaryRow) => {
   summaryTable.value?.toggleRowExpansion(row, true);
 };
 
-const openVoucher = (voucher: MumarenFinanceVoucher) => router.push({ path: "/app/finance-center/mumaren/vouchers/list", query: { book_id: String(voucher.book_id), voucher_id: String(voucher.id) } });
+const openVoucher = (voucher: MumarenFinanceVoucher) => { detailVoucherId.value = voucher.id; detailVisible.value = true; };
 
 const summaryMethod = ({ columns }: { columns: Array<Record<string, unknown>> }) => columns.map((column) => {
   const label = String(column.label || "");

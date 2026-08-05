@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import require_permission, require_roles
 from app.core.database import get_db
 from app.models.mumaren_finance_center import FinanceCenterMumarenAccount, FinanceCenterMumarenAuditLog, FinanceCenterMumarenBalanceSnapshot, FinanceCenterMumarenBook, FinanceCenterMumarenVoucher, FinanceCenterMumarenVoucherLine
+from app.models.mumaren_finance_center_auxiliary import FinanceCenterMumarenVoucherLineAuxiliary
 from app.models.sys import SysUser
 from app.schemas.common import ApiResponse
 from app.services.mumaren_finance_center.workflow import (
@@ -44,6 +45,13 @@ from app.services.mumaren_finance_center.voucher_summary import (
     build_summary_statement,
     build_voucher_type_options_statement,
     serialize_summary_rows,
+)
+from app.services.mumaren_finance_center.voucher_query import (
+    VoucherQueryFilters,
+    build_voucher_count_statement,
+    build_voucher_line_count_statement,
+    build_voucher_line_statement,
+    build_voucher_statement,
 )
 
 
@@ -143,12 +151,82 @@ def _voucher_data(voucher: FinanceCenterMumarenVoucher) -> dict:
         "status": voucher.status,
         "total_debit": voucher.total_debit,
         "total_credit": voucher.total_credit,
+        "created_by": voucher.created_by,
+        "created_at": voucher.created_at,
         "reviewed_by": voucher.reviewed_by,
+        "reviewed_at": voucher.reviewed_at,
         "posted_by": voucher.posted_by,
+        "posted_at": voucher.posted_at,
         "is_readonly": voucher.is_readonly,
         "is_normalized": voucher.is_normalized,
         "source_system": voucher.source_system,
         "source_database": voucher.source_database,
+        "source_key": voucher.source_key,
+        "import_batch_key": voucher.import_batch_key,
+    }
+
+
+def validate_voucher_query_dates(date_from: date | None, date_to: date | None, period: str | None) -> None:
+    if period and (date_from or date_to):
+        raise ValueError("日期范围与期间不能同时查询")
+    if date_from and date_to and date_from > date_to:
+        raise ValueError("开始日期不能晚于结束日期")
+
+
+def _serialize_auxiliaries(rows: list[FinanceCenterMumarenVoucherLineAuxiliary]) -> list[dict]:
+    return [{
+        "aux_type": item.aux_type,
+        "auxiliary_id": item.auxiliary_id,
+        "auxiliary_code": item.auxiliary_code_snapshot,
+        "auxiliary_name": item.auxiliary_name_snapshot,
+    } for item in rows]
+
+
+def _auxiliary_display(rows: list[FinanceCenterMumarenVoucherLineAuxiliary]) -> str:
+    return "；".join(f"{item.auxiliary_code_snapshot} {item.auxiliary_name_snapshot}".strip() for item in rows) or "—"
+
+
+def _voucher_line_query_data(
+    line: FinanceCenterMumarenVoucherLine,
+    voucher: FinanceCenterMumarenVoucher,
+    account: FinanceCenterMumarenAccount,
+    *,
+    inherited_summary: str,
+    auxiliaries: list[FinanceCenterMumarenVoucherLineAuxiliary],
+) -> dict:
+    return {
+        "id": line.id, "voucher_id": voucher.id, "voucher_date": voucher.voucher_date,
+        "voucher_no": voucher.voucher_no, "voucher_type": voucher.voucher_type,
+        "line_no": line.line_no,
+        "line_summary": resolve_ledger_line_summary(
+            line, inherited_summary=inherited_summary, voucher_summary=voucher.summary,
+        ),
+        "account_id": account.id, "account_code": account.account_code, "account_name": account.account_name,
+        "debit_amount": line.debit_amount, "credit_amount": line.credit_amount,
+        "status": voucher.status, "auxiliaries": _auxiliary_display(auxiliaries),
+    }
+
+
+def _voucher_detail_data(
+    voucher: FinanceCenterMumarenVoucher,
+    line_accounts: list[tuple[FinanceCenterMumarenVoucherLine, FinanceCenterMumarenAccount]],
+    auxiliaries_by_line: dict[int, list[FinanceCenterMumarenVoucherLineAuxiliary]],
+) -> dict:
+    inherited_summary = ""
+    lines = []
+    for line, account in line_accounts:
+        line_data = _voucher_line_query_data(
+            line, voucher, account, inherited_summary=inherited_summary,
+            auxiliaries=auxiliaries_by_line.get(line.id, []),
+        )
+        line_data["auxiliary_values"] = _serialize_auxiliaries(auxiliaries_by_line.get(line.id, []))
+        lines.append(line_data)
+        if line.summary:
+            inherited_summary = line.summary
+    return {
+        **_voucher_data(voucher),
+        "lines": lines,
+        "is_balanced": voucher.total_debit == voucher.total_credit,
     }
 
 
@@ -463,6 +541,167 @@ async def get_voucher_summary_details(
     vouchers = (await db.execute(build_detail_statement(filters, offset=offset, limit=limit))).scalars().all()
     total = int((await db.execute(build_detail_count_statement(filters))).scalar_one())
     return ApiResponse.ok(data={"items": [_voucher_data(voucher) for voucher in vouchers], "total": total, "offset": offset, "limit": limit})
+
+
+async def _voucher_query_filters(
+    db: AsyncSession,
+    *,
+    book_id: int,
+    status: Literal["draft", "reviewed", "posted"] | None,
+    date_from: date | None,
+    date_to: date | None,
+    period: str | None,
+    voucher_type: str | None,
+    keyword: str | None,
+    account_id: int | None,
+) -> VoucherQueryFilters:
+    try:
+        validate_voucher_query_dates(date_from, date_to, period)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="账簿不存在")
+    if account_id is not None:
+        account = await db.get(FinanceCenterMumarenAccount, account_id)
+        if account is None or account.book_id != book_id:
+            raise HTTPException(status_code=404, detail="科目不属于所选账簿")
+    return VoucherQueryFilters(
+        book_id=book_id, status=status, date_from=date_from, date_to=date_to, period=period,
+        voucher_type=voucher_type, keyword=keyword, account_id=account_id,
+    )
+
+
+async def _saved_auxiliaries_by_line(
+    db: AsyncSession, *, book_id: int, line_ids: list[int],
+) -> dict[int, list[FinanceCenterMumarenVoucherLineAuxiliary]]:
+    if not line_ids:
+        return {}
+    rows = (await db.execute(
+        select(FinanceCenterMumarenVoucherLineAuxiliary)
+        .where(
+            FinanceCenterMumarenVoucherLineAuxiliary.book_id == book_id,
+            FinanceCenterMumarenVoucherLineAuxiliary.voucher_line_id.in_(line_ids),
+        )
+        .order_by(FinanceCenterMumarenVoucherLineAuxiliary.id)
+    )).scalars().all()
+    output: dict[int, list[FinanceCenterMumarenVoucherLineAuxiliary]] = {}
+    for row in rows:
+        output.setdefault(row.voucher_line_id, []).append(row)
+    return output
+
+
+async def _inherited_summaries(
+    db: AsyncSession, voucher_ids: set[int],
+) -> dict[int, str]:
+    if not voucher_ids:
+        return {}
+    all_lines = (await db.execute(
+        select(FinanceCenterMumarenVoucherLine)
+        .where(FinanceCenterMumarenVoucherLine.voucher_id.in_(voucher_ids))
+        .order_by(FinanceCenterMumarenVoucherLine.voucher_id, FinanceCenterMumarenVoucherLine.line_no)
+    )).scalars().all()
+    inherited: dict[int, str] = {}
+    last_by_voucher: dict[int, str] = {}
+    for line in all_lines:
+        if line.summary:
+            last_by_voucher[line.voucher_id] = line.summary
+        inherited[line.id] = last_by_voucher.get(line.voucher_id, "")
+    return inherited
+
+
+@router.get("/vouchers/query", response_model=ApiResponse)
+async def query_vouchers(
+    book_id: int = Query(ge=1),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    status: Literal["draft", "reviewed", "posted"] | None = Query(default=None),
+    voucher_type: str | None = Query(default=None, min_length=1, max_length=16),
+    keyword: str | None = Query(default=None, max_length=500),
+    account_id: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = await _voucher_query_filters(
+        db, book_id=book_id, status=status, date_from=date_from, date_to=date_to, period=period,
+        voucher_type=voucher_type, keyword=keyword, account_id=account_id,
+    )
+    vouchers = (await db.execute(build_voucher_statement(filters).offset(offset).limit(limit))).scalars().all()
+    total = int((await db.execute(build_voucher_count_statement(filters))).scalar_one())
+    return ApiResponse.ok(data={"items": [_voucher_data(voucher) for voucher in vouchers], "total": total, "offset": offset, "limit": limit})
+
+
+@router.get("/vouchers/query/lines", response_model=ApiResponse)
+async def query_voucher_lines(
+    book_id: int = Query(ge=1),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    status: Literal["draft", "reviewed", "posted"] | None = Query(default=None),
+    voucher_type: str | None = Query(default=None, min_length=1, max_length=16),
+    keyword: str | None = Query(default=None, max_length=500),
+    account_id: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = await _voucher_query_filters(
+        db, book_id=book_id, status=status, date_from=date_from, date_to=date_to, period=period,
+        voucher_type=voucher_type, keyword=keyword, account_id=account_id,
+    )
+    lines = (await db.execute(build_voucher_line_statement(filters).offset(offset).limit(limit))).scalars().all()
+    total = int((await db.execute(build_voucher_line_count_statement(filters))).scalar_one())
+    voucher_ids = {line.voucher_id for line in lines}
+    account_ids = {line.account_id for line in lines}
+    vouchers = (await db.execute(select(FinanceCenterMumarenVoucher).where(FinanceCenterMumarenVoucher.id.in_(voucher_ids)))).scalars().all() if voucher_ids else []
+    accounts = (await db.execute(select(FinanceCenterMumarenAccount).where(
+        FinanceCenterMumarenAccount.book_id == book_id,
+        FinanceCenterMumarenAccount.id.in_(account_ids),
+    ))).scalars().all() if account_ids else []
+    voucher_by_id = {voucher.id: voucher for voucher in vouchers}
+    account_by_id = {account.id: account for account in accounts}
+    inherited = await _inherited_summaries(db, voucher_ids)
+    auxiliaries = await _saved_auxiliaries_by_line(db, book_id=book_id, line_ids=[line.id for line in lines])
+    items = [
+        _voucher_line_query_data(
+            line, voucher_by_id[line.voucher_id], account_by_id[line.account_id],
+            inherited_summary=inherited.get(line.id, ""), auxiliaries=auxiliaries.get(line.id, []),
+        )
+        for line in lines
+    ]
+    return ApiResponse.ok(data={"items": items, "total": total, "offset": offset, "limit": limit})
+
+
+@router.get("/vouchers/{voucher_id}/detail", response_model=ApiResponse)
+async def get_voucher_detail(
+    voucher_id: int,
+    book_id: int = Query(ge=1),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    book = await db.get(FinanceCenterMumarenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="账簿不存在")
+    voucher = await db.get(FinanceCenterMumarenVoucher, voucher_id)
+    if voucher is None or voucher.book_id != book_id:
+        raise HTTPException(status_code=404, detail="凭证不属于所选账簿")
+    line_accounts = (await db.execute(
+        select(FinanceCenterMumarenVoucherLine, FinanceCenterMumarenAccount)
+        .join(FinanceCenterMumarenAccount, FinanceCenterMumarenAccount.id == FinanceCenterMumarenVoucherLine.account_id)
+        .where(
+            FinanceCenterMumarenVoucherLine.voucher_id == voucher.id,
+            FinanceCenterMumarenAccount.book_id == book_id,
+        )
+        .order_by(FinanceCenterMumarenVoucherLine.line_no)
+    )).all()
+    auxiliaries = await _saved_auxiliaries_by_line(
+        db, book_id=book_id, line_ids=[line.id for line, _ in line_accounts],
+    )
+    return ApiResponse.ok(data=_voucher_detail_data(voucher, line_accounts, auxiliaries))
 
 
 @router.get("/vouchers", response_model=ApiResponse)

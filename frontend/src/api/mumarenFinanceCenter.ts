@@ -251,6 +251,56 @@ export interface MumarenVoucherSummaryParams {
   keyword?: string;
 }
 
+export interface MumarenVoucherQueryParams {
+  book_id: number;
+  date_from?: string;
+  date_to?: string;
+  period?: string;
+  status?: MumarenFinanceVoucher["status"];
+  voucher_type?: string;
+  keyword?: string;
+  account_id?: number;
+  offset?: number;
+  limit?: number;
+}
+
+export interface MumarenVoucherQueryPage<T> {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface MumarenVoucherQueryLine {
+  id: number;
+  voucher_id: number;
+  voucher_date: string;
+  voucher_no: string;
+  voucher_type: string;
+  line_no: number;
+  line_summary: string;
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  debit_amount: number;
+  credit_amount: number;
+  status: MumarenFinanceVoucher["status"];
+  auxiliaries: string;
+}
+
+export interface MumarenVoucherDetail extends MumarenFinanceVoucher {
+  reviewed_by: number | null;
+  reviewed_at: string | null;
+  posted_by: number | null;
+  posted_at: string | null;
+  source_key?: string | null;
+  import_batch_key?: string | null;
+  is_balanced: boolean;
+  lines: Array<MumarenVoucherQueryLine & {
+    auxiliary_values: Array<{ aux_type: string; auxiliary_id: number; auxiliary_code: string; auxiliary_name: string }>;
+  }>;
+}
+
 export interface MumarenFinanceHistoryVoucher {
   id: number;
   source_system: string;
@@ -383,6 +433,9 @@ export interface MumarenCashSafety {
 export const mumarenFinanceCenterApi = {
   getCatalog: () => request.get<ApiResponse<FinanceCenterCatalog>>(requestPath("/catalog")),
   listVouchers: (params?: { book_id?: number; voucher_id?: number; limit?: number; offset?: number }) => request.get<ApiResponse<MumarenFinanceVoucher[]>>(requestPath("/vouchers"), { params }),
+  queryVouchers: (params: MumarenVoucherQueryParams) => request.get<ApiResponse<MumarenVoucherQueryPage<MumarenFinanceVoucher>>>(requestPath("/vouchers/query"), { params }),
+  queryVoucherLines: (params: MumarenVoucherQueryParams) => request.get<ApiResponse<MumarenVoucherQueryPage<MumarenVoucherQueryLine>>>(requestPath("/vouchers/query/lines"), { params }),
+  getVoucherDetail: (voucherId: number, bookId: number) => request.get<ApiResponse<MumarenVoucherDetail>>(requestPath(`/vouchers/${voucherId}/detail`), { params: { book_id: bookId } }),
   getVoucherSummary: (params: MumarenVoucherSummaryParams) => request.get<ApiResponse<MumarenVoucherSummary>>(requestPath("/vouchers/summary"), { params }),
   getVoucherSummaryDetails: (params: MumarenVoucherSummaryParams & { offset?: number; limit?: number }) => request.get<ApiResponse<MumarenVoucherSummaryDetailPage>>(requestPath("/vouchers/summary/details"), { params }),
   listBooks: () => request.get<ApiResponse<MumarenFinanceBook[]>>(requestPath("/books")),
