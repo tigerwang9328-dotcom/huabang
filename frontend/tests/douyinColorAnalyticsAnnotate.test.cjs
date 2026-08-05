@@ -13,6 +13,8 @@ test("video annotation list sorts published videos newest first and keeps unknow
   assert.ok(source.includes("sortVideosForAnnotation"));
   assert.ok(source.includes("published_at == null"));
   assert.ok(source.includes("Date.parse"));
+  assert.ok(source.includes("整套穿搭"));
+  assert.ok(!source.includes("每个片段只标注一件主要分析衣物"));
 });
 
 test("annotation routes are available to internal signed-in users without a new frontend permission gate", () => {

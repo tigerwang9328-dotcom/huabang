@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">DOUYIN COLOR ANALYTICS</p>
         <h1>视频片段标注</h1>
-        <p>每个片段只标注一件主要分析衣物；多件重点或无法判断会保留质量记录，但不进入颜色排名。</p>
+        <p>每个片段标注一套清晰可见的穿搭；为套内每件衣物选择真实款号与可选 SKU，多套重点或无法判断只保留质量记录，不进入排名。</p>
       </div>
       <div class="head-actions">
         <el-tag v-if="context" type="info" effect="plain">账号：{{ context.account.display_name }}<span v-if="context.account.observed_account_name">（{{ context.account.observed_account_name }}）</span></el-tag>
