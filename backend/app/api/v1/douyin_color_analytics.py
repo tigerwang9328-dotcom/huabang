@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update, func
+from sqlalchemy import delete, select, update, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1078,6 +1078,18 @@ async def compute_metrics(
         ReleaseStageConfiguration.account_id == account_id,
     ))).scalar_one_or_none()
     bounce_semantics_status = config.bounce_semantics_status if config else "unverified"
+
+    # v4.1 is a complete account-level recomputation. Remove only its prior
+    # derived rows first so retries are idempotent and stale clip versions do
+    # not remain as ranking samples.
+    await db.execute(delete(OutfitColorMetric).where(
+        OutfitColorMetric.account_id == account_id,
+        OutfitColorMetric.metric_version == "v4.1",
+    ))
+    await db.execute(delete(VideoColorMetric).where(
+        VideoColorMetric.account_id == account_id,
+        VideoColorMetric.metric_version == "v4.1",
+    ))
 
     clips = (await db.execute(select(VideoClip).where(
         VideoClip.account_id == account_id,
