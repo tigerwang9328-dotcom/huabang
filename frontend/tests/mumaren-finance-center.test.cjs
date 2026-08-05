@@ -211,10 +211,11 @@ test('金蝶迁移凭证与汇总查询至少覆盖单账簿 339 张凭证', () 
   const history = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceHistory.vue')
   const summary = read('src', 'views', 'mumaren-finance-center', 'MumarenFinanceVoucherSummary.vue')
 
-  assert.match(api, /listVouchers: \(params\?: \{ book_id\?: number; limit\?: number; offset\?: number \}\)/)
-  for (const page of [list, history, summary]) {
+  assert.match(api, /listVouchers: \(params\?: \{ book_id\?: number; voucher_id\?: number; limit\?: number; offset\?: number \}\)/)
+  for (const page of [list, history]) {
     assert.match(page, /limit: 500/)
   }
+  assert.match(summary, /getVoucherSummary/)
 })
 
 test('历史凭证与查凭证切换账簿时不会被旧请求覆盖', () => {
@@ -559,7 +560,7 @@ test('重复付款入口已移除，应付业务统一由应付单台账承载',
 test('展示类页面调用明确的独立财务接口', () => {
   const derivedPages = [
     { file: 'MumarenFinanceCompass.vue', apis: ['loadBooks', 'getTrialBalance', 'getProfitStatement'] },
-    { file: 'MumarenFinanceVoucherSummary.vue', apis: ['loadBooks', 'listVouchers'] },
+    { file: 'MumarenFinanceVoucherSummary.vue', apis: ['loadBooks', 'getVoucherSummary', 'getVoucherSummaryDetails'] },
     { file: 'MumarenFinanceLedgerDetail.vue', apis: ['listBooks', 'listAccounts', 'getLedgerLines'] },
     { file: 'MumarenFinanceReportBalanceSheet.vue', apis: ['listBooks', 'getTrialBalance'] },
     { file: 'MumarenFinanceReportCashFlow.vue', apis: ['listBooks', 'getCashFlowStatement'] },

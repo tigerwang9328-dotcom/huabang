@@ -1,6 +1,7 @@
 """牧马人财务中心的独立 API，不依赖华邦旧财务模块。"""
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -34,6 +35,15 @@ from app.services.mumaren_finance_center.reports import (
     get_cash_flow_statement,
     get_profit_statement,
     get_trial_balance,
+)
+from app.services.mumaren_finance_center.voucher_summary import (
+    VoucherSummaryFilters,
+    build_detail_count_statement,
+    build_detail_statement,
+    build_period_options_statement,
+    build_summary_statement,
+    build_voucher_type_options_statement,
+    serialize_summary_rows,
 )
 
 
@@ -126,6 +136,7 @@ def _voucher_data(voucher: FinanceCenterMumarenVoucher) -> dict:
         "id": voucher.id,
         "book_id": voucher.book_id,
         "voucher_no": voucher.voucher_no,
+        "voucher_type": voucher.voucher_type,
         "voucher_date": voucher.voucher_date,
         "summary": voucher.summary,
         "status": voucher.status,
@@ -403,9 +414,60 @@ async def replace_account_auxiliary_dimensions_endpoint(
     )
 
 
+@router.get("/vouchers/summary", response_model=ApiResponse)
+async def get_voucher_summary(
+    book_id: int = Query(ge=1),
+    status: Literal["draft", "reviewed", "posted"] = "posted",
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    voucher_type: str | None = Query(default=None, min_length=1, max_length=16),
+    keyword: str | None = Query(default=None, max_length=500),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = VoucherSummaryFilters(
+        book_id=book_id, status=status, period=period, voucher_type=voucher_type, keyword=keyword,
+    )
+    rows = serialize_summary_rows((await db.execute(build_summary_statement(filters))).mappings().all())
+    periods = [str(item[0]) for item in (await db.execute(build_period_options_statement(filters))).all()]
+    voucher_types = [str(item[0]) for item in (await db.execute(build_voucher_type_options_statement(filters))).all()]
+    total_debit = sum(row["total_debit"] for row in rows)
+    total_credit = sum(row["total_credit"] for row in rows)
+    return ApiResponse.ok(data={
+        "filters": {"book_id": book_id, "status": status, "period": period, "voucher_type": voucher_type, "keyword": keyword},
+        "rows": rows,
+        "total_voucher_count": sum(row["voucher_count"] for row in rows),
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "is_balanced": total_debit == total_credit,
+        "available_periods": periods,
+        "available_voucher_types": voucher_types,
+    })
+
+
+@router.get("/vouchers/summary/details", response_model=ApiResponse)
+async def get_voucher_summary_details(
+    book_id: int = Query(ge=1),
+    status: Literal["draft", "reviewed", "posted"] = "posted",
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    voucher_type: str | None = Query(default=None, min_length=1, max_length=16),
+    keyword: str | None = Query(default=None, max_length=500),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    _: SysUser = Depends(require_mumaren_voucher_view),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = VoucherSummaryFilters(
+        book_id=book_id, status=status, period=period, voucher_type=voucher_type, keyword=keyword,
+    )
+    vouchers = (await db.execute(build_detail_statement(filters, offset=offset, limit=limit))).scalars().all()
+    total = int((await db.execute(build_detail_count_statement(filters))).scalar_one())
+    return ApiResponse.ok(data={"items": [_voucher_data(voucher) for voucher in vouchers], "total": total, "offset": offset, "limit": limit})
+
+
 @router.get("/vouchers", response_model=ApiResponse)
 async def get_vouchers(
     book_id: int | None = Query(default=None, ge=1),
+    voucher_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     _: SysUser = Depends(require_mumaren_voucher_view),
@@ -414,6 +476,8 @@ async def get_vouchers(
     statement = select(FinanceCenterMumarenVoucher).order_by(FinanceCenterMumarenVoucher.id.desc())
     if book_id is not None:
         statement = statement.where(FinanceCenterMumarenVoucher.book_id == book_id)
+    if voucher_id is not None:
+        statement = statement.where(FinanceCenterMumarenVoucher.id == voucher_id)
     result = await db.execute(statement.offset(offset).limit(limit))
     return ApiResponse.ok(data=[_voucher_data(voucher) for voucher in result.scalars()])
 
