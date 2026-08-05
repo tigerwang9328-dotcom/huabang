@@ -68,6 +68,8 @@ export interface AccountAuxiliaryDimensionsPayload {
 export interface VoucherLineInput {
   account_id: number;
   summary?: string | null;
+  /** 保留录入人主动点×清空摘要的语义，避免明细账兼容回填。 */
+  summary_explicitly_cleared?: boolean;
   debit_amount: number;
   credit_amount: number;
   auxiliaries?: Array<{ aux_type: "customer" | "supplier" | "employee" | "project" | "department"; auxiliary_id: number }>;

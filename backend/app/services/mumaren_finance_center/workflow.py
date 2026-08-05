@@ -419,6 +419,7 @@ async def create_voucher(
             line_no=line_no,
             account_id=account_id,
             summary=str(line["summary"]) if line.get("summary") is not None else None,
+            summary_explicitly_cleared=bool(line.get("summary_explicitly_cleared", False)),
             debit_amount=_amount(line, "debit_amount"),
             credit_amount=_amount(line, "credit_amount"),
         )
