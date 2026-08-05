@@ -45,8 +45,8 @@
         </el-alert>
         <el-form label-position="top">
           <div class="time-row">
-            <el-form-item label="开始秒"><el-input-number v-model="startSecond" :min="0" :max="maxSecond - 1" :step="1" :precision="0" /></el-form-item>
-            <el-form-item label="结束秒"><el-input-number v-model="endSecond" :min="1" :max="maxSecond" :step="1" :precision="0" /></el-form-item>
+            <el-form-item label="开始时间"><el-input v-model="startTimecode" aria-label="开始时间码" placeholder="00:05" @blur="commitTimecode('start')" /></el-form-item>
+            <el-form-item label="结束时间"><el-input v-model="endTimecode" aria-label="结束时间码" placeholder="00:18" @blur="commitTimecode('end')" /></el-form-item>
           </div>
           <el-form-item label="主要分析衣物判断">
             <el-radio-group v-model="editor.focus_status">
@@ -144,6 +144,11 @@ const editor = ref(newEditor());
 const maxSecond = computed(() => Math.max(1, Math.ceil((video.value?.duration_ms || 1_000) / 1_000)));
 const startSecond = computed({ get: () => Math.round(editor.value.input_start_ms / 1_000), set: (value: number | undefined) => { editor.value.input_start_ms = Math.max(0, Math.round(Number(value || 0)) * 1_000); } });
 const endSecond = computed({ get: () => Math.round(editor.value.input_end_ms / 1_000), set: (value: number | undefined) => { editor.value.input_end_ms = Math.max(0, Math.round(Number(value || 0)) * 1_000); } });
+const timecode = (value: number) => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+const startTimecode = ref(timecode(startSecond.value));
+const endTimecode = ref(timecode(endSecond.value));
+function commitTimecode(field: "start" | "end") { const target = field === "start" ? startTimecode : endTimecode; const match = /^(\d+)(?::(\d{1,2}))?$/.exec(target.value.trim()); if (!match || Number(match[2] || 0) >= 60) { target.value = timecode(field === "start" ? startSecond.value : endSecond.value); return; } const seconds = Number(match[1]) * (match[2] ? 60 : 1) + Number(match[2] || 0); if (field === "start") startSecond.value = Math.min(seconds, maxSecond.value - 1); else endSecond.value = Math.min(Math.max(1, seconds), maxSecond.value); target.value = timecode(field === "start" ? startSecond.value : endSecond.value); }
+watch([startSecond, endSecond], () => { startTimecode.value = timecode(startSecond.value); endTimecode.value = timecode(endSecond.value); });
 const video_preview_url = computed(() => video.value?.cover_path || "");
 const safeCreatorPath = computed(() => {
   const path = video.value?.creator_detail_path || "";
